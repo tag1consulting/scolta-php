@@ -182,6 +182,7 @@
   let allHighlightTerms = [];
   let lastExpandedTerms = null;
   let searchVersion = 0;
+  let usedOrFallback = false;
 
   // --- DOM references (set during init) ---
   let els = {};
@@ -346,8 +347,8 @@
           <div id="scolta-followup-thread" class="scolta-ai-followup-thread" style="display:none;"></div>
           <div class="scolta-ai-followup-input" id="scolta-followup-input">
             <input type="text" id="scolta-followup-field" placeholder="Ask a follow-up question..."
-                   onkeydown="if(event.key==='Enter')Scolta.submitFollowUp()">
-            <button onclick="Scolta.submitFollowUp()" id="scolta-followup-btn">Ask</button>
+                   data-scolta-followup-input>
+            <button id="scolta-followup-btn" data-scolta-followup-submit>Ask</button>
             <span class="scolta-ai-followup-counter" id="scolta-followup-counter">${CONFIG.AI_MAX_FOLLOWUPS} remaining</span>
           </div>
           ${disclaimerHtml}`;
@@ -492,6 +493,11 @@
     btn.disabled = true;
     input.value = '';
 
+    // Capture the search version at the time the follow-up was initiated.
+    // If a new search starts while this follow-up is in-flight, the response
+    // is stale and must be discarded to prevent cross-query contamination.
+    const followUpVersion = searchVersion;
+
     const threadEl = document.getElementById("scolta-followup-thread");
     threadEl.style.display = "block";
     const turnEl = document.createElement("div");
@@ -502,6 +508,13 @@
     turnEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
     const extraContext = await searchForFollowUpContext(question);
+
+    // Discard if a new search started while we were fetching context
+    if (followUpVersion !== searchVersion) {
+      console.log('[scolta:followup] Discarding stale follow-up (version', followUpVersion, 'vs current', searchVersion, ')');
+      return;
+    }
+
     const userMessage = extraContext
       ? `${question}\n\nAdditional search results for this follow-up:\n${extraContext}`
       : question;
@@ -513,7 +526,16 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: conversationMessages }),
+        signal: abortController?.signal,
       });
+
+      // Discard if a new search started while we were waiting for the response
+      if (followUpVersion !== searchVersion) {
+        console.log('[scolta:followup] Discarding stale follow-up response (version', followUpVersion, 'vs current', searchVersion, ')');
+        conversationMessages.pop();
+        return;
+      }
+
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
 
@@ -527,6 +549,11 @@
         turnEl.querySelector(".scolta-ai-followup-answer").textContent = "No response available.";
       }
     } catch (e) {
+      if (e.name === 'AbortError') {
+        // Search was cancelled — follow-up is stale, clean up silently
+        conversationMessages.pop();
+        return;
+      }
       console.warn("[scolta:followup] failed:", e);
       if (e.message && e.message.includes('429')) {
         turnEl.querySelector(".scolta-ai-followup-answer").textContent = "Follow-up limit reached.";
@@ -558,7 +585,7 @@
     container.style.display = "flex";
     container.innerHTML = '<span style="font-size:0.8rem;color:#666;margin-right:0.2rem;">Also try:</span>' +
       filtered
-        .map(t => `<span class="scolta-expanded-term" onclick="Scolta.searchTerm('${t.replace(/'/g, "\\'")}')">${escapeHtml(t)}</span>`)
+        .map(t => `<span class="scolta-expanded-term" data-scolta-search-term="${escapeHtml(t)}">${escapeHtml(t)}</span>`)
         .join("");
   }
 
@@ -832,12 +859,17 @@
     const primarySearch = await pagefindSearch(searchQuery, activeFilters);
     allScoredResults = await loadAndScoreSearch(primarySearch, searchQuery, 1.0);
 
-    // OR fallback
-    if (meaningfulTerms.length > 1 && primarySearch.results.length < 5) {
-      console.log('[scolta:search] AND returned', primarySearch.results.length, 'results — running OR fallback');
+    // OR fallback: only activate when AND search returns ZERO results.
+    // This prevents diluting precision when the user provides many terms
+    // to find a specific piece of content. When it activates, we set a flag
+    // so the UI can inform the user that the search was broadened.
+    usedOrFallback = false;
+    if (meaningfulTerms.length > 1 && primarySearch.results.length === 0) {
+      console.log('[scolta:search] AND returned 0 results — running OR fallback');
       const orQueries = meaningfulTerms.map(term => ({ term, weight: 0.6 }));
       const orResults = await searchAndLoadParallel(orQueries, activeFilters, searchQuery);
       allScoredResults = mergeResults(allScoredResults, orResults);
+      usedOrFallback = allScoredResults.length > 0;
     }
 
     allScoredResults.sort((a, b) => b.score - a.score);
@@ -900,9 +932,9 @@
       const checked = isActive ? "checked" : "";
       const activeClass = isActive ? " active" : "";
       html += `<label class="scolta-filter-item${activeClass}">
-        <input type="checkbox" value="${site}" ${checked}
-               onchange="Scolta.toggleFilter('${site.replace(/'/g, "\\'")}')">
-        ${site} <span class="scolta-filter-count">(${count})</span>
+        <input type="checkbox" value="${escapeHtml(site)}" ${checked}
+               data-scolta-filter="${escapeHtml(site)}">
+        ${escapeHtml(site)} <span class="scolta-filter-count">(${count})</span>
       </label>`;
     }
     container.innerHTML = html;
@@ -959,7 +991,8 @@
     const showing = Math.min(displayedCount + CONFIG.RESULTS_PER_PAGE, filtered.length);
     const expandLabel = isExpanded ? ' (with expanded terms)' : '';
     const filterLabel = activeFilters.size > 0 ? ` in ${[...activeFilters].join(', ')}` : '';
-    header.innerHTML = `<span>${filtered.length.toLocaleString()} results for "${escapeHtml(currentQuery)}"${filterLabel}${expandLabel}</span>
+    const orFallbackLabel = usedOrFallback ? ' — no exact matches found, showing partial matches' : '';
+    header.innerHTML = `<span>${filtered.length.toLocaleString()} results for "${escapeHtml(currentQuery)}"${filterLabel}${expandLabel}${orFallbackLabel}</span>
                         <span>Showing ${showing}</span>`;
 
     let html = "";
@@ -990,7 +1023,9 @@
     if (displayedCount === 0) {
       container.innerHTML = html;
     } else {
-      container.innerHTML += html;
+      // Append without re-parsing existing DOM nodes (avoids tearing down
+      // and rebuilding all existing result cards on "show more").
+      container.insertAdjacentHTML('beforeend', html);
     }
     displayedCount = showing;
 
@@ -1069,6 +1104,39 @@
     els.searchClear.addEventListener("click", clearSearch);
     els.searchBtn.addEventListener("click", () => doSearch());
     els.loadMore.addEventListener("click", showMore);
+
+    // Event delegation for dynamically rendered elements.
+    // This replaces inline onclick/onchange handlers with a single listener,
+    // avoiding fragile string escaping and ensuring robust event handling
+    // for all dynamically created UI elements.
+    root.addEventListener("click", (e) => {
+      // Expanded term click → search that term
+      const termEl = e.target.closest("[data-scolta-search-term]");
+      if (termEl) {
+        searchTerm(termEl.dataset.scoltaSearchTerm);
+        return;
+      }
+      // Follow-up submit button
+      if (e.target.closest("[data-scolta-followup-submit]")) {
+        submitFollowUp();
+        return;
+      }
+    });
+
+    root.addEventListener("change", (e) => {
+      // Filter checkbox toggle
+      const filterEl = e.target.closest("[data-scolta-filter]");
+      if (filterEl) {
+        toggleFilter(filterEl.dataset.scoltaFilter);
+      }
+    });
+
+    root.addEventListener("keydown", (e) => {
+      // Follow-up input Enter key
+      if (e.key === "Enter" && e.target.closest("[data-scolta-followup-input]")) {
+        submitFollowUp();
+      }
+    });
 
     // Init Pagefind.
     initPagefind();

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tag1\Scolta\Export;
 
+use Tag1\Scolta\Wasm\ScoltaWasm;
+
 /**
  * Exports content items as minimal HTML files for Pagefind indexing.
  *
@@ -97,80 +99,22 @@ class ContentExporter
     /**
      * Clean raw HTML body into plain text suitable for indexing.
      *
+     * Delegates to WASM module for consistent cross-platform cleaning.
      * Strips page chrome (main-content region extraction), footer,
      * script/style/nav elements, and normalizes whitespace.
      */
     public function cleanHtml(string $html, string $title = ''): string
     {
-        // Extract main content region if present.
-        $mainPos = strpos($html, 'id="main-content"');
-        if ($mainPos !== false) {
-            $closePos = strpos($html, '>', $mainPos);
-            $html = $closePos !== false
-                ? substr($html, $closePos + 1)
-                : substr($html, $mainPos);
-        }
-
-        // Remove footer region.
-        $footerMarkers = ['<footer', 'id="footer"', 'class="footer', 'region-footer'];
-        foreach ($footerMarkers as $marker) {
-            $footerPos = strpos($html, $marker);
-            if ($footerPos !== false) {
-                $html = substr($html, 0, $footerPos);
-                break;
-            }
-        }
-
-        // Remove non-content elements.
-        $html = preg_replace('/<script[^>]*>.*?<\/script>/si', '', $html);
-        $html = preg_replace('/<style[^>]*>.*?<\/style>/si', '', $html);
-        $html = preg_replace('/<nav[^>]*>.*?<\/nav>/si', '', $html);
-
-        // Strip all remaining tags and normalize whitespace.
-        $cleanText = strip_tags($html);
-        $cleanText = preg_replace('/\s+/', ' ', $cleanText);
-        $cleanText = trim($cleanText);
-
-        // Remove title from beginning of text (avoids duplication in index).
-        $titlePlain = trim($title);
-        if ($titlePlain !== '' && stripos($cleanText, $titlePlain) === 0) {
-            $cleanText = trim(substr($cleanText, strlen($titlePlain)));
-        }
-
-        return $cleanText;
+        return ScoltaWasm::cleanHtml($html, $title);
     }
 
     /**
      * Build a minimal HTML document with Pagefind data attributes.
+     *
+     * Delegates to WASM module for consistent cross-platform generation.
      */
     private function buildPagefindHtml(ContentItem $item, string $cleanText): string
     {
-        $titleEsc = htmlspecialchars($item->title, ENT_QUOTES, 'UTF-8');
-        $urlEsc = htmlspecialchars($item->url, ENT_QUOTES, 'UTF-8');
-        $siteNameEsc = htmlspecialchars($item->siteName, ENT_QUOTES, 'UTF-8');
-        $dateEsc = htmlspecialchars($item->date, ENT_QUOTES, 'UTF-8');
-        $bodyEsc = htmlspecialchars($cleanText, ENT_QUOTES, 'UTF-8');
-
-        $siteMeta = $item->siteName !== ''
-            ? "\n  <meta data-pagefind-meta=\"site:{$siteNameEsc}\">\n  <meta data-pagefind-filter=\"site:{$siteNameEsc}\">"
-            : '';
-
-        return <<<HTML
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>{$titleEsc}</title>
-  <meta data-pagefind-meta="url:{$urlEsc}">{$siteMeta}
-  <meta data-pagefind-meta="date:{$dateEsc}">
-</head>
-<body>
-  <main data-pagefind-body>
-    <h1>{$titleEsc}</h1>
-    <p>{$bodyEsc}</p>
-  </main>
-</body>
-</html>
-HTML;
+        return ScoltaWasm::buildPagefindHtml($item->id, $item->title, $cleanText, $item->url, $item->date, $item->siteName);
     }
 }
