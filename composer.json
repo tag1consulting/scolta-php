@@ -1,6 +1,6 @@
 {
-    "name": "tag1/scolta",
-    "description": "AI-powered search with Pagefind — shared core library",
+    "name": "tag1/scolta-php",
+    "description": "AI-powered search with Pagefind — PHP language binding",
     "type": "library",
     "license": "GPL-2.0-or-later",
     "autoload": {

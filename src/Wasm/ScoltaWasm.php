@@ -10,9 +10,9 @@ use Extism\Manifest;
 /**
  * Bridge between PHP and the scolta-core WebAssembly module.
  *
- * Loads scolta-core.wasm via Extism and provides typed PHP methods
+ * Loads scolta_core.wasm via Extism and provides typed PHP methods
  * for each exported WASM function. Platform adapters never call this
- * directly — they use the existing scolta-core API classes, which
+ * directly — they use the existing scolta-php API classes, which
  * delegate here internally.
  *
  * Debug mode: Call ScoltaWasm::enableDebug() to log all WASM calls
@@ -28,7 +28,7 @@ class ScoltaWasm
     /**
      * Set a custom path to the WASM binary.
      *
-     * By default, looks for wasm/scolta-core.wasm relative to this package.
+     * By default, looks for wasm/scolta_core.wasm relative to this package.
      */
     public static function setWasmPath(string $path): void
     {
@@ -76,13 +76,13 @@ class ScoltaWasm
     private static function plugin(): Plugin
     {
         if (self::$plugin === null) {
-            $path = self::$wasmPath ?? dirname(__DIR__, 2) . '/wasm/scolta-core.wasm';
+            $path = self::$wasmPath ?? dirname(__DIR__, 2) . '/wasm/scolta_core.wasm';
 
             if (!file_exists($path)) {
                 throw new \RuntimeException(
                     "Scolta WASM module not found at: {$path}. "
-                    . 'Run `cargo build --release --target wasm32-wasip1` in scolta-core-wasm/ '
-                    . 'and copy the .wasm file to scolta-core/wasm/'
+                    . 'Run `cargo build --release --target wasm32-wasip1` in scolta-core/ '
+                    . 'and copy the .wasm file to scolta-php/wasm/'
                 );
             }
 
