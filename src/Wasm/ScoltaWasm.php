@@ -116,7 +116,7 @@ class ScoltaWasm
         return $output;
     }
 
-    // -- Public API methods (called by scolta-core classes) --
+    // -- Public API methods (called by scolta-php classes) --
 
     public static function resolvePrompt(string $template, string $siteName, string $siteDescription = 'website'): string
     {
