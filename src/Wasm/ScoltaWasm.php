@@ -6,6 +6,7 @@ namespace Tag1\Scolta\Wasm;
 
 use Extism\Plugin;
 use Extism\Manifest;
+use Extism\Manifest\PathWasmSource;
 
 /**
  * Bridge between PHP and the scolta-core WebAssembly module.
@@ -86,8 +87,8 @@ class ScoltaWasm
                 );
             }
 
-            $manifest = Manifest::fromPath($path);
-            self::$plugin = new Plugin($manifest, wasi: true);
+            $manifest = new Manifest(new PathWasmSource($path));
+            self::$plugin = new Plugin($manifest, withWasiOrOptions: true);
         }
 
         return self::$plugin;

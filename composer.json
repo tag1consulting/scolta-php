@@ -13,6 +13,12 @@
         "extism/extism": "^1.0"
     },
     "require-dev": {
-        "phpunit/phpunit": "^10.0"
+        "guzzlehttp/guzzle": "^7.0",
+        "phpunit/phpunit": "^10.0|^11.0"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tag1\\Scolta\\Tests\\": "tests/"
+        }
     }
 }

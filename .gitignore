@@ -1,2 +1,4 @@
 /vendor/
 .phpunit.result.cache
+/.phpunit.cache/
+/wasm/scolta_core.wasm
