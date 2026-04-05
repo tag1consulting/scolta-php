@@ -39,7 +39,7 @@ This package follows the Scolta versioning policy. Major versions are synchroniz
 
 ### Version management and -dev workflow
 
-The `version` field in `composer.json` is always either a tagged release (`0.2.0`) or a dev pre-release (`0.3.0-dev`). See scolta-core/VERSIONING.md for the full workflow.
+The `version` field in `composer.json` is always either a tagged release (`0.2.0`) or a dev pre-release (`0.3.0-dev`). See scolta-core/VERSIONING.md for the full workflow. In Composer, `-dev` maps to a stability level that prevents accidental installation in production without an explicit `@dev` flag or `minimum-stability: dev`.
 
 **When committing code:**
 
