@@ -37,6 +37,20 @@ This package follows the Scolta versioning policy. Major versions are synchroniz
 - `composer.json` MUST use caret constraints for scolta-php dependencies from platform adapters: `"tag1/scolta-php": "^X.Y"`.
 - For development with path repos, use `@dev`.
 
+### Version management and -dev workflow
+
+The `version` field in `composer.json` is always either a tagged release (`0.2.0`) or a dev pre-release (`0.3.0-dev`). See scolta-core/VERSIONING.md for the full workflow.
+
+**When committing code:**
+
+- If the current version already has `-dev`, **do not change it**. Multiple commits accumulate on the same `-dev` version.
+- If the current version is a bare release and you are making the first change after that release, **bump to the next target with `-dev`** in `composer.json`.
+  - Bug fix only → `0.1.1-dev`
+  - New feature or deprecation → `0.2.0-dev`
+  - Breaking change → `1.0.0-dev` (coordinated across all packages)
+
+**WARNING:** Never commit a bare version bump without tagging it as a release.
+
 ## Testing
 
 - Run: `./vendor/bin/phpunit`
