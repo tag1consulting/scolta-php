@@ -1155,4 +1155,24 @@
     showMore,
   };
 
+  // Auto-initialize when the DOM is ready, if window.scolta config is present.
+  // Platform bridges (e.g. Drupal's scolta-drupal-bridge.js) may call init()
+  // earlier — the guard in init() prevents double-initialization.
+  function autoInit() {
+    if (global.scolta && global.scolta.container) {
+      var container = document.querySelector(global.scolta.container);
+      if (container && !container.hasChildNodes()) {
+        init(global.scolta.container);
+      }
+    }
+  }
+
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', autoInit);
+    } else {
+      autoInit();
+    }
+  }
+
 })(typeof window !== 'undefined' ? window : this);
