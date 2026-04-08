@@ -38,8 +38,11 @@ class StructuralIntegrityTest extends TestCase
             $expected .= '\\' . str_replace('/', '\\', $dir);
         }
 
-        $this->assertEquals($expected, $namespace,
-            "Namespace mismatch in " . basename($file));
+        $this->assertEquals(
+            $expected,
+            $namespace,
+            'Namespace mismatch in ' . basename($file)
+        );
     }
 
     public static function phpSourceFileProvider(): \Generator
@@ -64,8 +67,11 @@ class StructuralIntegrityTest extends TestCase
     {
         $output = [];
         exec('php -l ' . escapeshellarg($file) . ' 2>&1', $output, $exitCode);
-        $this->assertEquals(0, $exitCode,
-            "Syntax error in " . basename($file) . ": " . implode("\n", $output));
+        $this->assertEquals(
+            0,
+            $exitCode,
+            'Syntax error in ' . basename($file) . ': ' . implode("\n", $output)
+        );
     }
 
     // -------------------------------------------------------------------
@@ -92,15 +98,19 @@ class StructuralIntegrityTest extends TestCase
     public function testNoScoltaCoreWasmReferences(): void
     {
         $stale = $this->grepSourceFiles('/scolta[-_]core[-_]wasm/i');
-        $this->assertEmpty($stale,
-            "Files still reference scolta-core-wasm:\n" . implode("\n", $stale));
+        $this->assertEmpty(
+            $stale,
+            "Files still reference scolta-core-wasm:\n" . implode("\n", $stale)
+        );
     }
 
     public function testNoOldPackageName(): void
     {
         $stale = $this->grepSourceFiles('/"tag1\/scolta"/');
-        $this->assertEmpty($stale,
-            "Files still reference old package name:\n" . implode("\n", $stale));
+        $this->assertEmpty(
+            $stale,
+            "Files still reference old package name:\n" . implode("\n", $stale)
+        );
     }
 
     public function testWasmBinaryPathUsesUnderscores(): void
@@ -182,9 +192,13 @@ class StructuralIntegrityTest extends TestCase
         foreach ($it as $file) {
             $path = $file->getPathname();
             foreach ($exclude as $dir) {
-                if (str_contains($path, '/' . $dir . '/')) continue 2;
+                if (str_contains($path, '/' . $dir . '/')) {
+                    continue 2;
+                }
             }
-            if (!in_array($file->getExtension(), ['php', 'json', 'yml', 'js', 'md'], true)) continue;
+            if (!in_array($file->getExtension(), ['php', 'json', 'yml', 'js', 'md'], true)) {
+                continue;
+            }
 
             if (preg_match($pattern, file_get_contents($path))) {
                 $hits[] = str_replace($this->root . '/', '', $path);

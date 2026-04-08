@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Tag1\Scolta\Tests;
 
 use PHPUnit\Framework\TestCase;
-use Tag1\Scolta\Export\ContentItem;
 use Tag1\Scolta\Content\TrackerRecord;
+use Tag1\Scolta\Export\ContentItem;
 use Tag1\Scolta\Provider\AiResponse;
 
 /**

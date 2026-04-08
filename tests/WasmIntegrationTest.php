@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Tag1\Scolta\Tests;
 
 use PHPUnit\Framework\TestCase;
-use Tag1\Scolta\Wasm\ScoltaWasm;
 use Tag1\Scolta\Config\ScoltaConfig;
 use Tag1\Scolta\Prompt\DefaultPrompts;
 use Tag1\Scolta\Scorer\DefaultScorer;
+use Tag1\Scolta\Wasm\ScoltaWasm;
 
 /**
  * Tests that require the Extism runtime and WASM binary.
@@ -65,7 +65,12 @@ class WasmIntegrationTest extends TestCase
     public function testBuildPagefindHtml(): void
     {
         $html = ScoltaWasm::buildPagefindHtml(
-            'doc-1', 'Test Title', 'Body text', 'https://example.com', '2024-01-01', 'Site',
+            'doc-1',
+            'Test Title',
+            'Body text',
+            'https://example.com',
+            '2024-01-01',
+            'Site',
         );
         $this->assertStringContainsString('data-pagefind-body', $html);
         $this->assertStringContainsString('Test Title', $html);

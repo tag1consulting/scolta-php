@@ -26,5 +26,6 @@ class ContentItem
         public readonly string $date,
         /** Site name for Pagefind filtering/faceting. */
         public readonly string $siteName = '',
-    ) {}
+    ) {
+    }
 }

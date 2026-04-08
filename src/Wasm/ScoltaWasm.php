@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Tag1\Scolta\Wasm;
 
-use Extism\Plugin;
 use Extism\Manifest;
 use Extism\Manifest\PathWasmSource;
+use Extism\Plugin;
 
 /**
  * Bridge between PHP and the scolta-core WebAssembly module.

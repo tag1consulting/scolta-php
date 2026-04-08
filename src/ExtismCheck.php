@@ -24,7 +24,7 @@ final class ExtismCheck
             throw new \RuntimeException(
                 "PHP FFI extension is not loaded. Scolta requires FFI to run WebAssembly modules.\n"
                 . "Enable it in php.ini: ffi.enable=true\n"
-                . "See: https://www.php.net/manual/en/ffi.configuration.php"
+                . 'See: https://www.php.net/manual/en/ffi.configuration.php'
             );
         }
 
@@ -33,7 +33,7 @@ final class ExtismCheck
             throw new \RuntimeException(
                 "PHP FFI is loaded but disabled (ffi.enable={$ffiEnabled}).\n"
                 . "Set ffi.enable=true in php.ini.\n"
-                . "Note: ffi.enable=preload works for CLI but not web requests."
+                . 'Note: ffi.enable=preload works for CLI but not web requests.'
             );
         }
 
@@ -42,7 +42,7 @@ final class ExtismCheck
                 "Extism PHP SDK is not installed. Scolta requires it to run WebAssembly modules.\n"
                 . "Install: composer require extism/extism\n"
                 . "You also need the Extism shared library (libextism.so / libextism.dylib).\n"
-                . "Install: curl -s https://get.extism.org/cli | bash && sudo extism lib install --version latest"
+                . 'Install: curl -s https://get.extism.org/cli | bash && sudo extism lib install --version latest'
             );
         }
     }

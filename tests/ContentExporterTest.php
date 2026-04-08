@@ -35,7 +35,9 @@ class ContentExporterTest extends TestCase
 
     private function removeDir(string $dir): void
     {
-        if (!is_dir($dir)) return;
+        if (!is_dir($dir)) {
+            return;
+        }
         $items = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
             \RecursiveIteratorIterator::CHILD_FIRST
@@ -54,7 +56,7 @@ class ContentExporterTest extends TestCase
      */
     private function createStubExporter(int $minContentLength = 50): ContentExporter
     {
-        return new class($this->tmpDir, $minContentLength) extends ContentExporter {
+        return new class ($this->tmpDir, $minContentLength) extends ContentExporter {
             public function cleanHtml(string $html, string $title = ''): string
             {
                 return trim(strip_tags($html));
@@ -223,8 +225,11 @@ class ContentExporterTest extends TestCase
         $exporter->prepareOutputDir();
 
         $exporter->export(new ContentItem(
-            'my-article-42', 'Title', '<p>Enough content here.</p>',
-            'https://x.com', '2024-01-01',
+            'my-article-42',
+            'Title',
+            '<p>Enough content here.</p>',
+            'https://x.com',
+            '2024-01-01',
         ));
 
         $this->assertFileExists($this->tmpDir . '/my-article-42.html');
@@ -237,7 +242,11 @@ class ContentExporterTest extends TestCase
 
         // "Short" is 5 chars — should pass minContentLength=5.
         $result = $exporter->export(new ContentItem(
-            'x', 'T', '<b>Short</b>', 'https://x.com', '2024-01-01',
+            'x',
+            'T',
+            '<b>Short</b>',
+            'https://x.com',
+            '2024-01-01',
         ));
         $this->assertTrue($result);
     }

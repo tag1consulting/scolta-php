@@ -25,5 +25,6 @@ class TrackerRecord
         public readonly string $action = self::ACTION_INDEX,
         /** When the change was recorded. */
         public readonly ?\DateTimeImmutable $changedAt = null,
-    ) {}
+    ) {
+    }
 }
