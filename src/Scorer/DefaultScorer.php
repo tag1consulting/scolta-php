@@ -13,7 +13,7 @@ use Tag1\Scolta\Wasm\ScoltaWasm;
  * title/content match boosting, and result merging with deduplication.
  * All math runs in the WASM module for cross-platform consistency.
  */
-class DefaultScorer implements ScorerInterface
+class DefaultScorer
 {
     public function score(array $results, array $config = []): array
     {

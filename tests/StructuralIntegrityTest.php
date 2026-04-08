@@ -111,28 +111,31 @@ class StructuralIntegrityTest extends TestCase
     }
 
     // -------------------------------------------------------------------
-    // Interface implementations
+    // Interface and class checks
     // -------------------------------------------------------------------
-
-    public function testDefaultScorerImplementsScorerInterface(): void
-    {
-        $ref = new \ReflectionClass(\Tag1\Scolta\Scorer\DefaultScorer::class);
-        $this->assertTrue($ref->implementsInterface(\Tag1\Scolta\Scorer\ScorerInterface::class));
-    }
 
     public function testContentSourceInterfaceExists(): void
     {
         $this->assertTrue(interface_exists(\Tag1\Scolta\Content\ContentSourceInterface::class));
     }
 
-    public function testAiProviderInterfaceExists(): void
+    public function testDefaultScorerIsConcreteClass(): void
     {
-        $this->assertTrue(interface_exists(\Tag1\Scolta\Provider\AiProviderInterface::class));
+        $ref = new \ReflectionClass(\Tag1\Scolta\Scorer\DefaultScorer::class);
+        $this->assertFalse($ref->isAbstract());
+        $this->assertFalse($ref->isInterface());
     }
 
-    public function testScorerInterfaceExists(): void
+    public function testDeadInterfacesRemoved(): void
     {
-        $this->assertTrue(interface_exists(\Tag1\Scolta\Scorer\ScorerInterface::class));
+        $this->assertFalse(
+            file_exists(dirname(__DIR__) . '/src/Provider/AiProviderInterface.php'),
+            'AiProviderInterface should be removed (dead code)'
+        );
+        $this->assertFalse(
+            file_exists(dirname(__DIR__) . '/src/Scorer/ScorerInterface.php'),
+            'ScorerInterface should be removed (dead code)'
+        );
     }
 
     // -------------------------------------------------------------------
@@ -155,9 +158,7 @@ class StructuralIntegrityTest extends TestCase
             'ContentItem' => ['src/Export/ContentItem.php'],
             'DefaultPrompts' => ['src/Prompt/DefaultPrompts.php'],
             'DefaultScorer' => ['src/Scorer/DefaultScorer.php'],
-            'ScorerInterface' => ['src/Scorer/ScorerInterface.php'],
             'ScoltaWasm' => ['src/Wasm/ScoltaWasm.php'],
-            'AiProviderInterface' => ['src/Provider/AiProviderInterface.php'],
             'AiResponse' => ['src/Provider/AiResponse.php'],
             'ContentSourceInterface' => ['src/Content/ContentSourceInterface.php'],
             'TrackerRecord' => ['src/Content/TrackerRecord.php'],
