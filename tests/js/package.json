@@ -1,0 +1,10 @@
+{
+    "private": true,
+    "scripts": {
+        "test": "jest --verbose"
+    },
+    "devDependencies": {
+        "jest": "^29.0",
+        "jest-environment-jsdom": "^29.0"
+    }
+}
