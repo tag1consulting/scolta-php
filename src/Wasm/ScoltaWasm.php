@@ -77,6 +77,8 @@ class ScoltaWasm
     private static function plugin(): Plugin
     {
         if (self::$plugin === null) {
+            \Tag1\Scolta\ExtismCheck::verify();
+
             $path = self::$wasmPath ?? dirname(__DIR__, 2) . '/wasm/scolta_core.wasm';
 
             if (!file_exists($path)) {
