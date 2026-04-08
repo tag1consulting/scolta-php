@@ -3,7 +3,7 @@
     "version": "0.2.0-dev",
     "description": "AI-powered search with Pagefind — PHP language binding",
     "type": "library",
-    "license": "GPL-2.0-or-later",
+    "license": "MIT",
     "autoload": {
         "psr-4": {
             "Tag1\\Scolta\\": "src/"
