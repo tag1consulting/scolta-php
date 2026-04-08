@@ -60,7 +60,11 @@ class ContentExporter
                     : unlink($file->getRealPath());
             }
         }
-        @mkdir($this->outputDir, 0755, true);
+        if (!is_dir($this->outputDir) && !mkdir($this->outputDir, 0755, true)) {
+            throw new \RuntimeException(
+                sprintf('Failed to create output directory: %s', $this->outputDir)
+            );
+        }
     }
 
     /**

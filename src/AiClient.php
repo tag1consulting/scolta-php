@@ -123,6 +123,8 @@ class AiClient
             return $this->sendAnthropicRequest($systemPrompt, $messages, $maxTokens, $useModel);
         } catch (GuzzleException $e) {
             throw new \RuntimeException('Scolta AI API request failed: ' . $e->getMessage());
+        } catch (\JsonException $e) {
+            throw new \RuntimeException('Scolta AI API returned malformed JSON: ' . $e->getMessage());
         }
     }
 
@@ -147,7 +149,7 @@ class AiClient
             'timeout' => 30,
         ]);
 
-        $data = json_decode((string) $response->getBody(), true);
+        $data = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
         return $data['content'][0]['text'] ?? '';
     }
 
@@ -176,7 +178,7 @@ class AiClient
             'timeout' => 30,
         ]);
 
-        $data = json_decode((string) $response->getBody(), true);
+        $data = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
         return $data['choices'][0]['message']['content'] ?? '';
     }
 }
