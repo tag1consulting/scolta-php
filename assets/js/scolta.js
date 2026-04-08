@@ -168,8 +168,15 @@
   }
 
   // ==========================================================================
-  // SEARCH ENGINE
+  // INSTANCE FACTORY
   // ==========================================================================
+  // All mutable state is scoped to createInstance() closures, allowing
+  // multiple independent search widgets on one page. The backward-compatible
+  // Scolta.init() creates a default instance internally.
+
+  function createInstance(containerSelector, instanceConfig) {
+
+  // --- Instance state (local to this closure) ---
   let pagefind = null;
   let allScoredResults = [];
   let displayedCount = 0;
@@ -187,9 +194,53 @@
   // --- DOM references (set during init) ---
   let els = {};
 
+  // Instance-specific config readers that use the provided config object.
+  function getInstanceConfig() {
+    const s = (instanceConfig && instanceConfig.scoring) || {};
+    return {
+      RECENCY_BOOST_MAX: s.RECENCY_BOOST_MAX ?? 0.5,
+      RECENCY_HALF_LIFE_DAYS: s.RECENCY_HALF_LIFE_DAYS ?? 365,
+      RECENCY_PENALTY_AFTER_DAYS: s.RECENCY_PENALTY_AFTER_DAYS ?? 1825,
+      RECENCY_MAX_PENALTY: s.RECENCY_MAX_PENALTY ?? 0.3,
+      TITLE_MATCH_BOOST: s.TITLE_MATCH_BOOST ?? 1.0,
+      TITLE_ALL_TERMS_MULTIPLIER: s.TITLE_ALL_TERMS_MULTIPLIER ?? 1.5,
+      CONTENT_MATCH_BOOST: s.CONTENT_MATCH_BOOST ?? 0.4,
+      EXCERPT_LENGTH: s.EXCERPT_LENGTH ?? 300,
+      RESULTS_PER_PAGE: s.RESULTS_PER_PAGE ?? 10,
+      MAX_PAGEFIND_RESULTS: s.MAX_PAGEFIND_RESULTS ?? 50,
+      AI_EXPAND_QUERY: s.AI_EXPAND_QUERY ?? true,
+      AI_SUMMARIZE: s.AI_SUMMARIZE ?? true,
+      AI_SUMMARY_TOP_N: s.AI_SUMMARY_TOP_N ?? 5,
+      AI_SUMMARY_MAX_CHARS: s.AI_SUMMARY_MAX_CHARS ?? 2000,
+      EXPAND_PRIMARY_WEIGHT: s.EXPAND_PRIMARY_WEIGHT ?? 0.7,
+      AI_MAX_FOLLOWUPS: s.AI_MAX_FOLLOWUPS ?? 3,
+    };
+  }
+
+  function getInstanceEndpoints() {
+    const e = (instanceConfig && instanceConfig.endpoints) || {};
+    return {
+      expand: e.expand || '/api/scolta/v1/expand-query',
+      summarize: e.summarize || '/api/scolta/v1/summarize',
+      followup: e.followup || '/api/scolta/v1/followup',
+    };
+  }
+
+  function getInstanceSiteName() {
+    return (instanceConfig && instanceConfig.siteName) || 'this site';
+  }
+
+  function getInstanceAllowedLinkDomains() {
+    return (instanceConfig && instanceConfig.allowedLinkDomains) || [];
+  }
+
+  function getInstanceDisclaimer() {
+    return (instanceConfig && instanceConfig.disclaimer) || '';
+  }
+
   // Initialize Pagefind and preload the WASM index.
   async function initPagefind() {
-    const pagefindPath = (global.scolta && global.scolta.pagefindPath) || '/pagefind/pagefind.js';
+    const pagefindPath = (instanceConfig && instanceConfig.pagefindPath) || '/pagefind/pagefind.js';
     pagefind = await import(pagefindPath);
     await pagefind.init();
     // Warm the index: triggers WASM compilation + fragment download.
@@ -200,7 +251,7 @@
   // --- Scoring functions (preserved exactly from original) ---
 
   function recencyScore(dateStr) {
-    const CONFIG = getConfig();
+    const CONFIG = getInstanceConfig();
     if (!dateStr) return 0;
     try {
       const contentDate = new Date(dateStr);
@@ -220,7 +271,7 @@
   }
 
   function titleMatchScore(title, query) {
-    const CONFIG = getConfig();
+    const CONFIG = getInstanceConfig();
     if (!title || !query) return 0;
     const titleLower = title.toLowerCase();
     const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
@@ -243,7 +294,7 @@
   }
 
   function contentMatchScore(excerpt, query) {
-    const CONFIG = getConfig();
+    const CONFIG = getInstanceConfig();
     if (!excerpt || !query) return 0;
     const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
     if (terms.length === 0) return 0;
@@ -261,8 +312,8 @@
   // --- AI features ---
 
   async function expandQuery(query) {
-    const CONFIG = getConfig();
-    const endpoints = getEndpoints();
+    const CONFIG = getInstanceConfig();
+    const endpoints = getInstanceEndpoints();
     if (!CONFIG.AI_EXPAND_QUERY) return null;
     try {
       const resp = await fetch(endpoints.expand, {
@@ -289,8 +340,8 @@
   }
 
   async function summarizeResults(query, results, expandedTerms = []) {
-    const CONFIG = getConfig();
-    const endpoints = getEndpoints();
+    const CONFIG = getInstanceConfig();
+    const endpoints = getInstanceEndpoints();
     if (!CONFIG.AI_SUMMARIZE || results.length === 0) return null;
     const summaryEl = els.aiSummary;
     summaryEl.style.display = "block";
@@ -333,7 +384,7 @@
           { role: 'assistant', content: data.summary },
         ];
 
-        const disclaimer = getDisclaimer();
+        const disclaimer = getInstanceDisclaimer();
         const disclaimerHtml = disclaimer
           ? `<div class="scolta-ai-summary-disclaimer">${escapeHtml(disclaimer)}</div>`
           : '';
@@ -380,7 +431,7 @@
   // Build LLM context string from an array of scored results.
   // Top 2 results get full page content for depth; remaining get excerpts.
   function buildLLMContext(results) {
-    const CONFIG = getConfig();
+    const CONFIG = getInstanceConfig();
     return results.map((r, i) => {
       const title = r.data.meta?.title || "Untitled";
       const url = r.data.meta?.url || "";
@@ -422,7 +473,7 @@
   // Links are only rendered if the URL matches allowedLinkDomains
   // (empty list = allow all links).
   function formatInline(text) {
-    const allowedDomains = getAllowedLinkDomains();
+    const allowedDomains = getInstanceAllowedLinkDomains();
     return text
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, linkText, url) => {
@@ -467,7 +518,7 @@
   }
 
   function updateFollowUpCounter(remaining) {
-    const CONFIG = getConfig();
+    const CONFIG = getInstanceConfig();
     const counter = document.getElementById("scolta-followup-counter");
     if (counter) counter.textContent = `${remaining} remaining`;
 
@@ -481,8 +532,8 @@
   }
 
   async function submitFollowUp() {
-    const CONFIG = getConfig();
-    const endpoints = getEndpoints();
+    const CONFIG = getInstanceConfig();
+    const endpoints = getInstanceEndpoints();
     const input = document.getElementById("scolta-followup-field");
     const btn = document.getElementById("scolta-followup-btn");
     const question = input.value.trim();
@@ -696,7 +747,7 @@
   // ==========================================================================
 
   async function loadAndScoreSearch(search, query, weight) {
-    const CONFIG = getConfig();
+    const CONFIG = getInstanceConfig();
     const toLoad = Math.min(search.results.length, CONFIG.MAX_PAGEFIND_RESULTS);
     if (toLoad === 0) return [];
     const loaded = await Promise.all(
@@ -706,7 +757,7 @@
   }
 
   async function searchAndLoadParallel(queries, filters, originalQuery) {
-    const CONFIG = getConfig();
+    const CONFIG = getInstanceConfig();
     if (queries.length === 0) return [];
 
     const searches = await Promise.all(
@@ -750,7 +801,7 @@
   }
 
   async function mergeExpandedSearchResults(expandedTerms, originalQuery, searchQuery, preserveFilters, version) {
-    const CONFIG = getConfig();
+    const CONFIG = getInstanceConfig();
     if (!expandedTerms || expandedTerms.length === 0) return;
 
     const validTerms = expandedTerms.filter(
@@ -815,7 +866,7 @@
 
   async function doSearch(preserveFilters) {
     preserveFilters = preserveFilters || false;
-    const CONFIG = getConfig();
+    const CONFIG = getInstanceConfig();
     const query = els.queryInput.value.trim();
     if (!query || !pagefind) return;
 
@@ -971,7 +1022,7 @@
 
   function renderResults(isExpanded) {
     isExpanded = isExpanded || false;
-    const CONFIG = getConfig();
+    const CONFIG = getInstanceConfig();
     const container = els.results;
     const header = els.resultsHeader;
     const noResults = els.noResults;
@@ -1144,25 +1195,68 @@
     console.log("[scolta] Initialized");
   }
 
-  // Expose public API.
-  global.Scolta = {
-    init,
+  // Initialize the instance by building the UI inside the container.
+  init(containerSelector);
+  // If init failed to find the container, root will be empty.
+  var root = document.querySelector(containerSelector || '#scolta-search');
+  if (!root || !root.hasChildNodes()) {
+    return null;
+  }
+
+  // Return the instance's public API.
+  return {
     searchTerm,
     submitFollowUp,
     toggleFilter,
     clearSearch,
     doSearch,
     showMore,
+    destroy: function() {
+      if (abortController) abortController.abort();
+      root.innerHTML = '';
+      els = {};
+    },
+  };
+
+  } // end createInstance
+
+  // ==========================================================================
+  // BACKWARD-COMPATIBLE PUBLIC API
+  // ==========================================================================
+  // Scolta.init() creates a default instance using window.scolta config.
+  // Scolta.createInstance() allows multiple independent widgets.
+
+  global.Scolta = global.Scolta || {};
+
+  global.Scolta.createInstance = function(containerSelector, config) {
+    return createInstance(containerSelector, config);
+  };
+
+  // Backward-compatible init: creates a default instance from window.scolta.
+  global.Scolta.init = function(containerSelector) {
+    if (global.Scolta.defaultInstance) return; // already initialized
+    global.Scolta.defaultInstance = createInstance(
+      containerSelector || '#scolta-search',
+      global.scolta
+    );
+    // Expose instance methods on Scolta for backward compat.
+    if (global.Scolta.defaultInstance) {
+      var inst = global.Scolta.defaultInstance;
+      global.Scolta.searchTerm = inst.searchTerm;
+      global.Scolta.submitFollowUp = inst.submitFollowUp;
+      global.Scolta.toggleFilter = inst.toggleFilter;
+      global.Scolta.clearSearch = inst.clearSearch;
+      global.Scolta.doSearch = inst.doSearch;
+      global.Scolta.showMore = inst.showMore;
+    }
   };
 
   // Auto-initialize when the DOM is ready, if window.scolta config is present.
-  // Platform bridges (e.g. Drupal's scolta-drupal-bridge.js) may call init()
-  // earlier — the guard in init() prevents double-initialization.
   function autoInit() {
     if (global.scolta && global.scolta.container) {
       var container = document.querySelector(global.scolta.container);
       if (container && !container.hasChildNodes()) {
-        init(global.scolta.container);
+        global.Scolta.init(global.scolta.container);
       }
     }
   }
