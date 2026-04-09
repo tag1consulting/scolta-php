@@ -28,13 +28,16 @@ class DefaultScorerTest extends TestCase
         // Extism runtime may not be installed — skip gracefully.
         try {
             \Tag1\Scolta\ExtismCheck::verify();
+            $this->scorer = new DefaultScorer();
         } catch (\RuntimeException $e) {
-            if (str_contains($e->getMessage(), 'FFI') || str_contains($e->getMessage(), 'Extism')) {
+            if (str_contains($e->getMessage(), 'FFI')
+                || str_contains($e->getMessage(), 'Extism')
+                || str_contains($e->getMessage(), 'shared object')
+            ) {
                 $this->markTestSkipped('Extism native runtime not available: ' . $e->getMessage());
             }
             throw $e;
         }
-        $this->scorer = new DefaultScorer();
     }
 
     public function testScoreReturnsArray(): void

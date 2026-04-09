@@ -39,6 +39,7 @@ class PipelineTest extends TestCase
             if (str_contains($e->getMessage(), 'FFI')
                 || str_contains($e->getMessage(), 'libextism')
                 || str_contains($e->getMessage(), 'Extism')
+                || str_contains($e->getMessage(), 'shared object')
             ) {
                 $this->markTestSkipped('Extism native runtime not available: ' . $e->getMessage());
             }

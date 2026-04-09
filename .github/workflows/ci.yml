@@ -19,11 +19,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Extism runtime
+        run: |
+          curl -s https://get.extism.org/cli | bash -s -- -y
+          sudo extism lib install --version latest
+          sudo ldconfig
+
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
           extensions: ffi
+          ini-values: ffi.enable=true
           coverage: none
 
       - name: Install dependencies
