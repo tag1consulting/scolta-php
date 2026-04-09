@@ -7,6 +7,8 @@ namespace Tag1\Scolta\Tests\Http;
 use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\Cache\CacheDriverInterface;
 use Tag1\Scolta\Http\AiEndpointHandler;
+use Tag1\Scolta\Prompt\NullEnricher;
+use Tag1\Scolta\Prompt\PromptEnricherInterface;
 
 /**
  * Tests for the shared AiEndpointHandler class.
@@ -289,6 +291,101 @@ class AiEndpointHandlerTest extends TestCase
     }
 
     // ===================================================================
+    // Prompt enrichment
+    // ===================================================================
+
+    public function testNullEnricherPassesThroughUnchanged(): void
+    {
+        $enricher = new NullEnricher();
+        $original = 'You are a helpful search assistant.';
+
+        $result = $enricher->enrich($original, 'summarize', ['query' => 'test']);
+
+        $this->assertSame($original, $result);
+    }
+
+    public function testExpandQueryCallsEnricherBeforeAiService(): void
+    {
+        $enricher = new SpyEnricher('ENRICHED: ');
+        $ai = new PromptCapturingAiService('["term1", "term2", "term3"]');
+        $handler = $this->makeHandler(aiService: $ai, enricher: $enricher);
+
+        $result = $handler->handleExpandQuery('test query');
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(1, $enricher->callCount);
+        $this->assertEquals('expand_query', $enricher->lastPromptName);
+        $this->assertEquals(['query' => 'test query'], $enricher->lastContext);
+        $this->assertStringStartsWith('ENRICHED: ', $ai->lastSystemPrompt);
+    }
+
+    public function testSummarizeCallsEnricherBeforeAiService(): void
+    {
+        $enricher = new SpyEnricher('ENRICHED: ');
+        $ai = new PromptCapturingAiService('A helpful summary.');
+        $handler = $this->makeHandler(aiService: $ai, enricher: $enricher);
+
+        $result = $handler->handleSummarize('test query', 'some context');
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(1, $enricher->callCount);
+        $this->assertEquals('summarize', $enricher->lastPromptName);
+        $this->assertEquals(['query' => 'test query', 'context' => 'some context'], $enricher->lastContext);
+        $this->assertStringStartsWith('ENRICHED: ', $ai->lastSystemPrompt);
+    }
+
+    public function testFollowUpCallsEnricherBeforeAiService(): void
+    {
+        $enricher = new SpyEnricher('ENRICHED: ');
+        $ai = new PromptCapturingAiService('follow up response', captureConversation: true);
+        $handler = $this->makeHandler(aiService: $ai, enricher: $enricher);
+
+        $messages = [['role' => 'user', 'content' => 'hello']];
+        $result = $handler->handleFollowUp($messages);
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(1, $enricher->callCount);
+        $this->assertEquals('follow_up', $enricher->lastPromptName);
+        $this->assertEquals(['messages' => $messages], $enricher->lastContext);
+        $this->assertStringStartsWith('ENRICHED: ', $ai->lastSystemPrompt);
+    }
+
+    public function testCustomEnricherModifiesPrompt(): void
+    {
+        $enricher = new class implements PromptEnricherInterface {
+            public function enrich(string $resolvedPrompt, string $promptName, array $context = []): string
+            {
+                return $resolvedPrompt . "\n\nAlways mention our return policy.";
+            }
+        };
+
+        $ai = new PromptCapturingAiService('["term1", "term2"]');
+        $handler = $this->makeHandler(aiService: $ai, enricher: $enricher);
+
+        $handler->handleExpandQuery('pricing');
+
+        $this->assertStringContainsString('Always mention our return policy.', $ai->lastSystemPrompt);
+    }
+
+    public function testDefaultEnricherIsNullEnricher(): void
+    {
+        // Handler without explicit enricher should use NullEnricher (no modification).
+        $ai = new PromptCapturingAiService('["term1", "term2"]');
+        $handler = new AiEndpointHandler(
+            aiService: $ai,
+            cache: new InMemoryCacheDriver(),
+            generation: 1,
+            cacheTtl: 0,
+            maxFollowUps: 3,
+        );
+
+        $handler->handleExpandQuery('test');
+
+        // The prompt should be the raw prompt from the AI service, unmodified.
+        $this->assertEquals('Expand the following search query.', $ai->lastSystemPrompt);
+    }
+
+    // ===================================================================
     // Helpers
     // ===================================================================
 
@@ -298,6 +395,7 @@ class AiEndpointHandlerTest extends TestCase
         int $generation = 1,
         int $cacheTtl = 0,
         int $maxFollowUps = 3,
+        ?PromptEnricherInterface $enricher = null,
     ): AiEndpointHandler {
         return new AiEndpointHandler(
             aiService: $aiService ?? new MockAiService('["term1", "term2"]'),
@@ -305,6 +403,7 @@ class AiEndpointHandlerTest extends TestCase
             generation: $generation,
             cacheTtl: $cacheTtl,
             maxFollowUps: $maxFollowUps,
+            promptEnricher: $enricher ?? new NullEnricher(),
         );
     }
 }
@@ -376,5 +475,57 @@ class InMemoryCacheDriver implements CacheDriverInterface
     public function set(string $key, mixed $value, int $ttlSeconds): void
     {
         $this->store[$key] = $value;
+    }
+}
+
+/**
+ * Spy enricher that records calls and prepends a prefix.
+ */
+class SpyEnricher implements PromptEnricherInterface
+{
+    public int $callCount = 0;
+    public ?string $lastPromptName = null;
+    public ?array $lastContext = null;
+    public ?string $lastResolvedPrompt = null;
+
+    public function __construct(
+        private readonly string $prefix = '',
+    ) {}
+
+    public function enrich(string $resolvedPrompt, string $promptName, array $context = []): string
+    {
+        $this->callCount++;
+        $this->lastResolvedPrompt = $resolvedPrompt;
+        $this->lastPromptName = $promptName;
+        $this->lastContext = $context;
+
+        return $this->prefix . $resolvedPrompt;
+    }
+}
+
+/**
+ * AI service that captures the system prompt passed to message()/conversation().
+ */
+class PromptCapturingAiService extends MockAiService
+{
+    public ?string $lastSystemPrompt = null;
+
+    public function __construct(
+        string $response = '',
+        private readonly bool $captureConversation = false,
+    ) {
+        parent::__construct($response);
+    }
+
+    public function message(string $systemPrompt, string $userMessage, int $maxTokens): string
+    {
+        $this->lastSystemPrompt = $systemPrompt;
+        return parent::message($systemPrompt, $userMessage, $maxTokens);
+    }
+
+    public function conversation(string $systemPrompt, array $messages, int $maxTokens): string
+    {
+        $this->lastSystemPrompt = $systemPrompt;
+        return parent::conversation($systemPrompt, $messages, $maxTokens);
     }
 }

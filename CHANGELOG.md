@@ -8,6 +8,12 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ### Added
 
+- `PromptEnricherInterface` and `NullEnricher` for site-specific prompt context injection between WASM resolution and LLM calls
+- `AiEndpointHandler` now accepts an optional `PromptEnricherInterface` parameter (defaults to `NullEnricher`)
+- `docs/ENRICHMENT.md` documenting the enrichment API with platform-specific examples
+
+### Previously added
+
 - `ScoltaWasm` bridge to all scolta-core WASM functions via Extism PHP SDK and FFI
 - `ScoltaConfig` platform-agnostic configuration with `fromArray()`, `toJsScoringConfig()`, and `toAiClientConfig()` methods
 - `AiClient` provider-agnostic HTTP client supporting Anthropic and OpenAI APIs with single-turn and multi-turn conversation modes

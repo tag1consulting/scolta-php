@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tag1\Scolta\Http;
 
 use Tag1\Scolta\Cache\CacheDriverInterface;
+use Tag1\Scolta\Prompt\NullEnricher;
+use Tag1\Scolta\Prompt\PromptEnricherInterface;
 
 /**
  * Shared business logic for all AI endpoint handlers.
@@ -26,11 +28,12 @@ use Tag1\Scolta\Cache\CacheDriverInterface;
 class AiEndpointHandler
 {
     /**
-     * @param object               $aiService   AI service (duck-typed).
-     * @param CacheDriverInterface $cache       Cache driver.
-     * @param int                  $generation  Generation counter for cache invalidation.
-     * @param int                  $cacheTtl    Cache TTL in seconds (0 = disabled).
-     * @param int                  $maxFollowUps Maximum follow-up exchanges allowed.
+     * @param object                    $aiService       AI service (duck-typed).
+     * @param CacheDriverInterface      $cache           Cache driver.
+     * @param int                       $generation      Generation counter for cache invalidation.
+     * @param int                       $cacheTtl        Cache TTL in seconds (0 = disabled).
+     * @param int                       $maxFollowUps    Maximum follow-up exchanges allowed.
+     * @param PromptEnricherInterface   $promptEnricher  Prompt enricher for site-specific context injection.
      */
     public function __construct(
         private readonly object $aiService,
@@ -38,6 +41,7 @@ class AiEndpointHandler
         private readonly int $generation,
         private readonly int $cacheTtl,
         private readonly int $maxFollowUps,
+        private readonly PromptEnricherInterface $promptEnricher = new NullEnricher(),
     ) {}
 
     /**
@@ -64,8 +68,14 @@ class AiEndpointHandler
         }
 
         try {
-            $response = $this->aiService->message(
+            $systemPrompt = $this->promptEnricher->enrich(
                 $this->aiService->getExpandPrompt(),
+                'expand_query',
+                ['query' => $query],
+            );
+
+            $response = $this->aiService->message(
+                $systemPrompt,
                 'Expand this search query: ' . $query,
                 512,
             );
@@ -113,8 +123,14 @@ class AiEndpointHandler
         $userMessage = "Search query: {$query}\n\nSearch result excerpts:\n{$context}";
 
         try {
-            $summary = $this->aiService->message(
+            $systemPrompt = $this->promptEnricher->enrich(
                 $this->aiService->getSummarizePrompt(),
+                'summarize',
+                ['query' => $query, 'context' => $context],
+            );
+
+            $summary = $this->aiService->message(
+                $systemPrompt,
                 $userMessage,
                 512,
             );
@@ -171,8 +187,14 @@ class AiEndpointHandler
         }
 
         try {
-            $response = $this->aiService->conversation(
+            $systemPrompt = $this->promptEnricher->enrich(
                 $this->aiService->getFollowUpPrompt(),
+                'follow_up',
+                ['messages' => $messages],
+            );
+
+            $response = $this->aiService->conversation(
+                $systemPrompt,
                 $messages,
                 512,
             );
