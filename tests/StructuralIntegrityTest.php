@@ -164,6 +164,7 @@ class StructuralIntegrityTest extends TestCase
             'composer.json' => ['composer.json'],
             'ScoltaConfig' => ['src/Config/ScoltaConfig.php'],
             'AiClient' => ['src/AiClient.php'],
+            'AiServiceAdapter' => ['src/Service/AiServiceAdapter.php'],
             'ContentExporter' => ['src/Export/ContentExporter.php'],
             'ContentItem' => ['src/Export/ContentItem.php'],
             'DefaultPrompts' => ['src/Prompt/DefaultPrompts.php'],
