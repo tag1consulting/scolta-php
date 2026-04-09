@@ -62,3 +62,13 @@ The `version` field in `composer.json` is always either a tagged release (`0.2.0
 - ScoltaWasm is the bridge to the Rust WASM module. All scoring/HTML/prompt logic lives in WASM.
 - PHP classes are thin wrappers — don't reimplement algorithms that belong in scolta-core.
 - DTOs (ContentItem, AiResponse, TrackerRecord) are immutable readonly classes.
+
+## Documentation Rules
+
+Documentation follows code. When a PR changes behavior, the same PR must update the relevant docs.
+
+- **CHANGELOG.md**: Every PR that changes code (not docs-only) MUST add an entry under `## [Unreleased]`. CI enforces this.
+- **README.md**: Update if the change affects installation, usage examples, or the module structure.
+- **docs/CONFIG_REFERENCE.md**: MUST be updated when any `ScoltaConfig` property is added, removed, renamed, or has its default changed. CI checks freshness.
+- **UPGRADE.md**: MUST be updated when introducing breaking changes or deprecations.
+- **PHPDoc**: All public methods MUST have complete PHPDoc including `@since` and `@stability`.

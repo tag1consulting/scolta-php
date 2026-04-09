@@ -1,7 +1,6 @@
 # Scolta PHP
 
-<!-- TODO: Add CI badge once repo is on GitHub -->
-<!-- [![CI](https://github.com/tag1consulting/scolta-php/actions/workflows/ci.yml/badge.svg)](https://github.com/tag1consulting/scolta-php/actions/workflows/ci.yml) -->
+[![CI](https://github.com/tag1consulting/scolta-php/actions/workflows/ci.yml/badge.svg)](https://github.com/tag1consulting/scolta-php/actions/workflows/ci.yml)
 
 PHP language binding for the Scolta search engine. Bridges platform adapters (Drupal, WordPress, Laravel) to the scolta-core WebAssembly module via the Extism PHP SDK.
 
