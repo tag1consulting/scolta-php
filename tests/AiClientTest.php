@@ -308,4 +308,100 @@ class AiClientTest extends TestCase
         $result = $client->message('sys', 'msg');
         $this->assertEquals('', $result);
     }
+
+    // -------------------------------------------------------------------
+    // Configurable timeout and api_version
+    // -------------------------------------------------------------------
+
+    public function testCustomTimeoutUsedInRequest(): void
+    {
+        $container = [];
+        $history = Middleware::history($container);
+        $mock = new MockHandler([
+            new Response(200, [], json_encode([
+                'content' => [['text' => 'response']],
+            ])),
+        ]);
+        $stack = HandlerStack::create($mock);
+        $stack->push($history);
+
+        $client = new AiClient(
+            ['api_key' => 'test', 'timeout' => 60],
+            new Client(['handler' => $stack])
+        );
+
+        $client->message('system prompt', 'user message');
+
+        $this->assertCount(1, $container);
+        $options = $container[0]['options'];
+        $this->assertEquals(60, $options['timeout']);
+    }
+
+    public function testDefaultTimeoutIs30(): void
+    {
+        $container = [];
+        $history = Middleware::history($container);
+        $mock = new MockHandler([
+            new Response(200, [], json_encode([
+                'content' => [['text' => 'response']],
+            ])),
+        ]);
+        $stack = HandlerStack::create($mock);
+        $stack->push($history);
+
+        $client = new AiClient(
+            ['api_key' => 'test'],
+            new Client(['handler' => $stack])
+        );
+
+        $client->message('sys', 'msg');
+
+        $this->assertEquals(30, $container[0]['options']['timeout']);
+    }
+
+    public function testCustomApiVersionUsedInAnthropicHeader(): void
+    {
+        $container = [];
+        $history = Middleware::history($container);
+        $mock = new MockHandler([
+            new Response(200, [], json_encode([
+                'content' => [['text' => 'response']],
+            ])),
+        ]);
+        $stack = HandlerStack::create($mock);
+        $stack->push($history);
+
+        $client = new AiClient(
+            ['api_key' => 'test', 'api_version' => '2024-10-01'],
+            new Client(['handler' => $stack])
+        );
+
+        $client->message('sys', 'msg');
+
+        $request = $container[0]['request'];
+        $this->assertEquals('2024-10-01', $request->getHeaderLine('anthropic-version'));
+    }
+
+    public function testDefaultApiVersionIs20230601(): void
+    {
+        $container = [];
+        $history = Middleware::history($container);
+        $mock = new MockHandler([
+            new Response(200, [], json_encode([
+                'content' => [['text' => 'response']],
+            ])),
+        ]);
+        $stack = HandlerStack::create($mock);
+        $stack->push($history);
+
+        $client = new AiClient(
+            ['api_key' => 'test'],
+            new Client(['handler' => $stack])
+        );
+
+        $client->message('sys', 'msg');
+
+        $request = $container[0]['request'];
+        $this->assertEquals('2023-06-01', $request->getHeaderLine('anthropic-version'));
+    }
 }

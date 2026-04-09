@@ -30,6 +30,8 @@ class AiClient
     private string $apiKey;
     private string $model;
     private string $baseUrl;
+    private string $apiVersion;
+    private int $timeout;
 
     /**
      * @param array $config Configuration array with keys:
@@ -37,6 +39,8 @@ class AiClient
      *   - api_key: API key (required)
      *   - model: Model identifier (default: 'claude-sonnet-4-5-20250929')
      *   - base_url: Override API base URL (optional)
+     *   - api_version: Anthropic API version (default: '2023-06-01')
+     *   - timeout: HTTP request timeout in seconds (default: 30)
      * @param ClientInterface|null $httpClient Optional Guzzle client override.
      */
     public function __construct(array $config, ?ClientInterface $httpClient = null)
@@ -44,6 +48,8 @@ class AiClient
         $this->provider = $config['provider'] ?? 'anthropic';
         $this->apiKey = $config['api_key'] ?? '';
         $this->model = $config['model'] ?? 'claude-sonnet-4-5-20250929';
+        $this->apiVersion = $config['api_version'] ?? self::ANTHROPIC_API_VERSION;
+        $this->timeout = (int) ($config['timeout'] ?? 30);
 
         if ($this->provider === 'openai') {
             $this->baseUrl = $config['base_url'] ?? self::OPENAI_API_URL;
@@ -137,7 +143,7 @@ class AiClient
         $response = $this->httpClient->request('POST', $this->baseUrl, [
             'headers' => [
                 'x-api-key' => $this->apiKey,
-                'anthropic-version' => self::ANTHROPIC_API_VERSION,
+                'anthropic-version' => $this->apiVersion,
                 'Content-Type' => 'application/json',
             ],
             'json' => [
@@ -146,7 +152,7 @@ class AiClient
                 'system' => $systemPrompt,
                 'messages' => $messages,
             ],
-            'timeout' => 30,
+            'timeout' => $this->timeout,
         ]);
 
         $data = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
@@ -175,7 +181,7 @@ class AiClient
                 'max_tokens' => $maxTokens,
                 'messages' => $allMessages,
             ],
-            'timeout' => 30,
+            'timeout' => $this->timeout,
         ]);
 
         $data = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
