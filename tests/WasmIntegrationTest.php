@@ -20,11 +20,21 @@ class WasmIntegrationTest extends TestCase
 {
     protected function setUp(): void
     {
-        // Skip all tests if the Extism native library is not available.
+        // WASM binary must exist — this is a developer error if missing.
+        $wasmPath = dirname(__DIR__) . '/wasm/scolta_core.wasm';
+        $this->assertFileExists(
+            $wasmPath,
+            "WASM binary not found at {$wasmPath}. Run 'composer build-wasm' or copy from scolta-core build."
+        );
+
+        // Extism native runtime may not be installed — skip gracefully.
         try {
             ScoltaWasm::version();
-        } catch (\Throwable $e) {
-            $this->markTestSkipped('Extism runtime not available: ' . $e->getMessage());
+        } catch (\RuntimeException $e) {
+            if (str_contains($e->getMessage(), 'FFI') || str_contains($e->getMessage(), 'libextism') || str_contains($e->getMessage(), 'Extism')) {
+                $this->markTestSkipped('Extism native runtime not available: ' . $e->getMessage());
+            }
+            throw $e;
         }
     }
 
@@ -36,7 +46,7 @@ class WasmIntegrationTest extends TestCase
     {
         $version = ScoltaWasm::version();
         $this->assertNotEmpty($version);
-        $this->assertMatchesRegularExpression('/^\d+\.\d+\.\d+$/', $version);
+        $this->assertMatchesRegularExpression('/^\d+\.\d+\.\d+(-\w+)?$/', $version);
     }
 
     public function testGetPrompt(): void

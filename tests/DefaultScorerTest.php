@@ -18,10 +18,21 @@ class DefaultScorerTest extends TestCase
 
     protected function setUp(): void
     {
+        // WASM binary must exist.
+        $wasmPath = dirname(__DIR__) . '/wasm/scolta_core.wasm';
+        $this->assertFileExists(
+            $wasmPath,
+            "WASM binary not found. Run 'composer build-wasm'."
+        );
+
+        // Extism runtime may not be installed — skip gracefully.
         try {
             \Tag1\Scolta\ExtismCheck::verify();
         } catch (\RuntimeException $e) {
-            $this->markTestSkipped('Extism runtime not available: ' . $e->getMessage());
+            if (str_contains($e->getMessage(), 'FFI') || str_contains($e->getMessage(), 'Extism')) {
+                $this->markTestSkipped('Extism native runtime not available: ' . $e->getMessage());
+            }
+            throw $e;
         }
         $this->scorer = new DefaultScorer();
     }

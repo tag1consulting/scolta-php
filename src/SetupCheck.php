@@ -95,8 +95,27 @@ final class SetupCheck
             'status' => $wasmExists ? 'pass' : 'fail',
             'message' => $wasmExists
                 ? "scolta_core.wasm found ({$wasmFile})"
-                : "scolta_core.wasm not found at {$wasmFile}",
+                : "scolta_core.wasm not found at {$wasmFile} — run: composer build-wasm",
         ];
+
+        // 5b. WASM load test (only if binary exists and runtime available)
+        if ($wasmExists && $ffiOk && $extismSdk) {
+            try {
+                \Tag1\Scolta\Wasm\ScoltaWasm::version();
+                $results[] = [
+                    'name' => 'WASM load test',
+                    'status' => 'pass',
+                    'message' => 'WASM module loads and responds',
+                ];
+            } catch (\Throwable $e) {
+                $results[] = [
+                    'name' => 'WASM load test',
+                    'status' => 'fail',
+                    'message' => 'WASM binary exists but failed to load: ' . $e->getMessage()
+                        . ' — possible version mismatch between scolta-core and scolta-php',
+                ];
+            }
+        }
 
         // 6. Pagefind binary
         $resolver = new PagefindBinary(
