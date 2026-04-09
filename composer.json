@@ -27,6 +27,8 @@
         "test": "phpunit",
         "lint": "php-cs-fixer fix --dry-run --diff",
         "format": "php-cs-fixer fix",
-        "build-wasm": "cd ../scolta-core && cargo build --release --target wasm32-wasip1 && cp target/wasm32-wasip1/release/scolta_core.wasm ../scolta-php/wasm/scolta_core.wasm"
+        "build-wasm": "cd ../scolta-core && cargo build --release --target wasm32-wasip1 && cp target/wasm32-wasip1/release/scolta_core.wasm ../scolta-php/wasm/scolta_core.wasm",
+        "validate-release": "php scripts/validate-release.php",
+        "check-version-sync": "php scripts/check-version-sync.php"
     }
 }
