@@ -21,8 +21,9 @@ jobs:
 
       - name: Install Extism runtime
         run: |
-          curl -s https://get.extism.org/cli | bash -s -- -y
-          sudo extism lib install --version latest
+          EXTISM_VERSION=$(curl -s https://api.github.com/repos/extism/extism/releases/latest | grep tag_name | cut -d'"' -f4)
+          curl -sL "https://github.com/extism/extism/releases/download/${EXTISM_VERSION}/libextism-x86_64-unknown-linux-gnu-${EXTISM_VERSION#v}.tar.gz" -o /tmp/extism.tar.gz
+          sudo tar -xzf /tmp/extism.tar.gz -C /usr/local
           sudo ldconfig
 
       - name: Setup PHP
