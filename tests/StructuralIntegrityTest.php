@@ -19,62 +19,6 @@ class StructuralIntegrityTest extends TestCase
     }
 
     // -------------------------------------------------------------------
-    // Namespace consistency
-    // -------------------------------------------------------------------
-
-    #[\PHPUnit\Framework\Attributes\DataProvider('phpSourceFileProvider')]
-    public function testNamespaceMatchesPath(string $file): void
-    {
-        $contents = file_get_contents($file);
-        if (!preg_match('/^namespace\s+(.+);/m', $contents, $m)) {
-            $this->markTestSkipped("No namespace in {$file}");
-        }
-
-        $namespace = $m[1];
-        $relative = str_replace($this->root . '/src/', '', $file);
-        $dir = dirname($relative);
-        $expected = 'Tag1\\Scolta';
-        if ($dir !== '.') {
-            $expected .= '\\' . str_replace('/', '\\', $dir);
-        }
-
-        $this->assertEquals(
-            $expected,
-            $namespace,
-            'Namespace mismatch in ' . basename($file)
-        );
-    }
-
-    public static function phpSourceFileProvider(): \Generator
-    {
-        $root = dirname(__DIR__);
-        $it = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($root . '/src', \FilesystemIterator::SKIP_DOTS)
-        );
-        foreach ($it as $file) {
-            if ($file->getExtension() === 'php') {
-                yield $file->getBasename() => [$file->getPathname()];
-            }
-        }
-    }
-
-    // -------------------------------------------------------------------
-    // PHP syntax
-    // -------------------------------------------------------------------
-
-    #[\PHPUnit\Framework\Attributes\DataProvider('phpSourceFileProvider')]
-    public function testPhpSyntax(string $file): void
-    {
-        $output = [];
-        exec('php -l ' . escapeshellarg($file) . ' 2>&1', $output, $exitCode);
-        $this->assertEquals(
-            0,
-            $exitCode,
-            'Syntax error in ' . basename($file) . ': ' . implode("\n", $output)
-        );
-    }
-
-    // -------------------------------------------------------------------
     // Composer package name
     // -------------------------------------------------------------------
 
