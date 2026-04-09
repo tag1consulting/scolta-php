@@ -74,6 +74,12 @@ All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Platfo
 | `aiSummaryTopN` | int | `5` | Number of top results sent to AI for summarization |
 | `aiSummaryMaxChars` | int | `2000` | Maximum characters of content sent to AI for summarization |
 
+### Multilingual
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `aiLanguages` | array | `['en']` | Supported languages for AI responses. When multiple languages are configured, AI prompts include an instruction to respond in the same language as the user's query if it matches a supported language, otherwise fall back to the primary (first) language. Single-language configs do not add any instruction. |
+
 ### Prompts
 
 | Property | Type | Default | Description |
@@ -140,6 +146,12 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 | `aiSummarize` | `ai_summarize` | `ai_summarize` / `SCOLTA_AI_SUMMARIZE` | `ai_summarize` |
 | `aiSummaryTopN` | `ai_summary_top_n` | `ai_summary_top_n` | `ai_summary_top_n` |
 | `aiSummaryMaxChars` | `ai_summary_max_chars` | `ai_summary_max_chars` | `ai_summary_max_chars` |
+
+### Multilingual Keys
+
+| ScoltaConfig Property | Drupal | Laravel | WordPress |
+|----------------------|--------|---------|-----------|
+| `aiLanguages` | `ai_languages` | `ai_languages` / `SCOLTA_AI_LANGUAGES` | `ai_languages` |
 
 ### Prompt Keys
 

@@ -8,6 +8,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ### Added
 
+- `aiLanguages` property on `ScoltaConfig` for multilingual AI response support (default: `['en']`)
+- `AiEndpointHandler` accepts optional `aiLanguages` array; when multiple languages are configured, appends a language instruction to AI prompts so responses match the user's query language
+- `toJsScoringConfig()` now includes `ai_languages` in the exported JS config
 - `PromptEnricherInterface` and `NullEnricher` for site-specific prompt context injection between WASM resolution and LLM calls
 - `AiEndpointHandler` now accepts an optional `PromptEnricherInterface` parameter (defaults to `NullEnricher`)
 - `docs/ENRICHMENT.md` documenting the enrichment API with platform-specific examples

@@ -45,6 +45,7 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals('', $config->promptExpandQuery);
         $this->assertEquals('', $config->promptSummarize);
         $this->assertEquals('', $config->promptFollowUp);
+        $this->assertEquals(['en'], $config->aiLanguages);
     }
 
     // -------------------------------------------------------------------
@@ -134,6 +135,15 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals('Custom expand for {SITE_NAME}', $config->promptExpandQuery);
         $this->assertEquals('Custom summarize', $config->promptSummarize);
         $this->assertEquals('Custom follow-up', $config->promptFollowUp);
+    }
+
+    public function testFromArrayMapsAiLanguages(): void
+    {
+        $config = ScoltaConfig::fromArray([
+            'ai_languages' => ['en', 'es', 'fr'],
+        ]);
+
+        $this->assertEquals(['en', 'es', 'fr'], $config->aiLanguages);
     }
 
     public function testFromArrayIgnoresUnknownKeys(): void

@@ -34,6 +34,7 @@ class AiEndpointHandler
      * @param int                       $cacheTtl        Cache TTL in seconds (0 = disabled).
      * @param int                       $maxFollowUps    Maximum follow-up exchanges allowed.
      * @param PromptEnricherInterface   $promptEnricher  Prompt enricher for site-specific context injection.
+     * @param array                     $aiLanguages     Supported languages for multilingual responses.
      */
     public function __construct(
         private readonly object $aiService,
@@ -42,6 +43,7 @@ class AiEndpointHandler
         private readonly int $cacheTtl,
         private readonly int $maxFollowUps,
         private readonly PromptEnricherInterface $promptEnricher = new NullEnricher(),
+        private readonly array $aiLanguages = ['en'],
     ) {}
 
     /**
@@ -73,6 +75,7 @@ class AiEndpointHandler
                 'expand_query',
                 ['query' => $query],
             );
+            $systemPrompt = $this->appendLanguageInstruction($systemPrompt, 'expand_query');
 
             $response = $this->aiService->message(
                 $systemPrompt,
@@ -128,6 +131,7 @@ class AiEndpointHandler
                 'summarize',
                 ['query' => $query, 'context' => $context],
             );
+            $systemPrompt = $this->appendLanguageInstruction($systemPrompt, 'summarize');
 
             $summary = $this->aiService->message(
                 $systemPrompt,
@@ -192,6 +196,7 @@ class AiEndpointHandler
                 'follow_up',
                 ['messages' => $messages],
             );
+            $systemPrompt = $this->appendLanguageInstruction($systemPrompt, 'follow_up');
 
             $response = $this->aiService->conversation(
                 $systemPrompt,
@@ -208,6 +213,44 @@ class AiEndpointHandler
         } catch (\Exception $e) {
             return ['ok' => false, 'status' => 503, 'error' => 'Follow-up unavailable', 'exception' => $e];
         }
+    }
+
+    /**
+     * Append a multilingual language instruction to a prompt.
+     *
+     * When multiple languages are configured, instructs the LLM to respond
+     * in the same language as the user's query if it matches a supported
+     * language, otherwise fall back to the primary language.
+     *
+     * For expand_query prompts, instructs the LLM to return expansion terms
+     * in the same language as the original query.
+     *
+     * Single-language configurations (the default) do not add any instruction,
+     * preserving backward-compatible behavior.
+     *
+     * @param string $prompt     The resolved prompt text.
+     * @param string $promptType The prompt type: 'expand_query', 'summarize', or 'follow_up'.
+     * @return string The prompt with language instruction appended (if applicable).
+     *
+     * @since 0.2.0
+     * @stability experimental
+     */
+    private function appendLanguageInstruction(string $prompt, string $promptType): string
+    {
+        if (count($this->aiLanguages) <= 1) {
+            return $prompt;
+        }
+
+        $languages = implode(', ', $this->aiLanguages);
+        $primary = $this->aiLanguages[0];
+
+        if ($promptType === 'expand_query') {
+            $prompt .= "\n\nReturn expansion terms in the same language as the original query if it matches one of these supported languages: {$languages}. Otherwise return terms in {$primary}.";
+        } else {
+            $prompt .= "\n\nRespond in the same language as the user's query if it matches one of these supported languages: {$languages}. Otherwise respond in {$primary}.";
+        }
+
+        return $prompt;
     }
 
     /**

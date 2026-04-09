@@ -386,6 +386,82 @@ class AiEndpointHandlerTest extends TestCase
     }
 
     // ===================================================================
+    // Language instruction
+    // ===================================================================
+
+    public function testSingleLanguageDoesNotAddInstruction(): void
+    {
+        $ai = new PromptCapturingAiService('A helpful summary.');
+        $handler = $this->makeHandler(aiService: $ai, aiLanguages: ['en']);
+
+        $handler->handleSummarize('test query', 'some context');
+
+        $this->assertStringNotContainsString('supported languages', $ai->lastSystemPrompt);
+    }
+
+    public function testMultipleLanguagesAddsInstructionToSummarize(): void
+    {
+        $ai = new PromptCapturingAiService('A helpful summary.');
+        $handler = $this->makeHandler(aiService: $ai, aiLanguages: ['en', 'es', 'fr']);
+
+        $handler->handleSummarize('test query', 'some context');
+
+        $this->assertStringContainsString('en, es, fr', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('Respond in the same language', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('Otherwise respond in en', $ai->lastSystemPrompt);
+    }
+
+    public function testMultipleLanguagesAddsInstructionToExpandQuery(): void
+    {
+        $ai = new PromptCapturingAiService('["term1", "term2", "term3"]');
+        $handler = $this->makeHandler(aiService: $ai, aiLanguages: ['en', 'de']);
+
+        $handler->handleExpandQuery('test query');
+
+        $this->assertStringContainsString('en, de', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('Return expansion terms', $ai->lastSystemPrompt);
+    }
+
+    public function testMultipleLanguagesAddsInstructionToFollowUp(): void
+    {
+        $ai = new PromptCapturingAiService('follow up response', captureConversation: true);
+        $handler = $this->makeHandler(aiService: $ai, aiLanguages: ['en', 'ja']);
+
+        $messages = [['role' => 'user', 'content' => 'hello']];
+        $handler->handleFollowUp($messages);
+
+        $this->assertStringContainsString('en, ja', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('Respond in the same language', $ai->lastSystemPrompt);
+    }
+
+    public function testLanguageInstructionMentionsAllConfiguredLanguages(): void
+    {
+        $ai = new PromptCapturingAiService('A helpful summary.');
+        $handler = $this->makeHandler(aiService: $ai, aiLanguages: ['en', 'es', 'fr', 'de', 'ja']);
+
+        $handler->handleSummarize('test query', 'some context');
+
+        $this->assertStringContainsString('en, es, fr, de, ja', $ai->lastSystemPrompt);
+    }
+
+    public function testDefaultLanguagesDoNotAddInstruction(): void
+    {
+        // Default constructor value (['en']) should not add instruction.
+        $ai = new PromptCapturingAiService('A helpful summary.');
+        $handler = new AiEndpointHandler(
+            aiService: $ai,
+            cache: new InMemoryCacheDriver(),
+            generation: 1,
+            cacheTtl: 0,
+            maxFollowUps: 3,
+        );
+
+        $handler->handleSummarize('test query', 'some context');
+
+        $this->assertStringNotContainsString('supported languages', $ai->lastSystemPrompt);
+    }
+
+    // ===================================================================
     // Helpers
     // ===================================================================
 
@@ -396,6 +472,7 @@ class AiEndpointHandlerTest extends TestCase
         int $cacheTtl = 0,
         int $maxFollowUps = 3,
         ?PromptEnricherInterface $enricher = null,
+        array $aiLanguages = ['en'],
     ): AiEndpointHandler {
         return new AiEndpointHandler(
             aiService: $aiService ?? new MockAiService('["term1", "term2"]'),
@@ -404,6 +481,7 @@ class AiEndpointHandlerTest extends TestCase
             cacheTtl: $cacheTtl,
             maxFollowUps: $maxFollowUps,
             promptEnricher: $enricher ?? new NullEnricher(),
+            aiLanguages: $aiLanguages,
         );
     }
 }
