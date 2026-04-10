@@ -44,7 +44,8 @@ class AiEndpointHandler
         private readonly int $maxFollowUps,
         private readonly PromptEnricherInterface $promptEnricher = new NullEnricher(),
         private readonly array $aiLanguages = ['en'],
-    ) {}
+    ) {
+    }
 
     /**
      * Handle an expand-query request.

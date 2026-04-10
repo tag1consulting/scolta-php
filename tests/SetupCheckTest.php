@@ -30,10 +30,16 @@ class SetupCheckTest extends TestCase
             $this->assertArrayHasKey('status', $result, 'Each check must have a status');
             $this->assertArrayHasKey('message', $result, 'Each check must have a message');
             $this->assertArrayHasKey('category', $result, 'Each check must have a category');
-            $this->assertContains($result['status'], ['pass', 'fail', 'warn'],
-                "Status must be pass, fail, or warn, got: {$result['status']}");
-            $this->assertContains($result['category'], ['runtime', 'build'],
-                "Category must be runtime or build, got: {$result['category']}");
+            $this->assertContains(
+                $result['status'],
+                ['pass', 'fail', 'warn'],
+                "Status must be pass, fail, or warn, got: {$result['status']}"
+            );
+            $this->assertContains(
+                $result['category'],
+                ['runtime', 'build'],
+                "Category must be runtime or build, got: {$result['category']}"
+            );
         }
     }
 
@@ -42,8 +48,11 @@ class SetupCheckTest extends TestCase
         $results = SetupCheck::run();
         $phpCheck = $this->findCheck($results, 'PHP version');
         $this->assertNotNull($phpCheck, 'PHP version check should exist');
-        $this->assertEquals('pass', $phpCheck['status'],
-            'PHP version check should pass on PHP 8.1+');
+        $this->assertEquals(
+            'pass',
+            $phpCheck['status'],
+            'PHP version check should pass on PHP 8.1+'
+        );
         $this->assertEquals('runtime', $phpCheck['category']);
     }
 
@@ -110,12 +119,21 @@ class SetupCheckTest extends TestCase
         $results = SetupCheck::run();
         $names = array_column($results, 'name');
         foreach ($names as $name) {
-            $this->assertStringNotContainsString('FFI', $name,
-                'FFI checks should no longer exist');
-            $this->assertStringNotContainsString('Extism', $name,
-                'Extism checks should no longer exist');
-            $this->assertStringNotContainsString('Server WASM', $name,
-                'Server WASM checks should no longer exist');
+            $this->assertStringNotContainsString(
+                'FFI',
+                $name,
+                'FFI checks should no longer exist'
+            );
+            $this->assertStringNotContainsString(
+                'Extism',
+                $name,
+                'Extism checks should no longer exist'
+            );
+            $this->assertStringNotContainsString(
+                'Server WASM',
+                $name,
+                'Server WASM checks should no longer exist'
+            );
         }
     }
 

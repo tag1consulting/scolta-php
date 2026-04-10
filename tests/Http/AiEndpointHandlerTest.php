@@ -352,7 +352,7 @@ class AiEndpointHandlerTest extends TestCase
 
     public function testCustomEnricherModifiesPrompt(): void
     {
-        $enricher = new class implements PromptEnricherInterface {
+        $enricher = new class () implements PromptEnricherInterface {
             public function enrich(string $resolvedPrompt, string $promptName, array $context = []): string
             {
                 return $resolvedPrompt . "\n\nAlways mention our return policy.";
@@ -501,7 +501,8 @@ class MockAiService
         private readonly string $response = '',
         private readonly bool $throwOnMessage = false,
         private readonly bool $throwOnConversation = false,
-    ) {}
+    ) {
+    }
 
     public function getExpandPrompt(): string
     {
@@ -568,7 +569,8 @@ class SpyEnricher implements PromptEnricherInterface
 
     public function __construct(
         private readonly string $prefix = '',
-    ) {}
+    ) {
+    }
 
     public function enrich(string $resolvedPrompt, string $promptName, array $context = []): string
     {
