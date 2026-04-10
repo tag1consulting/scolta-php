@@ -57,11 +57,12 @@ class StructuralIntegrityTest extends TestCase
         );
     }
 
-    public function testWasmBinaryPathUsesUnderscores(): void
+    public function testWasmClassRemoved(): void
     {
-        $wasm = file_get_contents($this->root . '/src/Wasm/ScoltaWasm.php');
-        $this->assertStringContainsString('scolta_core.wasm', $wasm);
-        $this->assertStringNotContainsString('scolta-core.wasm', $wasm);
+        $this->assertFileDoesNotExist(
+            $this->root . '/src/Wasm/ScoltaWasm.php',
+            'ScoltaWasm should be removed (HTML processing ported to pure PHP)'
+        );
     }
 
     // -------------------------------------------------------------------
@@ -113,7 +114,8 @@ class StructuralIntegrityTest extends TestCase
             'ContentExporter' => ['src/Export/ContentExporter.php'],
             'ContentItem' => ['src/Export/ContentItem.php'],
             'DefaultPrompts' => ['src/Prompt/DefaultPrompts.php'],
-            'ScoltaWasm' => ['src/Wasm/ScoltaWasm.php'],
+            'HtmlCleaner' => ['src/Html/HtmlCleaner.php'],
+            'PagefindHtmlBuilder' => ['src/Html/PagefindHtmlBuilder.php'],
             'AiResponse' => ['src/Provider/AiResponse.php'],
             'ContentSourceInterface' => ['src/Content/ContentSourceInterface.php'],
             'TrackerRecord' => ['src/Content/TrackerRecord.php'],
@@ -132,7 +134,7 @@ class StructuralIntegrityTest extends TestCase
         $it = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($this->root, \FilesystemIterator::SKIP_DOTS)
         );
-        $exclude = ['vendor', '.git', 'node_modules', '.phpunit.cache', 'tests', 'wasm'];
+        $exclude = ['vendor', '.git', 'node_modules', '.phpunit.cache', 'tests'];
 
         foreach ($it as $file) {
             $path = $file->getPathname();

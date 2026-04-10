@@ -19,20 +19,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Extism runtime
-        run: |
-          EXTISM_VERSION=$(curl -s https://api.github.com/repos/extism/extism/releases/latest | grep tag_name | cut -d'"' -f4)
-          curl -sL "https://github.com/extism/extism/releases/download/${EXTISM_VERSION}/libextism-x86_64-unknown-linux-gnu-${EXTISM_VERSION}.tar.gz" | tar -xzf - -C /tmp
-          sudo cp /tmp/libextism.so /usr/local/lib/
-          sudo cp /tmp/extism.h /usr/local/include/ 2>/dev/null || true
-          sudo ldconfig
-
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: ffi
-          ini-values: ffi.enable=true
           coverage: none
 
       - name: Install dependencies
@@ -41,18 +31,9 @@ jobs:
       - name: Lint
         if: matrix.lint
         run: composer lint
-        continue-on-error: true
 
       - name: Run tests
         run: composer test
-
-      - name: Verify WASM binary committed
-        run: |
-          if [ ! -f wasm/scolta_core.wasm ]; then
-            echo "FAIL: wasm/scolta_core.wasm not found"
-            echo "Build and commit: composer build-wasm"
-            exit 1
-          fi
 
   docs-check:
     runs-on: ubuntu-latest
@@ -65,7 +46,7 @@ jobs:
       - name: Check CHANGELOG.md updated when code changes
         run: |
           CODE_CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- \
-            'src/' 'composer.json' 'tests/' 'wasm/' | head -1)
+            'src/' 'composer.json' 'tests/' | head -1)
           if [ -n "$CODE_CHANGED" ]; then
             CHANGELOG_CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- CHANGELOG.md)
             if [ -z "$CHANGELOG_CHANGED" ]; then

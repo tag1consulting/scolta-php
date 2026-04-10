@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace Tag1\Scolta\Export;
 
-use Tag1\Scolta\Wasm\ScoltaWasm;
+use Tag1\Scolta\Html\HtmlCleaner;
+use Tag1\Scolta\Html\PagefindHtmlBuilder;
 
 /**
  * Exports content items as minimal HTML files for Pagefind indexing.
@@ -16,15 +17,6 @@ use Tag1\Scolta\Wasm\ScoltaWasm;
  *
  * Platform adapters are responsible for querying their CMS, extracting
  * fields, and constructing ContentItem objects. This class does the rest.
- *
- * Usage:
- *   $exporter = new ContentExporter('/path/to/output');
- *   $exporter->prepareOutputDir();
- *   foreach ($items as $item) {
- *       $result = $exporter->export($item);
- *       // $result is true if exported, false if skipped (insufficient content)
- *   }
- *   $stats = $exporter->getStats();
  */
 class ContentExporter
 {
@@ -74,14 +66,22 @@ class ContentExporter
      */
     public function export(ContentItem $item): bool
     {
-        $cleanText = $this->cleanHtml($item->bodyHtml, $item->title);
+        $cleanText = HtmlCleaner::clean($item->bodyHtml, $item->title);
 
         if (strlen($cleanText) < $this->minContentLength) {
             $this->skipped++;
             return false;
         }
 
-        $html = $this->buildPagefindHtml($item, $cleanText);
+        $html = PagefindHtmlBuilder::build(
+            $item->id,
+            $item->title,
+            $cleanText,
+            $item->url,
+            $item->date,
+            $item->siteName,
+        );
+
         file_put_contents("{$this->outputDir}/{$item->id}.html", $html);
         $this->exported++;
         return true;
@@ -98,27 +98,5 @@ class ContentExporter
             'exported' => $this->exported,
             'skipped' => $this->skipped,
         ];
-    }
-
-    /**
-     * Clean raw HTML body into plain text suitable for indexing.
-     *
-     * Delegates to WASM module for consistent cross-platform cleaning.
-     * Strips page chrome (main-content region extraction), footer,
-     * script/style/nav elements, and normalizes whitespace.
-     */
-    public function cleanHtml(string $html, string $title = ''): string
-    {
-        return ScoltaWasm::cleanHtml($html, $title);
-    }
-
-    /**
-     * Build a minimal HTML document with Pagefind data attributes.
-     *
-     * Delegates to WASM module for consistent cross-platform generation.
-     */
-    private function buildPagefindHtml(ContentItem $item, string $cleanText): string
-    {
-        return ScoltaWasm::buildPagefindHtml($item->id, $item->title, $cleanText, $item->url, $item->date, $item->siteName);
     }
 }

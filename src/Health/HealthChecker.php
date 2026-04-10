@@ -6,7 +6,6 @@ namespace Tag1\Scolta\Health;
 
 use Tag1\Scolta\Binary\PagefindBinary;
 use Tag1\Scolta\Config\ScoltaConfig;
-use Tag1\Scolta\ExtismCheck;
 
 /**
  * Shared health check logic for all platform adapters.
@@ -35,8 +34,6 @@ final class HealthChecker
      */
     public function check(): array
     {
-        $wasmStatus = ExtismCheck::status();
-
         $resolver = new PagefindBinary(
             configuredPath: $this->pagefindBinaryPath,
             projectDir: $this->projectDir,
@@ -57,14 +54,17 @@ final class HealthChecker
             'ai_provider' => $this->config->aiProvider ?: 'anthropic',
             'ai_configured' => $aiConfigured,
             'pagefind_available' => $binaryStatus['available'],
-            'wasm_available' => $wasmStatus['available'],
+            'wasm_available' => false,
             'index_exists' => $indexExists,
             'pagefind' => [
                 'available' => $binaryStatus['available'],
                 'version' => $binaryStatus['version'],
                 'resolved_via' => $binaryStatus['via'],
             ],
-            'wasm' => $wasmStatus,
+            'wasm' => [
+                'available' => false,
+                'message' => 'Server-side WASM removed — HTML processing is now pure PHP',
+            ],
         ];
     }
 }

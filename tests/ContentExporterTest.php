@@ -11,13 +11,8 @@ use Tag1\Scolta\Export\ContentItem;
 /**
  * Tests ContentExporter file I/O and filtering logic.
  *
- * These tests exercise prepareOutputDir, stats tracking, and the min
- * content length filter. The actual HTML cleaning and Pagefind HTML
- * generation delegate to WASM, so those paths are tested separately
- * in WasmIntegrationTest (which requires libextism).
- *
- * For tests that call export(), we mock the WASM dependency by
- * subclassing ContentExporter and overriding cleanHtml/buildPagefindHtml.
+ * ContentExporter now uses pure PHP HtmlCleaner and PagefindHtmlBuilder
+ * directly, so no WASM stubs are needed.
  */
 class ContentExporterTest extends TestCase
 {
@@ -48,69 +43,13 @@ class ContentExporterTest extends TestCase
         rmdir($dir);
     }
 
-    /**
-     * Stubbed exporter that bypasses WASM for unit testing.
-     *
-     * Overrides both cleanHtml (public) and buildPagefindHtml (private,
-     * accessed via export()) to avoid needing the Extism native library.
-     */
-    private function createStubExporter(int $minContentLength = 50): ContentExporter
-    {
-        return new class ($this->tmpDir, $minContentLength) extends ContentExporter {
-            public function cleanHtml(string $html, string $title = ''): string
-            {
-                return trim(strip_tags($html));
-            }
-
-            public function export(\Tag1\Scolta\Export\ContentItem $item): bool
-            {
-                $cleanText = $this->cleanHtml($item->bodyHtml, $item->title);
-                if (strlen($cleanText) < $this->getMinContentLength()) {
-                    $this->incrementSkipped();
-                    return false;
-                }
-                // Build simple HTML without WASM.
-                $html = sprintf(
-                    '<!DOCTYPE html><html><body data-pagefind-body><h1>%s</h1><p>%s</p></body></html>',
-                    htmlspecialchars($item->title),
-                    htmlspecialchars($cleanText),
-                );
-                file_put_contents($this->getOutputDir() . '/' . $item->id . '.html', $html);
-                $this->incrementExported();
-                return true;
-            }
-
-            public function getMinContentLength(): int
-            {
-                return (new \ReflectionProperty(ContentExporter::class, 'minContentLength'))->getValue($this);
-            }
-
-            public function getOutputDir(): string
-            {
-                return (new \ReflectionProperty(ContentExporter::class, 'outputDir'))->getValue($this);
-            }
-
-            public function incrementExported(): void
-            {
-                $prop = new \ReflectionProperty(ContentExporter::class, 'exported');
-                $prop->setValue($this, $prop->getValue($this) + 1);
-            }
-
-            public function incrementSkipped(): void
-            {
-                $prop = new \ReflectionProperty(ContentExporter::class, 'skipped');
-                $prop->setValue($this, $prop->getValue($this) + 1);
-            }
-        };
-    }
-
     // -------------------------------------------------------------------
     // prepareOutputDir
     // -------------------------------------------------------------------
 
     public function testPrepareOutputDirCreatesDirectory(): void
     {
-        $exporter = $this->createStubExporter();
+        $exporter = new ContentExporter($this->tmpDir);
 
         $this->assertDirectoryDoesNotExist($this->tmpDir);
         $exporter->prepareOutputDir();
@@ -123,7 +62,7 @@ class ContentExporterTest extends TestCase
         file_put_contents($this->tmpDir . '/old-file.html', 'old content');
         file_put_contents($this->tmpDir . '/another.txt', 'data');
 
-        $exporter = $this->createStubExporter();
+        $exporter = new ContentExporter($this->tmpDir);
         $exporter->prepareOutputDir();
 
         $this->assertDirectoryExists($this->tmpDir);
@@ -136,7 +75,7 @@ class ContentExporterTest extends TestCase
         mkdir($this->tmpDir . '/subdir', 0755, true);
         file_put_contents($this->tmpDir . '/subdir/nested.html', 'nested');
 
-        $exporter = $this->createStubExporter();
+        $exporter = new ContentExporter($this->tmpDir);
         $exporter->prepareOutputDir();
 
         $this->assertDirectoryExists($this->tmpDir);
@@ -149,7 +88,7 @@ class ContentExporterTest extends TestCase
 
     public function testInitialStatsAreZero(): void
     {
-        $exporter = $this->createStubExporter();
+        $exporter = new ContentExporter($this->tmpDir);
         $stats = $exporter->getStats();
 
         $this->assertEquals(0, $stats['exported']);
@@ -162,7 +101,7 @@ class ContentExporterTest extends TestCase
 
     public function testExportSkipsShortContent(): void
     {
-        $exporter = $this->createStubExporter(50);
+        $exporter = new ContentExporter($this->tmpDir, minContentLength: 50);
         $exporter->prepareOutputDir();
 
         $item = new ContentItem(
@@ -182,7 +121,7 @@ class ContentExporterTest extends TestCase
 
     public function testExportWritesFileForSufficientContent(): void
     {
-        $exporter = $this->createStubExporter(10);
+        $exporter = new ContentExporter($this->tmpDir, minContentLength: 10);
         $exporter->prepareOutputDir();
 
         $item = new ContentItem(
@@ -199,11 +138,16 @@ class ContentExporterTest extends TestCase
         $this->assertEquals(1, $exporter->getStats()['exported']);
         $this->assertEquals(0, $exporter->getStats()['skipped']);
         $this->assertFileExists($this->tmpDir . '/good-1.html');
+
+        // Verify the exported HTML has pagefind attributes.
+        $html = file_get_contents($this->tmpDir . '/good-1.html');
+        $this->assertStringContainsString('data-pagefind-body', $html);
+        $this->assertStringContainsString('Good Article', $html);
     }
 
     public function testExportTracksMultipleItems(): void
     {
-        $exporter = $this->createStubExporter(20);
+        $exporter = new ContentExporter($this->tmpDir, minContentLength: 20);
         $exporter->prepareOutputDir();
 
         $longBody = '<p>' . str_repeat('word ', 20) . '</p>';
@@ -221,7 +165,7 @@ class ContentExporterTest extends TestCase
 
     public function testExportUsesItemIdAsFilename(): void
     {
-        $exporter = $this->createStubExporter(5);
+        $exporter = new ContentExporter($this->tmpDir, minContentLength: 5);
         $exporter->prepareOutputDir();
 
         $exporter->export(new ContentItem(
@@ -237,10 +181,10 @@ class ContentExporterTest extends TestCase
 
     public function testExportCustomMinLength(): void
     {
-        $exporter = $this->createStubExporter(5);
+        $exporter = new ContentExporter($this->tmpDir, minContentLength: 5);
         $exporter->prepareOutputDir();
 
-        // "Short" is 5 chars — should pass minContentLength=5.
+        // "Short" is 5 chars -- should pass minContentLength=5.
         $result = $exporter->export(new ContentItem(
             'x',
             'T',

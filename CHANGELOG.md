@@ -9,17 +9,28 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ### Changed
 
 - **BREAKING:** Scoring, merging, and expansion parsing now run in the browser via WASM — no server-side WASM at runtime
-- `ScoltaWasm` is now build-time only: removed `scoreResults()`, `mergeResults()`, `parseExpansion()`, `resolvePrompt()`, `getPrompt()`, `toJsScoringConfig()`
+- **BREAKING:** Removed `ScoltaWasm`, `ExtismCheck`, and `DefaultScorer` — all server-side WASM/Extism/FFI dependencies eliminated
+- **BREAKING:** `SetupCheck::run()` no longer accepts `$wasmPath` parameter; only checks PHP version, AI key, Browser WASM, and Pagefind binary
+- HTML cleaning and Pagefind HTML generation ported to pure PHP (`HtmlCleaner`, `PagefindHtmlBuilder`)
+- `ContentExporter` now uses `HtmlCleaner` and `PagefindHtmlBuilder` directly — no Extism/FFI required
 - `ScoltaConfig::toJsScoringConfig()` is now pure PHP — no WASM call at runtime
 - `DefaultPrompts` templates are now PHP constants — no WASM call for prompt resolution
-- Extism/FFI dependency moved from runtime requirement to build-time suggestion
-- `SetupCheck` splits checks into "runtime" and "build" categories; FFI/Extism are informational, not critical
+- `SetupCheck` simplified: status values are 'pass', 'fail', 'warn' only (removed 'info'); no FFI/Extism/server-WASM checks
+
+### Removed
+
+- `src/Wasm/ScoltaWasm.php` — replaced by `HtmlCleaner` and `PagefindHtmlBuilder`
+- `src/ExtismCheck.php` — Extism runtime no longer needed
+- `src/Scorer/DefaultScorer.php` — scoring moved to browser WASM
+- `wasm/scolta_core.wasm` — server-side WASM binary no longer shipped
+- Extism/FFI requirements from `composer.json` and CI pipeline
 
 ### Added
 
+- `HtmlCleaner` — pure PHP HTML cleaning (ported from Rust `scolta-core/src/html.rs`)
+- `PagefindHtmlBuilder` — pure PHP Pagefind HTML document builder (ported from Rust)
 - Browser WASM assets (`assets/wasm/scolta_core_bg.wasm`, `scolta_core.js`) for client-side scoring
 - `ScoltaConfig::toBrowserConfig()` for rendering client-side configuration
-- `ScoltaWasm::resolveAllPrompts()` for caching resolved prompts at build time
 - `composer update-browser-wasm` script
 - `MarkdownRenderer` utility class (`Tag1\Scolta\Util\MarkdownRenderer`) for converting AI markdown responses to XSS-safe HTML (bold, links, bullet lists, paragraphs)
 - `AiEndpointHandler::handleSummarize()` and `handleFollowUp()` now render AI markdown responses to HTML via `MarkdownRenderer` before returning results; all three platform adapters benefit automatically

@@ -10,6 +10,9 @@ use Tag1\Scolta\Export\ContentItem;
 
 /**
  * End-to-end pipeline test: content items through export.
+ *
+ * ContentExporter uses pure PHP HtmlCleaner and PagefindHtmlBuilder
+ * internally, so no WASM or Extism dependencies are needed.
  */
 class PipelineTest extends TestCase
 {
