@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Tag1\Scolta\Config;
 
-use Tag1\Scolta\Wasm\ScoltaWasm;
-
 /**
  * Platform-agnostic configuration for Scolta.
  *
@@ -92,29 +90,50 @@ class ScoltaConfig
      * Export scoring parameters as an array matching the JS CONFIG object.
      *
      * Used to populate window.scolta.scoring in the search page.
-     * Delegates to WASM module for canonical transformation.
+     * Pure PHP — no WASM dependency at runtime.
      */
     public function toJsScoringConfig(): array
     {
-        return ScoltaWasm::toJsScoringConfig([
-            'recency_boost_max' => $this->recencyBoostMax,
-            'recency_half_life_days' => $this->recencyHalfLifeDays,
-            'recency_penalty_after_days' => $this->recencyPenaltyAfterDays,
-            'recency_max_penalty' => $this->recencyMaxPenalty,
-            'title_match_boost' => $this->titleMatchBoost,
-            'title_all_terms_multiplier' => $this->titleAllTermsMultiplier,
-            'content_match_boost' => $this->contentMatchBoost,
-            'excerpt_length' => $this->excerptLength,
-            'results_per_page' => $this->resultsPerPage,
-            'max_pagefind_results' => $this->maxPagefindResults,
-            'ai_expand_query' => $this->aiExpandQuery,
-            'ai_summarize' => $this->aiSummarize,
-            'ai_summary_top_n' => $this->aiSummaryTopN,
-            'ai_summary_max_chars' => $this->aiSummaryMaxChars,
-            'expand_primary_weight' => $this->expandPrimaryWeight,
-            'ai_max_followups' => $this->maxFollowUps,
-            'ai_languages' => $this->aiLanguages,
-        ]);
+        return [
+            'RECENCY_BOOST_MAX' => $this->recencyBoostMax,
+            'RECENCY_HALF_LIFE_DAYS' => $this->recencyHalfLifeDays,
+            'RECENCY_PENALTY_AFTER_DAYS' => $this->recencyPenaltyAfterDays,
+            'RECENCY_MAX_PENALTY' => $this->recencyMaxPenalty,
+            'TITLE_MATCH_BOOST' => $this->titleMatchBoost,
+            'TITLE_ALL_TERMS_MULTIPLIER' => $this->titleAllTermsMultiplier,
+            'CONTENT_MATCH_BOOST' => $this->contentMatchBoost,
+            'EXCERPT_LENGTH' => $this->excerptLength,
+            'RESULTS_PER_PAGE' => $this->resultsPerPage,
+            'MAX_PAGEFIND_RESULTS' => $this->maxPagefindResults,
+            'AI_EXPAND_QUERY' => $this->aiExpandQuery,
+            'AI_SUMMARIZE' => $this->aiSummarize,
+            'AI_SUMMARY_TOP_N' => $this->aiSummaryTopN,
+            'AI_SUMMARY_MAX_CHARS' => $this->aiSummaryMaxChars,
+            'EXPAND_PRIMARY_WEIGHT' => $this->expandPrimaryWeight,
+            'AI_MAX_FOLLOWUPS' => $this->maxFollowUps,
+            'AI_LANGUAGES' => $this->aiLanguages,
+        ];
+    }
+
+    /**
+     * Export browser-side configuration for rendering window.scolta.
+     *
+     * Platform adapters use this to generate the client-side config.
+     * They fill in the platform-specific paths (wasmPath, pagefindPath, endpoints).
+     */
+    public function toBrowserConfig(): array
+    {
+        return [
+            'scoring' => $this->toJsScoringConfig(),
+            'endpoints' => [
+                'expand' => '/api/scolta/v1/expand-query',
+                'summarize' => '/api/scolta/v1/summarize',
+                'followup' => '/api/scolta/v1/followup',
+            ],
+            'wasmPath' => '',
+            'siteName' => $this->siteName,
+            'pagefindPath' => $this->pagefindIndexPath . '/pagefind.js',
+        ];
     }
 
     /**

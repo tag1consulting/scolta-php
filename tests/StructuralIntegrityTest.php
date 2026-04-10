@@ -73,11 +73,12 @@ class StructuralIntegrityTest extends TestCase
         $this->assertTrue(interface_exists(\Tag1\Scolta\Content\ContentSourceInterface::class));
     }
 
-    public function testDefaultScorerIsConcreteClass(): void
+    public function testDefaultScorerRemoved(): void
     {
-        $ref = new \ReflectionClass(\Tag1\Scolta\Scorer\DefaultScorer::class);
-        $this->assertFalse($ref->isAbstract());
-        $this->assertFalse($ref->isInterface());
+        $this->assertFalse(
+            file_exists(dirname(__DIR__) . '/src/Scorer/DefaultScorer.php'),
+            'DefaultScorer should be removed (scoring moved out of WASM)'
+        );
     }
 
     public function testDeadInterfacesRemoved(): void
@@ -112,7 +113,6 @@ class StructuralIntegrityTest extends TestCase
             'ContentExporter' => ['src/Export/ContentExporter.php'],
             'ContentItem' => ['src/Export/ContentItem.php'],
             'DefaultPrompts' => ['src/Prompt/DefaultPrompts.php'],
-            'DefaultScorer' => ['src/Scorer/DefaultScorer.php'],
             'ScoltaWasm' => ['src/Wasm/ScoltaWasm.php'],
             'AiResponse' => ['src/Provider/AiResponse.php'],
             'ContentSourceInterface' => ['src/Content/ContentSourceInterface.php'],

@@ -12,6 +12,7 @@
  *     followup: '/api/scolta/v1/followup',
  *   }
  *   pagefindPath: '/pagefind/pagefind.js'  — Path to Pagefind JS
+ *   wasmPath: '/path/to/scolta_core.js'    — Path to browser WASM glue module
  *   siteName: 'My Site'                    — Display name for the site
  *   container: '#scolta-search'            — CSS selector for the search container
  *   allowedLinkDomains: []                 — Domains allowed in summary links (empty = all)
@@ -248,9 +249,29 @@
     console.log("[scolta] Pagefind index preloaded");
   }
 
-  // --- Scoring functions (preserved exactly from original) ---
+  // Scolta WASM module for client-side scoring.
+  let scoltaWasm = null;
 
-  function recencyScore(dateStr) {
+  async function initScoltaWasm() {
+    const wasmPath = (instanceConfig && instanceConfig.wasmPath)
+      || (global.scolta && global.scolta.wasmPath)
+      || '/scolta/wasm/scolta_core.js';
+    try {
+      const wasm = await import(wasmPath);
+      await wasm.default(); // wasm-pack init() — loads the .wasm binary
+      scoltaWasm = wasm;
+      console.log("[scolta] WASM module loaded, version:", wasm.version());
+    } catch (e) {
+      console.warn("[scolta] WASM module not available, using JS fallback scoring:", e.message);
+      scoltaWasm = null;
+    }
+  }
+
+  // --- Scoring functions ---
+  // When browser WASM is loaded, scoring delegates to the Rust implementation
+  // for cross-platform consistency. Falls back to JS if WASM is unavailable.
+
+  function recencyScoreFallback(dateStr) {
     const CONFIG = getInstanceConfig();
     if (!dateStr) return 0;
     try {
@@ -258,48 +279,40 @@
       if (isNaN(contentDate.getTime())) return 0;
       const now = new Date();
       const ageDays = (now - contentDate) / (1000 * 60 * 60 * 24);
-
       if (ageDays < CONFIG.RECENCY_PENALTY_AFTER_DAYS) {
-        // Exponential decay boost for newer content
         return CONFIG.RECENCY_BOOST_MAX *
           Math.exp(-ageDays / CONFIG.RECENCY_HALF_LIFE_DAYS * Math.LN2);
       }
-      // Penalty for very old content
       const yearsOver = (ageDays - CONFIG.RECENCY_PENALTY_AFTER_DAYS) / 365;
       return -Math.min(CONFIG.RECENCY_MAX_PENALTY, yearsOver * 0.05);
     } catch { return 0; }
   }
 
-  function titleMatchScore(title, query) {
+  function titleMatchScoreFallback(title, query) {
     const CONFIG = getInstanceConfig();
     if (!title || !query) return 0;
     const titleLower = title.toLowerCase();
     const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
     if (terms.length === 0) return 0;
-
     let matchCount = 0;
     for (const term of terms) {
-      // Full-word boundary match (both sides) — "skin" must not boost "Skinner"
       const regex = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, "i");
       if (regex.test(titleLower)) matchCount++;
     }
-
     if (matchCount === 0) return 0;
     let boost = CONFIG.TITLE_MATCH_BOOST;
-    // Bonus when ALL search terms appear in title
     if (matchCount === terms.length && terms.length > 1) {
       boost *= CONFIG.TITLE_ALL_TERMS_MULTIPLIER;
     }
     return boost * (matchCount / terms.length);
   }
 
-  function contentMatchScore(excerpt, query) {
+  function contentMatchScoreFallback(excerpt, query) {
     const CONFIG = getInstanceConfig();
     if (!excerpt || !query) return 0;
     const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
     if (terms.length === 0) return 0;
     const excerptLower = excerpt.toLowerCase();
-
     let matchCount = 0;
     for (const term of terms) {
       const regex = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, "i");
@@ -660,12 +673,41 @@
 
   // Score a set of loaded results against a query.
   function scoreResults(loaded, query, sourceWeight) {
+    if (scoltaWasm) {
+      // WASM scoring — canonical Rust implementation
+      const results = loaded.map((data, i) => ({
+        title: data.meta?.title || '',
+        url: data.meta?.url || data.url || '',
+        excerpt: data.excerpt || '',
+        date: data.meta?.date || '',
+        pagefind_index: i,
+        score: loaded.length > 1 ? 1 - (i / (loaded.length - 1)) : 1,
+      }));
+      const input = JSON.stringify({
+        query: query,
+        results: results,
+        config: getInstanceConfig(),
+      });
+      try {
+        const output = scoltaWasm.score_results(input);
+        const scored = JSON.parse(output);
+        return scored.map(item => ({
+          data: loaded[item.pagefind_index] || loaded.find(d =>
+            (d.meta?.url || d.url) === item.url
+          ) || loaded[0],
+          score: item.score * sourceWeight,
+        }));
+      } catch (e) {
+        console.warn("[scolta] WASM score_results failed, using fallback:", e.message);
+      }
+    }
+    // JS fallback scoring
     const count = loaded.length;
     return loaded.map((data, i) => {
       const pagefindScore = count > 1 ? 1 - (i / (count - 1)) : 1;
-      const recency = recencyScore(data.meta?.date);
-      const titleBoost = titleMatchScore(data.meta?.title, query);
-      const contentBoost = contentMatchScore(data.excerpt, query);
+      const recency = recencyScoreFallback(data.meta?.date);
+      const titleBoost = titleMatchScoreFallback(data.meta?.title, query);
+      const contentBoost = contentMatchScoreFallback(data.excerpt, query);
       const finalScore = (pagefindScore + recency + titleBoost + contentBoost) * sourceWeight;
       return { data, score: finalScore };
     });
@@ -724,6 +766,45 @@
 
   // Merge scored results, keeping highest score per URL.
   function mergeResults(currentResults, newResults) {
+    if (scoltaWasm) {
+      const original = currentResults.map(r => ({
+        title: r.data.meta?.title || '',
+        url: r.data.meta?.url || r.data.url || '',
+        score: r.score,
+        excerpt: r.data.excerpt || '',
+        date: r.data.meta?.date || '',
+      }));
+      const expanded = newResults.map(r => ({
+        title: r.data.meta?.title || '',
+        url: r.data.meta?.url || r.data.url || '',
+        score: r.score,
+        excerpt: r.data.excerpt || '',
+        date: r.data.meta?.date || '',
+      }));
+      const input = JSON.stringify({
+        original: original,
+        expanded: expanded,
+        config: { expand_primary_weight: getInstanceConfig().EXPAND_PRIMARY_WEIGHT },
+      });
+      try {
+        const output = scoltaWasm.merge_results(input);
+        const merged = JSON.parse(output);
+        const dataByUrl = new Map();
+        for (const r of [...currentResults, ...newResults]) {
+          const url = r.data.meta?.url || r.data.url || '';
+          if (!dataByUrl.has(url) || r.score > dataByUrl.get(url).score) {
+            dataByUrl.set(url, r);
+          }
+        }
+        return merged.map(item => ({
+          data: dataByUrl.get(item.url)?.data || item,
+          score: item.score,
+        }));
+      } catch (e) {
+        console.warn("[scolta] WASM merge_results failed, using fallback:", e.message);
+      }
+    }
+    // JS fallback merge
     const urlMap = new Map();
     for (const r of currentResults) {
       const url = r.data.meta?.url || r.data.url || '';
@@ -1189,8 +1270,10 @@
       }
     });
 
-    // Init Pagefind.
-    initPagefind();
+    // Load Pagefind and Scolta WASM in parallel.
+    Promise.all([initPagefind(), initScoltaWasm()]).then(() => {
+      console.log("[scolta] Ready — Pagefind + WASM loaded");
+    });
 
     console.log("[scolta] Initialized");
   }

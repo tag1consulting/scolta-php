@@ -70,23 +70,6 @@ class WasmBridgeTest extends TestCase
         $this->assertIsString($cleaned);
     }
 
-    public function testResolvePromptSubstitutesValues(): void
-    {
-        $resolved = ScoltaWasm::resolvePrompt('expand_query', 'My Site', 'documentation portal');
-
-        $this->assertStringContainsString('My Site', $resolved);
-        $this->assertStringContainsString('documentation portal', $resolved);
-        $this->assertStringNotContainsString('{SITE_NAME}', $resolved);
-        $this->assertStringNotContainsString('{SITE_DESCRIPTION}', $resolved);
-    }
-
-    public function testScoreResultsWithEmptyArray(): void
-    {
-        $scored = ScoltaWasm::scoreResults([], [], 'test');
-        $this->assertIsArray($scored);
-        $this->assertEmpty($scored);
-    }
-
     public function testDescribeReturnsAllFunctions(): void
     {
         // Verify the WASM module exposes the functions we depend on
@@ -94,13 +77,7 @@ class WasmBridgeTest extends TestCase
         $functions = [
             'version' => fn () => ScoltaWasm::version(),
             'clean_html' => fn () => ScoltaWasm::cleanHtml('<p>test</p>', ''),
-            'get_prompt' => fn () => ScoltaWasm::getPrompt('expand_query'),
-            'resolve_prompt' => fn () => ScoltaWasm::resolvePrompt('expand_query', 'S', 'D'),
-            'score_results' => fn () => ScoltaWasm::scoreResults([], [], ''),
             'build_pagefind_html' => fn () => ScoltaWasm::buildPagefindHtml('1', 'T', 'B', 'U', '2024-01-01'),
-            'to_js_scoring_config' => fn () => ScoltaWasm::toJsScoringConfig([]),
-            'parse_expansion' => fn () => ScoltaWasm::parseExpansion('["a","b"]'),
-            'merge_results' => fn () => ScoltaWasm::mergeResults([], [], 0.7),
         ];
 
         foreach ($functions as $name => $callable) {
@@ -111,6 +88,6 @@ class WasmBridgeTest extends TestCase
             }
         }
 
-        $this->assertCount(9, $functions, 'All expected WASM functions should be tested');
+        $this->assertCount(3, $functions, 'All expected WASM functions should be tested');
     }
 }

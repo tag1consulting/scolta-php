@@ -7,44 +7,18 @@ namespace Tag1\Scolta\Tests\Integration;
 use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\Export\ContentExporter;
 use Tag1\Scolta\Export\ContentItem;
-use Tag1\Scolta\Wasm\ScoltaWasm;
 
 /**
- * End-to-end pipeline test: content items through export and scoring.
- *
- * Requires libextism for the WASM-based export and scoring steps.
+ * End-to-end pipeline test: content items through export.
  */
 class PipelineTest extends TestCase
 {
     private string $tempDir;
-    private bool $wasmAvailable = false;
 
     protected function setUp(): void
     {
         $this->tempDir = sys_get_temp_dir() . '/scolta_pipeline_test_' . uniqid();
         mkdir($this->tempDir, 0755, true);
-
-        // WASM binary must exist.
-        $wasmPath = dirname(__DIR__, 2) . '/wasm/scolta_core.wasm';
-        $this->assertFileExists(
-            $wasmPath,
-            "WASM binary not found at {$wasmPath}. This is a build error."
-        );
-
-        // Check if Extism is available.
-        try {
-            ScoltaWasm::version();
-            $this->wasmAvailable = true;
-        } catch (\RuntimeException $e) {
-            if (str_contains($e->getMessage(), 'FFI')
-                || str_contains($e->getMessage(), 'libextism')
-                || str_contains($e->getMessage(), 'Extism')
-                || str_contains($e->getMessage(), 'shared object')
-            ) {
-                $this->markTestSkipped('Extism native runtime not available: ' . $e->getMessage());
-            }
-            throw $e;
-        }
     }
 
     protected function tearDown(): void
@@ -52,7 +26,7 @@ class PipelineTest extends TestCase
         $this->removeDir($this->tempDir);
     }
 
-    public function testContentToScoringPipeline(): void
+    public function testContentExportPipeline(): void
     {
         // Step 1: Create ContentItems.
         $items = [
@@ -97,33 +71,6 @@ class PipelineTest extends TestCase
         $this->assertStringContainsString('Getting Started with PHP', $html1);
         $this->assertStringContainsString('data-pagefind-body', $html2);
         $this->assertStringContainsString('Advanced PHP Patterns', $html2);
-
-        // Step 4: Score results via WASM.
-        $searchResults = [
-            [
-                'url' => 'https://example.com/php-guide',
-                'title' => 'Getting Started with PHP',
-                'excerpt' => 'PHP is a server-side scripting language.',
-                'date' => '2024-06-15',
-            ],
-            [
-                'url' => 'https://example.com/php-patterns',
-                'title' => 'Advanced PHP Patterns',
-                'excerpt' => 'Design patterns improve code quality.',
-                'date' => '2024-08-01',
-            ],
-        ];
-
-        $scored = ScoltaWasm::scoreResults($searchResults, [], 'PHP');
-
-        $this->assertIsArray($scored);
-        $this->assertCount(2, $scored);
-
-        // Each result should have a score.
-        foreach ($scored as $result) {
-            $this->assertArrayHasKey('score', $result);
-            $this->assertIsFloat($result['score']);
-        }
     }
 
     // -------------------------------------------------------------------

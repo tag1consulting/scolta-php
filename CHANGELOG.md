@@ -6,8 +6,21 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased] (0.2.0-dev)
 
+### Changed
+
+- **BREAKING:** Scoring, merging, and expansion parsing now run in the browser via WASM — no server-side WASM at runtime
+- `ScoltaWasm` is now build-time only: removed `scoreResults()`, `mergeResults()`, `parseExpansion()`, `resolvePrompt()`, `getPrompt()`, `toJsScoringConfig()`
+- `ScoltaConfig::toJsScoringConfig()` is now pure PHP — no WASM call at runtime
+- `DefaultPrompts` templates are now PHP constants — no WASM call for prompt resolution
+- Extism/FFI dependency moved from runtime requirement to build-time suggestion
+- `SetupCheck` splits checks into "runtime" and "build" categories; FFI/Extism are informational, not critical
+
 ### Added
 
+- Browser WASM assets (`assets/wasm/scolta_core_bg.wasm`, `scolta_core.js`) for client-side scoring
+- `ScoltaConfig::toBrowserConfig()` for rendering client-side configuration
+- `ScoltaWasm::resolveAllPrompts()` for caching resolved prompts at build time
+- `composer update-browser-wasm` script
 - `MarkdownRenderer` utility class (`Tag1\Scolta\Util\MarkdownRenderer`) for converting AI markdown responses to XSS-safe HTML (bold, links, bullet lists, paragraphs)
 - `AiEndpointHandler::handleSummarize()` and `handleFollowUp()` now render AI markdown responses to HTML via `MarkdownRenderer` before returning results; all three platform adapters benefit automatically
 - `aiLanguages` property on `ScoltaConfig` for multilingual AI response support (default: `['en']`)

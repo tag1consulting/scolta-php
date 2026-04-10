@@ -9,12 +9,14 @@ use Extism\Manifest\PathWasmSource;
 use Extism\Plugin;
 
 /**
- * Bridge between PHP and the scolta-core WebAssembly module.
+ * Build-time bridge between PHP and the scolta-core WebAssembly module.
  *
- * Loads scolta_core.wasm via Extism and provides typed PHP methods
- * for each exported WASM function. Platform adapters never call this
- * directly — they use the existing scolta-php API classes, which
- * delegate here internally.
+ * Loads scolta_core.wasm via Extism and provides typed PHP methods for
+ * build-time WASM functions: HTML cleaning and Pagefind document generation.
+ *
+ * Runtime scoring, merging, and expansion parsing now run in the browser
+ * via the browser WASM module (wasm-bindgen). This class is only needed
+ * for content indexing CLI commands (build, export, rebuild-index).
  *
  * Debug mode: Call ScoltaWasm::enableDebug() to log all WASM calls
  * with input/output sizes and timing. Retrieve with getDebugLog().
@@ -119,22 +121,14 @@ class ScoltaWasm
         return $output;
     }
 
-    // -- Public API methods (called by scolta-php classes) --
+    // -- Build-time API methods --
 
-    public static function resolvePrompt(string $template, string $siteName, string $siteDescription = 'website'): string
-    {
-        return self::call('resolve_prompt', json_encode([
-            'prompt_name' => $template,
-            'site_name' => $siteName,
-            'site_description' => $siteDescription,
-        ], JSON_THROW_ON_ERROR));
-    }
-
-    public static function getPrompt(string $name): string
-    {
-        return self::call('get_prompt', $name);
-    }
-
+    /**
+     * Clean HTML by removing page chrome and extracting main content.
+     *
+     * Used during content export to prepare HTML for Pagefind indexing.
+     * This is a build-time operation — not called during search requests.
+     */
     public static function cleanHtml(string $html, string $title = ''): string
     {
         return self::call('clean_html', json_encode([
@@ -143,6 +137,12 @@ class ScoltaWasm
         ], JSON_THROW_ON_ERROR));
     }
 
+    /**
+     * Build a Pagefind-compatible HTML document.
+     *
+     * Used during content export to generate indexed documents.
+     * This is a build-time operation — not called during search requests.
+     */
     public static function buildPagefindHtml(string $id, string $title, string $body, string $url, string $date, string $siteName = ''): string
     {
         return self::call('build_pagefind_html', json_encode([
@@ -155,38 +155,39 @@ class ScoltaWasm
         ], JSON_THROW_ON_ERROR));
     }
 
-    public static function toJsScoringConfig(array $config): array
+    /**
+     * Resolve all prompt templates with site-specific values.
+     *
+     * Call this at build time or when admin saves settings to cache the
+     * resolved prompts. API proxy endpoints read cached prompts at runtime
+     * without needing WASM.
+     *
+     * @return array{expand_query: string, summarize: string, follow_up: string}
+     */
+    public static function resolveAllPrompts(string $siteName, string $siteDescription = 'website'): array
     {
-        $result = self::call('to_js_scoring_config', json_encode($config, JSON_THROW_ON_ERROR));
-        return json_decode($result, true, 512, JSON_THROW_ON_ERROR);
+        return [
+            'expand_query' => self::call('resolve_prompt', json_encode([
+                'prompt_name' => 'expand_query',
+                'site_name' => $siteName,
+                'site_description' => $siteDescription,
+            ], JSON_THROW_ON_ERROR)),
+            'summarize' => self::call('resolve_prompt', json_encode([
+                'prompt_name' => 'summarize',
+                'site_name' => $siteName,
+                'site_description' => $siteDescription,
+            ], JSON_THROW_ON_ERROR)),
+            'follow_up' => self::call('resolve_prompt', json_encode([
+                'prompt_name' => 'follow_up',
+                'site_name' => $siteName,
+                'site_description' => $siteDescription,
+            ], JSON_THROW_ON_ERROR)),
+        ];
     }
 
-    public static function scoreResults(array $results, array $config, string $query): array
-    {
-        $result = self::call('score_results', json_encode([
-            'results' => $results,
-            'config' => $config,
-            'query' => $query,
-        ], JSON_THROW_ON_ERROR));
-        return json_decode($result, true, 512, JSON_THROW_ON_ERROR);
-    }
-
-    public static function mergeResults(array $original, array $expanded, float $primaryWeight = 0.7): array
-    {
-        $result = self::call('merge_results', json_encode([
-            'original' => $original,
-            'expanded' => $expanded,
-            'primary_weight' => $primaryWeight,
-        ], JSON_THROW_ON_ERROR));
-        return json_decode($result, true, 512, JSON_THROW_ON_ERROR);
-    }
-
-    public static function parseExpansion(string $llmResponse): array
-    {
-        $result = self::call('parse_expansion', $llmResponse);
-        return json_decode($result, true, 512, JSON_THROW_ON_ERROR);
-    }
-
+    /**
+     * Get the WASM module version.
+     */
     public static function version(): string
     {
         return self::call('version', '');

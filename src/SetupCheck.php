@@ -9,11 +9,16 @@ use Tag1\Scolta\Binary\PagefindBinary;
 /**
  * Runs all pre-flight dependency checks for Scolta.
  *
+ * Checks are split into two categories:
+ * - Runtime: needed to serve search results (PHP, AI key, browser WASM)
+ * - Build: needed for content indexing (FFI, Extism, server WASM, Pagefind)
+ *
  * Returns a structured array of check results that platform adapters
  * can format for their CLI output. Each check has:
  *   - name: short label
- *   - status: 'pass', 'fail', 'warn'
+ *   - status: 'pass', 'fail', 'warn', 'info'
  *   - message: human-readable detail
+ *   - category: 'runtime' or 'build'
  */
 final class SetupCheck
 {
@@ -23,17 +28,21 @@ final class SetupCheck
      * @param string|null $configuredBinaryPath Pagefind binary from platform config.
      * @param string|null $projectDir           Project root for binary resolution.
      * @param string|null $aiApiKey             AI API key (pass the value, not the source).
-     * @param string|null $wasmPath             Custom WASM binary path, or null for default.
+     * @param string|null $wasmPath             Custom server WASM binary path, or null for default.
+     * @param string|null $browserWasmDir       Directory containing browser WASM assets.
      *
-     * @return array<array{name: string, status: string, message: string}>
+     * @return array<array{name: string, status: string, message: string, category: string}>
      */
     public static function run(
         ?string $configuredBinaryPath = null,
         ?string $projectDir = null,
         ?string $aiApiKey = null,
         ?string $wasmPath = null,
+        ?string $browserWasmDir = null,
     ): array {
         $results = [];
+
+        // ---- Runtime Requirements ----
 
         // 1. PHP version
         $phpVersion = PHP_VERSION;
@@ -44,23 +53,49 @@ final class SetupCheck
             'message' => $phpOk
                 ? "PHP {$phpVersion}"
                 : "PHP {$phpVersion} — requires 8.1+",
+            'category' => 'runtime',
         ];
 
-        // 2. FFI extension
+        // 2. AI API key
+        $hasKey = !empty($aiApiKey);
+        $results[] = [
+            'name' => 'AI API key',
+            'status' => $hasKey ? 'pass' : 'warn',
+            'message' => $hasKey
+                ? 'AI API key configured'
+                : 'AI API key not set — AI features disabled. Set SCOLTA_API_KEY environment variable.',
+            'category' => 'runtime',
+        ];
+
+        // 3. Browser WASM assets
+        $browserDir = $browserWasmDir ?? dirname(__DIR__) . '/assets/wasm';
+        $browserWasmExists = file_exists($browserDir . '/scolta_core_bg.wasm');
+        $browserJsExists = file_exists($browserDir . '/scolta_core.js');
+        $results[] = [
+            'name' => 'Browser WASM',
+            'status' => ($browserWasmExists && $browserJsExists) ? 'pass' : 'warn',
+            'message' => ($browserWasmExists && $browserJsExists)
+                ? 'Browser WASM assets found'
+                : 'Browser WASM assets missing — client-side scoring unavailable',
+            'category' => 'runtime',
+        ];
+
+        // ---- Build Requirements (for content indexing) ----
+
+        // 4. FFI extension
         $ffiLoaded = extension_loaded('ffi');
         $ffiEnabled = ini_get('ffi.enable');
         $ffiOk = $ffiLoaded && in_array($ffiEnabled, ['1', 'true', 'preload'], true);
         $results[] = [
             'name' => 'FFI extension',
-            'status' => $ffiOk ? 'pass' : 'fail',
+            'status' => $ffiOk ? 'pass' : 'info',
             'message' => $ffiOk
                 ? "FFI loaded (ffi.enable={$ffiEnabled})"
-                : ($ffiLoaded
-                    ? "FFI loaded but disabled (ffi.enable={$ffiEnabled}) — set to true"
-                    : 'FFI extension not loaded — enable in php.ini'),
+                : 'FFI not available — only needed for content indexing CLI commands',
+            'category' => 'build',
         ];
 
-        // 3. Extism shared library
+        // 5. Extism shared library
         $extismLibFound = false;
         $searchPaths = ['/usr/local/lib/libextism.so', '/usr/local/lib/libextism.dylib', '/usr/lib/libextism.so'];
         foreach ($searchPaths as $path) {
@@ -71,34 +106,37 @@ final class SetupCheck
         }
         $results[] = [
             'name' => 'Extism shared library',
-            'status' => $extismLibFound ? 'pass' : 'fail',
+            'status' => $extismLibFound ? 'pass' : 'info',
             'message' => $extismLibFound
                 ? 'Extism shared library found'
-                : 'libextism not found — install: curl -s https://get.extism.org/cli | bash && sudo extism lib install',
+                : 'libextism not found — only needed for content indexing CLI commands',
+            'category' => 'build',
         ];
 
-        // 4. Extism PHP SDK
+        // 6. Extism PHP SDK
         $extismSdk = class_exists(\Extism\Plugin::class);
         $results[] = [
             'name' => 'Extism PHP SDK',
-            'status' => $extismSdk ? 'pass' : 'fail',
+            'status' => $extismSdk ? 'pass' : 'info',
             'message' => $extismSdk
                 ? 'Extism PHP SDK installed'
-                : 'Extism PHP SDK not found — install: composer require extism/extism',
+                : 'Extism PHP SDK not installed — only needed for content indexing CLI commands',
+            'category' => 'build',
         ];
 
-        // 5. WASM binary
+        // 7. Server WASM binary
         $wasmFile = $wasmPath ?? dirname(__DIR__) . '/wasm/scolta_core.wasm';
         $wasmExists = file_exists($wasmFile);
         $results[] = [
-            'name' => 'WASM binary',
-            'status' => $wasmExists ? 'pass' : 'fail',
+            'name' => 'Server WASM binary',
+            'status' => $wasmExists ? 'pass' : 'info',
             'message' => $wasmExists
-                ? "scolta_core.wasm found ({$wasmFile})"
-                : "scolta_core.wasm not found at {$wasmFile} — run: composer build-wasm",
+                ? "scolta_core.wasm found"
+                : 'Server WASM not found — only needed for content indexing CLI commands',
+            'category' => 'build',
         ];
 
-        // 5b. WASM load test (only if binary exists and runtime available)
+        // 7b. WASM load test (only if binary exists and runtime available)
         if ($wasmExists && $ffiOk && $extismSdk) {
             try {
                 \Tag1\Scolta\Wasm\ScoltaWasm::version();
@@ -106,18 +144,19 @@ final class SetupCheck
                     'name' => 'WASM load test',
                     'status' => 'pass',
                     'message' => 'WASM module loads and responds',
+                    'category' => 'build',
                 ];
             } catch (\Throwable $e) {
                 $results[] = [
                     'name' => 'WASM load test',
-                    'status' => 'fail',
-                    'message' => 'WASM binary exists but failed to load: ' . $e->getMessage()
-                        . ' — possible version mismatch between scolta-core and scolta-php',
+                    'status' => 'warn',
+                    'message' => 'WASM binary exists but failed to load: ' . $e->getMessage(),
+                    'category' => 'build',
                 ];
             }
         }
 
-        // 6. Pagefind binary
+        // 8. Pagefind binary
         $resolver = new PagefindBinary(
             configuredPath: $configuredBinaryPath,
             projectDir: $projectDir,
@@ -125,20 +164,11 @@ final class SetupCheck
         $binaryStatus = $resolver->status();
         $results[] = [
             'name' => 'Pagefind binary',
-            'status' => $binaryStatus['available'] ? 'pass' : 'warn',
+            'status' => $binaryStatus['available'] ? 'pass' : 'info',
             'message' => $binaryStatus['available']
                 ? $binaryStatus['message']
-                : 'Pagefind not found — run download-pagefind or: npm install -g pagefind',
-        ];
-
-        // 7. AI API key
-        $hasKey = !empty($aiApiKey);
-        $results[] = [
-            'name' => 'AI API key',
-            'status' => $hasKey ? 'pass' : 'warn',
-            'message' => $hasKey
-                ? 'AI API key configured'
-                : 'AI API key not set — AI features disabled. Set SCOLTA_API_KEY environment variable.',
+                : 'Pagefind not found — only needed for content indexing CLI commands',
+            'category' => 'build',
         ];
 
         return $results;
@@ -148,7 +178,7 @@ final class SetupCheck
      * Determine overall exit code from check results.
      *
      * Returns 0 if all critical checks pass, 1 if any 'fail'.
-     * Warnings (pagefind, API key) don't cause failure.
+     * Info/warn items (build dependencies, API key) don't cause failure.
      */
     public static function exitCode(array $results): int
     {

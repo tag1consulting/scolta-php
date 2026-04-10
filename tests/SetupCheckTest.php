@@ -9,6 +9,10 @@ use Tag1\Scolta\SetupCheck;
 
 /**
  * Tests the SetupCheck pre-flight dependency chain.
+ *
+ * Checks are split into runtime (PHP, AI key, browser WASM) and
+ * build (FFI, Extism, server WASM, Pagefind). Build checks are
+ * informational ('info'), not critical failures.
  */
 class SetupCheckTest extends TestCase
 {
@@ -26,8 +30,11 @@ class SetupCheckTest extends TestCase
             $this->assertArrayHasKey('name', $result, 'Each check must have a name');
             $this->assertArrayHasKey('status', $result, 'Each check must have a status');
             $this->assertArrayHasKey('message', $result, 'Each check must have a message');
-            $this->assertContains($result['status'], ['pass', 'fail', 'warn'],
-                "Status must be pass, fail, or warn, got: {$result['status']}");
+            $this->assertArrayHasKey('category', $result, 'Each check must have a category');
+            $this->assertContains($result['status'], ['pass', 'fail', 'warn', 'info'],
+                "Status must be pass, fail, warn, or info, got: {$result['status']}");
+            $this->assertContains($result['category'], ['runtime', 'build'],
+                "Category must be runtime or build, got: {$result['category']}");
         }
     }
 
@@ -38,17 +45,19 @@ class SetupCheckTest extends TestCase
         $this->assertNotNull($phpCheck, 'PHP version check should exist');
         $this->assertEquals('pass', $phpCheck['status'],
             'PHP version check should pass on PHP 8.1+');
+        $this->assertEquals('runtime', $phpCheck['category']);
     }
 
-    public function testMissingWasmBinaryReportsFail(): void
+    public function testMissingServerWasmReportsInfo(): void
     {
         $results = SetupCheck::run(
             wasmPath: '/nonexistent/scolta_core.wasm',
         );
-        $wasmCheck = $this->findCheck($results, 'WASM binary');
+        $wasmCheck = $this->findCheck($results, 'Server WASM');
         $this->assertNotNull($wasmCheck);
-        $this->assertEquals('fail', $wasmCheck['status']);
-        $this->assertStringContainsString('not found', $wasmCheck['message']);
+        $this->assertEquals('info', $wasmCheck['status'],
+            'Missing server WASM should be informational (build-time only)');
+        $this->assertEquals('build', $wasmCheck['category']);
     }
 
     public function testMissingApiKeyReportsWarn(): void
@@ -73,36 +82,34 @@ class SetupCheckTest extends TestCase
 
     public function testExitCodeZeroWhenAllCriticalPass(): void
     {
-        // Use the real environment — if FFI and Extism are available,
-        // only WASM binary and pagefind might fail. Those are not
-        // 'fail' status if the file exists.
         $results = SetupCheck::run(
             aiApiKey: 'test-key',
         );
         $exitCode = SetupCheck::exitCode($results);
-        // Exit code depends on environment, but the function must return int.
         $this->assertIsInt($exitCode);
         $this->assertContains($exitCode, [0, 1]);
     }
 
-    public function testExitCodeNonZeroOnCriticalFail(): void
+    public function testExitCodeZeroWhenOnlyBuildDepsAreMissing(): void
     {
-        // Force a critical failure by pointing to nonexistent WASM.
+        // Build-time dependencies are 'info' status, not 'fail',
+        // so missing server WASM should not cause non-zero exit.
         $results = SetupCheck::run(
             wasmPath: '/nonexistent/scolta_core.wasm',
         );
         $exitCode = SetupCheck::exitCode($results);
-        $this->assertEquals(1, $exitCode,
-            'Exit code should be 1 when WASM binary check fails');
+        // Exit code should be 0 unless there are actual 'fail' statuses
+        // (e.g., PHP version too old), which won't happen in test env.
+        $this->assertEquals(0, $exitCode,
+            'Missing build-time deps should not cause non-zero exit');
     }
 
     public function testExitCodeZeroOnWarnOnly(): void
     {
-        // Warnings (pagefind, API key) should not cause non-zero exit.
         $fakeResults = [
-            ['name' => 'PHP version', 'status' => 'pass', 'message' => 'OK'],
-            ['name' => 'AI API key', 'status' => 'warn', 'message' => 'Not set'],
-            ['name' => 'Pagefind', 'status' => 'warn', 'message' => 'Not found'],
+            ['name' => 'PHP version', 'status' => 'pass', 'message' => 'OK', 'category' => 'runtime'],
+            ['name' => 'AI API key', 'status' => 'warn', 'message' => 'Not set', 'category' => 'runtime'],
+            ['name' => 'Pagefind', 'status' => 'info', 'message' => 'Not found', 'category' => 'build'],
         ];
         $this->assertEquals(0, SetupCheck::exitCode($fakeResults));
     }
@@ -113,9 +120,18 @@ class SetupCheckTest extends TestCase
         $names = array_column($results, 'name');
         $this->assertContains('PHP version', $names);
         $this->assertContains('FFI extension', $names);
-        $this->assertContains('WASM binary', $names);
+        $this->assertContains('Server WASM binary', $names);
+        $this->assertContains('Browser WASM', $names);
         $this->assertContains('Pagefind binary', $names);
         $this->assertContains('AI API key', $names);
+    }
+
+    public function testBrowserWasmCheckExists(): void
+    {
+        $results = SetupCheck::run();
+        $browserCheck = $this->findCheck($results, 'Browser WASM');
+        $this->assertNotNull($browserCheck, 'Browser WASM check should exist');
+        $this->assertEquals('runtime', $browserCheck['category']);
     }
 
     /**

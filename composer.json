@@ -11,10 +11,13 @@
     },
     "require": {
         "php": ">=8.1",
-        "extism/extism": "^1.0",
         "guzzlehttp/guzzle": "^7.0"
     },
+    "suggest": {
+        "extism/extism": "Required for content indexing CLI commands (build, export, rebuild-index). Not needed for serving search."
+    },
     "require-dev": {
+        "extism/extism": "^1.0",
         "friendsofphp/php-cs-fixer": "^3.0",
         "phpunit/phpunit": "^10.0|^11.0"
     },
@@ -28,6 +31,7 @@
         "lint": "php-cs-fixer fix --dry-run --diff",
         "format": "php-cs-fixer fix",
         "build-wasm": "cd ../scolta-core && cargo build --release --target wasm32-wasip1 && cp target/wasm32-wasip1/release/scolta_core.wasm ../scolta-php/wasm/scolta_core.wasm",
+        "update-browser-wasm": "cp ../scolta-core/pkg/scolta_core_bg.wasm assets/wasm/ && cp ../scolta-core/pkg/scolta_core.js assets/wasm/",
         "validate-release": "php scripts/validate-release.php",
         "check-version-sync": "php scripts/check-version-sync.php"
     }
