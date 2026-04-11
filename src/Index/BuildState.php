@@ -55,7 +55,7 @@ class BuildState
         $manifest = array_merge([
             'version' => '1.0.0',
             'language' => 'en',
-            'pagefind_version' => '1.5.0',
+            'pagefind_version' => SupportedVersions::BUNDLED_VERSION,
             'total_pages' => 0,
             'pages_processed' => 0,
             'chunk_size' => 100,

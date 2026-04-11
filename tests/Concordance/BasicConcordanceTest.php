@@ -62,7 +62,7 @@ class BasicConcordanceTest extends TestCase
         $this->assertIsArray($entry);
         $this->assertArrayHasKey('version', $entry);
         $this->assertArrayHasKey('languages', $entry);
-        $this->assertSame('1.5.0', $entry['version']);
+        $this->assertSame('1.5.1', $entry['version']);
 
         // Verify at least one index file with valid gzip and delimiter.
         $indexFiles = glob($pagefindDir . '/index/*.pf_index');

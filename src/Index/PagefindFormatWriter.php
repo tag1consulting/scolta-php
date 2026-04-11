@@ -14,7 +14,7 @@ namespace Tag1\Scolta\Index;
  * - pf_filter files (gzipped CBOR with pagefind_dcd delimiter)
  * - pf_fragment files (gzipped JSON)
  *
- * Compatible with pagefind.js 1.3.0 through 1.5.0. The CBOR array
+ * Compatible with pagefind.js 1.3.0 through 1.5.1. The CBOR array
  * format and pagefind_dcd delimiter are stable across these versions.
  */
 class PagefindFormatWriter
@@ -24,8 +24,15 @@ class PagefindFormatWriter
 
     public function __construct(
         private readonly CborEncoder $cbor,
-        private readonly string $pagefindVersion = '1.5.0',
+        private readonly string $pagefindVersion = '',
     ) {
+    }
+
+    private function getVersion(): string
+    {
+        return $this->pagefindVersion !== ''
+            ? $this->pagefindVersion
+            : SupportedVersions::getVersionForMetadata();
     }
 
     /**
@@ -107,7 +114,7 @@ class PagefindFormatWriter
         // Write entry.json (plain JSON, NOT gzipped).
         $langHash = substr(hash('sha256', 'en'), 0, 16);
         $entry = [
-            'version' => $this->pagefindVersion,
+            'version' => $this->getVersion(),
             'languages' => [
                 'en' => [
                     'hash' => $langHash,
@@ -237,7 +244,7 @@ class PagefindFormatWriter
         }
 
         return $this->cbor->encodeArray([
-            $this->cbor->encodeString($this->pagefindVersion),
+            $this->cbor->encodeString($this->getVersion()),
             $this->cbor->encodeArray($pageItems),
             $this->cbor->encodeArray($chunkItems),
             $this->cbor->encodeArray($filterItems),
