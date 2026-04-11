@@ -68,6 +68,10 @@ class ScoltaConfig
     public string $promptSummarize = '';
     public string $promptFollowUp = '';
 
+    // -- Indexer --
+    /** @var string 'auto' | 'php' | 'binary' */
+    public string $indexer = 'auto';
+
     /**
      * Create from an associative array (e.g., from Drupal config, wp_options, or Laravel config).
      */
