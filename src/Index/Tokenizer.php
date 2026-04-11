@@ -18,9 +18,22 @@ class Tokenizer
 {
     private ?\Transliterator $transliterator = null;
 
+    /** Common diacritic mappings for pure PHP fallback when ext-intl is missing. */
+    private const DIACRITIC_MAP = [
+        'à' => 'a', 'á' => 'a', 'â' => 'a', 'ã' => 'a', 'ä' => 'a', 'å' => 'a',
+        'è' => 'e', 'é' => 'e', 'ê' => 'e', 'ë' => 'e',
+        'ì' => 'i', 'í' => 'i', 'î' => 'i', 'ï' => 'i',
+        'ò' => 'o', 'ó' => 'o', 'ô' => 'o', 'õ' => 'o', 'ö' => 'o',
+        'ù' => 'u', 'ú' => 'u', 'û' => 'u', 'ü' => 'u',
+        'ñ' => 'n', 'ç' => 'c', 'ß' => 'ss', 'ÿ' => 'y', 'ý' => 'y',
+        'æ' => 'ae', 'œ' => 'oe', 'ø' => 'o', 'ð' => 'd', 'þ' => 'th',
+    ];
+
     public function __construct()
     {
-        $this->transliterator = \Transliterator::create('NFD; [:Nonspacing Mark:] Remove; NFC');
+        if (extension_loaded('intl')) {
+            $this->transliterator = \Transliterator::create('NFD; [:Nonspacing Mark:] Remove; NFC');
+        }
     }
 
     /**
@@ -81,16 +94,20 @@ class Tokenizer
 
     /**
      * Normalize text by removing diacritics.
+     *
+     * Uses ICU Transliterator when ext-intl is available, falls back
+     * to a strtr() mapping table for common Latin diacritics.
      */
     private function normalize(string $text): string
     {
-        if ($this->transliterator === null) {
-            return $text;
+        if ($this->transliterator !== null) {
+            $result = $this->transliterator->transliterate($text);
+
+            return $result !== false ? $result : $text;
         }
 
-        $result = $this->transliterator->transliterate($text);
-
-        return $result !== false ? $result : $text;
+        // Pure PHP fallback: strtr for common diacritics.
+        return strtr($text, self::DIACRITIC_MAP);
     }
 
     /**

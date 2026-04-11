@@ -47,9 +47,17 @@ class Stemmer
     public function __construct(string $language = 'en')
     {
         $class = self::LANGUAGE_MAP[$language] ?? null;
-        if ($class !== null && class_exists($class)) {
-            $this->stemmer = new $class();
+        if ($class === null) {
+            // Unsupported language — fallback to no stemming is intentional.
+            return;
         }
+        if (!class_exists($class)) {
+            throw new \RuntimeException(
+                "Stemmer class {$class} not found. "
+                . 'Ensure wamania/php-stemmer is installed: composer require wamania/php-stemmer'
+            );
+        }
+        $this->stemmer = new $class();
     }
 
     /**

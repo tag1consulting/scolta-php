@@ -93,3 +93,24 @@ jobs:
           echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-z]+)?$' || \
             (echo "FAIL: Invalid version format" && exit 1)
           echo "PASS"
+
+  fixture-freshness:
+    name: Concordance fixture version check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check fixture version matches BUNDLED_VERSION
+        run: |
+          BUNDLED=$(grep "BUNDLED_VERSION" src/Index/SupportedVersions.php \
+            | grep -oE "'[0-9]+\.[0-9]+\.[0-9]+'" | tr -d "'")
+          FIXTURE=$(cat tests/fixtures/concordance/reference/pagefind-entry.json \
+            | grep -oE '"version":"[^"]+"' | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          echo "BUNDLED_VERSION: $BUNDLED"
+          echo "Fixture version: $FIXTURE"
+          if [ "$BUNDLED" != "$FIXTURE" ]; then
+            echo "::error::BUNDLED_VERSION ($BUNDLED) does not match fixture version ($FIXTURE)"
+            echo "Run: ./scripts/generate-concordance-fixtures.sh $BUNDLED"
+            exit 1
+          fi
+          echo "PASS: Versions match."
