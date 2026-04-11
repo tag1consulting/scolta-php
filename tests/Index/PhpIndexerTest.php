@@ -35,7 +35,7 @@ class PhpIndexerTest extends TestCase
                 "doc-{$i}",
                 "Test Page {$i}",
                 "<p>This is test page number {$i} with enough content to be indexed properly. "
-                . "It contains various words like apple, banana, cherry, and other fruit names.</p>",
+                . 'It contains various words like apple, banana, cherry, and other fruit names.</p>',
                 "https://example.com/page-{$i}",
                 '2026-01-01',
                 'TestSite',

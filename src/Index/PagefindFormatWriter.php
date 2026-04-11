@@ -21,7 +21,8 @@ class PagefindFormatWriter
     public function __construct(
         private readonly CborEncoder $cbor,
         private readonly string $pagefindVersion = '1.3.0',
-    ) {}
+    ) {
+    }
 
     /**
      * Write the complete Pagefind index to disk.

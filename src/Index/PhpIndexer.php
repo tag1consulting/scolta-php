@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Tag1\Scolta\Index;
 
-use Tag1\Scolta\Html\HtmlCleaner;
-
 /**
  * Orchestrate the PHP indexing pipeline.
  *

@@ -16,5 +16,6 @@ class BuildResult
         public readonly int $fileCount,
         public readonly float $elapsedSeconds,
         public readonly ?string $error = null,
-    ) {}
+    ) {
+    }
 }

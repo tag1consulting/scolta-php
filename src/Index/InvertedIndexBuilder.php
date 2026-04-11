@@ -24,7 +24,8 @@ class InvertedIndexBuilder
     public function __construct(
         private readonly Tokenizer $tokenizer,
         private readonly Stemmer $stemmer,
-    ) {}
+    ) {
+    }
 
     /**
      * Build a partial inverted index from content items.
