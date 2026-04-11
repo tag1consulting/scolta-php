@@ -7,6 +7,7 @@ namespace Tag1\Scolta\Tests\Concordance;
 use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\Export\ContentItem;
 use Tag1\Scolta\Index\PhpIndexer;
+use Tag1\Scolta\Index\SupportedVersions;
 
 /**
  * Basic concordance tests for the PHP indexer.
@@ -62,7 +63,7 @@ class BasicConcordanceTest extends TestCase
         $this->assertIsArray($entry);
         $this->assertArrayHasKey('version', $entry);
         $this->assertArrayHasKey('languages', $entry);
-        $this->assertSame('1.5.0', $entry['version']);
+        $this->assertSame(SupportedVersions::BUNDLED_VERSION, $entry['version']);
 
         // Verify at least one index file with valid gzip and delimiter.
         $indexFiles = glob($pagefindDir . '/index/*.pf_index');
