@@ -194,4 +194,50 @@ class ContentExporterTest extends TestCase
         ));
         $this->assertTrue($result);
     }
+
+    public function testExportToItemsFiltersShortContent(): void
+    {
+        $exporter = new ContentExporter($this->tmpDir);
+
+        $items = [
+            new ContentItem('1', 'Good', '<p>This is a page with enough content to be indexed properly.</p>', '/good', '2024-01-01'),
+            new ContentItem('2', 'Short', '<p>Hi</p>', '/short', '2024-01-01'),
+        ];
+
+        $result = $exporter->exportToItems($items);
+        $this->assertCount(1, $result);
+        $this->assertSame('1', $result[0]->id);
+    }
+
+    public function testExportToItemsPreservesValidItems(): void
+    {
+        $exporter = new ContentExporter($this->tmpDir);
+
+        $items = [
+            new ContentItem('a', 'Page A', '<p>Content for page A that is long enough to pass the minimum content filter.</p>', '/a', '2024-01-01'),
+            new ContentItem('b', 'Page B', '<p>Content for page B that is also long enough to pass the minimum content filter.</p>', '/b', '2024-01-01'),
+        ];
+
+        $result = $exporter->exportToItems($items);
+        $this->assertCount(2, $result);
+        $ids = array_map(fn ($item) => $item->id, $result);
+        $this->assertContains('a', $ids);
+        $this->assertContains('b', $ids);
+    }
+
+    public function testExportToItemsDoesNotWriteFiles(): void
+    {
+        $exporter = new ContentExporter($this->tmpDir);
+        $exporter->prepareOutputDir();
+
+        $items = [
+            new ContentItem('1', 'Page', '<p>Long enough content to pass filter easily.</p>', '/page', '2024-01-01'),
+        ];
+
+        $exporter->exportToItems($items);
+
+        // No files should be written to disk.
+        $files = glob($this->tmpDir . '/*.html');
+        $this->assertEmpty($files);
+    }
 }

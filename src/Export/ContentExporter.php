@@ -88,6 +88,27 @@ class ContentExporter
     }
 
     /**
+     * Filter content items by minimum content length without writing to disk.
+     *
+     * Used by PhpIndexer to process content directly in memory.
+     *
+     * @param ContentItem[] $items Raw content items from platform adapter.
+     * @return ContentItem[] Items that pass the minimum content length filter.
+     */
+    public function exportToItems(array $items): array
+    {
+        $result = [];
+        foreach ($items as $item) {
+            $cleaned = HtmlCleaner::clean($item->bodyHtml);
+            if (mb_strlen($cleaned) >= $this->minContentLength) {
+                $result[] = $item;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
      * Get export statistics.
      *
      * @return array{exported: int, skipped: int}

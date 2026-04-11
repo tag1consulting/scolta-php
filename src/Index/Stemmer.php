@@ -7,11 +7,38 @@ namespace Tag1\Scolta\Index;
 /**
  * Word stemmer using Snowball algorithms.
  *
- * Wraps wamania/php-stemmer to provide consistent stemming that
- * matches the Pagefind binary's Rust pagefind_stem crate.
+ * Wraps wamania/php-stemmer for consistent stemming across 14 languages:
+ * Catalan (ca), Danish (da), Dutch (nl), English (en), Finnish (fi),
+ * French (fr), German (de), Italian (it), Norwegian (no), Portuguese (pt),
+ * Romanian (ro), Russian (ru), Spanish (es), Swedish (sv).
+ *
+ * For unsupported languages (Arabic, Greek, Hindi, Hungarian, Turkish, etc.),
+ * words are returned unchanged — search still works, just without
+ * morphological matching ("running" won't match "run").
+ *
+ * CJK languages (Chinese, Japanese, Korean) use character-level tokenization
+ * and don't require stemming.
  */
 class Stemmer
 {
+    /** @var array<string, string> Language code => stemmer class. */
+    private const LANGUAGE_MAP = [
+        'ca' => \Wamania\Snowball\Stemmer\Catalan::class,
+        'da' => \Wamania\Snowball\Stemmer\Danish::class,
+        'de' => \Wamania\Snowball\Stemmer\German::class,
+        'en' => \Wamania\Snowball\Stemmer\English::class,
+        'es' => \Wamania\Snowball\Stemmer\Spanish::class,
+        'fi' => \Wamania\Snowball\Stemmer\Finnish::class,
+        'fr' => \Wamania\Snowball\Stemmer\French::class,
+        'it' => \Wamania\Snowball\Stemmer\Italian::class,
+        'nl' => \Wamania\Snowball\Stemmer\Dutch::class,
+        'no' => \Wamania\Snowball\Stemmer\Norwegian::class,
+        'pt' => \Wamania\Snowball\Stemmer\Portuguese::class,
+        'ro' => \Wamania\Snowball\Stemmer\Romanian::class,
+        'ru' => \Wamania\Snowball\Stemmer\Russian::class,
+        'sv' => \Wamania\Snowball\Stemmer\Swedish::class,
+    ];
+
     private ?\Wamania\Snowball\Stemmer\Stemmer $stemmer = null;
 
     /**
@@ -19,7 +46,7 @@ class Stemmer
      */
     public function __construct(string $language = 'en')
     {
-        $class = $this->resolveClass($language);
+        $class = self::LANGUAGE_MAP[$language] ?? null;
         if ($class !== null && class_exists($class)) {
             $this->stemmer = new $class();
         }
@@ -40,26 +67,12 @@ class Stemmer
     }
 
     /**
-     * Map language code to wamania/php-stemmer class.
+     * Get the list of supported language codes.
+     *
+     * @return string[] ISO 639-1 language codes with stemming support.
      */
-    private function resolveClass(string $language): ?string
+    public static function getSupportedLanguages(): array
     {
-        $map = [
-            'en' => \Wamania\Snowball\Stemmer\English::class,
-            'fr' => \Wamania\Snowball\Stemmer\French::class,
-            'de' => \Wamania\Snowball\Stemmer\German::class,
-            'es' => \Wamania\Snowball\Stemmer\Spanish::class,
-            'it' => \Wamania\Snowball\Stemmer\Italian::class,
-            'pt' => \Wamania\Snowball\Stemmer\Portuguese::class,
-            'nl' => \Wamania\Snowball\Stemmer\Dutch::class,
-            'sv' => \Wamania\Snowball\Stemmer\Swedish::class,
-            'no' => \Wamania\Snowball\Stemmer\Norwegian::class,
-            'da' => \Wamania\Snowball\Stemmer\Danish::class,
-            'fi' => \Wamania\Snowball\Stemmer\Finnish::class,
-            'ro' => \Wamania\Snowball\Stemmer\Romanian::class,
-            'ru' => \Wamania\Snowball\Stemmer\Russian::class,
-        ];
-
-        return $map[$language] ?? null;
+        return array_keys(self::LANGUAGE_MAP);
     }
 }

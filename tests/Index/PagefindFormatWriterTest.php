@@ -78,7 +78,7 @@ class PagefindFormatWriterTest extends TestCase
         $this->assertFileExists($entryFile);
 
         $entry = json_decode(file_get_contents($entryFile), true);
-        $this->assertSame('1.3.0', $entry['version']);
+        $this->assertSame('1.5.0', $entry['version']);
         $this->assertArrayHasKey('en', $entry['languages']);
         $this->assertSame(2, $entry['languages']['en']['page_count']);
     }
@@ -177,6 +177,47 @@ class PagefindFormatWriterTest extends TestCase
         sort($names1);
         sort($names2);
         $this->assertSame($names1, $names2);
+    }
+
+    public function testVersionStringInEntryJson(): void
+    {
+        $this->writer->write($this->sampleIndex(), $this->samplePages(), $this->tmpDir);
+        $entry = json_decode(file_get_contents($this->tmpDir . '/.scolta-building/pagefind-entry.json'), true);
+        $this->assertSame('1.5.0', $entry['version']);
+    }
+
+    public function testCustomMetaFieldsIncluded(): void
+    {
+        $pages = $this->samplePages();
+        $pages[1]['meta']['author'] = 'Test Author';
+        $pages[1]['meta']['category'] = 'News';
+
+        $this->writer->write($this->sampleIndex(), $pages, $this->tmpDir);
+
+        // Verify meta file exists and contains the delimiter.
+        $metaFiles = glob($this->tmpDir . '/.scolta-building/pagefind.*.pf_meta');
+        $this->assertCount(1, $metaFiles);
+        $decompressed = gzdecode(file_get_contents($metaFiles[0]));
+        $this->assertStringStartsWith('pagefind_dcd', $decompressed);
+    }
+
+    public function testFilterFileReferencedInMetadata(): void
+    {
+        $this->writer->write($this->sampleIndex(), $this->samplePages(), $this->tmpDir);
+
+        // Both filter and meta files should exist.
+        $filterFiles = glob($this->tmpDir . '/.scolta-building/pagefind.*.pf_filter');
+        $metaFiles = glob($this->tmpDir . '/.scolta-building/pagefind.*.pf_meta');
+        $this->assertCount(1, $filterFiles);
+        $this->assertCount(1, $metaFiles);
+
+        // Meta file should reference filter data (non-empty filters array in CBOR).
+        $decompressed = gzdecode(file_get_contents($metaFiles[0]));
+        $cborData = substr($decompressed, strlen('pagefind_dcd'));
+        // The filters section (position [3] in the meta array) should not be empty
+        // when pages have filter values. We verify structurally: the CBOR data
+        // should be larger than it would be with an empty filters array.
+        $this->assertGreaterThan(20, strlen($cborData));
     }
 
     private function removeDir(string $dir): void

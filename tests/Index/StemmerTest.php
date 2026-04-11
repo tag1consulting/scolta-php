@@ -61,4 +61,33 @@ class StemmerTest extends TestCase
         $stemmed = $stemmer->stem('running');
         $this->assertSame($stemmed, $stemmer->stem($stemmed));
     }
+
+    public function testCatalanStemmer(): void
+    {
+        $stemmer = new Stemmer('ca');
+        $result = $stemmer->stem('casals');
+        $this->assertIsString($result);
+        $this->assertNotEmpty($result);
+    }
+
+    public function testUnsupportedArabicFallback(): void
+    {
+        $stemmer = new Stemmer('ar');
+        $this->assertSame('hello', $stemmer->stem('hello'));
+    }
+
+    public function testUnsupportedPolishFallback(): void
+    {
+        $stemmer = new Stemmer('pl');
+        $this->assertSame('test', $stemmer->stem('test'));
+    }
+
+    public function testGetSupportedLanguages(): void
+    {
+        $langs = Stemmer::getSupportedLanguages();
+        $this->assertContains('en', $langs);
+        $this->assertContains('fr', $langs);
+        $this->assertContains('ca', $langs);
+        $this->assertCount(14, $langs);
+    }
 }

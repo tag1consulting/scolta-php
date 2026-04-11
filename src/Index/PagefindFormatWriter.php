@@ -11,7 +11,11 @@ namespace Tag1\Scolta\Index;
  * - pagefind-entry.json (plain JSON)
  * - pf_meta file (gzipped CBOR)
  * - pf_index files (gzipped CBOR with pagefind_dcd delimiter)
+ * - pf_filter files (gzipped CBOR with pagefind_dcd delimiter)
  * - pf_fragment files (gzipped JSON)
+ *
+ * Compatible with pagefind.js 1.3.0 through 1.5.0. The CBOR array
+ * format and pagefind_dcd delimiter are stable across these versions.
  */
 class PagefindFormatWriter
 {
@@ -20,7 +24,7 @@ class PagefindFormatWriter
 
     public function __construct(
         private readonly CborEncoder $cbor,
-        private readonly string $pagefindVersion = '1.3.0',
+        private readonly string $pagefindVersion = '1.5.0',
     ) {
     }
 
@@ -28,8 +32,8 @@ class PagefindFormatWriter
      * Write the complete Pagefind index to disk.
      *
      * @param array $mergedIndex From IndexMerger.
-     * @param array $pages Page metadata.
-     * @param string $outputDir Destination directory.
+     * @param array $pages       Page metadata.
+     * @param string $outputDir  Destination directory.
      */
     public function write(array $mergedIndex, array $pages, string $outputDir): void
     {
@@ -44,8 +48,8 @@ class PagefindFormatWriter
                 'url' => $page['url'],
                 'content' => $page['content'] ?? '',
                 'word_count' => $page['wordCount'],
-                'filters' => $page['filters'] ?? new \stdClass(),
-                'meta' => $page['meta'] ?? new \stdClass(),
+                'filters' => !empty($page['filters']) ? $page['filters'] : new \stdClass(),
+                'meta' => !empty($page['meta']) ? $page['meta'] : new \stdClass(),
                 'anchors' => [],
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
@@ -79,19 +83,26 @@ class PagefindFormatWriter
             ];
         }
 
-        // Write metadata file (gzipped CBOR).
-        $metaCbor = $this->buildMetadata($pages, $indexChunkMeta);
-        $metaHash = substr(hash('sha256', 'meta'), 0, 16);
-        $compressed = gzencode(self::DELIMITER . $metaCbor, 9);
-        file_put_contents($buildDir . "/pagefind.{$metaHash}.pf_meta", $compressed);
-
         // Write filter index.
         $filterData = $this->buildFilterIndex($pages);
+        $filterHash = null;
         if ($filterData !== null) {
             $filterHash = substr(hash('sha256', 'filter'), 0, 16);
             $compressed = gzencode(self::DELIMITER . $filterData, 9);
             file_put_contents($buildDir . "/pagefind.{$filterHash}.pf_filter", $compressed);
         }
+
+        // Collect meta fields dynamically from page data.
+        $metaFields = $this->collectMetaFields($pages);
+
+        // Collect filter names for metadata reference.
+        $filterNames = $this->collectFilterNames($pages);
+
+        // Write metadata file (gzipped CBOR).
+        $metaCbor = $this->buildMetadata($pages, $indexChunkMeta, $filterNames, $filterHash, $metaFields);
+        $metaHash = substr(hash('sha256', 'meta'), 0, 16);
+        $compressed = gzencode(self::DELIMITER . $metaCbor, 9);
+        file_put_contents($buildDir . "/pagefind.{$metaHash}.pf_meta", $compressed);
 
         // Write entry.json (plain JSON, NOT gzipped).
         $langHash = substr(hash('sha256', 'en'), 0, 16);
@@ -132,7 +143,6 @@ class PagefindFormatWriter
         $deltaPages = DeltaEncoder::deltaEncode($pageNums);
 
         $encodedPages = [];
-        $prevPage = 0;
         foreach ($pageNums as $idx => $pageNum) {
             $entry = $pageEntries[$pageNum];
             $positions = DeltaEncoder::encodePositions($entry['positions']);
@@ -174,12 +184,25 @@ class PagefindFormatWriter
 
     /**
      * Build CBOR metadata.
+     *
+     * MetaIndex → [version, pages, index_chunks, filters, sorts, meta_fields]
+     *
+     * @param array       $pages        Page data.
+     * @param array       $indexChunks  Index chunk references.
+     * @param string[]    $filterNames  Filter names found in pages.
+     * @param string|null $filterHash   Hash of the filter file, if created.
+     * @param string[]    $metaFields   Meta field names.
      */
-    private function buildMetadata(array $pages, array $indexChunks): string
-    {
+    private function buildMetadata(
+        array $pages,
+        array $indexChunks,
+        array $filterNames,
+        ?string $filterHash,
+        array $metaFields,
+    ): string {
         // Pages array: [page_hash, word_count] for each page.
         $pageItems = [];
-        foreach ($pages as $pageNum => $page) {
+        foreach ($pages as $page) {
             $pageItems[] = $this->cbor->encodeArray([
                 $this->cbor->encodeString($page['hash']),
                 $this->cbor->encodeUint($page['wordCount']),
@@ -196,24 +219,35 @@ class PagefindFormatWriter
             ]);
         }
 
+        // Filters: [filter_name, file_hash] for each filter.
+        $filterItems = [];
+        if ($filterHash !== null) {
+            foreach ($filterNames as $filterName) {
+                $filterItems[] = $this->cbor->encodeArray([
+                    $this->cbor->encodeString($filterName),
+                    $this->cbor->encodeString($filterHash),
+                ]);
+            }
+        }
+
         // Meta fields.
-        $metaFields = [];
-        $metaFields[] = $this->cbor->encodeString('title');
-        $metaFields[] = $this->cbor->encodeString('url');
-        $metaFields[] = $this->cbor->encodeString('date');
+        $metaFieldItems = [];
+        foreach ($metaFields as $field) {
+            $metaFieldItems[] = $this->cbor->encodeString($field);
+        }
 
         return $this->cbor->encodeArray([
             $this->cbor->encodeString($this->pagefindVersion),
             $this->cbor->encodeArray($pageItems),
             $this->cbor->encodeArray($chunkItems),
-            $this->cbor->encodeArray([]),  // filters
-            $this->cbor->encodeArray([]),  // sorts
-            $this->cbor->encodeArray($metaFields),
+            $this->cbor->encodeArray($filterItems),
+            $this->cbor->encodeArray([]),  // sorts (not used by Scolta)
+            $this->cbor->encodeArray($metaFieldItems),
         ]);
     }
 
     /**
-     * Build filter index.
+     * Build filter index CBOR.
      */
     private function buildFilterIndex(array $pages): ?string
     {
@@ -252,6 +286,42 @@ class PagefindFormatWriter
         }
 
         return $this->cbor->encodeArray($filterItems);
+    }
+
+    /**
+     * Collect meta field names from all pages.
+     *
+     * Ensures standard fields (title, url) are always present.
+     *
+     * @return string[]
+     */
+    private function collectMetaFields(array $pages): array
+    {
+        $fields = ['title' => true, 'url' => true];
+        foreach ($pages as $page) {
+            foreach (array_keys($page['meta'] ?? []) as $key) {
+                $fields[$key] = true;
+            }
+        }
+
+        return array_keys($fields);
+    }
+
+    /**
+     * Collect unique filter names from all pages.
+     *
+     * @return string[]
+     */
+    private function collectFilterNames(array $pages): array
+    {
+        $names = [];
+        foreach ($pages as $page) {
+            foreach (array_keys($page['filters'] ?? []) as $name) {
+                $names[$name] = true;
+            }
+        }
+
+        return array_keys($names);
     }
 
     /**
