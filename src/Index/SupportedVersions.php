@@ -18,13 +18,13 @@ class SupportedVersions
      *
      * @var string[]
      */
-    public const TESTED_VERSIONS = ['1.3.0', '1.4.0', '1.5.0', '1.5.1'];
+    public const TESTED_VERSIONS = ['1.3.0', '1.4.0', '1.5.0'];
 
     /**
      * The version of Pagefind JS/WASM bundled with this package.
      * Written into index metadata so pagefind.js knows which version built the index.
      */
-    public const BUNDLED_VERSION = '1.5.1';
+    public const BUNDLED_VERSION = '1.5.0';
 
     /**
      * Minimum Pagefind version known to work.

@@ -78,7 +78,7 @@ class PagefindFormatWriterTest extends TestCase
         $this->assertFileExists($entryFile);
 
         $entry = json_decode(file_get_contents($entryFile), true);
-        $this->assertSame('1.5.1', $entry['version']);
+        $this->assertSame('1.5.0', $entry['version']);
         $this->assertArrayHasKey('en', $entry['languages']);
         $this->assertSame(2, $entry['languages']['en']['page_count']);
     }
@@ -183,7 +183,7 @@ class PagefindFormatWriterTest extends TestCase
     {
         $this->writer->write($this->sampleIndex(), $this->samplePages(), $this->tmpDir);
         $entry = json_decode(file_get_contents($this->tmpDir . '/.scolta-building/pagefind-entry.json'), true);
-        $this->assertSame('1.5.1', $entry['version']);
+        $this->assertSame('1.5.0', $entry['version']);
     }
 
     public function testCustomMetaFieldsIncluded(): void

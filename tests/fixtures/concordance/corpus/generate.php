@@ -167,7 +167,7 @@ $pages = [
 echo 'Generating ' . count($pages) . " corpus files...\n";
 
 foreach ($pages as $filename => $page) {
-    $html = "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n";
+    $html = "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n";
     $html .= '<title>' . htmlspecialchars($page['title']) . "</title>\n";
     $html .= "</head>\n<body data-pagefind-body>\n";
     $html .= '<h1>' . htmlspecialchars($page['title']) . "</h1>\n";

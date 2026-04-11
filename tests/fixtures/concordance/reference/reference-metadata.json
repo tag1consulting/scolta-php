@@ -1,0 +1,7 @@
+{
+    "pagefind_version": "1.5.0",
+    "generated_at": "2026-04-11T11:16:56Z",
+    "corpus_file_count": 25,
+    "platform": "Darwin-arm64",
+    "generator_script": "scripts/generate-concordance-fixtures.sh"
+}
