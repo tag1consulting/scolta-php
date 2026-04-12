@@ -89,7 +89,10 @@ class PagefindFormatWriter
                 $cborItems[] = $this->encodeWordEntry($word, $mergedIndex[$word]);
             }
 
-            $cborData = $this->cbor->encodeArray($cborItems);
+            // Pagefind wraps word entries in an outer array: [[entries...]].
+            // The WASM expects this wrapper when parsing pf_index chunks.
+            $innerArray = $this->cbor->encodeArray($cborItems);
+            $cborData = $this->cbor->encodeArray([$innerArray]);
             $hash = 'en_' . substr(hash('sha256', implode(',', $chunkWords)), 0, 7);
             $compressed = gzencode(self::DELIMITER . $cborData, 9);
             file_put_contents($buildDir . "/index/{$hash}.pf_index", $compressed);
@@ -314,15 +317,21 @@ class PagefindFormatWriter
     /**
      * Collect meta field names from all pages.
      *
-     * Ensures standard fields (title, url) are always present.
+     * Only includes fields that Pagefind treats as meta fields.
+     * 'url' is NOT a meta field — it is a top-level fragment property
+     * that pagefind.js accesses directly. Including 'url' here corrupts
+     * the positional field index that pagefind.js uses to resolve metadata.
      *
      * @return string[]
      */
     private function collectMetaFields(array $pages): array
     {
-        $fields = ['title' => true, 'url' => true];
+        $fields = ['title' => true];
         foreach ($pages as $page) {
             foreach (array_keys($page['meta'] ?? []) as $key) {
+                if ($key === 'url') {
+                    continue;
+                }
                 $fields[$key] = true;
             }
         }

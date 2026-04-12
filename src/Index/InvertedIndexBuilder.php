@@ -71,7 +71,6 @@ class InvertedIndexBuilder
                 'filters' => $item->siteName !== '' ? ['site' => $item->siteName] : [],
                 'meta' => array_filter([
                     'title' => $item->title,
-                    'url' => $item->url,
                     'date' => $item->date,
                 ]),
                 'hash' => hash('sha256', $cleanText),

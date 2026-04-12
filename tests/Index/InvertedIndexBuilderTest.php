@@ -147,7 +147,9 @@ class InvertedIndexBuilderTest extends TestCase
 
         $page = array_values($result['pages'])[0];
         $this->assertSame('My Title', $page['meta']['title']);
-        $this->assertSame('https://example.com/page', $page['meta']['url']);
         $this->assertSame('2026-01-01', $page['meta']['date']);
+        // url is a top-level page property, not inside meta (Pagefind convention).
+        $this->assertSame('https://example.com/page', $page['url']);
+        $this->assertArrayNotHasKey('url', $page['meta']);
     }
 }
