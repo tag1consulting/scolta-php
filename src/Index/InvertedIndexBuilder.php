@@ -105,14 +105,21 @@ class InvertedIndexBuilder
             if (!isset($index[$stemmed][$pageNum])) {
                 $index[$stemmed][$pageNum] = [
                     'positions' => [],
+                    'meta_positions' => [],
                 ];
             }
 
-            // Add position under the weight group.
-            if (!isset($index[$stemmed][$pageNum]['positions'][$weight])) {
-                $index[$stemmed][$pageNum]['positions'][$weight] = [];
+            // Title tokens go to meta_positions (Pagefind encodes these
+            // in meta_locs with field index markers, not in body locs).
+            // Body/URL tokens go to positions (encoded in locs).
+            if ($weight === self::TITLE_WEIGHT) {
+                $index[$stemmed][$pageNum]['meta_positions'][] = $position;
+            } else {
+                if (!isset($index[$stemmed][$pageNum]['positions'][$weight])) {
+                    $index[$stemmed][$pageNum]['positions'][$weight] = [];
+                }
+                $index[$stemmed][$pageNum]['positions'][$weight][] = $position;
             }
-            $index[$stemmed][$pageNum]['positions'][$weight][] = $position;
 
             // Track diacritic variants.
             if ($token['stem'] !== $token['original']) {

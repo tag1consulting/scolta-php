@@ -103,8 +103,8 @@ class InvertedIndexBuilderTest extends TestCase
             $pageEntries = array_filter($result['index'][$stemmed], fn ($k) => is_int($k), ARRAY_FILTER_USE_KEY);
             $entry = array_values($pageEntries)[0] ?? null;
             if ($entry !== null) {
-                // Title weight (50) should be present.
-                $this->assertArrayHasKey(50, $entry['positions']);
+                // Title tokens go to meta_positions (not positions weight 50).
+                $this->assertNotEmpty($entry['meta_positions'], 'Title word should have meta_positions');
             }
         }
         $this->assertTrue(true);

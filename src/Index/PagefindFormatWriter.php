@@ -169,33 +169,75 @@ class PagefindFormatWriter
         $encodedPages = [];
         foreach ($pageNums as $idx => $pageNum) {
             $entry = $pageEntries[$pageNum];
-            $positions = DeltaEncoder::encodePositions($entry['positions']);
-
             $pageItems = [
                 $this->cbor->encodeUint($deltaPages[$idx]),
             ];
-            // Encode positions.
+
+            // Encode locs: Pagefind always emits a weight marker, even for
+            // the default body weight. Body weight in Pagefind is 24 (marker -25).
+            $allBodyPositions = [];
+            foreach ($entry['positions'] as $weight => $positions) {
+                sort($positions);
+                $allBodyPositions = array_merge($allBodyPositions, $positions);
+            }
+            sort($allBodyPositions);
+
             $posItems = [];
-            foreach ($positions as $pos) {
-                $posItems[] = $pos >= 0
-                    ? $this->cbor->encodeUint($pos)
-                    : $this->cbor->encodeNegInt($pos);
+            if (!empty($allBodyPositions)) {
+                // Weight marker for body content: -(24 + 1) = -25
+                $posItems[] = $this->cbor->encodeNegInt(-25);
+                $deltaPos = DeltaEncoder::deltaEncode($allBodyPositions);
+                foreach ($deltaPos as $dp) {
+                    $posItems[] = $dp >= 0
+                        ? $this->cbor->encodeUint($dp)
+                        : $this->cbor->encodeNegInt($dp);
+                }
             }
             $pageItems[] = $this->cbor->encodeArray($posItems);
-            // Empty meta positions.
-            $pageItems[] = $this->cbor->encodeArray([]);
+
+            // Encode meta_locs: title positions use field index markers.
+            // Pagefind format: -(field_index + 1) as marker, then delta positions.
+            // Title is always field index 0 in our meta_fields = ["title", "date"].
+            // Encode meta_locs: title positions use field index markers.
+            // The marker is -(field_index + 1) where field_index is the
+            // position of 'title' in the meta_fields array.
+            $metaPositions = $entry['meta_positions'] ?? [];
+            $metaItems = [];
+            if (!empty($metaPositions)) {
+                sort($metaPositions);
+                // Field marker for title: find its index in meta_fields.
+                // meta_fields is sorted alphabetically (collectMetaFields returns
+                // keys($fields) which preserves insertion order: title first).
+                // For safety, we use index 0 (title is always first).
+                $titleFieldIndex = 0;
+                $metaItems[] = $this->cbor->encodeNegInt(-($titleFieldIndex + 1));
+                $deltaMetaPos = DeltaEncoder::deltaEncode($metaPositions);
+                foreach ($deltaMetaPos as $mp) {
+                    $metaItems[] = $mp >= 0
+                        ? $this->cbor->encodeUint($mp)
+                        : $this->cbor->encodeNegInt($mp);
+                }
+            }
+            $pageItems[] = $this->cbor->encodeArray($metaItems);
 
             $encodedPages[] = $this->cbor->encodeArray($pageItems);
         }
 
-        // Encode variants.
+        // Encode variants. Each variant page is a full PackedPage entry
+        // [page_num, locs, meta_locs], not a bare integer.
         $encodedVariants = [];
         foreach ($variants as $form => $variantPages) {
+            $variantPageEntries = [];
+            foreach ($variantPages as $vp) {
+                $variantPageEntries[] = $this->cbor->encodeArray([
+                    $this->cbor->encodeUint($vp),
+                    $this->cbor->encodeArray([]),  // empty locs
+                    $this->cbor->encodeArray([]),  // empty meta_locs
+                ]);
+            }
             $encodedVariants[] = $this->cbor->encodeArray([
                 $this->cbor->encodeString((string) $form),
-                $this->cbor->encodeArray(
-                    array_map(fn (int $p) => $this->cbor->encodeUint($p), $variantPages)
-                ),
+                $this->cbor->encodeArray($variantPageEntries),
             ]);
         }
 

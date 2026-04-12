@@ -75,6 +75,18 @@ class IndexMerger
                             );
                             sort($mergedIndex[$word][$pageNum]['positions'][$weight]);
                         }
+                        // Merge meta positions.
+                        if (!empty($data['meta_positions'])) {
+                            if (!isset($mergedIndex[$word][$pageNum]['meta_positions'])) {
+                                $mergedIndex[$word][$pageNum]['meta_positions'] = [];
+                            }
+                            $mergedIndex[$word][$pageNum]['meta_positions'] = array_values(
+                                array_unique(
+                                    array_merge($mergedIndex[$word][$pageNum]['meta_positions'], $data['meta_positions'])
+                                )
+                            );
+                            sort($mergedIndex[$word][$pageNum]['meta_positions']);
+                        }
                     }
                 }
             }
