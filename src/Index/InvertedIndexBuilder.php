@@ -51,7 +51,14 @@ class InvertedIndexBuilder
             $titleTokens = $this->tokenizer->tokenize($item->title);
             $bodyTokens = $this->tokenizer->tokenize($cleanText, mb_strlen($item->title) + 1);
 
-            $wordCount = count($titleTokens) + count($bodyTokens);
+            // Tokenize URL path segments for search discovery.
+            $urlPath = parse_url($item->url, PHP_URL_PATH) ?? '';
+            $urlPath = preg_replace('/\.\w+$/', '', $urlPath); // Strip file extension.
+            $urlSegments = array_filter(explode('/', $urlPath), fn ($s) => strlen($s) > 0);
+            $urlText = implode(' ', $urlSegments);
+            $urlTokens = $this->tokenizer->tokenize($urlText, mb_strlen($item->title) + mb_strlen($cleanText) + 2);
+
+            $wordCount = count($titleTokens) + count($bodyTokens) + count($urlTokens);
 
             // Build page entry.
             $pages[$pageNum] = [
@@ -75,6 +82,9 @@ class InvertedIndexBuilder
 
             // Index body tokens with default weight.
             $this->indexTokens($index, $bodyTokens, $pageNum, self::BODY_WEIGHT);
+
+            // Index URL tokens with body weight.
+            $this->indexTokens($index, $urlTokens, $pageNum, self::BODY_WEIGHT);
         }
 
         return ['index' => $index, 'pages' => $pages];

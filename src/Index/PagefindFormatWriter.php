@@ -44,6 +44,12 @@ class PagefindFormatWriter
      */
     public function write(array $mergedIndex, array $pages, string $outputDir): void
     {
+        // Remap page numbers to sequential 0-based indices.
+        // pagefind.js resolves search results by using page numbers as array
+        // indices into pf_meta: pf_meta[1][page_num]. The page numbers in
+        // pf_index MUST be 0-based sequential positions in the pf_meta array.
+        [$pages, $mergedIndex] = $this->remapPageNumbers($pages, $mergedIndex);
+
         $buildDir = $outputDir . '/.scolta-building';
         $this->ensureDir($buildDir);
         $this->ensureDir($buildDir . '/index');
@@ -367,6 +373,59 @@ class PagefindFormatWriter
         }
 
         return $chunks;
+    }
+
+    /**
+     * Remap page numbers to sequential 0-based indices.
+     *
+     * InvertedIndexBuilder may use crc32 hashes or arbitrary integers as
+     * page numbers. pagefind.js expects page numbers to be 0-based indices
+     * into the pf_meta page array. This method normalizes them.
+     *
+     * @return array{0: array, 1: array} [remapped_pages, remapped_index]
+     */
+    private function remapPageNumbers(array $pages, array $mergedIndex): array
+    {
+        $originalKeys = array_keys($pages);
+        $pageMap = array_flip(array_values(array_map('intval', $originalKeys)));
+
+        // Build mapping: original page number → sequential index.
+        $map = [];
+        $i = 0;
+        foreach ($originalKeys as $key) {
+            $map[(int) $key] = $i++;
+        }
+
+        // Rekey pages to sequential.
+        $newPages = array_values($pages);
+
+        // Remap page numbers in the inverted index.
+        $newIndex = [];
+        foreach ($mergedIndex as $word => $entries) {
+            $newIndex[$word] = [];
+
+            // Handle _variants separately.
+            if (isset($entries['_variants'])) {
+                $newVariants = [];
+                foreach ($entries['_variants'] as $variant => $variantPages) {
+                    $newVariants[$variant] = array_map(
+                        fn (int $p) => $map[$p] ?? $p,
+                        $variantPages
+                    );
+                }
+                $newIndex[$word]['_variants'] = $newVariants;
+            }
+
+            foreach ($entries as $pageNum => $data) {
+                if ($pageNum === '_variants') {
+                    continue;
+                }
+                $newPageNum = $map[(int) $pageNum] ?? (int) $pageNum;
+                $newIndex[$word][$newPageNum] = $data;
+            }
+        }
+
+        return [$newPages, $newIndex];
     }
 
     /**

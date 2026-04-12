@@ -53,7 +53,8 @@ class Tokenizer
         $originalText = $text;
 
         // Split on word boundaries BEFORE lowercasing (preserves camelCase info).
-        $pattern = '/[\p{L}\p{N}\p{Emoji_Presentation}]+/u';
+        // Include internal apostrophes for contractions (don't, it's, we've).
+        $pattern = "/[\p{L}\p{N}\p{Emoji_Presentation}]+(?:'[\p{L}]+)*/u";
         if (preg_match_all($pattern, $originalText, $matches, PREG_OFFSET_CAPTURE) === false) {
             return [];
         }
@@ -130,7 +131,8 @@ class Tokenizer
             return $parts;
         }
 
-        // Hyphen splitting: "mother-in-law" → ["mother", "in", "law"].
+        // Hyphen splitting: "mother-in-law" → ["mother", "in", "law", "motherinlaw"].
+        // Pagefind indexes both the parts AND the joined compound.
         if (str_contains($word, '-')) {
             $parts = [];
             $offset = 0;
@@ -138,7 +140,13 @@ class Tokenizer
                 if (mb_strlen($segment) >= 2) {
                     $parts[$offset] = $segment;
                 }
-                $offset += mb_strlen($segment) + 1; // +1 for the hyphen.
+                $offset += mb_strlen($segment) + 1;
+            }
+
+            // Also include the joined compound (without hyphens).
+            $compound = str_replace('-', '', $word);
+            if (mb_strlen($compound) >= 3 && count($parts) > 1) {
+                $parts[mb_strlen($word) + 1] = $compound;
             }
 
             return $parts ?: [0 => $word];
