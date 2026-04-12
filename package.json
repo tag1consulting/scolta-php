@@ -1,0 +1,30 @@
+{
+  "name": "scolta-php",
+  "version": "1.0.0",
+  "description": "[![CI](https://github.com/tag1consulting/scolta-php/actions/workflows/ci.yml/badge.svg)](https://github.com/tag1consulting/scolta-php/actions/workflows/ci.yml)",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:e2e": "npx playwright test tests/E2E/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tag1consulting/scolta-php.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/tag1consulting/scolta-php/issues"
+  },
+  "homepage": "https://github.com/tag1consulting/scolta-php#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "pagefind": "^1.5.0"
+  }
+}

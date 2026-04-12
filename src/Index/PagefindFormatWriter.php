@@ -56,7 +56,10 @@ class PagefindFormatWriter
         $this->ensureDir($buildDir . '/fragment');
 
         // Write fragments (gzipped JSON, one per page).
-        foreach ($pages as $pageNum => $page) {
+        // Store the fragment hash in page data so pf_meta references the
+        // correct filename. pagefind.js uses pf_meta page hashes to construct
+        // fragment URLs: fragment/{hash}.pf_fragment
+        foreach ($pages as $pageNum => &$page) {
             $fragment = json_encode([
                 'url' => $page['url'],
                 'content' => $page['content'] ?? '',
@@ -66,10 +69,12 @@ class PagefindFormatWriter
                 'anchors' => [],
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-            $hash = substr(hash('sha256', (string) $pageNum . $page['url']), 0, 16);
-            $compressed = gzencode($fragment, 9);
+            $hash = 'en_' . substr(hash('sha256', (string) $pageNum . $page['url']), 0, 7);
+            $page['fragmentHash'] = $hash;
+            $compressed = gzencode(self::DELIMITER . $fragment, 9);
             file_put_contents($buildDir . "/fragment/{$hash}.pf_fragment", $compressed);
         }
+        unset($page);
 
         // Chunk and write index files.
         $wordList = array_map('strval', array_keys($mergedIndex));
@@ -85,7 +90,7 @@ class PagefindFormatWriter
             }
 
             $cborData = $this->cbor->encodeArray($cborItems);
-            $hash = substr(hash('sha256', implode(',', $chunkWords)), 0, 16);
+            $hash = 'en_' . substr(hash('sha256', implode(',', $chunkWords)), 0, 7);
             $compressed = gzencode(self::DELIMITER . $cborData, 9);
             file_put_contents($buildDir . "/index/{$hash}.pf_index", $compressed);
 
@@ -100,9 +105,10 @@ class PagefindFormatWriter
         $filterData = $this->buildFilterIndex($pages);
         $filterHash = null;
         if ($filterData !== null) {
-            $filterHash = substr(hash('sha256', 'filter'), 0, 16);
+            $this->ensureDir($buildDir . '/filter');
+            $filterHash = 'en_' . substr(hash('sha256', $filterData), 0, 7);
             $compressed = gzencode(self::DELIMITER . $filterData, 9);
-            file_put_contents($buildDir . "/pagefind.{$filterHash}.pf_filter", $compressed);
+            file_put_contents($buildDir . "/filter/{$filterHash}.pf_filter", $compressed);
         }
 
         // Collect meta fields dynamically from page data.
@@ -112,19 +118,21 @@ class PagefindFormatWriter
         $filterNames = $this->collectFilterNames($pages);
 
         // Write metadata file (gzipped CBOR).
+        // The hash in the filename must match the hash in entry.json so
+        // pagefind.js can locate the file: pagefind.{hash}.pf_meta
         $metaCbor = $this->buildMetadata($pages, $indexChunkMeta, $filterNames, $filterHash, $metaFields);
-        $metaHash = substr(hash('sha256', 'meta'), 0, 16);
+        $metaHash = 'en_' . substr(hash('sha256', $metaCbor), 0, 10);
         $compressed = gzencode(self::DELIMITER . $metaCbor, 9);
         file_put_contents($buildDir . "/pagefind.{$metaHash}.pf_meta", $compressed);
 
         // Write entry.json (plain JSON, NOT gzipped).
-        $langHash = substr(hash('sha256', 'en'), 0, 16);
+        // The hash here MUST match the meta filename hash above.
         $entry = [
             'version' => $this->getVersion(),
             'languages' => [
                 'en' => [
-                    'hash' => $langHash,
-                    'wasm' => null,
+                    'hash' => $metaHash,
+                    'wasm' => 'en',
                     'page_count' => count($pages),
                 ],
             ],
@@ -214,10 +222,12 @@ class PagefindFormatWriter
         array $metaFields,
     ): string {
         // Pages array: [page_hash, word_count] for each page.
+        // page_hash must match the fragment filename so pagefind.js can
+        // load fragment/{hash}.pf_fragment for search result display.
         $pageItems = [];
         foreach ($pages as $page) {
             $pageItems[] = $this->cbor->encodeArray([
-                $this->cbor->encodeString($page['hash']),
+                $this->cbor->encodeString($page['fragmentHash'] ?? $page['hash']),
                 $this->cbor->encodeUint($page['wordCount']),
             ]);
         }

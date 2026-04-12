@@ -154,6 +154,9 @@ class ConcordanceTest extends TestCase
         foreach ($fragmentFiles as $fragFile) {
             $decompressed = gzdecode(file_get_contents($fragFile));
             $this->assertNotFalse($decompressed, "Fragment should be valid gzip: {$fragFile}");
+            if (str_starts_with($decompressed, 'pagefind_dcd')) {
+                $decompressed = substr($decompressed, 12);
+            }
 
             $decoded = json_decode($decompressed, true);
             $this->assertIsArray($decoded, "Fragment should be valid JSON: {$fragFile}");
@@ -182,7 +185,7 @@ class ConcordanceTest extends TestCase
     {
         $pagefindDir = $this->buildIndex();
 
-        $filterFiles = glob($pagefindDir . '/pagefind.*.pf_filter');
+        $filterFiles = glob($pagefindDir . '/filter/*.pf_filter');
         // Filter file should exist since corpus has category filters.
         $this->assertNotEmpty($filterFiles, 'Filter file should exist for corpus with filters');
 
@@ -216,7 +219,7 @@ class ConcordanceTest extends TestCase
         $fragmentFiles = glob($pagefindDir . '/fragment/*.pf_fragment');
         $allContent = '';
         foreach ($fragmentFiles as $fragFile) {
-            $fragment = json_decode(gzdecode(file_get_contents($fragFile)), true);
+            $fragment = json_decode(preg_replace('/^pagefind_dcd/', '', gzdecode(file_get_contents($fragFile))), true);
             $allContent .= ' ' . ($fragment['content'] ?? '');
         }
 
@@ -232,7 +235,7 @@ class ConcordanceTest extends TestCase
         $fragmentFiles = glob($pagefindDir . '/fragment/*.pf_fragment');
         $urls = [];
         foreach ($fragmentFiles as $fragFile) {
-            $fragment = json_decode(gzdecode(file_get_contents($fragFile)), true);
+            $fragment = json_decode(preg_replace('/^pagefind_dcd/', '', gzdecode(file_get_contents($fragFile))), true);
             $urls[] = $fragment['url'];
         }
 
@@ -245,7 +248,7 @@ class ConcordanceTest extends TestCase
 
         $fragmentFiles = glob($pagefindDir . '/fragment/*.pf_fragment');
         foreach ($fragmentFiles as $fragFile) {
-            $fragment = json_decode(gzdecode(file_get_contents($fragFile)), true);
+            $fragment = json_decode(preg_replace('/^pagefind_dcd/', '', gzdecode(file_get_contents($fragFile))), true);
             $this->assertGreaterThan(0, $fragment['word_count'], "Word count should be positive for {$fragment['url']}");
         }
     }

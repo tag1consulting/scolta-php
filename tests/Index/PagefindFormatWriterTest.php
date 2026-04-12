@@ -104,9 +104,11 @@ class PagefindFormatWriterTest extends TestCase
         $this->assertNotEmpty($fragmentFiles);
 
         $compressed = file_get_contents($fragmentFiles[0]);
-        $json = gzdecode($compressed);
-        $this->assertNotFalse($json);
+        $decompressed = gzdecode($compressed);
+        $this->assertNotFalse($decompressed);
 
+        // Fragments have pagefind_dcd prefix like all other Pagefind files.
+        $json = preg_replace('/^pagefind_dcd/', '', $decompressed);
         $data = json_decode($json, true);
         $this->assertArrayHasKey('url', $data);
         $this->assertArrayHasKey('content', $data);
@@ -147,7 +149,7 @@ class PagefindFormatWriterTest extends TestCase
     public function testFilterFileCreatedWhenFiltersExist(): void
     {
         $this->writer->write($this->sampleIndex(), $this->samplePages(), $this->tmpDir);
-        $filterFiles = glob($this->tmpDir . '/.scolta-building/pagefind.*.pf_filter');
+        $filterFiles = glob($this->tmpDir . '/.scolta-building/filter/*.pf_filter');
         $this->assertCount(1, $filterFiles);
     }
 
@@ -158,7 +160,7 @@ class PagefindFormatWriterTest extends TestCase
             $page['filters'] = [];
         }
         $this->writer->write($this->sampleIndex(), $pages, $this->tmpDir);
-        $filterFiles = glob($this->tmpDir . '/.scolta-building/pagefind.*.pf_filter');
+        $filterFiles = glob($this->tmpDir . '/.scolta-building/filter/*.pf_filter');
         $this->assertEmpty($filterFiles);
     }
 
@@ -206,7 +208,7 @@ class PagefindFormatWriterTest extends TestCase
         $this->writer->write($this->sampleIndex(), $this->samplePages(), $this->tmpDir);
 
         // Both filter and meta files should exist.
-        $filterFiles = glob($this->tmpDir . '/.scolta-building/pagefind.*.pf_filter');
+        $filterFiles = glob($this->tmpDir . '/.scolta-building/filter/*.pf_filter');
         $metaFiles = glob($this->tmpDir . '/.scolta-building/pagefind.*.pf_meta');
         $this->assertCount(1, $filterFiles);
         $this->assertCount(1, $metaFiles);

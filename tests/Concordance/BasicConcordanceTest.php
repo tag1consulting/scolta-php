@@ -83,6 +83,9 @@ class BasicConcordanceTest extends TestCase
         foreach ($fragmentFiles as $fragFile) {
             $decompressed = gzdecode(file_get_contents($fragFile));
             $this->assertNotFalse($decompressed);
+            if (str_starts_with($decompressed, 'pagefind_dcd')) {
+                $decompressed = substr($decompressed, 12);
+            }
             $decoded = json_decode($decompressed, true);
             $this->assertIsArray($decoded);
             $this->assertArrayHasKey('url', $decoded);
@@ -135,7 +138,7 @@ class BasicConcordanceTest extends TestCase
         $fragmentFiles = glob($pagefindDir . '/fragment/*.pf_fragment');
         $this->assertNotEmpty($fragmentFiles);
 
-        $fragment = json_decode(gzdecode(file_get_contents($fragmentFiles[0])), true);
+        $fragment = json_decode(preg_replace('/^pagefind_dcd/', '', gzdecode(file_get_contents($fragmentFiles[0]))), true);
         $this->assertStringContainsString('café', mb_strtolower($fragment['content']));
     }
 
