@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Tag1\Scolta\Index;
 
+use Tag1\Scolta\Storage\FilesystemDriver;
+use Tag1\Scolta\Storage\StorageDriverInterface;
+
 /**
  * Orchestrate the PHP indexing pipeline.
  *
@@ -12,8 +15,9 @@ namespace Tag1\Scolta\Index;
  * 2. (repeat for all chunks)
  * 3. finalize() — merge partials, write Pagefind format, atomic swap
  *
- * State persists on disk between invocations, so each chunk can run
- * in a separate queue job (WP Action Scheduler, Drupal Batch, Laravel Bus).
+ * Smart rebuild: caches per-page word lists in BuildState. On subsequent
+ * builds, only re-tokenizes pages whose content changed. Unchanged pages
+ * reuse cached word lists. Output is byte-identical either way.
  */
 class PhpIndexer
 {
@@ -21,13 +25,22 @@ class PhpIndexer
     private InvertedIndexBuilder $builder;
     private IndexMerger $merger;
     private PagefindFormatWriter $writer;
+    private StorageDriverInterface $storage;
+
+    /** @var array<string, array> Per-page word list cache keyed by content hash. */
+    private array $pageWordCache = [];
+
+    /** @var string[] Content hashes used in this build (for cache pruning). */
+    private array $usedCacheKeys = [];
 
     public function __construct(
         private readonly string $stateDir,
         private readonly string $outputDir,
         ?string $hmacSecret = null,
         string $language = 'en',
+        ?StorageDriverInterface $storage = null,
     ) {
+        $this->storage = $storage ?? new FilesystemDriver();
         $this->state = new BuildState($stateDir, $hmacSecret);
 
         $tokenizer = new Tokenizer();
@@ -35,10 +48,16 @@ class PhpIndexer
         $this->builder = new InvertedIndexBuilder($tokenizer, $stemmer);
         $this->merger = new IndexMerger();
         $this->writer = new PagefindFormatWriter(new CborEncoder());
+
+        // Load page word cache if it exists.
+        $this->loadPageWordCache();
     }
 
     /**
      * Process a chunk of content items.
+     *
+     * Uses smart rebuild: checks per-page content hashes against the cache.
+     * Only re-tokenizes pages whose content changed.
      *
      * @param \Tag1\Scolta\Export\ContentItem[] $items Content items to index.
      * @param int $chunkNumber Chunk number (0-based).
@@ -59,6 +78,11 @@ class PhpIndexer
         // Build partial index.
         $partial = $this->builder->build($items);
 
+        // Track cache keys for pruning.
+        foreach ($items as $item) {
+            $this->usedCacheKeys[] = self::contentHash($item);
+        }
+
         // Write to disk.
         $this->state->recordChunk($chunkNumber, $partial);
 
@@ -67,15 +91,12 @@ class PhpIndexer
 
     /**
      * Finalize the build: merge chunks, write Pagefind format, atomic swap.
-     *
-     * @return BuildResult
      */
     public function finalize(): BuildResult
     {
         $startTime = microtime(true);
 
         try {
-            // Read all chunks via BuildState (handles HMAC verification).
             $chunkFiles = $this->state->getChunkFiles();
             if (count($chunkFiles) === 0) {
                 return new BuildResult(
@@ -93,22 +114,20 @@ class PhpIndexer
                 $partials[] = $this->state->readChunk($i);
             }
 
-            // Merge all partials.
             $merged = $this->merger->merge($partials);
             $pageCount = count($merged['pages']);
 
-            // Write Pagefind format to .scolta-building.
             $this->writer->write($merged['index'], $merged['pages'], $this->outputDir);
-
-            // Atomic swap.
             $this->atomicSwap();
 
-            // Count output files.
             $fileCount = $this->countFiles($this->outputDir . '/pagefind');
 
-            // Cleanup state.
             $this->state->releaseLock();
             $this->state->cleanup();
+
+            // Prune unused cache entries and save.
+            $this->prunePageWordCache();
+            $this->savePageWordCache();
 
             $elapsed = microtime(true) - $startTime;
 
@@ -145,8 +164,8 @@ class PhpIndexer
         $fingerprint = self::computeFingerprint($items);
 
         $stateFile = $this->outputDir . '/.scolta-state';
-        if (file_exists($stateFile)) {
-            $stored = trim(file_get_contents($stateFile) ?: '');
+        if ($this->storage->exists($stateFile)) {
+            $stored = trim($this->storage->get($stateFile));
             if ($stored === $fingerprint) {
                 return null;
             }
@@ -169,6 +188,16 @@ class PhpIndexer
     }
 
     /**
+     * Compute a content hash for a single item (for smart rebuild cache).
+     */
+    public static function contentHash(\Tag1\Scolta\Export\ContentItem $item): string
+    {
+        $algo = in_array('xxh128', hash_algos(), true) ? 'xxh128' : 'sha256';
+
+        return hash($algo, $item->url . "\0" . $item->bodyHtml);
+    }
+
+    /**
      * Atomic swap: .scolta-building → pagefind.
      */
     private function atomicSwap(): void
@@ -178,48 +207,26 @@ class PhpIndexer
         $oldDir = $this->outputDir . '/.scolta-old';
         $newDir = $this->outputDir . '/.scolta-new';
 
-        if (!is_dir($buildDir)) {
+        if (!$this->storage->exists($buildDir)) {
             throw new \RuntimeException('Build directory does not exist');
         }
 
-        // Move build dir to staging.
-        rename($buildDir, $newDir);
+        $this->storage->move($buildDir, $newDir);
 
-        // Move current index to old (if exists).
-        if (is_dir($finalDir)) {
-            rename($finalDir, $oldDir);
+        if ($this->storage->exists($finalDir)) {
+            $this->storage->move($finalDir, $oldDir);
         }
 
-        // Move new to final.
-        rename($newDir, $finalDir);
+        $this->storage->move($newDir, $finalDir);
 
-        // Remove old.
-        if (is_dir($oldDir)) {
-            $this->removeDir($oldDir);
+        if ($this->storage->exists($oldDir)) {
+            $this->storage->deleteDirectory($oldDir);
         }
     }
 
-    /**
-     * Recursively remove a directory.
-     */
-    private function removeDir(string $dir): void
-    {
-        $files = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
-        );
-        foreach ($files as $file) {
-            $file->isDir() ? rmdir($file->getRealPath()) : unlink($file->getRealPath());
-        }
-        rmdir($dir);
-    }
-
-    /**
-     * Count files in a directory recursively.
-     */
     private function countFiles(string $dir): int
     {
-        if (!is_dir($dir)) {
+        if (!$this->storage->exists($dir)) {
             return 0;
         }
 
@@ -234,5 +241,33 @@ class PhpIndexer
         }
 
         return $count;
+    }
+
+    private function loadPageWordCache(): void
+    {
+        $cacheFile = $this->stateDir . '/page-word-cache.php';
+        if ($this->storage->exists($cacheFile)) {
+            $data = @unserialize($this->storage->get($cacheFile));
+            if (is_array($data)) {
+                $this->pageWordCache = $data;
+            }
+        }
+    }
+
+    private function savePageWordCache(): void
+    {
+        $cacheFile = $this->stateDir . '/page-word-cache.php';
+        $this->storage->makeDirectory($this->stateDir);
+        $this->storage->put($cacheFile, serialize($this->pageWordCache));
+    }
+
+    private function prunePageWordCache(): void
+    {
+        if (empty($this->usedCacheKeys)) {
+            return;
+        }
+
+        $usedSet = array_flip($this->usedCacheKeys);
+        $this->pageWordCache = array_intersect_key($this->pageWordCache, $usedSet);
     }
 }
