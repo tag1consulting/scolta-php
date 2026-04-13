@@ -9,6 +9,21 @@ namespace Tag1\Scolta\Storage;
  */
 class FilesystemDriver implements StorageDriverInterface
 {
+    /**
+     * Validate that a path does not use PHP stream wrappers.
+     *
+     * Defense-in-depth: platform adapters sanitize paths upstream,
+     * but this guard prevents accidental misuse of the storage driver.
+     *
+     * @throws \InvalidArgumentException If the path contains a stream wrapper.
+     */
+    private function validatePath(string $path): void
+    {
+        if (preg_match('#^[a-zA-Z][a-zA-Z0-9+\-.]*://#', $path)) {
+            throw new \InvalidArgumentException('Stream wrappers are not allowed in file paths.');
+        }
+    }
+
     public function exists(string $path): bool
     {
         return file_exists($path);
@@ -16,6 +31,7 @@ class FilesystemDriver implements StorageDriverInterface
 
     public function get(string $path): string
     {
+        $this->validatePath($path);
         $contents = file_get_contents($path);
         if ($contents === false) {
             throw new \RuntimeException("Failed to read: {$path}");
@@ -26,6 +42,7 @@ class FilesystemDriver implements StorageDriverInterface
 
     public function put(string $path, string $contents): bool
     {
+        $this->validatePath($path);
         $dir = dirname($path);
         if (!is_dir($dir)) {
             mkdir($dir, 0755, true);
@@ -36,6 +53,7 @@ class FilesystemDriver implements StorageDriverInterface
 
     public function delete(string $path): bool
     {
+        $this->validatePath($path);
         if (!file_exists($path)) {
             return true;
         }
@@ -45,6 +63,7 @@ class FilesystemDriver implements StorageDriverInterface
 
     public function deleteDirectory(string $path): bool
     {
+        $this->validatePath($path);
         if (!is_dir($path)) {
             return true;
         }
@@ -63,6 +82,7 @@ class FilesystemDriver implements StorageDriverInterface
 
     public function makeDirectory(string $path): bool
     {
+        $this->validatePath($path);
         if (is_dir($path)) {
             return true;
         }
@@ -72,11 +92,15 @@ class FilesystemDriver implements StorageDriverInterface
 
     public function move(string $from, string $to): bool
     {
+        $this->validatePath($from);
+        $this->validatePath($to);
+
         return rename($from, $to);
     }
 
     public function files(string $directory, string $pattern = '*'): array
     {
+        $this->validatePath($directory);
         $result = glob($directory . '/' . $pattern);
 
         return $result !== false ? $result : [];

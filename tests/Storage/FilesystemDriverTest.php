@@ -87,4 +87,41 @@ class FilesystemDriverTest extends TestCase
         $this->assertTrue($this->driver->put($path, 'deep'));
         $this->assertSame('deep', $this->driver->get($path));
     }
+
+    public function testRejectsStreamWrappers(): void
+    {
+        $driver = new FilesystemDriver();
+
+        $wrappers = ['php://filter/resource=/etc/passwd', 'file:///etc/passwd', 'expect://ls'];
+        foreach ($wrappers as $wrapper) {
+            try {
+                $driver->get($wrapper);
+                $this->fail("Expected InvalidArgumentException for: {$wrapper}");
+            } catch (\InvalidArgumentException $e) {
+                $this->assertStringContainsString('Stream wrappers', $e->getMessage());
+            }
+        }
+    }
+
+    public function testRejectsStreamWrapperInPut(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Stream wrappers');
+        $this->driver->put('php://memory', 'data');
+    }
+
+    public function testRejectsStreamWrapperInMove(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Stream wrappers');
+        $this->driver->move('php://filter/resource=/etc/passwd', '/tmp/out');
+    }
+
+    public function testNormalPathsAreNotRejected(): void
+    {
+        // Paths that look like they could be wrappers but are not.
+        $path = $this->tmpDir . '/normal-file.txt';
+        $this->driver->put($path, 'ok');
+        $this->assertSame('ok', $this->driver->get($path));
+    }
 }
