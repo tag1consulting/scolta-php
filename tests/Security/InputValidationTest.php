@@ -376,20 +376,47 @@ class InputValidationTest extends TestCase
 
     private function makeHandlerWithMaxFollowUps(int $max): AiEndpointHandler
     {
-        $aiService = new class {
-            public function getExpandPrompt(): string { return 'expand'; }
-            public function getSummarizePrompt(): string { return 'summarize'; }
-            public function getFollowUpPrompt(): string { return 'followup'; }
-            public function message(string $sys, string $user): string { return 'ok'; }
-            public function conversation(string $sys, array $msgs): string { return 'ok'; }
-            public function isConfigured(): bool { return false; }
+        $aiService = new class () {
+            public function getExpandPrompt(): string
+            {
+                return 'expand';
+            }
+            public function getSummarizePrompt(): string
+            {
+                return 'summarize';
+            }
+            public function getFollowUpPrompt(): string
+            {
+                return 'followup';
+            }
+            public function message(string $sys, string $user): string
+            {
+                return 'ok';
+            }
+            public function conversation(string $sys, array $msgs): string
+            {
+                return 'ok';
+            }
+            public function isConfigured(): bool
+            {
+                return false;
+            }
         };
 
-        $cache = new class implements \Tag1\Scolta\Cache\CacheDriverInterface {
-            public function get(string $key): mixed { return null; }
-            public function set(string $key, mixed $value, int $ttlSeconds): void {}
-            public function delete(string $key): void {}
-            public function flush(): void {}
+        $cache = new class () implements \Tag1\Scolta\Cache\CacheDriverInterface {
+            public function get(string $key): mixed
+            {
+                return null;
+            }
+            public function set(string $key, mixed $value, int $ttlSeconds): void
+            {
+            }
+            public function delete(string $key): void
+            {
+            }
+            public function flush(): void
+            {
+            }
         };
 
         return new AiEndpointHandler(

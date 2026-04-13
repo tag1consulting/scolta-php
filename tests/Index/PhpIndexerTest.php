@@ -178,8 +178,11 @@ class PhpIndexerTest extends TestCase
         sort($data);
         $binaryFingerprint = hash('sha256', json_encode($data));
 
-        $this->assertNotSame($phpFingerprint, $binaryFingerprint,
-            'PHP and binary indexer must produce different fingerprints for same content');
+        $this->assertNotSame(
+            $phpFingerprint,
+            $binaryFingerprint,
+            'PHP and binary indexer must produce different fingerprints for same content'
+        );
     }
 
     public function testShouldBuildAfterIndexerSwitch(): void
