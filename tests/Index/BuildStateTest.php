@@ -39,6 +39,23 @@ class BuildStateTest extends TestCase
         $this->assertFalse($state2->initiateBuild(['total_pages' => 50]));
     }
 
+    public function testOnlyOneLockAcquiredConcurrently(): void
+    {
+        // Simulate two handles racing: both call initiateBuild() before either
+        // releases. flock(LOCK_EX | LOCK_NB) guarantees only one succeeds.
+        // NOTE: objects must be kept alive (referenced) or PHP closes the handle.
+        $states = [];
+        $results = [];
+        for ($i = 0; $i < 5; $i++) {
+            $s = new BuildState($this->tmpDir);
+            $states[] = $s; // Keep reference so lockHandle is not closed.
+            $results[] = $s->initiateBuild(['total_pages' => 10]);
+        }
+
+        $acquired = array_filter($results);
+        $this->assertCount(1, $acquired, 'Exactly one concurrent initiateBuild() should succeed');
+    }
+
     public function testRecordAndReadChunk(): void
     {
         $state = new BuildState($this->tmpDir);

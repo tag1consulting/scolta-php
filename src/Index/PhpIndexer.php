@@ -177,6 +177,10 @@ class PhpIndexer
     /**
      * Compute a deterministic fingerprint for a set of content items.
      *
+     * The prefix 'php-indexer-v1:' ensures the fingerprint changes when
+     * switching from binary→PHP indexer (or across indexer versions), so
+     * shouldBuild() correctly triggers a rebuild after an indexer change.
+     *
      * @param \Tag1\Scolta\Export\ContentItem[] $items
      */
     public static function computeFingerprint(array $items): string
@@ -184,7 +188,7 @@ class PhpIndexer
         $data = array_map(fn ($item) => $item->id . ':' . hash('sha256', $item->bodyHtml), $items);
         sort($data);
 
-        return hash('sha256', json_encode($data));
+        return hash('sha256', 'php-indexer-v1:' . json_encode($data));
     }
 
     /**

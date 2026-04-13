@@ -1,0 +1,364 @@
+name: Release Validation
+
+# Comprehensive pre-release integration tests.
+#
+# Runs on every push/PR (fast jobs) and on main (slower E2E jobs).
+# Jobs are independent so failures are isolated and readable.
+#
+# What this validates:
+#   1. PHP indexer → pagefind.js search compatibility (Playwright E2E)
+#   2. AI endpoint handler integration (mock HTTP, no real API key needed)
+#   3. Adapter install: each platform adapter installs scolta-php from VCS
+#      and its full test suite stays green
+#   4. Release script validation (version format, changelog presence)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # -------------------------------------------------------------------
+  # Job 1: PHP indexer → pagefind.js search compatibility
+  #
+  # Builds a real Pagefind-format index with the PHP indexer, serves it
+  # over HTTP in a headless browser, and runs search queries. This proves
+  # the PHP-generated index is byte-for-byte compatible with pagefind.js.
+  # -------------------------------------------------------------------
+  e2e-search:
+    name: E2E — PHP index ↔ pagefind.js search
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: intl
+          coverage: none
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E search compatibility tests
+        run: npm run test:e2e
+        env:
+          PLAYWRIGHT_HTML_REPORT: ''
+
+      - name: Upload E2E artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: test-results/
+          retention-days: 7
+
+  # -------------------------------------------------------------------
+  # Job 2: AI endpoint handler integration
+  #
+  # Exercises AiEndpointHandler with a mock HTTP client to verify:
+  #   - Query expansion request/response round-trip
+  #   - Summarization request/response round-trip
+  #   - Follow-up conversation handling
+  #   - All error paths (429, 503, malformed JSON, timeout)
+  #
+  # No real AI API key is needed — a mock Guzzle handler is used.
+  # -------------------------------------------------------------------
+  ai-endpoint-integration:
+    name: AI endpoint handler integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: intl
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run AI integration tests
+        run: |
+          ./vendor/bin/phpunit \
+            tests/Http/ \
+            tests/Security/AiErrorHandlingTest.php \
+            tests/Security/InputValidationTest.php \
+            --colors=never
+
+  # -------------------------------------------------------------------
+  # Job 3: Concordance and multi-language indexing
+  #
+  # Verifies the PHP indexer handles all supported languages correctly
+  # and that edge cases (huge documents, RTL text, emoji) are indexed.
+  # -------------------------------------------------------------------
+  concordance-integration:
+    name: Concordance — multi-language and edge cases
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: intl
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run concordance tests
+        run: |
+          ./vendor/bin/phpunit \
+            tests/Concordance/ \
+            --colors=never
+
+  # -------------------------------------------------------------------
+  # Job 4: Adapter install + test — WordPress
+  #
+  # Installs scolta-wp against the current scolta-php branch (via GitHub
+  # VCS reference pointing at this repo). Proves the adapter compiles
+  # and its full test suite stays green.
+  # -------------------------------------------------------------------
+  adapter-wp:
+    name: Adapter install — WordPress
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout scolta-wp
+        uses: actions/checkout@v4
+        with:
+          repository: tag1consulting/scolta-wp
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: intl
+          coverage: none
+
+      - name: Replace path repo with GitHub VCS repo
+        run: |
+          php -r '
+            $j = json_decode(file_get_contents("composer.json"), true);
+            $j["repositories"] = [["type" => "vcs", "url" => "https://github.com/tag1consulting/scolta-php.git"]];
+            file_put_contents("composer.json", json_encode($j, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+          '
+
+      - name: Install dependencies
+        run: composer update --no-interaction --prefer-dist --ignore-platform-req=php
+
+      - name: Run WordPress adapter tests
+        run: composer test
+
+  # -------------------------------------------------------------------
+  # Job 5: Adapter install + test — Drupal
+  # -------------------------------------------------------------------
+  adapter-drupal:
+    name: Adapter install — Drupal
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout scolta-drupal
+        uses: actions/checkout@v4
+        with:
+          repository: tag1consulting/scolta-drupal
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: intl
+          coverage: none
+
+      - name: Replace path repo with GitHub VCS repo
+        run: |
+          php -r '
+            $j = json_decode(file_get_contents("composer.json"), true);
+            $j["repositories"] = [["type" => "vcs", "url" => "https://github.com/tag1consulting/scolta-php.git"]];
+            file_put_contents("composer.json", json_encode($j, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+          '
+
+      - name: Install dependencies
+        run: composer update --no-interaction --prefer-dist --ignore-platform-req=php
+
+      - name: Run Drupal adapter tests
+        run: composer test
+
+  # -------------------------------------------------------------------
+  # Job 6: Adapter install + test — Laravel
+  # -------------------------------------------------------------------
+  adapter-laravel:
+    name: Adapter install — Laravel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout scolta-laravel
+        uses: actions/checkout@v4
+        with:
+          repository: tag1consulting/scolta-laravel
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: intl
+          coverage: none
+
+      - name: Replace path repo with GitHub VCS repo
+        run: |
+          php -r '
+            $j = json_decode(file_get_contents("composer.json"), true);
+            $j["repositories"] = [["type" => "vcs", "url" => "https://github.com/tag1consulting/scolta-php.git"]];
+            file_put_contents("composer.json", json_encode($j, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+          '
+
+      - name: Install dependencies
+        run: composer update --no-interaction --prefer-dist --ignore-platform-req=php
+
+      - name: Run Laravel adapter tests
+        run: composer test
+
+  # -------------------------------------------------------------------
+  # Job 7: Fresh-install integration smoke test
+  #
+  # Exercises the full pipeline end-to-end using only PHP (no browser):
+  #   1. Build a 50-page index from synthesized ContentItems
+  #   2. Verify pagefind-entry.json and index files are present
+  #   3. Verify index statistics look sane (page count, file count)
+  #   4. Verify AI endpoint handler responds correctly with a mock client
+  #
+  # This is the "release smoke test" — if this passes, the core pipeline
+  # is working correctly from ContentItem → pagefind-format output.
+  # -------------------------------------------------------------------
+  smoke-test:
+    name: Release smoke test (PHP pipeline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: intl
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run pipeline smoke test
+        # Suppress E_DEPRECATED from voku/portable-utf8 (third-party, PHP 8.x nullable params).
+        run: php -d error_reporting=E_ALL~E_DEPRECATED scripts/smoke-test.php
+
+      - name: Verify index output structure
+        run: |
+          INDEX_DIR="/tmp/scolta-smoke-output/pagefind"
+
+          if [ ! -f "$INDEX_DIR/pagefind-entry.json" ]; then
+            echo "::error::pagefind-entry.json missing from index output"
+            exit 1
+          fi
+          echo "pagefind-entry.json: PRESENT"
+
+          FRAGMENT_COUNT=$(find "$INDEX_DIR" -name "*.pf_fragment" | wc -l)
+          if [ "$FRAGMENT_COUNT" -lt 3 ]; then
+            echo "::error::Expected at least 3 fragment files, found $FRAGMENT_COUNT"
+            exit 1
+          fi
+          echo "Fragment files: $FRAGMENT_COUNT (>= 3: PASS)"
+
+          INDEX_COUNT=$(find "$INDEX_DIR" -name "*.pf_index" | wc -l)
+          if [ "$INDEX_COUNT" -lt 1 ]; then
+            echo "::error::No .pf_index files found — index may be empty"
+            exit 1
+          fi
+          echo "Index files: $INDEX_COUNT (>= 1: PASS)"
+
+          # pagefind-entry.json must contain a valid JSON object.
+          php -r '
+            $entry = json_decode(file_get_contents("'$INDEX_DIR'/pagefind-entry.json"), true);
+            if (!is_array($entry)) { fwrite(STDERR, "pagefind-entry.json is not valid JSON\n"); exit(1); }
+            if (empty($entry["version"])) { fwrite(STDERR, "pagefind-entry.json missing version field\n"); exit(1); }
+            echo "pagefind-entry.json valid, version: " . $entry["version"] . "\n";
+          '
+
+          echo "PASS: Index output structure is valid."
+
+  # -------------------------------------------------------------------
+  # Job 8: Release readiness checks
+  #
+  # Verifies the release is properly formed:
+  #   - CHANGELOG.md has content under ## [Unreleased] or a versioned section
+  #   - Version format is valid
+  #   - WASM binary is present and valid
+  # -------------------------------------------------------------------
+  release-readiness:
+    name: Release readiness checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+
+      - name: Check version format
+        run: |
+          VERSION=$(php -r "echo json_decode(file_get_contents('composer.json'))->version;")
+          echo "Version: $VERSION"
+          echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-z]+)?$' || \
+            (echo "::error::Invalid version format: $VERSION" && exit 1)
+          echo "PASS: Version format valid."
+
+      - name: Check CHANGELOG.md has content
+        run: |
+          if [ ! -f CHANGELOG.md ]; then
+            echo "::error::CHANGELOG.md is missing"
+            exit 1
+          fi
+
+          # Must have either an [Unreleased] section or a versioned release.
+          if ! grep -qE '## \[' CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no version sections (expected ## [Unreleased] or ## [x.y.z])"
+            exit 1
+          fi
+          echo "PASS: CHANGELOG.md has version sections."
+
+      - name: Check WASM binary present and valid
+        run: |
+          WASM_PATH="assets/wasm/scolta_core_bg.wasm"
+          JS_PATH="assets/wasm/scolta_core.js"
+
+          if [ ! -f "$WASM_PATH" ]; then
+            echo "::error::WASM binary missing: $WASM_PATH"
+            exit 1
+          fi
+
+          MAGIC=$(xxd -l 4 -p "$WASM_PATH")
+          if [ "$MAGIC" != "0061736d" ]; then
+            echo "::error::WASM binary has invalid magic bytes: $MAGIC"
+            exit 1
+          fi
+
+          if [ ! -f "$JS_PATH" ]; then
+            echo "::error::WASM JS loader missing: $JS_PATH"
+            exit 1
+          fi
+          echo "PASS: WASM binary and JS loader present."

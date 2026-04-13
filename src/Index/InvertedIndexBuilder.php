@@ -48,15 +48,18 @@ class InvertedIndexBuilder
             }
 
             // Tokenize title and body separately for weight differentiation.
-            $titleTokens = $this->tokenizer->tokenize($item->title);
-            $bodyTokens = $this->tokenizer->tokenize($cleanText, mb_strlen($item->title) + 1);
+            // Strip HTML tags and decode entities — CMS adapters may pass
+            // titles like "<b>Bold Title</b>" or "Title &amp; Subtitle".
+            $cleanTitle = html_entity_decode(strip_tags($item->title), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $titleTokens = $this->tokenizer->tokenize($cleanTitle);
+            $bodyTokens = $this->tokenizer->tokenize($cleanText, mb_strlen($cleanTitle) + 1);
 
             // Tokenize URL path segments for search discovery.
             $urlPath = parse_url($item->url, PHP_URL_PATH) ?? '';
             $urlPath = preg_replace('/\.\w+$/', '', $urlPath); // Strip file extension.
             $urlSegments = array_filter(explode('/', $urlPath), fn ($s) => strlen($s) > 0);
             $urlText = implode(' ', $urlSegments);
-            $urlTokens = $this->tokenizer->tokenize($urlText, mb_strlen($item->title) + mb_strlen($cleanText) + 2);
+            $urlTokens = $this->tokenizer->tokenize($urlText, mb_strlen($cleanTitle) + mb_strlen($cleanText) + 2);
 
             $wordCount = count($titleTokens) + count($bodyTokens) + count($urlTokens);
 
@@ -64,13 +67,13 @@ class InvertedIndexBuilder
             $pages[$pageNum] = [
                 'id' => $item->id,
                 'url' => $item->url,
-                'title' => $item->title,
+                'title' => $cleanTitle,
                 'content' => $cleanText,
                 'wordCount' => $wordCount,
                 'date' => $item->date,
                 'filters' => $item->siteName !== '' ? ['site' => $item->siteName] : [],
                 'meta' => array_filter([
-                    'title' => $item->title,
+                    'title' => $cleanTitle,
                     'date' => $item->date,
                 ]),
                 'hash' => hash('sha256', $cleanText),

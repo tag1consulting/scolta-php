@@ -69,7 +69,7 @@ class PagefindFormatWriter
                 'anchors' => [],
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-            $hash = 'en_' . substr(hash('sha256', (string) $pageNum . $page['url']), 0, 7);
+            $hash = 'en_' . substr(hash('sha256', (string) $pageNum . $page['url']), 0, 10);
             $page['fragmentHash'] = $hash;
             $compressed = gzencode(self::DELIMITER . $fragment, 9);
             file_put_contents($buildDir . "/fragment/{$hash}.pf_fragment", $compressed);
@@ -93,7 +93,7 @@ class PagefindFormatWriter
             // The WASM expects this wrapper when parsing pf_index chunks.
             $innerArray = $this->cbor->encodeArray($cborItems);
             $cborData = $this->cbor->encodeArray([$innerArray]);
-            $hash = 'en_' . substr(hash('sha256', implode(',', $chunkWords)), 0, 7);
+            $hash = 'en_' . substr(hash('sha256', implode(',', $chunkWords)), 0, 10);
             $compressed = gzencode(self::DELIMITER . $cborData, 9);
             file_put_contents($buildDir . "/index/{$hash}.pf_index", $compressed);
 
@@ -109,7 +109,7 @@ class PagefindFormatWriter
         $filterHash = null;
         if ($filterData !== null) {
             $this->ensureDir($buildDir . '/filter');
-            $filterHash = 'en_' . substr(hash('sha256', $filterData), 0, 7);
+            $filterHash = 'en_' . substr(hash('sha256', $filterData), 0, 10);
             $compressed = gzencode(self::DELIMITER . $filterData, 9);
             file_put_contents($buildDir . "/filter/{$filterHash}.pf_filter", $compressed);
         }

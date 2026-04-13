@@ -18,6 +18,9 @@ class BuildState
     /** Maximum lock age before considering it stale (1 hour). */
     private const STALE_LOCK_SECONDS = 3600;
 
+    /** @var resource|null Open file handle holding the exclusive flock. */
+    private $lockHandle = null;
+
     public function __construct(
         private readonly string $stateDir,
         private readonly ?string $hmacSecret = null,
@@ -30,6 +33,10 @@ class BuildState
     /**
      * Initiate a new build.
      *
+     * Uses flock(LOCK_EX | LOCK_NB) for atomic lock acquisition, eliminating
+     * the TOCTOU race between check and write. The file handle is kept open
+     * (and locked) until releaseLock() is called.
+     *
      * @param array $manifest Initial manifest data (total_pages, chunk_size, language, etc.).
      * @return bool True if lock acquired, false if build already running.
      */
@@ -37,19 +44,25 @@ class BuildState
     {
         $lockFile = $this->stateDir . '/' . self::LOCK_FILE;
 
-        // Check for existing lock.
-        if (file_exists($lockFile)) {
-            $lockData = file_get_contents($lockFile);
-            if ($lockData !== false && !$this->isLockStale($lockData)) {
-                return false;
-            }
-            // Stale lock — clear it.
-            unlink($lockFile);
+        // Open the lock file for writing (creates it if missing).
+        $fp = fopen($lockFile, 'c');
+        if ($fp === false) {
+            return false;
         }
 
-        // Acquire lock.
-        $pid = getmypid();
-        file_put_contents($lockFile, "{$pid}:" . time());
+        // Attempt a non-blocking exclusive lock.
+        if (!flock($fp, LOCK_EX | LOCK_NB)) {
+            fclose($fp);
+            return false;
+        }
+
+        // We hold the lock — write PID and timestamp for diagnostics.
+        ftruncate($fp, 0);
+        fwrite($fp, getmypid() . ':' . time());
+        fflush($fp);
+
+        // Keep the handle open; releaseLock() will flock(LOCK_UN) + fclose().
+        $this->lockHandle = $fp;
 
         // Write manifest.
         $manifest = array_merge([
@@ -153,9 +166,15 @@ class BuildState
      */
     public function releaseLock(): void
     {
+        if ($this->lockHandle !== null) {
+            flock($this->lockHandle, LOCK_UN);
+            fclose($this->lockHandle);
+            $this->lockHandle = null;
+        }
+
         $lockFile = $this->stateDir . '/' . self::LOCK_FILE;
         if (file_exists($lockFile)) {
-            unlink($lockFile);
+            @unlink($lockFile);
         }
 
         $manifest = $this->readManifest();

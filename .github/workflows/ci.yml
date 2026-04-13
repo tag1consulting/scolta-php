@@ -12,10 +12,14 @@ jobs:
     strategy:
       matrix:
         include:
+          - php: '8.1'
+            lint: false
           - php: '8.2'
             lint: false
           - php: '8.3'
             lint: true
+          - php: '8.4'
+            lint: false
     steps:
       - uses: actions/checkout@v4
 
@@ -23,6 +27,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
+          extensions: intl
           coverage: none
 
       - name: Install dependencies
@@ -34,6 +39,94 @@ jobs:
 
       - name: Run tests
         run: composer test
+
+  coverage:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP with Xdebug
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: intl
+          coverage: xdebug
+
+      - name: Install dependencies
+        run: composer update --no-interaction --prefer-dist
+
+      - name: Run tests with coverage
+        run: ./vendor/bin/phpunit --coverage-text --colors=never 2>&1 | tail -20
+
+  wasm-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate WASM binary exists and is well-formed
+        run: |
+          WASM_PATH="assets/wasm/scolta_core_bg.wasm"
+          JS_PATH="assets/wasm/scolta_core.js"
+
+          echo "Checking WASM binary: $WASM_PATH"
+          if [ ! -f "$WASM_PATH" ]; then
+            echo "::error::WASM binary not found at $WASM_PATH"
+            exit 1
+          fi
+
+          WASM_SIZE=$(stat -c%s "$WASM_PATH")
+          echo "WASM size: ${WASM_SIZE} bytes"
+          if [ "$WASM_SIZE" -lt 102400 ] || [ "$WASM_SIZE" -gt 5242880 ]; then
+            echo "::error::WASM binary size ${WASM_SIZE} bytes is outside expected range (100KB–5MB)"
+            exit 1
+          fi
+
+          # Verify WebAssembly magic number: \0asm (0x00 0x61 0x73 0x6D)
+          MAGIC=$(xxd -l 4 -p "$WASM_PATH")
+          if [ "$MAGIC" != "0061736d" ]; then
+            echo "::error::WASM binary has invalid magic bytes: $MAGIC (expected 0061736d)"
+            exit 1
+          fi
+          echo "WASM magic bytes: OK ($MAGIC)"
+
+          echo "Checking JS loader: $JS_PATH"
+          if [ ! -f "$JS_PATH" ]; then
+            echo "::error::WASM JS loader not found at $JS_PATH"
+            exit 1
+          fi
+
+          # JS loader must reference the WASM file
+          if ! grep -q "scolta_core_bg.wasm" "$JS_PATH"; then
+            echo "::error::JS loader does not reference scolta_core_bg.wasm"
+            exit 1
+          fi
+          echo "JS loader references: OK"
+
+          echo "PASS: WASM binary validation complete."
+
+      - name: Setup Node.js for WASM runtime check
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate WASM loads in Node.js
+        run: |
+          node -e "
+            const fs = require('fs');
+            const wasmPath = 'assets/wasm/scolta_core_bg.wasm';
+            if (!fs.existsSync(wasmPath)) {
+              console.error('WASM file not found');
+              process.exit(1);
+            }
+            const buf = fs.readFileSync(wasmPath);
+            WebAssembly.compile(buf).then(() => {
+              console.log('PASS: WASM compiles successfully in Node.js');
+            }).catch(e => {
+              console.error('FAIL: WASM failed to compile:', e.message);
+              process.exit(1);
+            });
+          "
 
   docs-check:
     runs-on: ubuntu-latest

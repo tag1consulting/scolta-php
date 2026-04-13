@@ -163,6 +163,43 @@ class PhpIndexerTest extends TestCase
         $this->removeDir($stateDir2);
     }
 
+    public function testFingerprintChangesWhenIndexerTypeWouldChange(): void
+    {
+        // The PHP indexer fingerprint must differ from a hypothetical binary
+        // indexer fingerprint for the same content. We verify by checking that
+        // the prefix 'php-indexer-v1:' is baked in, making the fingerprint
+        // distinct from a raw hash of just the content IDs.
+        $items = $this->makeItems(3);
+
+        $phpFingerprint = PhpIndexer::computeFingerprint($items);
+
+        // Simulate a "binary indexer" fingerprint: same content, no type prefix.
+        $data = array_map(fn ($item) => $item->id . ':' . hash('sha256', $item->bodyHtml), $items);
+        sort($data);
+        $binaryFingerprint = hash('sha256', json_encode($data));
+
+        $this->assertNotSame($phpFingerprint, $binaryFingerprint,
+            'PHP and binary indexer must produce different fingerprints for same content');
+    }
+
+    public function testShouldBuildAfterIndexerSwitch(): void
+    {
+        $items = $this->makeItems(3);
+
+        // Store a "binary indexer" fingerprint in .scolta-state.
+        $data = array_map(fn ($item) => $item->id . ':' . hash('sha256', $item->bodyHtml), $items);
+        sort($data);
+        $binaryFingerprint = hash('sha256', json_encode($data));
+        file_put_contents($this->outputDir . '/.scolta-state', $binaryFingerprint);
+
+        // PHP indexer must see this as stale and return a new fingerprint.
+        $indexer = new PhpIndexer($this->stateDir, $this->outputDir);
+        $result = $indexer->shouldBuild($items);
+
+        $this->assertNotNull($result, 'Should build when stored fingerprint is from a different indexer type');
+        $this->assertNotSame($binaryFingerprint, $result);
+    }
+
     public function testHmacSecretUsed(): void
     {
         $indexer = new PhpIndexer($this->stateDir, $this->outputDir, 'my-secret');

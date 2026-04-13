@@ -41,29 +41,66 @@ Platform Adapters          scolta-php              scolta-core (browser WASM)
 
 Search scoring runs entirely in the browser via the WASM module loaded by `scolta.js`. The PHP server handles content indexing, AI API proxying, and configuration.
 
-## Two-Tier Indexing
+## Indexer
 
 Scolta supports two indexers that produce identical Pagefind-compatible output:
 
-| Tier | Indexer | When to use |
-|------|---------|-------------|
-| 1 | **PHP** (`PhpIndexer`) | Managed hosting where `exec()` is disabled (WP Engine, Kinsta, Flywheel) |
-| 2 | **Binary** (`PagefindBinary`) | Any host with shell access — faster for large sites |
+| Feature | PHP Indexer | Pagefind Binary |
+| ------- | ----------- | --------------- |
+| Languages with stemming | 15 (Snowball) | 33+ |
+| Speed (1 000 pages) | ~3–4 seconds | ~0.3–0.5 seconds |
+| Dependencies | None (pure PHP) | Node.js or direct binary |
+| Shared / managed hosting | Yes | Only if binary installable |
+| Heading / anchor search | Not yet | Yes |
+| Custom sort fields | Not yet | Yes |
 
-Set `indexer: auto` (default) to auto-detect. The PHP indexer is chunk-aware: it processes pages in batches, persists state to disk, and finalizes when all batches complete.
+Set `indexer: auto` (default) to auto-detect. With `auto`, Scolta uses the binary when available and silently falls back to PHP.
 
-## Language Support
+### When to use the PHP indexer
+
+- WP Engine, Kinsta, Flywheel, Pantheon and other managed hosts that disable `exec()`
+- Any environment where installing a Node.js binary is not possible
+- Smaller sites (under ~5 000 pages) where the speed difference is negligible
+
+### Upgrading to the binary indexer
+
+Install Pagefind globally (Node.js ≥ 18 required):
+
+```bash
+npm install -g pagefind
+```
+
+Or install the binary directly (no Node.js required):
+
+```bash
+# Scolta ships a download command on every platform:
+wp scolta download-pagefind          # WordPress
+drush scolta:download-pagefind       # Drupal
+php artisan scolta:download-pagefind # Laravel
+```
+
+Verify the upgrade:
+
+```bash
+wp scolta check-setup          # WordPress
+drush scolta:check-setup       # Drupal
+php artisan scolta:check-setup # Laravel
+```
+
+The health endpoint also reports `indexer_active` (`"binary"` or `"php"`) and `indexer_upgrade_available`.
+
+### Language support
 
 The PHP indexer supports word stemming for 15 languages via Snowball algorithms:
 Catalan, Danish, Dutch, English, Finnish, French, German, Italian, Norwegian,
 Portuguese, Romanian, Russian, Spanish, Swedish.
 
 For other languages (Arabic, Greek, Hindi, Hungarian, Turkish, etc.), the PHP
-indexer indexes content without stemming — search works, but "running" won't
-match "run." CJK languages (Chinese, Japanese, Korean) use character-level
-tokenization and don't require stemming.
+indexer indexes without stemming — search works, but "running" won't match "run."
+CJK languages (Chinese, Japanese, Korean) use character-level tokenization and
+don't require stemming.
 
-For full language parity with Pagefind's 33+ languages, use the binary indexer (Tier 2).
+For full language parity with Pagefind's 33+ languages, use the binary indexer.
 
 ## Testing
 

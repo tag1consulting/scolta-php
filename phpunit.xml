@@ -9,4 +9,18 @@
       <directory>tests</directory>
     </testsuite>
   </testsuites>
+
+  <!-- Exclude the benchmark group from the default test run.
+       To run benchmarks: ./vendor/bin/phpunit tests/Benchmark/ -group benchmark -->
+  <groups>
+    <exclude>
+      <group>benchmark</group>
+    </exclude>
+  </groups>
+
+  <coverage>
+    <report>
+      <text outputFile="php://stdout" showOnlySummary="true"/>
+    </report>
+  </coverage>
 </phpunit>

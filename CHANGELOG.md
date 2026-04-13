@@ -6,6 +6,14 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased] (0.2.0-dev)
 
+### Fixed
+
+- **Bug:** HTML tags (e.g. `<b>Title</b>`) and HTML entities (e.g. `&amp;`) in CMS-supplied titles were passed directly to the tokenizer, polluting the index with tag tokens. `InvertedIndexBuilder` now strips tags and decodes entities before tokenization and metadata storage.
+- **Bug:** Fragment, index chunk, and filter file hashes were 7 hex chars (28 bits), risking collisions at scale. All hashes are now uniformly 10 chars (40 bits), matching the pre-existing metadata hash.
+- **Bug:** `BuildState::initiateBuild()` had a TOCTOU race — two concurrent processes could both acquire the lock. Replaced with `flock(LOCK_EX | LOCK_NB)` for atomic OS-level mutual exclusion; the handle is held open until `releaseLock()`.
+- **Bug:** `PhpIndexer::computeFingerprint()` had no indexer-type marker, so switching binary→PHP left the fingerprint unchanged and `shouldBuild()` returned `null`. Fingerprint now includes a `php-indexer-v1:` prefix.
+- **Improvement:** `HealthChecker::check()` now includes `indexer_active`, `indexer_upgrade_available`, and `indexer_upgrade_message` fields to surface binary-upgrade guidance in platform admin UIs.
+
 ### Changed
 
 - **BREAKING:** Scoring, merging, and expansion parsing now run in the browser via WASM — no server-side WASM at runtime

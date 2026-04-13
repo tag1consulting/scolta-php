@@ -139,6 +139,30 @@ class InvertedIndexBuilderTest extends TestCase
         $this->assertSame(64, strlen($page['hash'])); // SHA-256 hex
     }
 
+    public function testHtmlInTitleIsStripped(): void
+    {
+        $item = new ContentItem(
+            'doc-1',
+            '<b>Bold &amp; Beautiful</b>',
+            '<p>Enough content here to pass the minimum length requirement for indexing.</p>',
+            'https://example.com/page',
+            '2026-01-01',
+        );
+        $result = $this->builder->build([$item]);
+
+        $page = array_values($result['pages'])[0];
+        // Title stored in page metadata must have no HTML tags.
+        $this->assertSame('Bold & Beautiful', $page['title']);
+        $this->assertSame('Bold & Beautiful', $page['meta']['title']);
+
+        // No "<b>" or "</b>" tokens in the inverted index.
+        foreach (array_keys($result['index']) as $word) {
+            $this->assertStringNotContainsString('<', $word, "HTML tag leaked into index word: {$word}");
+            $this->assertStringNotContainsString('>', $word, "HTML tag leaked into index word: {$word}");
+            $this->assertStringNotContainsString('&amp', $word, "HTML entity leaked into index word: {$word}");
+        }
+    }
+
     public function testMetaFieldsPopulated(): void
     {
         $result = $this->builder->build([

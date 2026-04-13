@@ -203,6 +203,45 @@ class PagefindFormatWriterTest extends TestCase
         $this->assertStringStartsWith('pagefind_dcd', $decompressed);
     }
 
+    public function testFragmentHashIsAtLeastTenChars(): void
+    {
+        $this->writer->write($this->sampleIndex(), $this->samplePages(), $this->tmpDir);
+        $fragmentFiles = glob($this->tmpDir . '/.scolta-building/fragment/*.pf_fragment');
+        $this->assertNotEmpty($fragmentFiles);
+
+        foreach ($fragmentFiles as $file) {
+            $basename = basename($file, '.pf_fragment');
+            // Format: en_<hash> — strip the "en_" prefix, remainder is the hash.
+            $hash = preg_replace('/^en_/', '', $basename);
+            $this->assertGreaterThanOrEqual(10, strlen($hash), "Fragment hash too short: {$basename}");
+        }
+    }
+
+    public function testFragmentHashesAreUniqueAcrossLargePageSet(): void
+    {
+        // Generate 500 pages to stress-test hash collision resistance.
+        $pages = [];
+        $index = [];
+        for ($i = 0; $i < 500; $i++) {
+            $pages[$i] = [
+                'url' => "/page-{$i}",
+                'title' => "Page {$i}",
+                'content' => "Content for page {$i}",
+                'wordCount' => 10,
+                'date' => '2026-01-01',
+                'filters' => [],
+                'meta' => ['title' => "Page {$i}"],
+                'hash' => hash('sha256', "page-{$i}"),
+            ];
+        }
+
+        $this->writer->write($index, $pages, $this->tmpDir);
+        $fragmentFiles = glob($this->tmpDir . '/.scolta-building/fragment/*.pf_fragment');
+
+        // 500 pages should produce exactly 500 unique fragment files.
+        $this->assertCount(500, $fragmentFiles, 'Hash collision detected: fewer fragment files than pages');
+    }
+
     public function testFilterFileReferencedInMetadata(): void
     {
         $this->writer->write($this->sampleIndex(), $this->samplePages(), $this->tmpDir);

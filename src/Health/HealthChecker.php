@@ -49,6 +49,12 @@ final class HealthChecker
             $status = 'degraded';
         }
 
+        $indexerActive = $binaryStatus['available'] ? 'binary' : 'php';
+        $upgradeMessage = $binaryStatus['available']
+            ? null
+            : 'Pagefind binary not found. Using PHP indexer (slower, English-only). '
+              . 'For 10× faster indexing and 15-language support: npm install -g pagefind';
+
         return [
             'status' => $status,
             'ai_provider' => $this->config->aiProvider ?: 'anthropic',
@@ -56,6 +62,9 @@ final class HealthChecker
             'pagefind_available' => $binaryStatus['available'],
             'wasm_available' => false,
             'index_exists' => $indexExists,
+            'indexer_active' => $indexerActive,
+            'indexer_upgrade_available' => !$binaryStatus['available'],
+            'indexer_upgrade_message' => $upgradeMessage,
             'pagefind' => [
                 'available' => $binaryStatus['available'],
                 'version' => $binaryStatus['version'],
