@@ -101,6 +101,7 @@ jobs:
             tests/Http/ \
             tests/Security/AiErrorHandlingTest.php \
             tests/Security/InputValidationTest.php \
+            --no-coverage \
             --colors=never
 
   # -------------------------------------------------------------------
@@ -129,6 +130,7 @@ jobs:
         run: |
           ./vendor/bin/phpunit \
             tests/Concordance/ \
+            --no-coverage \
             --colors=never
 
   # -------------------------------------------------------------------
@@ -141,11 +143,15 @@ jobs:
   adapter-wp:
     name: Adapter install — WordPress
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scolta-wp
     steps:
       - name: Checkout scolta-wp
         uses: actions/checkout@v4
         with:
           repository: tag1consulting/scolta-wp
+          path: scolta-wp
 
       - name: Setup PHP 8.3
         uses: shivammathur/setup-php@v2
@@ -174,11 +180,15 @@ jobs:
   adapter-drupal:
     name: Adapter install — Drupal
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scolta-drupal
     steps:
       - name: Checkout scolta-drupal
         uses: actions/checkout@v4
         with:
           repository: tag1consulting/scolta-drupal
+          path: scolta-drupal
 
       - name: Setup PHP 8.3
         uses: shivammathur/setup-php@v2
@@ -207,11 +217,15 @@ jobs:
   adapter-laravel:
     name: Adapter install — Laravel
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scolta-laravel
     steps:
       - name: Checkout scolta-laravel
         uses: actions/checkout@v4
         with:
           repository: tag1consulting/scolta-laravel
+          path: scolta-laravel
 
       - name: Setup PHP 8.3
         uses: shivammathur/setup-php@v2
