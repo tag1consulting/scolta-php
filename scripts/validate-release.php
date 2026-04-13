@@ -20,8 +20,8 @@ if (str_ends_with($version, '-dev')) {
 }
 
 // Check WASM binary exists.
-if (!file_exists(__DIR__ . '/../wasm/scolta_core.wasm')) {
-    echo "FAIL: WASM binary not found. Run composer build-wasm.\n";
+if (!file_exists(__DIR__ . '/../assets/wasm/scolta_core_bg.wasm')) {
+    echo "FAIL: WASM binary not found at assets/wasm/scolta_core_bg.wasm.\n";
     $fail = true;
 }
 
