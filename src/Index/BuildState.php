@@ -233,6 +233,113 @@ class BuildState
     }
 
     /**
+     * Check whether a build is currently in progress.
+     *
+     * Returns true when the manifest shows status = 'building' AND the lock
+     * file exists (i.e. a live process holds the lock). A stale lock (PID
+     * dead or older than STALE_LOCK_SECONDS) is not considered running.
+     *
+     * @since 0.2.0
+     * @stability experimental
+     */
+    public function isRunning(): bool
+    {
+        $manifest = $this->readManifest();
+        if ($manifest === null || ($manifest['status'] ?? '') !== 'building') {
+            return false;
+        }
+
+        $lockFile = $this->stateDir . '/' . self::LOCK_FILE;
+        if (!file_exists($lockFile)) {
+            return false;
+        }
+
+        $lockData = file_get_contents($lockFile);
+        if ($lockData === false) {
+            return false;
+        }
+
+        return !$this->isLockStale($lockData);
+    }
+
+    /**
+     * Return build progress as a fraction between 0.0 and 1.0.
+     *
+     * Computed as chunks_written / max(1, ceil(total_pages / chunk_size)).
+     * Returns 0.0 when no manifest is present.
+     *
+     * @since 0.2.0
+     * @stability experimental
+     */
+    public function getProgress(): float
+    {
+        $manifest = $this->readManifest();
+        if ($manifest === null) {
+            return 0.0;
+        }
+
+        $totalPages  = (int) ($manifest['total_pages'] ?? 0);
+        $chunkSize   = (int) ($manifest['chunk_size'] ?? 100);
+        $chunksWritten = (int) ($manifest['chunks_written'] ?? 0);
+
+        $totalChunks = $totalPages > 0 ? (int) ceil($totalPages / max(1, $chunkSize)) : 1;
+
+        return min(1.0, $chunksWritten / $totalChunks);
+    }
+
+    /**
+     * Return the ISO 8601 timestamp when the current build started.
+     *
+     * Returns null when no manifest is present.
+     *
+     * @since 0.2.0
+     * @stability experimental
+     */
+    public function getStartTime(): ?string
+    {
+        $manifest = $this->readManifest();
+
+        return $manifest['started_at'] ?? null;
+    }
+
+    /**
+     * Return the number of pages processed so far in the current build.
+     *
+     * Returns 0 when no manifest is present.
+     *
+     * @since 0.2.0
+     * @stability experimental
+     */
+    public function getPagesProcessed(): int
+    {
+        $manifest = $this->readManifest();
+
+        return (int) ($manifest['pages_processed'] ?? 0);
+    }
+
+    /**
+     * Return the ISO 8601 timestamp of the last completed build.
+     *
+     * Derived from the manifest file's mtime when the build status is 'idle'.
+     * Returns null when no completed build record exists.
+     *
+     * @since 0.2.0
+     * @stability experimental
+     */
+    public function getLastBuildTime(): ?string
+    {
+        $manifest = $this->readManifest();
+        if ($manifest === null || ($manifest['status'] ?? '') !== 'idle') {
+            return null;
+        }
+
+        $path = $this->stateDir . '/' . self::MANIFEST_FILE;
+        $mtime = @filemtime($path);
+
+        return $mtime !== false ? gmdate('c', $mtime) : null;
+    }
+
+    /**
      * Clean up all state files.
      */
     public function cleanup(): void
