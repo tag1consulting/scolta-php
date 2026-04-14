@@ -6,6 +6,14 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Added
+
+- Sequential page numbering fix: removes crc32 fallback that corrupted indexes with string/UUID keys
+- Multilingual concordance test suite: 19 languages × 5 pages, compared to Pagefind 1.5.0 reference
+- Snowball stemmer concordance corpus: 177k words across EN/DE/FR/ES/RU with thresholds
+- Byte-level structural parity tests for CBOR index files
+- Performance benchmark script (`scripts/benchmark.php`)
+
 ## [0.2.0] - 2026-04-13
 
 ### Fixed
