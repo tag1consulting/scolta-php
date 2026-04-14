@@ -182,6 +182,129 @@ class ByteParityTest extends TestCase
         }
     }
 
+    /**
+     * Filter index files have the expected structure when present.
+     *
+     * If no filter files are produced by this corpus, the test is skipped.
+     * Filter structure: [[filter_name_str, [[value_str, [page_num_int, ...]]]]]
+     */
+    public function testFilterIndexStructure(): void
+    {
+        $phpDir = $this->buildWithPhpIndexer();
+        $pagefindDir = $phpDir . '/pagefind';
+
+        $filterFiles = glob($pagefindDir . '/filter/*.pf_filter') ?: [];
+        if (count($filterFiles) === 0) {
+            $this->markTestSkipped('No pf_filter files produced by this corpus — skipping filter structure test.');
+        }
+
+        $metaFiles = glob($pagefindDir . '/pagefind.*.pf_meta') ?: glob($pagefindDir . '/*.pf_meta');
+        $this->assertNotEmpty($metaFiles, 'No pf_meta file found');
+        $meta = CborDecoder::decodePfFile($metaFiles[0]);
+        $pageCount = count($meta[1] ?? []);
+
+        foreach ($filterFiles as $filterFile) {
+            $decoded = CborDecoder::decodePfFile($filterFile);
+            $basename = basename($filterFile);
+
+            $this->assertIsArray($decoded, "Filter file must decode to array: {$basename}");
+            $this->assertNotEmpty($decoded, "Filter file must not be empty: {$basename}");
+
+            // Top-level: array of [filter_name, [[value, [page_nums...]]]]
+            foreach ($decoded as $filterEntry) {
+                $this->assertIsArray($filterEntry, "Each filter entry must be an array: {$basename}");
+                $this->assertCount(2, $filterEntry, "Each filter entry must have 2 elements: {$basename}");
+                $this->assertIsString($filterEntry[0], "Filter name must be a string: {$basename}");
+                $this->assertNotEmpty($filterEntry[0], "Filter name must not be empty: {$basename}");
+
+                $valueList = $filterEntry[1];
+                $this->assertIsArray($valueList, "Filter value list must be an array: {$basename}");
+
+                foreach ($valueList as $valueEntry) {
+                    $this->assertIsArray($valueEntry, "Each value entry must be an array: {$basename}");
+                    $this->assertCount(2, $valueEntry, "Each value entry must have 2 elements: {$basename}");
+                    $this->assertIsString($valueEntry[0], "Filter value must be a string: {$basename}");
+
+                    $pageNums = $valueEntry[1];
+                    $this->assertIsArray($pageNums, "Page nums list must be an array: {$basename}");
+
+                    foreach ($pageNums as $pn) {
+                        $this->assertIsInt($pn, "Page num must be int: {$basename}");
+                        $this->assertGreaterThanOrEqual(0, $pn, "Page num must be ≥ 0: {$basename}");
+                        $this->assertLessThan(
+                            $pageCount,
+                            $pn,
+                            "Page num {$pn} out of range (0..{$pageCount}): {$basename}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Every pf_* file is actually compressed (gzip reduced its size).
+     */
+    public function testCompressedFilesAreActuallyCompressed(): void
+    {
+        $phpDir = $this->buildWithPhpIndexer();
+        $pagefindDir = $phpDir . '/pagefind';
+
+        $patterns = [
+            'pf_meta'     => glob($pagefindDir . '/pagefind.*.pf_meta') ?: glob($pagefindDir . '/*.pf_meta'),
+            'pf_index'    => glob($pagefindDir . '/index/*.pf_index') ?: [],
+            'pf_fragment' => glob($pagefindDir . '/fragment/*.pf_fragment') ?: glob($pagefindDir . '/*.pf_fragment'),
+            'pf_filter'   => glob($pagefindDir . '/filter/*.pf_filter') ?: [],
+        ];
+
+        $checkedAny = false;
+
+        foreach ($patterns as $type => $files) {
+            foreach ($files as $file) {
+                $compressed = file_get_contents($file);
+                $this->assertNotFalse($compressed, "Cannot read file: {$file}");
+
+                $uncompressed = gzdecode($compressed);
+                $this->assertNotFalse($uncompressed, "File must be gzip-decompressible: {$file}");
+
+                $compressedSize = strlen($compressed);
+                $uncompressedSize = strlen($uncompressed);
+
+                // Must have reduced size.
+                $this->assertLessThan(
+                    $uncompressedSize,
+                    $compressedSize,
+                    "Compressed size ({$compressedSize}) must be less than uncompressed ({$uncompressedSize}) for: " . basename($file)
+                );
+
+                $ratio = $uncompressedSize > 0 ? $compressedSize / $uncompressedSize : 1.0;
+
+                $this->assertLessThan(
+                    0.99,
+                    $ratio,
+                    sprintf('Compression ratio %.3f ≥ 0.99 for %s (must achieve at least 1%%)', $ratio, basename($file))
+                );
+
+                // For index and meta files, expect stronger compression (≥ 15%).
+                if ($type === 'pf_index' || $type === 'pf_meta') {
+                    $this->assertLessThan(
+                        0.85,
+                        $ratio,
+                        sprintf(
+                            'Compression ratio %.3f ≥ 0.85 for %s (expected ≥15%% reduction on CBOR data)',
+                            $ratio,
+                            basename($file)
+                        )
+                    );
+                }
+
+                $checkedAny = true;
+            }
+        }
+
+        $this->assertTrue($checkedAny, 'Must have found at least one pf_* file to check compression');
+    }
+
     // ---------------------------------------------------------------
     // Helpers (standalone copies — not shared with ReferenceComparisonTest)
     // ---------------------------------------------------------------
