@@ -33,13 +33,17 @@ class InvertedIndexBuilder
      * @param ContentItem[] $items Content items to index.
      * @return array{index: array, pages: array}
      */
-    public function build(array $items): array
+    public function build(array $items, int $pageOffset = 0): array
     {
         $index = [];
         $pages = [];
+        $pageNum = $pageOffset;  // Start from caller-provided offset
 
-        foreach ($items as $pageId => $item) {
-            $pageNum = is_int($pageId) ? $pageId : crc32($item->id) & 0x7FFFFFFF;
+        foreach ($items as $item) {
+            // Page numbers MUST be sequential. pagefind.js resolves search
+            // results via pf_meta[1][page_num] where pf_meta[1] is a
+            // sequential array. crc32 hashing and non-sequential keys
+            // corrupt result resolution at runtime.
 
             $cleanText = HtmlCleaner::clean($item->bodyHtml, $item->title);
 
@@ -87,6 +91,8 @@ class InvertedIndexBuilder
 
             // Index URL tokens with body weight.
             $this->indexTokens($index, $urlTokens, $pageNum, self::BODY_WEIGHT);
+
+            $pageNum++;
         }
 
         return ['index' => $index, 'pages' => $pages];

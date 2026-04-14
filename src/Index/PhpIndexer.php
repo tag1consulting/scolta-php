@@ -33,6 +33,9 @@ class PhpIndexer
     /** @var string[] Content hashes used in this build (for cache pruning). */
     private array $usedCacheKeys = [];
 
+    /** Global page offset for sequential page numbering across chunks. */
+    private int $currentPageOffset = 0;
+
     public function __construct(
         private readonly string $stateDir,
         private readonly string $outputDir,
@@ -76,7 +79,8 @@ class PhpIndexer
         }
 
         // Build partial index.
-        $partial = $this->builder->build($items);
+        $partial = $this->builder->build($items, $this->currentPageOffset);
+        $this->currentPageOffset += count($partial['pages']);
 
         // Track cache keys for pruning.
         foreach ($items as $item) {
