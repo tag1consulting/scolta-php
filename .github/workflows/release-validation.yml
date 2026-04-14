@@ -376,3 +376,55 @@ jobs:
             exit 1
           fi
           echo "PASS: WASM binary and JS loader present."
+
+  # -------------------------------------------------------------------
+  # Job 9: Benchmark throughput sanity check
+  #
+  # Runs the benchmark at 1000 pages (3 runs, median reported).
+  # Fails if throughput drops below 500 pages/sec — a sanity floor,
+  # not regression detection (no prior CI runs to compare against yet).
+  # Does NOT commit the JSON back to the repo.
+  # -------------------------------------------------------------------
+  benchmark:
+    name: Benchmark throughput sanity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: intl
+          coverage: none
+
+      - name: Install dependencies
+        run: composer update --no-interaction --prefer-dist --ignore-platform-req=php
+
+      - name: Run benchmark (1000 pages, 3 runs)
+        run: |
+          php -d error_reporting=E_ALL~E_DEPRECATED scripts/benchmark.php --sizes=1000 \
+            --json=benchmarks/results/ci-$(date +%Y-%m-%d)-${GITHUB_SHA::7}.json
+
+      - name: Assert minimum throughput
+        run: |
+          # Find the most recent JSON file produced by the benchmark.
+          LATEST=$(ls -1t benchmarks/results/*.json 2>/dev/null | head -1)
+          if [ -z "$LATEST" ]; then
+            echo "::error::No benchmark JSON file found"
+            exit 1
+          fi
+
+          PPS=$(php -r "
+            \$data = json_decode(file_get_contents('$LATEST'), true);
+            \$run = \$data['runs'][0] ?? null;
+            echo \$run ? (int)round(\$run['pages_per_second']) : 0;
+          ")
+
+          echo "Pages/sec at 1000 pages: $PPS"
+
+          if [ "$PPS" -lt 500 ]; then
+            echo "::error::Throughput $PPS pages/sec is below minimum floor of 500 pages/sec"
+            exit 1
+          fi
+          echo "PASS: Throughput $PPS pages/sec >= 500 pages/sec floor."

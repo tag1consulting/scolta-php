@@ -1,0 +1,65 @@
+{
+    "version": "0.2.1-dev",
+    "git_sha": "6e77cea",
+    "timestamp": "2026-04-14T16:32:59Z",
+    "environment": {
+        "php_version": "8.5.2",
+        "os": "Darwin",
+        "cpu_model": "Apple M4 Max",
+        "cpu_cores": 16,
+        "ram_gb": 128
+    },
+    "runs": [
+        {
+            "pages": 100,
+            "wall_clock_seconds": 0.241213,
+            "peak_memory_mb": 16,
+            "pages_per_second": 414.6,
+            "raw_runs": [
+                0.237305,
+                0.241213,
+                0.246618
+            ],
+            "breakdown": {
+                "tokenization_ms": 0,
+                "stemming_ms": 0,
+                "cbor_encoding_ms": 0,
+                "gzip_ms": 0
+            }
+        },
+        {
+            "pages": 1000,
+            "wall_clock_seconds": 2.536444,
+            "peak_memory_mb": 144.36,
+            "pages_per_second": 394.3,
+            "raw_runs": [
+                2.516429,
+                2.536444,
+                2.56997
+            ],
+            "breakdown": {
+                "tokenization_ms": 0,
+                "stemming_ms": 0,
+                "cbor_encoding_ms": 0,
+                "gzip_ms": 0
+            }
+        },
+        {
+            "pages": 5000,
+            "wall_clock_seconds": 13.208749,
+            "peak_memory_mb": 664,
+            "pages_per_second": 378.5,
+            "raw_runs": [
+                13.143897,
+                13.208749,
+                13.417654
+            ],
+            "breakdown": {
+                "tokenization_ms": 0,
+                "stemming_ms": 0,
+                "cbor_encoding_ms": 0,
+                "gzip_ms": 0
+            }
+        }
+    ]
+}

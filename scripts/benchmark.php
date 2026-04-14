@@ -8,8 +8,11 @@ declare(strict_types=1);
  * Usage:
  *   php scripts/benchmark.php
  *   php scripts/benchmark.php --sizes=100,1000
+ *   php scripts/benchmark.php --json=/path/to/output.json
  *
  * Output: a table of pages/second, wall-clock time and memory.
+ *         Optionally writes structured JSON to --json path.
+ *         Each size is run 3 times; the median is reported.
  */
 
 // Autoload.
@@ -29,6 +32,7 @@ use Tag1\Scolta\Index\PhpIndexer;
 
 $defaultSizes = [100, 1000, 10000, 50000];
 $sizes = $defaultSizes;
+$jsonPath = null;
 
 foreach ($argv as $arg) {
     if (str_starts_with($arg, '--sizes=')) {
@@ -38,7 +42,17 @@ foreach ($argv as $arg) {
         if (!empty($parsed)) {
             $sizes = array_values($parsed);
         }
+    } elseif (str_starts_with($arg, '--json=')) {
+        $jsonPath = substr($arg, strlen('--json='));
     }
+}
+
+// Default JSON path if not specified.
+if ($jsonPath === null) {
+    $date = date('Y-m-d');
+    $sha = trim((string) shell_exec('git -C ' . escapeshellarg(__DIR__ . '/..') . ' rev-parse --short HEAD 2>/dev/null')) ?: 'unknown';
+    $resultsDir = __DIR__ . '/../benchmarks/results';
+    $jsonPath = "{$resultsDir}/{$date}-{$sha}.json";
 }
 
 // ---------------------------------------------------------------------------
@@ -102,8 +116,97 @@ function generateSyntheticItem(int $index, array $wordPool): ContentItem
         bodyHtml: $body,
         url: "/bench/page-{$index}",
         date: $date,
-        language: 'en',
     );
+}
+
+// ---------------------------------------------------------------------------
+// Single benchmark run helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Run one benchmark pass for $n pages. Returns [wall_clock_sec, peak_mem_mb].
+ */
+function runBenchmarkPass(int $n, array $items, string $wordPool): array
+{
+    $stateDir = sys_get_temp_dir() . '/scolta-bench-state-' . uniqid();
+    $outputDir = sys_get_temp_dir() . '/scolta-bench-output-' . uniqid();
+    mkdir($stateDir, 0755, true);
+    mkdir($outputDir, 0755, true);
+
+    gc_collect_cycles();
+    $memBefore = memory_get_usage(true);
+
+    $start = hrtime(true);
+
+    $indexer = new PhpIndexer($stateDir, $outputDir);
+    $indexer->processChunk($items, 0);
+    $result = $indexer->finalize();
+
+    $elapsed = (hrtime(true) - $start) / 1e9;
+
+    $memAfter = memory_get_peak_usage(true);
+    $memMb = ($memAfter - $memBefore) / (1024 * 1024);
+
+    if (!$result->success) {
+        fwrite(STDERR, "WARNING: build failed for {$n} pages: " . ($result->error ?? 'unknown') . "\n");
+    }
+
+    // Clean up.
+    $rmDir = function (string $dir) use (&$rmDir): void {
+        if (!is_dir($dir)) {
+            return;
+        }
+        foreach (new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST
+        ) as $item) {
+            $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());
+        }
+        rmdir($dir);
+    };
+    $rmDir($stateDir);
+    $rmDir($outputDir);
+
+    return [$elapsed, $memMb];
+}
+
+// ---------------------------------------------------------------------------
+// Environment detection
+// ---------------------------------------------------------------------------
+
+function detectEnvironment(): array
+{
+    $phpVersion = PHP_VERSION;
+    $os = PHP_OS_FAMILY;
+
+    $cpuModel = 'unknown';
+    $cpuCores = 1;
+    $ramGb = 0;
+
+    if (file_exists('/proc/cpuinfo')) {
+        $cpuinfo = file_get_contents('/proc/cpuinfo');
+        if (preg_match('/^model name\s*:\s*(.+)$/m', $cpuinfo, $m)) {
+            $cpuModel = trim($m[1]);
+        }
+        $cpuCores = max(1, (int) shell_exec('nproc 2>/dev/null') ?: 1);
+        $meminfo = file_get_contents('/proc/meminfo');
+        if (preg_match('/MemTotal:\s+(\d+)\s+kB/i', $meminfo, $m)) {
+            $ramGb = round((int) $m[1] / (1024 * 1024), 1);
+        }
+    } elseif (PHP_OS_FAMILY === 'Darwin') {
+        $cpuModel = trim((string) shell_exec('sysctl -n machdep.cpu.brand_string 2>/dev/null'));
+        $cpuCores = (int) trim((string) shell_exec('sysctl -n hw.logicalcpu 2>/dev/null') ?: '1');
+        $memBytes = (int) trim((string) shell_exec('sysctl -n hw.memsize 2>/dev/null') ?: '0');
+        $ramGb = round($memBytes / (1024 * 1024 * 1024), 1);
+    }
+
+    return [
+        'php_version' => $phpVersion,
+        'os' => $os,
+        'cpu_model' => $cpuModel ?: 'unknown',
+        'cpu_cores' => $cpuCores,
+        'ram_gb' => $ramGb,
+    ];
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +229,8 @@ echo $separator . "\n";
 echo $header . "\n";
 echo $separator . "\n";
 
+$jsonRuns = [];
+
 foreach ($sizes as $n) {
     // Pre-generate items before timing (exclude generation time).
     $items = [];
@@ -133,59 +238,72 @@ foreach ($sizes as $n) {
         $items[] = generateSyntheticItem($i, $wordPool);
     }
 
-    // Directories.
-    $stateDir = sys_get_temp_dir() . '/scolta-bench-state-' . uniqid();
-    $outputDir = sys_get_temp_dir() . '/scolta-bench-output-' . uniqid();
-    mkdir($stateDir, 0755, true);
-    mkdir($outputDir, 0755, true);
+    // Run 3 times, take the median wall-clock time.
+    $rawTimes = [];
+    $rawMems = [];
+    for ($run = 0; $run < 3; $run++) {
+        [$t, $mem] = runBenchmarkPass($n, $items, '');
+        $rawTimes[] = $t;
+        $rawMems[] = $mem;
+    }
 
-    // Force GC before run.
-    gc_collect_cycles();
-    $memBefore = memory_get_usage(true);
+    sort($rawTimes);
+    $elapsed = $rawTimes[1]; // Median of 3
+    $memMb = max($rawMems);  // Peak across runs
 
-    // Time the build.
-    $start = hrtime(true);
-
-    $indexer = new PhpIndexer($stateDir, $outputDir);
-    $indexer->processChunk($items, 0);
-    $result = $indexer->finalize();
-
-    $elapsed = (hrtime(true) - $start) / 1e9; // seconds
-
-    $memAfter = memory_get_peak_usage(true);
-    $memMb = ($memAfter - $memBefore) / (1024 * 1024);
-
-    $pagesPerSec = $elapsed > 0 ? (int) round($n / $elapsed) : 0;
+    $pagesPerSec = $elapsed > 0 ? round($n / $elapsed, 1) : 0.0;
 
     echo sprintf(
         ' %' . $colWidths[0] . 'd | %' . $colWidths[1] . '.3f | %' . $colWidths[2] . 'd | %' . $colWidths[3] . '.1f',
         $n,
         $elapsed,
-        $pagesPerSec,
+        (int) round($pagesPerSec),
         $memMb
     ) . "\n";
 
-    if (!$result->success) {
-        fwrite(STDERR, "WARNING: build failed for {$n} pages: " . ($result->error ?? 'unknown') . "\n");
-    }
-
-    // Clean up.
-    $rmDir = function (string $dir) use (&$rmDir): void {
-        if (!is_dir($dir)) {
-            return;
-        }
-        foreach (new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::CHILD_FIRST
-        ) as $item) {
-            $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());
-        }
-        rmdir($dir);
-    };
-    $rmDir($stateDir);
-    $rmDir($outputDir);
+    $jsonRuns[] = [
+        'pages' => $n,
+        'wall_clock_seconds' => round($elapsed, 6),
+        'peak_memory_mb' => round($memMb, 2),
+        'pages_per_second' => $pagesPerSec,
+        'raw_runs' => [
+            round($rawTimes[0], 6),
+            round($rawTimes[1], 6),
+            round($rawTimes[2], 6),
+        ],
+        'breakdown' => [
+            'tokenization_ms' => 0.0,
+            'stemming_ms' => 0.0,
+            'cbor_encoding_ms' => 0.0,
+            'gzip_ms' => 0.0,
+        ],
+    ];
 }
 
 echo $separator . "\n\n";
 echo "Run with --sizes=N,M to benchmark specific sizes.\n";
 echo "Example: php scripts/benchmark.php --sizes=100,500,2000\n\n";
+
+// ---------------------------------------------------------------------------
+// Write JSON results
+// ---------------------------------------------------------------------------
+
+$composerJson = json_decode((string) file_get_contents(__DIR__ . '/../composer.json'), true);
+$version = $composerJson['version'] ?? 'unknown';
+$sha = trim((string) shell_exec('git -C ' . escapeshellarg(__DIR__ . '/..') . ' rev-parse --short HEAD 2>/dev/null')) ?: 'unknown';
+
+$jsonData = [
+    'version' => $version,
+    'git_sha' => $sha,
+    'timestamp' => gmdate('Y-m-d\TH:i:s\Z'),
+    'environment' => detectEnvironment(),
+    'runs' => $jsonRuns,
+];
+
+$jsonDir = dirname((string) $jsonPath);
+if (!is_dir($jsonDir)) {
+    mkdir($jsonDir, 0755, true);
+}
+
+file_put_contents($jsonPath, json_encode($jsonData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+echo "JSON results written to: {$jsonPath}\n\n";
