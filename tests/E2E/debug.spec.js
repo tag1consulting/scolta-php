@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 
-const OUTPUT_DIR = path.join(__dirname, '../../.e2e-output');
+const OUTPUT_DIR = path.join(__dirname, '../../.e2e-output-debug');
 let server, baseUrl;
 
 test.beforeAll(async () => {

@@ -5,6 +5,7 @@
 scripts/.pagefind-bin/
 /node_modules/
 /.e2e-output/
+/.e2e-output-debug/
 /test-results/
 .php-cs-fixer.cache
 /.claude/
