@@ -153,7 +153,7 @@ class BuildState
             $data = $serialized;
         }
 
-        $result = unserialize($data);
+        $result = unserialize($data, ['allowed_classes' => false]);
         if (!is_array($result)) {
             throw new \RuntimeException("Invalid chunk data in: {$filename}");
         }

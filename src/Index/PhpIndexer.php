@@ -255,7 +255,7 @@ class PhpIndexer
     {
         $cacheFile = $this->stateDir . '/page-word-cache.php';
         if ($this->storage->exists($cacheFile)) {
-            $data = @unserialize($this->storage->get($cacheFile));
+            $data = @unserialize($this->storage->get($cacheFile), ['allowed_classes' => false]);
             if (is_array($data)) {
                 $this->pageWordCache = $data;
             }

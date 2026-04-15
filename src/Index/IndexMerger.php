@@ -123,7 +123,7 @@ class IndexMerger
             if ($data === false) {
                 continue;
             }
-            $partial = unserialize($data);
+            $partial = unserialize($data, ['allowed_classes' => false]);
             if (is_array($partial)) {
                 $partials[] = $partial;
             }
