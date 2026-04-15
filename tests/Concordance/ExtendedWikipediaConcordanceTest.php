@@ -9,21 +9,20 @@ use Tag1\Scolta\Export\ContentItem;
 use Tag1\Scolta\Index\PhpIndexer;
 
 /**
- * Concordance test against Wikipedia corpus (19 languages × 5 pages).
+ * Concordance test against extended Wikipedia corpus (19 languages × 5 pages).
  *
- * Compares PHP indexer output against a frozen Pagefind reference generated
- * from Wikipedia article summaries. Thresholds:
- *  - Latin-script languages: Jaccard ≥ 0.65
- *  - CJK / Arabic (ar, zh, ja, ko): Jaccard ≥ 0.45
+ * Uses different topics (literature, philosophy, music, sport, science)
+ * from the base WikipediaConcordanceTest (which uses science/geography).
+ * Thresholds are the same: Latin-script ≥ 0.65, CJK+Arabic ≥ 0.45.
  *
- * Run generate-concordance-fixtures-wiki.sh to regenerate reference fixtures.
+ * Run generate-concordance-fixtures-wiki-extended.sh to regenerate reference.
  *
  * @since 0.3.0
  * @stability experimental
  */
-class WikipediaConcordanceTest extends TestCase
+class ExtendedWikipediaConcordanceTest extends TestCase
 {
-    private string $referenceWikiDir;
+    private string $referenceExtDir;
     private string $stateDir;
     private string $outputDir;
 
@@ -55,16 +54,16 @@ class WikipediaConcordanceTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->referenceWikiDir = __DIR__ . '/../fixtures/concordance/reference-wiki';
+        $this->referenceExtDir = __DIR__ . '/../fixtures/concordance/reference-wiki-extended';
 
-        if (!file_exists($this->referenceWikiDir . '/pagefind-entry.json')) {
+        if (!file_exists($this->referenceExtDir . '/pagefind-entry.json')) {
             $this->markTestSkipped(
-                'Wikipedia reference fixtures not generated. Run: ./scripts/generate-concordance-fixtures-wiki.sh'
+                'Extended Wikipedia reference fixtures not generated. Run: ./scripts/generate-concordance-fixtures-wiki-extended.sh'
             );
         }
 
-        $this->stateDir = sys_get_temp_dir() . '/scolta-wiki-state-' . uniqid();
-        $this->outputDir = sys_get_temp_dir() . '/scolta-wiki-output-' . uniqid();
+        $this->stateDir = sys_get_temp_dir() . '/scolta-wiki-ext-state-' . uniqid();
+        $this->outputDir = sys_get_temp_dir() . '/scolta-wiki-ext-output-' . uniqid();
         mkdir($this->stateDir, 0755, true);
         mkdir($this->outputDir, 0755, true);
     }
@@ -95,7 +94,7 @@ class WikipediaConcordanceTest extends TestCase
             count($phpFragments),
             1,
             sprintf(
-                '[%s] PHP indexed %d pages, Pagefind indexed %d. Allowed delta: 1.',
+                '[ext:%s] PHP indexed %d pages, Pagefind indexed %d. Allowed delta: 1.',
                 $lang,
                 count($phpFragments),
                 count($refFragments)
@@ -136,17 +135,17 @@ class WikipediaConcordanceTest extends TestCase
         }
 
         if (count($similarities) === 0) {
-            $this->markTestSkipped("[{$lang}] No overlapping fragments to compare.");
+            $this->markTestSkipped("[ext:{$lang}] No overlapping fragments to compare.");
         }
 
         $avg = array_sum($similarities) / count($similarities);
-        fwrite(STDERR, sprintf("[wiki:%s] Content overlap: %.3f (threshold: %.2f)\n", $lang, $avg, $threshold));
+        fwrite(STDERR, sprintf("[wiki-ext:%s] Content overlap: %.3f (threshold: %.2f)\n", $lang, $avg, $threshold));
 
         $this->assertGreaterThanOrEqual(
             $threshold,
             $avg,
             sprintf(
-                '[%s] Average Jaccard similarity %.3f < threshold %.2f (n=%d fragments)',
+                '[ext:%s] Average Jaccard similarity %.3f < threshold %.2f (n=%d fragments)',
                 $lang,
                 $avg,
                 $threshold,
@@ -156,21 +155,18 @@ class WikipediaConcordanceTest extends TestCase
     }
 
     /**
-     * Record baseline concordance measurements to JSON file.
-     *
-     * This test never fails — it is a measurement pass. Run with
-     * --group baseline to collect measurements for threshold review.
+     * Record extended baseline measurements.
      *
      * @group baseline
      */
-    public function testRecordWikipediaConcordanceBaseline(): void
+    public function testRecordExtendedWikipediaConcordanceBaseline(): void
     {
         $languages = array_values(self::languageProvider());
         $results = [];
 
         foreach ($languages as [$lang]) {
-            $stateDir = sys_get_temp_dir() . '/scolta-wiki-bl-state-' . uniqid();
-            $outputDir = sys_get_temp_dir() . '/scolta-wiki-bl-output-' . uniqid();
+            $stateDir = sys_get_temp_dir() . '/scolta-wiki-ext-bl-state-' . uniqid();
+            $outputDir = sys_get_temp_dir() . '/scolta-wiki-ext-bl-output-' . uniqid();
             mkdir($stateDir, 0755, true);
             mkdir($outputDir, 0755, true);
 
@@ -217,18 +213,17 @@ class WikipediaConcordanceTest extends TestCase
             }
         }
 
-        $baselineFile = __DIR__ . '/../fixtures/concordance/wiki-concordance-baseline.json';
+        $extendedFile = __DIR__ . '/../fixtures/concordance/wiki-concordance-extended.json';
         file_put_contents(
-            $baselineFile,
+            $extendedFile,
             json_encode([
                 'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
-                'corpus' => 'corpus-wiki',
+                'corpus' => 'corpus-wiki-extended',
                 'results' => $results,
             ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n"
         );
 
-        // Always passes — this is a measurement, not an assertion.
-        $this->assertTrue(true, 'Baseline recorded to: ' . $baselineFile);
+        $this->assertTrue(true, 'Extended baseline recorded to: ' . $extendedFile);
     }
 
     // ---------------------------------------------------------------
@@ -238,24 +233,18 @@ class WikipediaConcordanceTest extends TestCase
     /**
      * Returns Jaccard threshold for the given language.
      *
-     * Thresholds were tightened after measuring both Wikipedia corpora
-     * (science/geography + literature/arts topics). Adjustment logic:
-     *  - Latin: both corpora > 0.80 → max(0.75, min(both) − 0.03)
-     *  - CJK+Arabic: both corpora > 0.55 → max(0.50, min(both) − 0.03)
-     *  - If variance between corpora > 0.05: leave unchanged.
+     * Same tightened thresholds as WikipediaConcordanceTest after
+     * cross-corpus threshold revisit.
      */
     private function getJaccardThreshold(string $lang): float
     {
         return match ($lang) {
-            // CJK + Arabic — tightened from 0.45
-            'ar' => 0.95,   // both ~0.98, min−0.03=0.95
-            'zh' => 0.90,   // both ~0.93, min−0.03=0.90
-            'ja' => 0.97,   // both 1.000, min−0.03=0.97
-            'ko' => 0.97,   // both 1.000, min−0.03=0.97
-            // Latin with minor variance (< 0.05) — tightened from 0.65
-            'ro' => 0.95,   // baseline 0.980, extended 0.981
-            'ru' => 0.92,   // baseline 0.983, extended 0.952
-            // Most Latin languages: both = 1.000 — tightened from 0.65
+            'ar' => 0.95,
+            'zh' => 0.90,
+            'ja' => 0.97,
+            'ko' => 0.97,
+            'ro' => 0.95,
+            'ru' => 0.92,
             default => 0.97,
         };
     }
@@ -266,7 +255,7 @@ class WikipediaConcordanceTest extends TestCase
         $indexer = new PhpIndexer($this->stateDir, $this->outputDir, null, $lang);
         $indexer->processChunk($items, 0);
         $result = $indexer->finalize();
-        $this->assertTrue($result->success, "[{$lang}] PHP index build must succeed: " . ($result->error ?? ''));
+        $this->assertTrue($result->success, "[ext:{$lang}] PHP index build must succeed: " . ($result->error ?? ''));
 
         return $this->outputDir;
     }
@@ -274,7 +263,7 @@ class WikipediaConcordanceTest extends TestCase
     /** @return ContentItem[] */
     private function loadContentItemsForLanguage(string $lang): array
     {
-        $corpusDir = __DIR__ . '/../fixtures/concordance/corpus-wiki';
+        $corpusDir = __DIR__ . '/../fixtures/concordance/corpus-wiki-extended';
         $items = [];
 
         foreach (glob("{$corpusDir}/{$lang}-*.html") as $file) {
@@ -296,18 +285,16 @@ class WikipediaConcordanceTest extends TestCase
     }
 
     /**
-     * Load all fragments from the Wikipedia reference dir for the given language.
+     * Load language fragments from the extended reference directory.
      *
      * @return array<string, array<string, mixed>>
      */
     private function loadLanguageFragments(string $lang): array
     {
         $fragments = [];
-        $refDir = $this->referenceWikiDir;
+        $refDir = $this->referenceExtDir;
 
-        // Try lang-prefixed files in fragment/ subdir (Pagefind 1.5+ layout).
         $files = glob("{$refDir}/fragment/{$lang}_*.pf_fragment") ?: [];
-
         if (empty($files)) {
             $files = glob("{$refDir}/{$lang}_*.pf_fragment") ?: [];
         }
@@ -326,7 +313,6 @@ class WikipediaConcordanceTest extends TestCase
             }
         }
 
-        // Fallback: filter all fragments by URL prefix.
         if (empty($fragments)) {
             $allFiles = glob("{$refDir}/fragment/*.pf_fragment") ?: glob("{$refDir}/*.pf_fragment") ?: [];
             foreach ($allFiles as $file) {

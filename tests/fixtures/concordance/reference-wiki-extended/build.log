@@ -1,0 +1,45 @@
+
+Running Pagefind v1.5.0
+Running from: "/Users/jandrews/devel/tag1/scolta/packages/scolta-php"
+Source:       "tests/fixtures/concordance/corpus-wiki-extended"
+Output:       "/var/folders/bz/hwzt5rlx7bvf1gh1ff02w85m0000gn/T/tmp.3JEmQK5mYt/pagefind"
+
+[Walking source directory]
+Found 95 files matching **/*.{html}
+
+[Parsing files]
+Found a data-pagefind-body element on the site.
+↳ Ignoring pages without this tag.
+
+[Reading languages]
+Discovered 19 languages: de, ar, nl, da, tr, fr, pt, ro, fi, ru, en, no, it, sv, ko, ja, zh, hu, es
+
+[Building search indexes]
+⚠ Indexing Japanese in non-extended mode. 
+In this mode, Pagefind will not segment words that are not whitespace separated. 
+Running the extended Pagefind binary will include this segmentation. 
+Either download the pagefind_extended binary, or run via npx pagefind.
+⚠ Indexing Chinese in non-extended mode. 
+In this mode, Pagefind will not segment words that are not whitespace separated. 
+Running the extended Pagefind binary will include this segmentation. 
+Either download the pagefind_extended binary, or run via npx pagefind.
+Total: 
+  Indexed 19 languages
+  Indexed 95 pages
+  Indexed 3534 words
+  Indexed 19 filters
+  Indexed 0 sorts
+Note: Pagefind doesn't support stemming for the language ko. 
+Search will still work, but will not match across root words.
+Note: Pagefind doesn't support stemming for the language ja. 
+Search will still work, but will not match across root words.
+Note: Pagefind doesn't support stemming for the language zh. 
+Search will still work, but will not match across root words.
+Note: Pagefind doesn't support stemming for the language ko. 
+Search will still work, but will not match across root words.
+Note: Pagefind doesn't support stemming for the language ja. 
+Search will still work, but will not match across root words.
+Note: Pagefind doesn't support stemming for the language zh. 
+Search will still work, but will not match across root words.
+
+Finished in 0.041 seconds

@@ -1,0 +1,21 @@
+{
+    "ar": ["\u0623\u062f\u0628", "\u0641\u0644\u0633\u0641\u0629", "\u0645\u0648\u0633\u064a\u0642\u0649", "\u0631\u064a\u0627\u0636\u0629", "\u0639\u0644\u0645"],
+    "zh": ["\u6587\u5b66", "\u54f2\u5b66", "\u97f3\u4e50", "\u4f53\u80b2", "\u79d1\u5b66"],
+    "da": ["Litteratur", "Filosofi", "Musik", "Sport", "Videnskab"],
+    "nl": ["Literatuur", "Filosofie", "Muziek", "Sport", "Wetenschap"],
+    "en": ["Literature", "Philosophy", "Music", "Sport", "Science"],
+    "fi": ["Kirjallisuus", "Filosofia", "Musiikki", "Urheilu", "Tiede"],
+    "fr": ["Litt\u00e9rature", "Philosophie", "Musique", "Sport", "Science"],
+    "de": ["Literatur", "Philosophie", "Musik", "Sport", "Wissenschaft"],
+    "hu": ["Irodalom", "Filoz\u00f3fia", "Zene", "Sport", "Tudom\u00e1ny"],
+    "it": ["Letteratura", "Filosofia", "Musica", "Sport", "Scienza"],
+    "ja": ["\u6587\u5b66", "\u54f2\u5b66", "\u97f3\u697d", "\u30b9\u30dd\u30fc\u30c4", "\u79d1\u5b66"],
+    "ko": ["\ubb38\ud559", "\ucca0\ud559", "\uc74c\uc545", "\uc2a4\ud3ec\uce20", "\uacfc\ud559"],
+    "no": ["Litteratur", "Filosofi", "Musikk", "Sport", "Vitenskap"],
+    "pt": ["Literatura", "Filosofia", "M\u00fasica", "Esporte", "Ci\u00eancia"],
+    "ro": ["Literatur\u0103", "Filozofie", "Muzic\u0103", "Sport", "\u0218tiin\u0163\u0103"],
+    "ru": ["\u041b\u0438\u0442\u0435\u0440\u0430\u0442\u0443\u0440\u0430", "\u0424\u0438\u043b\u043e\u0441\u043e\u0444\u0438\u044f", "\u041c\u0443\u0437\u044b\u043a\u0430", "\u0421\u043f\u043e\u0440\u0442", "\u041d\u0430\u0443\u043a\u0430"],
+    "es": ["Literatura", "Filosof\u00eda", "M\u00fasica", "Deporte", "Ciencia"],
+    "sv": ["Litteratur", "Filosofi", "Musik", "Sport", "Vetenskap"],
+    "tr": ["Edebiyat", "Felsefe", "M\u00fczik", "Spor", "Bilim"]
+}

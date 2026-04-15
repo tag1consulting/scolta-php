@@ -56,6 +56,40 @@ five languages) with a higher-precision comparison.
 | ES       | 99.97%        | Excellent; Spanish stemmer is highly compatible |
 | RU       | 99.78%        | Cyrillic normalization well-matched              |
 
+## Measured concordance — Wikipedia corpora
+
+Two Wikipedia corpora were used to measure content overlap between PHP indexer and Pagefind 1.5.0:
+- **Baseline** (`corpus-wiki`): science/geography topics — Physics, Mathematics, Chemistry, Geography, History
+- **Extended** (`corpus-wiki-extended`): arts/culture topics — Literature, Philosophy, Music, Sport, Science
+
+Thresholds were tightened using the rule: if both corpora exceed 0.80 (Latin) or 0.55 (CJK+Arabic),
+tighten to `max(floor, min(both_values) − 0.03)`. Languages with variance > 0.05 between corpora
+were left unchanged. All languages pass both corpora.
+
+| Language | Baseline Jaccard | Extended Jaccard | Decision |
+|----------|-----------------|-----------------|---------|
+| ar | 0.980 | 0.988 | Tightened: 0.45 → **0.95** |
+| zh | 0.931 | 0.931 | Tightened: 0.45 → **0.90** |
+| da | 1.000 | 1.000 | Tightened: 0.65 → **0.97** |
+| nl | 1.000 | 1.000 | Tightened: 0.65 → **0.97** |
+| en | 1.000 | 1.000 | Tightened: 0.65 → **0.97** |
+| fi | 1.000 | 1.000 | Tightened: 0.65 → **0.97** |
+| fr | 1.000 | 1.000 | Tightened: 0.65 → **0.97** |
+| de | 1.000 | 1.000 | Tightened: 0.65 → **0.97** |
+| hu | 1.000 | 1.000 | Tightened: 0.65 → **0.97** |
+| it | 1.000 | 1.000 | Tightened: 0.65 → **0.97** |
+| ja | 1.000 | 1.000 | Tightened: 0.45 → **0.97** |
+| ko | 1.000 | 1.000 | Tightened: 0.45 → **0.97** |
+| no | 1.000 | 1.000 | Tightened: 0.65 → **0.97** |
+| pt | 1.000 | 1.000 | Tightened: 0.65 → **0.97** |
+| ro | 0.980 | 0.981 | Tightened: 0.65 → **0.95** (variance 0.001) |
+| ru | 0.983 | 0.952 | Tightened: 0.65 → **0.92** (variance 0.031) |
+| es | 1.000 | 1.000 | Tightened: 0.65 → **0.97** |
+| sv | 1.000 | 1.000 | Tightened: 0.65 → **0.97** |
+| tr | 1.000 | 1.000 | Tightened: 0.65 → **0.97** |
+
+No findings filed: all languages pass both corpora at the tightened thresholds.
+
 ## Known Differences from Pagefind Reference
 
 ### 1. CJK tokenization

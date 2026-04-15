@@ -13,6 +13,11 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 - Snowball stemmer concordance corpus: 177k words across EN/DE/FR/ES/RU with thresholds
 - Byte-level structural parity tests for CBOR index files
 - Performance benchmark script (`scripts/benchmark.php`)
+- Part 1: Posting list semantic correctness test — every indexed word verified present in its referenced fragment
+- Part 2: Filter index structure test, delta encoding integration tests, compression coverage tests
+- Part 3: Benchmark script now emits structured JSON with median-of-3 sampling; BENCHMARKS-LATEST.md auto-generated; CI benchmark job
+- Part 4: Wikipedia corpus (19 languages × 5 pages) with WikipediaConcordanceTest and baseline concordance measurements
+- Part 5: Extended Wikipedia corpus (different topics) with threshold revisit and updated LANGUAGE_PARITY.md
 
 ## [0.2.0] - 2026-04-13
 
