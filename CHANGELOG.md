@@ -6,6 +6,8 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-15
+
 ### Added
 
 - Sequential page numbering fix: removes crc32 fallback that corrupted indexes with string/UUID keys
@@ -18,6 +20,17 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 - Part 3: Benchmark script now emits structured JSON with median-of-3 sampling; BENCHMARKS-LATEST.md auto-generated; CI benchmark job
 - Part 4: Wikipedia corpus (19 languages × 5 pages) with WikipediaConcordanceTest and baseline concordance measurements
 - Part 5: Extended Wikipedia corpus (different topics) with threshold revisit and updated LANGUAGE_PARITY.md
+- CJK bigram tokenization: Chinese/Japanese/Korean runs now produce overlapping bigrams instead of single-character splits, improving recall for multi-character CJK terms
+- Bundled `assets/pagefind/pagefind.js` (Pagefind 1.5.0 browser client) for E2E test self-sufficiency
+
+### Fixed
+
+- **Security:** `unserialize()` calls in `BuildState`, `IndexMerger`, and `PhpIndexer` now use `['allowed_classes' => false]` to prevent PHP object injection attacks on HMAC-validated data
+- **Security:** `AiEndpointHandler` no longer includes PHP exception objects in API responses; adds optional PSR-3 logger constructor param (`NullLogger` default) for structured error logging
+- **Correctness:** `PagefindFormatWriter::ensureDir()` race: replaced `!is_dir() && !mkdir()` with `@mkdir()` + post-check `is_dir()`, preventing spurious `RuntimeException` under concurrent builds
+- **Correctness:** `HealthChecker` and doc claims corrected — PHP indexer supports 14 languages (Snowball) not "English-only" or "15 languages"
+- **Tests:** E2E `debug.spec.js` and `search-compatibility.spec.js` now use separate output directories to prevent concurrent test race on shared `.e2e-output`
+- **Tests:** E2E index rebuild always runs (removed stale-cache skip), preventing 404s from hash mismatches
 
 ## [0.2.0] - 2026-04-13
 
