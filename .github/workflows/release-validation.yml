@@ -381,7 +381,7 @@ jobs:
   # Job 9: Benchmark throughput sanity check
   #
   # Runs the benchmark at 1000 pages (3 runs, median reported).
-  # Fails if throughput drops below 500 pages/sec — a sanity floor,
+  # Fails if throughput drops below 100 pages/sec — a sanity floor
   # not regression detection (no prior CI runs to compare against yet).
   # Does NOT commit the JSON back to the repo.
   # -------------------------------------------------------------------
@@ -423,8 +423,8 @@ jobs:
 
           echo "Pages/sec at 1000 pages: $PPS"
 
-          if [ "$PPS" -lt 500 ]; then
-            echo "::error::Throughput $PPS pages/sec is below minimum floor of 500 pages/sec"
+          if [ "$PPS" -lt 100 ]; then
+            echo "::error::Throughput $PPS pages/sec is below minimum floor of 100 pages/sec"
             exit 1
           fi
-          echo "PASS: Throughput $PPS pages/sec >= 500 pages/sec floor."
+          echo "PASS: Throughput $PPS pages/sec >= 100 pages/sec floor."

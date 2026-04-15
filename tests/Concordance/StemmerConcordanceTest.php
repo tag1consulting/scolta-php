@@ -288,12 +288,16 @@ class StemmerConcordanceTest extends TestCase
             }
         }
 
-        $tested = $total - count(array_filter($words, fn($w) => str_starts_with($w, "'")));
+        $tested = $total - count(array_filter($words, fn ($w) => str_starts_with($w, "'")));
         $rate = $tested > 0 ? 1 - (count($mismatches) / $tested) : 1.0;
 
         fwrite(STDERR, sprintf(
             "[stemmer] %s: %.2f%% concordance (%d/%d words match, %d mismatches)\n",
-            strtoupper($lang), $rate * 100, $tested - count($mismatches), $tested, count($mismatches)
+            strtoupper($lang),
+            $rate * 100,
+            $tested - count($mismatches),
+            $tested,
+            count($mismatches)
         ));
 
         // Per-language thresholds. EN/ES/RU achieve ≥99.7% concordance.
