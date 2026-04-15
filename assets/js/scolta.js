@@ -64,6 +64,10 @@
       AI_SUMMARY_MAX_CHARS: s.AI_SUMMARY_MAX_CHARS ?? 2000,
       EXPAND_PRIMARY_WEIGHT: s.EXPAND_PRIMARY_WEIGHT ?? 0.7,
       AI_MAX_FOLLOWUPS: s.AI_MAX_FOLLOWUPS ?? 3,
+      LANGUAGE: s.LANGUAGE ?? 'en',
+      CUSTOM_STOP_WORDS: s.CUSTOM_STOP_WORDS ?? [],
+      RECENCY_STRATEGY: s.RECENCY_STRATEGY ?? 'exponential',
+      RECENCY_CURVE: s.RECENCY_CURVE ?? [],
     };
   }
 
@@ -215,6 +219,10 @@
       AI_SUMMARY_MAX_CHARS: s.AI_SUMMARY_MAX_CHARS ?? 2000,
       EXPAND_PRIMARY_WEIGHT: s.EXPAND_PRIMARY_WEIGHT ?? 0.7,
       AI_MAX_FOLLOWUPS: s.AI_MAX_FOLLOWUPS ?? 3,
+      LANGUAGE: s.LANGUAGE ?? 'en',
+      CUSTOM_STOP_WORDS: s.CUSTOM_STOP_WORDS ?? [],
+      RECENCY_STRATEGY: s.RECENCY_STRATEGY ?? 'exponential',
+      RECENCY_CURVE: s.RECENCY_CURVE ?? [],
     };
   }
 
@@ -711,6 +719,24 @@
       const finalScore = (pagefindScore + recency + titleBoost + contentBoost) * sourceWeight;
       return { data, score: finalScore };
     });
+  }
+
+  // Score multiple independent queries in one WASM call.
+  // queries: [{ query, results, config? }, ...]
+  // Returns an array of scored result arrays, one per input query.
+  function batchScoreResults(queries) {
+    if (!scoltaWasm) {
+      console.warn("[scolta] WASM not loaded — batchScoreResults unavailable");
+      return queries.map(() => []);
+    }
+    try {
+      const input = JSON.stringify({ queries, default_config: getInstanceConfig() });
+      const output = scoltaWasm.batch_score_results(input);
+      return JSON.parse(output);
+    } catch (e) {
+      console.warn("[scolta] WASM batch_score_results failed:", e.message);
+      return queries.map(() => []);
+    }
   }
 
   // Compute facet counts from actual result set.
@@ -1293,6 +1319,7 @@
     toggleFilter,
     clearSearch,
     doSearch,
+    batchScoreResults,
     showMore,
     destroy: function() {
       if (abortController) abortController.abort();
@@ -1331,6 +1358,7 @@
       global.Scolta.clearSearch = inst.clearSearch;
       global.Scolta.doSearch = inst.doSearch;
       global.Scolta.showMore = inst.showMore;
+      global.Scolta.batchScoreResults = inst.batchScoreResults;
     }
   };
 

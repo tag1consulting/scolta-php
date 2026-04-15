@@ -49,6 +49,20 @@ class ScoltaConfig
     // -- Scoring: Expanded terms --
     public float $expandPrimaryWeight = 0.7;
 
+    // -- Scoring: Language and stop words --
+    public string $language = 'en';
+    /** @var string[] */
+    public array $customStopWords = [];
+
+    // -- Scoring: Recency strategy --
+    /** @var string 'exponential' | 'linear' | 'step' | 'none' | 'custom' */
+    public string $recencyStrategy = 'exponential';
+    /**
+     * Control points for 'custom' recency strategy: [[days, boost], ...].
+     * @var array<array{0: float, 1: float}>
+     */
+    public array $recencyCurve = [];
+
     // -- Display --
     public int $excerptLength = 300;
     public int $resultsPerPage = 10;
@@ -116,6 +130,10 @@ class ScoltaConfig
             'EXPAND_PRIMARY_WEIGHT' => $this->expandPrimaryWeight,
             'AI_MAX_FOLLOWUPS' => $this->maxFollowUps,
             'AI_LANGUAGES' => $this->aiLanguages,
+            'LANGUAGE' => $this->language,
+            'CUSTOM_STOP_WORDS' => $this->customStopWords,
+            'RECENCY_STRATEGY' => $this->recencyStrategy,
+            'RECENCY_CURVE' => $this->recencyCurve,
         ];
     }
 

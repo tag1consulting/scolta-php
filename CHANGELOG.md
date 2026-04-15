@@ -6,6 +6,21 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+## [0.2.2] - Unreleased
+
+### Added
+
+- **`ScoltaConfig::$language`** (default `'en'`): ISO 639-1 language code passed to WASM for stop word filtering.
+- **`ScoltaConfig::$customStopWords`** (default `[]`): Additional stop words layered on top of the built-in language list.
+- **`ScoltaConfig::$recencyStrategy`** (default `'exponential'`): Recency decay function — `exponential`, `linear`, `step`, `none`, or `custom`.
+- **`ScoltaConfig::$recencyCurve`** (default `[]`): Control points `[[days, boost], …]` for the `custom` recency strategy.
+- **`batchScoreResults(queries)`** in `scolta.js`: JS wrapper around the WASM `batch_score_results` export; exposed on `Scolta` global and instance API.
+
+### Changed
+
+- `ScoltaConfig::toJsScoringConfig()` now includes `LANGUAGE`, `CUSTOM_STOP_WORDS`, `RECENCY_STRATEGY`, and `RECENCY_CURVE` keys.
+- `scolta.js` `getConfig()` / `getInstanceConfig()` read the four new scoring keys from `window.scolta.scoring` with safe `??` defaults.
+
 ## [0.2.1] - 2026-04-15
 
 ### Added

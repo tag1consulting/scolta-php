@@ -57,6 +57,20 @@ All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Platfo
 |----------|------|---------|-------------|
 | `expandPrimaryWeight` | float | `0.7` | Weight given to original query results vs expanded results during merge |
 
+### Scoring: Language and Stop Words
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `language` | string | `'en'` | ISO 639-1 language code for stop word filtering (`en`, `de`, `fr`, …). 30 languages supported; CJK and unknown codes apply no stop word filtering. |
+| `customStopWords` | array | `[]` | Additional stop words to filter beyond the language's built-in list. |
+
+### Scoring: Recency Strategy
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `recencyStrategy` | string | `'exponential'` | Recency decay function: `exponential` (default), `linear`, `step`, `none`, or `custom` (piecewise-linear). |
+| `recencyCurve` | array | `[]` | Control points for the `custom` strategy: `[[days, boost], …]` sorted by days ascending. |
+
 ### Display
 
 | Property | Type | Default | Description |
@@ -129,6 +143,10 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 | `titleAllTermsMultiplier` | `scoring.title_all_terms_multiplier` | `scoring.title_all_terms_multiplier` | `title_all_terms_multiplier` |
 | `contentMatchBoost` | `scoring.content_match_boost` | `scoring.content_match_boost` | `content_match_boost` |
 | `expandPrimaryWeight` | `scoring.expand_primary_weight` | `scoring.expand_primary_weight` | `expand_primary_weight` |
+| `language` | `scoring.language` | `scoring.language` / `SCOLTA_LANGUAGE` | `language` |
+| `customStopWords` | `scoring.custom_stop_words` | `scoring.custom_stop_words` | `custom_stop_words` |
+| `recencyStrategy` | `scoring.recency_strategy` | `scoring.recency_strategy` / `SCOLTA_RECENCY_STRATEGY` | `recency_strategy` |
+| `recencyCurve` | `scoring.recency_curve` | `scoring.recency_curve` | `recency_curve` |
 
 ### Display Keys
 

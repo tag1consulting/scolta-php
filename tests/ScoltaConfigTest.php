@@ -209,4 +209,50 @@ class ScoltaConfigTest extends TestCase
 
         $this->assertArrayNotHasKey('base_url', $config->toAiClientConfig());
     }
+
+    // -------------------------------------------------------------------
+    // 0.2.2 new fields: language, customStopWords, recencyStrategy, recencyCurve
+    // -------------------------------------------------------------------
+
+    public function testNewFieldsHaveDefaults(): void
+    {
+        $config = new ScoltaConfig();
+
+        $this->assertEquals('en', $config->language);
+        $this->assertEquals([], $config->customStopWords);
+        $this->assertEquals('exponential', $config->recencyStrategy);
+        $this->assertEquals([], $config->recencyCurve);
+    }
+
+    public function testFromArrayConvertsNewFields(): void
+    {
+        $config = ScoltaConfig::fromArray([
+            'language' => 'de',
+            'custom_stop_words' => ['foo', 'bar'],
+            'recency_strategy' => 'linear',
+            'recency_curve' => [[0, 1.0], [365, 0.5]],
+        ]);
+
+        $this->assertEquals('de', $config->language);
+        $this->assertEquals(['foo', 'bar'], $config->customStopWords);
+        $this->assertEquals('linear', $config->recencyStrategy);
+        $this->assertEquals([[0, 1.0], [365, 0.5]], $config->recencyCurve);
+    }
+
+    public function testToJsScoringConfigIncludesNewFields(): void
+    {
+        $config = ScoltaConfig::fromArray([
+            'language' => 'fr',
+            'custom_stop_words' => ['les'],
+            'recency_strategy' => 'step',
+            'recency_curve' => [[30, 1.0], [365, 0.0]],
+        ]);
+
+        $js = $config->toJsScoringConfig();
+
+        $this->assertEquals('fr', $js['LANGUAGE']);
+        $this->assertEquals(['les'], $js['CUSTOM_STOP_WORDS']);
+        $this->assertEquals('step', $js['RECENCY_STRATEGY']);
+        $this->assertEquals([[30, 1.0], [365, 0.0]], $js['RECENCY_CURVE']);
+    }
 }
