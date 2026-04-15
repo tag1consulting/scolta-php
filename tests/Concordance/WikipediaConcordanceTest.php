@@ -218,14 +218,16 @@ class WikipediaConcordanceTest extends TestCase
         }
 
         $baselineFile = __DIR__ . '/../fixtures/concordance/wiki-concordance-baseline.json';
-        file_put_contents(
-            $baselineFile,
-            json_encode([
-                'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
-                'corpus' => 'corpus-wiki',
-                'results' => $results,
-            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n"
-        );
+        if (!file_exists($baselineFile)) {
+            file_put_contents(
+                $baselineFile,
+                json_encode([
+                    'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
+                    'corpus' => 'corpus-wiki',
+                    'results' => $results,
+                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n"
+            );
+        }
 
         // Always passes — this is a measurement, not an assertion.
         $this->assertTrue(true, 'Baseline recorded to: ' . $baselineFile);

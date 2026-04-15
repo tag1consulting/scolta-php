@@ -214,14 +214,16 @@ class ExtendedWikipediaConcordanceTest extends TestCase
         }
 
         $extendedFile = __DIR__ . '/../fixtures/concordance/wiki-concordance-extended.json';
-        file_put_contents(
-            $extendedFile,
-            json_encode([
-                'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
-                'corpus' => 'corpus-wiki-extended',
-                'results' => $results,
-            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n"
-        );
+        if (!file_exists($extendedFile)) {
+            file_put_contents(
+                $extendedFile,
+                json_encode([
+                    'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
+                    'corpus' => 'corpus-wiki-extended',
+                    'results' => $results,
+                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n"
+            );
+        }
 
         $this->assertTrue(true, 'Extended baseline recorded to: ' . $extendedFile);
     }
