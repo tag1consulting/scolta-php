@@ -8,9 +8,9 @@ const OUTPUT_DIR = path.join(__dirname, '../../.e2e-output');
 let server, baseUrl;
 
 test.beforeAll(async () => {
-    if (!fs.existsSync(OUTPUT_DIR + '/pagefind/pagefind-entry.json')) {
-        execSync(`php tests/E2E/build-php-index.php ${OUTPUT_DIR}`, { cwd: path.join(__dirname, '../..'), stdio: 'pipe' });
-    }
+    // Always rebuild — reusing a stale index risks hash mismatches between
+    // pagefind-entry.json and the index files when the indexer output changes.
+    execSync(`php tests/E2E/build-php-index.php ${OUTPUT_DIR}`, { cwd: path.join(__dirname, '../..'), stdio: 'pipe' });
 
     const pagefindDir = path.join(OUTPUT_DIR, 'pagefind');
     const html = `<!DOCTYPE html>
