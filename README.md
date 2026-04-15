@@ -91,7 +91,7 @@ The health endpoint also reports `indexer_active` (`"binary"` or `"php"`) and `i
 
 ### Language support
 
-The PHP indexer supports word stemming for 15 languages via Snowball algorithms:
+The PHP indexer supports word stemming for 14 languages via Snowball algorithms:
 Catalan, Danish, Dutch, English, Finnish, French, German, Italian, Norwegian,
 Portuguese, Romanian, Russian, Spanish, Swedish.
 

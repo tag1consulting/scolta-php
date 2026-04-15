@@ -54,7 +54,7 @@ The `version` field in `composer.json` is always either a tagged release (`0.2.0
 ## Testing
 
 - Run: `./vendor/bin/phpunit`
-- WASM integration tests are skipped when `libextism` is not installed — this is expected in CI without the native runtime.
+- Tests run with `./vendor/bin/phpunit`. All tests should pass in CI without any native runtime.
 - All new public methods MUST have unit tests.
 
 ## Architecture

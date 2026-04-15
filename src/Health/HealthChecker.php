@@ -52,8 +52,8 @@ final class HealthChecker
         $indexerActive = $binaryStatus['available'] ? 'binary' : 'php';
         $upgradeMessage = $binaryStatus['available']
             ? null
-            : 'Pagefind binary not found. Using PHP indexer (slower, English-only). '
-              . 'For 10× faster indexing and 15-language support: npm install -g pagefind';
+            : 'Pagefind binary not found. Using PHP indexer (slower, 14 Snowball languages vs 33+). '
+              . 'For faster indexing: npm install -g pagefind';
 
         return [
             'status' => $status,

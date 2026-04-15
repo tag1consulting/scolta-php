@@ -23,7 +23,7 @@ use Tag1\Scolta\Index\PhpIndexer;
  * 2. The fragment content preserves the original Unicode characters.
  * 3. At least one token is produced per page (even for CJK).
  *
- * Note: PHP indexer uses Snowball stemming (15 languages). CJK uses
+ * Note: PHP indexer uses Snowball stemming (14 languages). CJK uses
  * character-level tokenization without stemming, which still produces
  * a searchable index.
  */

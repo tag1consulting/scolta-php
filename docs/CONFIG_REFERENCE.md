@@ -205,13 +205,9 @@ Returns `array<array{name: string, status: string, message: string}>` where `sta
 | # | Check | Status on Failure | Description |
 |---|-------|-------------------|-------------|
 | 1 | PHP version | `fail` | Requires PHP 8.1+ |
-| 2 | FFI extension | `fail` | Requires `ext-ffi` loaded and `ffi.enable` set to `true` or `preload` |
-| 3 | Extism shared library | `fail` | Looks for `libextism.so` / `libextism.dylib` in standard paths |
-| 4 | Extism PHP SDK | `fail` | Checks that `\Extism\Plugin` class exists |
-| 5 | WASM binary | `fail` | Verifies `scolta_core.wasm` exists at expected path |
-| 5b | WASM load test | `fail` | Loads the WASM module and calls `version()` (only runs if checks 2, 4, 5 pass) |
-| 6 | Pagefind binary | `warn` | Resolves Pagefind binary via `PagefindBinary` |
-| 7 | AI API key | `warn` | Checks if an API key is provided |
+| 2 | AI API key | `warn` | Checks if an API key is provided |
+| 3 | Browser WASM | `warn` | Verifies `scolta_core_bg.wasm` and `scolta_core.js` exist in the assets directory |
+| 4 | Pagefind binary | `warn` | Resolves Pagefind binary via `PagefindBinary`; falls back to PHP indexer if absent |
 
 ### Exit Code
 

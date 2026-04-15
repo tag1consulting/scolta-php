@@ -34,7 +34,7 @@ _This section will be populated when 0.2.0 is released._
 
 ### New Requirements
 
-(None beyond the existing PHP 8.1+, Extism, FFI requirements.)
+(None beyond PHP 8.1+.)
 
 ## Upgrade Checklist Template
 

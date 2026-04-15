@@ -21,9 +21,9 @@ Scolta supports two indexers:
 
 **Auto-detection** (`indexer: auto`) tries the binary first, falls back to PHP.
 
-For 10× faster indexing and 15-language support, use the binary indexer when
-`exec()` is available. The PHP indexer is English-only but has no external
-dependencies.
+For faster indexing and 33+ language support, use the binary indexer when
+`exec()` is available. The PHP indexer supports 14 languages (Snowball stemming)
+and has no external dependencies.
 
 ## Platform-Specific Notes
 
