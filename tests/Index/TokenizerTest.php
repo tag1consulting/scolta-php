@@ -101,8 +101,13 @@ class TokenizerTest extends TestCase
 
     public function testCjkSplitting(): void
     {
+        // Bigram tokenization: 4 chars → 3 overlapping bigrams.
         $tokens = $this->tokenizer->tokenize('你好世界');
-        $this->assertCount(4, $tokens);
+        $this->assertCount(3, $tokens);
+        $stems = array_column($tokens, 'stem');
+        $this->assertContains('你好', $stems);
+        $this->assertContains('好世', $stems);
+        $this->assertContains('世界', $stems);
     }
 
     public function testMixedContent(): void

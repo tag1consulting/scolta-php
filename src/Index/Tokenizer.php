@@ -118,17 +118,9 @@ class Tokenizer
      */
     private function splitCompound(string $word): array
     {
-        // Check for CJK characters — split each as individual token.
-        if (preg_match('/[\x{4E00}-\x{9FFF}\x{3400}-\x{4DBF}\x{F900}-\x{FAFF}]/u', $word)) {
-            $parts = [];
-            $offset = 0;
-            $chars = mb_str_split($word);
-            foreach ($chars as $char) {
-                $parts[$offset] = $char;
-                $offset += mb_strlen($char);
-            }
-
-            return $parts;
+        // Check for CJK/Hiragana/Katakana/Hangul characters — use bigram tokenization.
+        if (preg_match('/[\x{4E00}-\x{9FFF}\x{3400}-\x{4DBF}\x{F900}-\x{FAFF}\x{3040}-\x{309F}\x{30A0}-\x{30FF}\x{AC00}-\x{D7AF}]/u', $word)) {
+            return $this->tokenizeMixedCjk($word);
         }
 
         // Hyphen splitting: "mother-in-law" → ["mother", "in", "law", "motherinlaw"].
@@ -171,5 +163,63 @@ class Tokenizer
         }
 
         return [0 => $word];
+    }
+
+    /**
+     * Tokenize a word containing CJK/Hiragana/Katakana/Hangul using bigram strategy.
+     *
+     * Non-CJK runs are emitted as a single token. CJK runs of length ≥ 2 emit
+     * overlapping bigrams; a single CJK character is emitted as-is.
+     *
+     * @return array<int, string> Offset => token.
+     */
+    private function tokenizeMixedCjk(string $word): array
+    {
+        $cjkPattern = '/[\x{4E00}-\x{9FFF}\x{3400}-\x{4DBF}\x{F900}-\x{FAFF}\x{3040}-\x{309F}\x{30A0}-\x{30FF}\x{AC00}-\x{D7AF}]/u';
+
+        $chars = mb_str_split($word);
+        $parts = [];
+
+        $runStart = 0;
+        $runChars = [];
+        $runIsCjk = null;
+
+        $flushRun = function (int $startOffset, array $runChars, bool $isCjk) use (&$parts): void {
+            $count = count($runChars);
+            if ($count === 0) {
+                return;
+            }
+            if (!$isCjk) {
+                $parts[$startOffset] = implode('', $runChars);
+            } elseif ($count === 1) {
+                $parts[$startOffset] = $runChars[0];
+            } else {
+                for ($i = 0; $i < $count - 1; ++$i) {
+                    $parts[$startOffset + $i] = $runChars[$i] . $runChars[$i + 1];
+                }
+            }
+        };
+
+        foreach ($chars as $i => $char) {
+            $isCjk = preg_match($cjkPattern, $char) === 1;
+
+            if ($runIsCjk === null) {
+                $runIsCjk = $isCjk;
+                $runStart = $i;
+            }
+
+            if ($isCjk !== $runIsCjk) {
+                $flushRun($runStart, $runChars, $runIsCjk);
+                $runStart = $i;
+                $runChars = [];
+                $runIsCjk = $isCjk;
+            }
+
+            $runChars[] = $char;
+        }
+
+        $flushRun($runStart, $runChars, $runIsCjk ?? false);
+
+        return $parts;
     }
 }

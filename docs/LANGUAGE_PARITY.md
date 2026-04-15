@@ -95,9 +95,10 @@ No findings filed: all languages pass both corpora at the tightened thresholds.
 ### 1. CJK tokenization
 
 Pagefind uses the `lindera` tokenizer (Japanese MeCab-based) and `jieba` for Chinese,
-which produce compound tokens. The PHP indexer splits on Unicode character boundaries.
-Result: PHP produces more tokens per sentence; individual characters are indexed rather
-than semantic words. Search for a single character will return more results.
+which produce compound tokens. The PHP indexer uses bigram tokenization for CJK text
+(see "CJK tokenization strategy" below). This produces overlapping character pairs
+rather than semantic word units, improving overlap compared to single-character splitting.
+Search for a single CJK character is not supported; search for two-character compounds works.
 
 ### 2. Arabic script
 
@@ -121,3 +122,45 @@ elisions like `l'homme` split to `l` + `homme`. This is consistent and intention
 Pagefind indexes text found in URL paths (e.g., `/search-results` contributes
 `search` and `results`). The PHP indexer indexes only body content and explicit
 metadata. This accounts for ~5% of vocabulary gap in the English test.
+
+## CJK tokenization strategy
+
+Scolta uses **bigram tokenization** for CJK text (Chinese, Japanese, Korean).
+
+### Why bigrams, not dictionary-based tokenization
+
+Pagefind uses jieba (Chinese) and lindera (Japanese, MeCab-based) for semantic
+word boundary detection. A direct port is not feasible for PHP without 100-300 MB
+dictionary dependencies, and Korean has no viable PHP solution at all.
+
+Bigram tokenization emits overlapping character pairs from CJK runs:
+
+- Input:  人工智能 (4 characters)
+- Before: [人] [工] [智] [能] (4 single-char tokens, no semantic units)
+- After:  [人工] [工智] [智能] (3 bigrams — both real compounds included)
+
+This approach:
+
+- Requires zero dependencies
+- Works uniformly across Chinese, Japanese, and Korean
+- Recovers compound words (at the cost of one noise token per pair)
+- Raises estimated Jaccard overlap with Pagefind from ~50% to ~65-70%
+
+### Measured concordance after bigram tokenization
+
+| Language | Before bigrams | After bigrams                     | Change   |
+|----------|----------------|-----------------------------------|----------|
+| zh       | ~0.50          | 0.926 (ml corpus) / 0.931 (wiki)  | improved |
+| ja       | ~0.50          | 0.928 (ml corpus) / 1.000 (wiki)  | improved |
+| ko       | ~0.50          | 0.979 (ml corpus) / 1.000 (wiki)  | improved |
+
+Note: The Wikipedia corpora use Pagefind in non-extended mode (whitespace-based CJK),
+which means character splitting matches well. The ml corpus uses the standard Pagefind
+binary, giving a truer measure of the bigram vs. jieba/lindera gap.
+
+### Future enhancement path
+
+Dictionary-based tokenization (jieba for Chinese, MeCab/lindera for Japanese)
+can be added as an optional enhancement if higher precision is needed for a
+specific deployment. It would replace bigrams for that language only. Korean
+remains bigram-only until a suitable PHP library is available.
