@@ -1,6 +1,54 @@
 /* @ts-self-types="./scolta_core.d.ts" */
 
 /**
+ * Score multiple queries against their respective result sets in a single call.
+ *
+ * Input: JSON string with shape:
+ * ```json
+ * {
+ *   "queries": [
+ *     { "query": "search terms", "results": [...], "config": {...} },
+ *     { "query": "other query",  "results": [...] }
+ *   ],
+ *   "default_config": { "language": "en" }
+ * }
+ * ```
+ *
+ * Per-query `"config"` overrides `"default_config"` for that entry.
+ *
+ * Output: JSON string — array of arrays of scored results, one inner array
+ * per input query, in the same order.
+ * @param {string} input
+ * @returns {string}
+ */
+export function batch_score_results(input) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.batch_score_results(retptr, ptr0, len0);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        var ptr2 = r0;
+        var len2 = r1;
+        if (r3) {
+            ptr2 = 0; len2 = 0;
+            throw takeObject(r2);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+        wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
  * Return a JSON description of all available functions.
  * @returns {string}
  */
@@ -17,7 +65,7 @@ export function describe() {
         return getStringFromWasm0(r0, r1);
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export(deferred1_0, deferred1_1, 1);
+        wasm.__wbindgen_export3(deferred1_0, deferred1_1, 1);
     }
 }
 
@@ -34,7 +82,7 @@ export function get_prompt(name) {
     let deferred3_1;
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
         wasm.get_prompt(retptr, ptr0, len0);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -52,7 +100,7 @@ export function get_prompt(name) {
         return getStringFromWasm0(ptr2, len2);
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export(deferred3_0, deferred3_1, 1);
+        wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
     }
 }
 
@@ -71,7 +119,7 @@ export function merge_results(input) {
     let deferred3_1;
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
+        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
         wasm.merge_results(retptr, ptr0, len0);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -89,15 +137,26 @@ export function merge_results(input) {
         return getStringFromWasm0(ptr2, len2);
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export(deferred3_0, deferred3_1, 1);
+        wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
     }
 }
 
 /**
  * Parse an LLM expansion response into individual search terms.
  *
- * Input: Raw LLM response string (may contain JSON, markdown, or bare text).
- * Output: JSON string — array of extracted terms.
+ * Accepts two input forms:
+ *
+ * 1. **Bare string** — treated as the raw LLM response; language defaults to `"en"`.
+ *    ```text
+ *    ["term1", "term2"]
+ *    ```
+ *
+ * 2. **JSON object** — allows specifying a language for stop word filtering.
+ *    ```json
+ *    { "text": "[\"term1\", \"term2\"]", "language": "de" }
+ *    ```
+ *
+ * Output: JSON string — array of extracted, filtered terms.
  * @param {string} input
  * @returns {string}
  */
@@ -106,7 +165,7 @@ export function parse_expansion(input) {
     let deferred3_1;
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
+        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
         wasm.parse_expansion(retptr, ptr0, len0);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -124,7 +183,7 @@ export function parse_expansion(input) {
         return getStringFromWasm0(ptr2, len2);
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export(deferred3_0, deferred3_1, 1);
+        wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
     }
 }
 
@@ -143,7 +202,7 @@ export function resolve_prompt(input) {
     let deferred3_1;
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
+        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
         wasm.resolve_prompt(retptr, ptr0, len0);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -161,7 +220,7 @@ export function resolve_prompt(input) {
         return getStringFromWasm0(ptr2, len2);
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export(deferred3_0, deferred3_1, 1);
+        wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
     }
 }
 
@@ -180,7 +239,7 @@ export function score_results(input) {
     let deferred3_1;
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
+        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
         wasm.score_results(retptr, ptr0, len0);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -198,7 +257,7 @@ export function score_results(input) {
         return getStringFromWasm0(ptr2, len2);
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export(deferred3_0, deferred3_1, 1);
+        wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
     }
 }
 
@@ -215,7 +274,7 @@ export function to_js_scoring_config(input) {
     let deferred3_1;
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
+        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
         wasm.to_js_scoring_config(retptr, ptr0, len0);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -233,7 +292,7 @@ export function to_js_scoring_config(input) {
         return getStringFromWasm0(ptr2, len2);
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export(deferred3_0, deferred3_1, 1);
+        wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
     }
 }
 
@@ -254,7 +313,7 @@ export function version() {
         return getStringFromWasm0(r0, r1);
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export(deferred1_0, deferred1_1, 1);
+        wasm.__wbindgen_export3(deferred1_0, deferred1_1, 1);
     }
 }
 

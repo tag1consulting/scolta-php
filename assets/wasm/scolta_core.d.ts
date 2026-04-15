@@ -2,6 +2,27 @@
 /* eslint-disable */
 
 /**
+ * Score multiple queries against their respective result sets in a single call.
+ *
+ * Input: JSON string with shape:
+ * ```json
+ * {
+ *   "queries": [
+ *     { "query": "search terms", "results": [...], "config": {...} },
+ *     { "query": "other query",  "results": [...] }
+ *   ],
+ *   "default_config": { "language": "en" }
+ * }
+ * ```
+ *
+ * Per-query `"config"` overrides `"default_config"` for that entry.
+ *
+ * Output: JSON string — array of arrays of scored results, one inner array
+ * per input query, in the same order.
+ */
+export function batch_score_results(input: string): string;
+
+/**
  * Return a JSON description of all available functions.
  */
 export function describe(): string;
@@ -27,8 +48,19 @@ export function merge_results(input: string): string;
 /**
  * Parse an LLM expansion response into individual search terms.
  *
- * Input: Raw LLM response string (may contain JSON, markdown, or bare text).
- * Output: JSON string — array of extracted terms.
+ * Accepts two input forms:
+ *
+ * 1. **Bare string** — treated as the raw LLM response; language defaults to `"en"`.
+ *    ```text
+ *    ["term1", "term2"]
+ *    ```
+ *
+ * 2. **JSON object** — allows specifying a language for stop word filtering.
+ *    ```json
+ *    { "text": "[\"term1\", \"term2\"]", "language": "de" }
+ *    ```
+ *
+ * Output: JSON string — array of extracted, filtered terms.
  */
 export function parse_expansion(input: string): string;
 
@@ -69,6 +101,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly batch_score_results: (a: number, b: number, c: number) => void;
     readonly describe: (a: number) => void;
     readonly get_prompt: (a: number, b: number, c: number) => void;
     readonly merge_results: (a: number, b: number, c: number) => void;
@@ -78,9 +111,9 @@ export interface InitOutput {
     readonly to_js_scoring_config: (a: number, b: number, c: number) => void;
     readonly version: (a: number) => void;
     readonly __wbindgen_add_to_stack_pointer: (a: number) => number;
-    readonly __wbindgen_export: (a: number, b: number, c: number) => void;
-    readonly __wbindgen_export2: (a: number, b: number) => number;
-    readonly __wbindgen_export3: (a: number, b: number, c: number, d: number) => number;
+    readonly __wbindgen_export: (a: number, b: number) => number;
+    readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
+    readonly __wbindgen_export3: (a: number, b: number, c: number) => void;
 }
 
 export type SyncInitInput = BufferSource | WebAssembly.Module;
