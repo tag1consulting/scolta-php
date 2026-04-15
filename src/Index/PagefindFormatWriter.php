@@ -494,7 +494,14 @@ class PagefindFormatWriter
      */
     private function ensureDir(string $dir): void
     {
-        if (!is_dir($dir) && !mkdir($dir, 0755, true)) {
+        if (is_dir($dir)) {
+            return;
+        }
+        // Suppress the warning — mkdir may fail with E_WARNING if a parallel
+        // process creates the directory between the is_dir() check and mkdir().
+        // The subsequent is_dir() confirms success either way.
+        @mkdir($dir, 0755, true);
+        if (!is_dir($dir)) {
             throw new \RuntimeException("Failed to create directory: {$dir}");
         }
     }
