@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tag1\Scolta\Http;
 
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Tag1\Scolta\Cache\CacheDriverInterface;
 use Tag1\Scolta\Prompt\NullEnricher;
 use Tag1\Scolta\Prompt\PromptEnricherInterface;
@@ -35,6 +37,7 @@ class AiEndpointHandler
      * @param int                       $maxFollowUps    Maximum follow-up exchanges allowed.
      * @param PromptEnricherInterface   $promptEnricher  Prompt enricher for site-specific context injection.
      * @param array                     $aiLanguages     Supported languages for multilingual responses.
+     * @param LoggerInterface           $logger          PSR-3 logger (defaults to NullLogger).
      */
     public function __construct(
         private readonly object $aiService,
@@ -44,6 +47,7 @@ class AiEndpointHandler
         private readonly int $maxFollowUps,
         private readonly PromptEnricherInterface $promptEnricher = new NullEnricher(),
         private readonly array $aiLanguages = ['en'],
+        private readonly LoggerInterface $logger = new NullLogger(),
     ) {
     }
 
@@ -92,7 +96,9 @@ class AiEndpointHandler
 
             return ['ok' => true, 'data' => $terms];
         } catch (\Exception $e) {
-            return ['ok' => false, 'status' => 503, 'error' => 'Query expansion unavailable', 'exception' => $e];
+            $this->logger->error('Scolta query expansion failed', ['exception' => $e]);
+
+            return ['ok' => false, 'status' => 503, 'error' => 'Query expansion unavailable'];
         }
     }
 
@@ -148,7 +154,9 @@ class AiEndpointHandler
 
             return ['ok' => true, 'data' => $result];
         } catch (\Exception $e) {
-            return ['ok' => false, 'status' => 503, 'error' => 'Summarization unavailable', 'exception' => $e];
+            $this->logger->error('Scolta summarization failed', ['exception' => $e]);
+
+            return ['ok' => false, 'status' => 503, 'error' => 'Summarization unavailable'];
         }
     }
 
@@ -212,7 +220,9 @@ class AiEndpointHandler
                 'remaining' => max(0, $remaining),
             ]];
         } catch (\Exception $e) {
-            return ['ok' => false, 'status' => 503, 'error' => 'Follow-up unavailable', 'exception' => $e];
+            $this->logger->error('Scolta follow-up failed', ['exception' => $e]);
+
+            return ['ok' => false, 'status' => 503, 'error' => 'Follow-up unavailable'];
         }
     }
 
