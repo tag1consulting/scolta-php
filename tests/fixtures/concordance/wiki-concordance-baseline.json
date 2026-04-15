@@ -1,119 +1,119 @@
 {
-    "generated_at": "2026-04-14T19:37:18Z",
+    "generated_at": "2026-04-15T02:11:16Z",
     "corpus": "corpus-wiki",
     "results": {
         "ar": {
             "jaccard": 0.9796,
             "fragments_compared": 5,
-            "threshold": 0.45,
+            "threshold": 0.95,
             "passes": true
         },
         "zh": {
             "jaccard": 0.9311,
             "fragments_compared": 5,
-            "threshold": 0.45,
+            "threshold": 0.9,
             "passes": true
         },
         "da": {
             "jaccard": 1,
             "fragments_compared": 5,
-            "threshold": 0.65,
+            "threshold": 0.97,
             "passes": true
         },
         "nl": {
             "jaccard": 1,
             "fragments_compared": 5,
-            "threshold": 0.65,
+            "threshold": 0.97,
             "passes": true
         },
         "en": {
             "jaccard": 1,
             "fragments_compared": 5,
-            "threshold": 0.65,
+            "threshold": 0.97,
             "passes": true
         },
         "fi": {
             "jaccard": 1,
             "fragments_compared": 5,
-            "threshold": 0.65,
+            "threshold": 0.97,
             "passes": true
         },
         "fr": {
             "jaccard": 1,
             "fragments_compared": 5,
-            "threshold": 0.65,
+            "threshold": 0.97,
             "passes": true
         },
         "de": {
             "jaccard": 1,
             "fragments_compared": 5,
-            "threshold": 0.65,
+            "threshold": 0.97,
             "passes": true
         },
         "hu": {
             "jaccard": 1,
             "fragments_compared": 5,
-            "threshold": 0.65,
+            "threshold": 0.97,
             "passes": true
         },
         "it": {
             "jaccard": 1,
             "fragments_compared": 5,
-            "threshold": 0.65,
+            "threshold": 0.97,
             "passes": true
         },
         "ja": {
             "jaccard": 1,
             "fragments_compared": 5,
-            "threshold": 0.45,
+            "threshold": 0.97,
             "passes": true
         },
         "ko": {
             "jaccard": 1,
             "fragments_compared": 5,
-            "threshold": 0.45,
+            "threshold": 0.97,
             "passes": true
         },
         "no": {
             "jaccard": 1,
             "fragments_compared": 5,
-            "threshold": 0.65,
+            "threshold": 0.97,
             "passes": true
         },
         "pt": {
             "jaccard": 1,
             "fragments_compared": 5,
-            "threshold": 0.65,
+            "threshold": 0.97,
             "passes": true
         },
         "ro": {
             "jaccard": 0.9795,
             "fragments_compared": 5,
-            "threshold": 0.65,
+            "threshold": 0.95,
             "passes": true
         },
         "ru": {
             "jaccard": 0.9833,
             "fragments_compared": 5,
-            "threshold": 0.65,
+            "threshold": 0.92,
             "passes": true
         },
         "es": {
             "jaccard": 1,
             "fragments_compared": 5,
-            "threshold": 0.65,
+            "threshold": 0.97,
             "passes": true
         },
         "sv": {
             "jaccard": 1,
             "fragments_compared": 5,
-            "threshold": 0.65,
+            "threshold": 0.97,
             "passes": true
         },
         "tr": {
             "jaccard": 1,
             "fragments_compared": 5,
-            "threshold": 0.65,
+            "threshold": 0.97,
             "passes": true
         }
     }
