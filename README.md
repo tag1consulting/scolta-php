@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/tag1consulting/scolta-php/actions/workflows/ci.yml/badge.svg)](https://github.com/tag1consulting/scolta-php/actions/workflows/ci.yml)
 
-Scolta is a browser-side search engine: the index lives in static files, scoring runs in the browser via WebAssembly, and an optional AI layer handles query expansion and summarization. No search server required. "Scolta" is Italian for "lookout" — someone watching for what matters.
+Scolta is a browser-side search engine: the index lives in static files, scoring runs in the browser via WebAssembly, and an optional AI layer handles query expansion and summarization. No search server required. "Scolta" is archaic Italian for sentinel — someone watching for what matters.
 
 This package is the shared PHP library. Platform adapters (WordPress, Drupal, Laravel) depend on it for content export, AI client, indexing, configuration, and shared frontend assets.
 
