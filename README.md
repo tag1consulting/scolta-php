@@ -104,7 +104,86 @@ Check that `ext-intl` is loaded and that the content items passed to the indexer
 
 ### "WASM interface version mismatch"
 
-If `ScoltaWasm` throws a `RuntimeException` about interface version, the pre-built WASM binary in `assets/wasm/` does not match the version this PHP package expects. This should not happen with a normal `composer install` — it indicates the WASM binary was replaced manually or a partial upgrade occurred. Run `composer install --no-cache` to restore the correct binary.
+If `ScoltaWasm` throws a `RuntimeException` about interface version, the pre-built WASM binary in `assets/wasm/` does not match the version this PHP package expects. Run `composer install --no-cache` to restore the correct binary.
+
+## Configuration Reference
+
+All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Platform adapters map their native config systems into this object via `ScoltaConfig::fromArray()`, which accepts snake_case keys.
+
+### AI Provider
+
+| Property | snake_case key | Type | Default | Description |
+| -------- | -------------- | ---- | ------- | ----------- |
+| `aiProvider` | `ai_provider` | string | `anthropic` | AI provider (`anthropic` or `openai`) |
+| `aiApiKey` | `ai_api_key` | string | `''` | API key for the AI provider |
+| `aiModel` | `ai_model` | string | `claude-sonnet-4-5-20250929` | Model identifier |
+| `aiBaseUrl` | `ai_base_url` | string | `''` | Custom API base URL (empty = provider default) |
+| `aiExpandQuery` | `ai_expand_query` | bool | `true` | Enable AI query expansion |
+| `aiSummarize` | `ai_summarize` | bool | `true` | Enable AI result summarization |
+| `aiSummaryTopN` | `ai_summary_top_n` | int | `5` | Number of top results sent to AI for summarization |
+| `aiSummaryMaxChars` | `ai_summary_max_chars` | int | `2000` | Maximum characters of content sent to AI for summarization |
+| `aiLanguages` | `ai_languages` | array | `['en']` | Supported languages for AI responses. With multiple languages, the AI responds in the user's query language if it matches; otherwise falls back to the primary (first) language. |
+
+### Scoring: Recency
+
+| Property | snake_case key | Type | Default | Description |
+| -------- | -------------- | ---- | ------- | ----------- |
+| `recencyStrategy` | `recency_strategy` | string | `exponential` | Decay function: `exponential`, `linear`, `step`, `none`, or `custom` (piecewise-linear) |
+| `recencyCurve` | `recency_curve` | array | `[]` | Control points for `custom` strategy: `[[days, boost], …]` sorted ascending |
+| `recencyBoostMax` | `recency_boost_max` | float | `0.5` | Maximum positive boost for recent content |
+| `recencyHalfLifeDays` | `recency_half_life_days` | int | `365` | Half-life for recency decay (days) |
+| `recencyPenaltyAfterDays` | `recency_penalty_after_days` | int | `1825` | Age threshold before penalty applies (~5 years) |
+| `recencyMaxPenalty` | `recency_max_penalty` | float | `0.3` | Maximum penalty for old content |
+
+### Scoring: Title/Content Match
+
+| Property | snake_case key | Type | Default | Description |
+| -------- | -------------- | ---- | ------- | ----------- |
+| `titleMatchBoost` | `title_match_boost` | float | `1.0` | Boost for title keyword matches |
+| `titleAllTermsMultiplier` | `title_all_terms_multiplier` | float | `1.5` | Multiplier when all search terms appear in title |
+| `contentMatchBoost` | `content_match_boost` | float | `0.4` | Boost for content/excerpt keyword matches |
+| `expandPrimaryWeight` | `expand_primary_weight` | float | `0.7` | Weight given to original query results vs expanded results during merge |
+
+### Scoring: Language
+
+| Property | snake_case key | Type | Default | Description |
+| -------- | -------------- | ---- | ------- | ----------- |
+| `language` | `language` | string | `en` | ISO 639-1 language code for stop word filtering. 30 languages supported; unknown codes apply no stop word filtering. |
+| `customStopWords` | `custom_stop_words` | array | `[]` | Additional stop words beyond the language's built-in list |
+
+### Display
+
+| Property | snake_case key | Type | Default | Description |
+| -------- | -------------- | ---- | ------- | ----------- |
+| `excerptLength` | `excerpt_length` | int | `300` | Maximum excerpt length in characters |
+| `resultsPerPage` | `results_per_page` | int | `10` | Results shown per page |
+| `maxPagefindResults` | `max_pagefind_results` | int | `50` | Maximum results fetched from Pagefind |
+
+### Site Identity
+
+| Property | snake_case key | Type | Default | Description |
+| -------- | -------------- | ---- | ------- | ----------- |
+| `siteName` | `site_name` | string | `''` | Site name used in AI prompts |
+| `siteDescription` | `site_description` | string | `website` | Site description used in AI prompts |
+| `searchPagePath` | `search_page_path` | string | `/search` | Path to the search page |
+| `pagefindIndexPath` | `pagefind_index_path` | string | `/pagefind` | URL path to the Pagefind index directory |
+
+### Caching
+
+| Property | snake_case key | Type | Default | Description |
+| -------- | -------------- | ---- | ------- | ----------- |
+| `cacheTtl` | `cache_ttl` | int | `2592000` | Cache TTL in seconds (default: 30 days) |
+| `maxFollowUps` | `max_follow_ups` | int | `3` | Maximum follow-up questions per session |
+
+### Prompts
+
+| Property | snake_case key | Type | Default | Description |
+| -------- | -------------- | ---- | ------- | ----------- |
+| `promptExpandQuery` | `prompt_expand_query` | string | `''` | Custom prompt for query expansion (empty = use DefaultPrompts) |
+| `promptSummarize` | `prompt_summarize` | string | `''` | Custom prompt for summarization (empty = use DefaultPrompts) |
+| `promptFollowUp` | `prompt_follow_up` | string | `''` | Custom prompt for follow-up conversations (empty = use DefaultPrompts) |
+
+For per-platform key mapping (e.g., Drupal `scoring.recency_boost_max` vs. WordPress `recency_boost_max` vs. Laravel `scoring.recency_boost_max`), see [docs/CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md).
 
 ## Architecture
 
