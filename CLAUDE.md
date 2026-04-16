@@ -27,10 +27,11 @@ This package follows the Scolta versioning policy. Major versions are synchroniz
 - **NEVER** remove a `@stability stable` method without a deprecation phase.
 - Removal MUST only happen in a major version bump.
 
-### WASM interface version
+### WASM asset versioning
 
-- ScoltaWasm.php MUST check the WASM interface version at load time.
-- If the loaded WASM binary reports an interface version this package doesn't support, throw a clear RuntimeException.
+- The `scolta.wasm` binary is a browser-side asset compiled via `wasm-pack --target web`.
+- Platform adapters (scolta-wp, scolta-drupal, scolta-laravel) ship the WASM binary as a static file.
+- WASM runs in the browser — no server-side PHP extension (FFI, Extism, etc.) is involved.
 
 ### Dependency constraint
 
@@ -59,7 +60,7 @@ The `version` field in `composer.json` is always either a tagged release (`0.2.0
 
 ## Architecture
 
-- ScoltaWasm is the bridge to the Rust WASM module. All scoring/HTML/prompt logic lives in WASM.
+- The scoring engine (scolta-core) runs as browser-side WASM via wasm-bindgen. PHP does not invoke WASM directly.
 - PHP classes are thin wrappers — don't reimplement algorithms that belong in scolta-core.
 - DTOs (ContentItem, AiResponse, TrackerRecord) are immutable readonly classes.
 

@@ -102,9 +102,9 @@ Check that `ext-intl` is loaded and that the content items passed to the indexer
 2. Check the model identifier — model names change with provider updates. Default: `claude-sonnet-4-5-20250929`.
 3. Enable Guzzle request logging: set `SCOLTA_DEBUG=1` to log raw request/response bodies.
 
-### "WASM interface version mismatch"
+### Scoring results look wrong
 
-If `ScoltaWasm` throws a `RuntimeException` about interface version, the pre-built WASM binary in `assets/wasm/` does not match the version this PHP package expects. Run `composer install --no-cache` to restore the correct binary.
+The browser-side WASM scorer (`scolta-core`) runs client-side via wasm-bindgen. If results appear unscored or identically ranked, confirm the `pagefind.js` and `scolta.wasm` assets are both loading without 404 errors. The WASM binary is a static file served from your platform's public directory — check your web server's static file headers.
 
 ## Configuration Reference
 

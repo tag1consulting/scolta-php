@@ -46,10 +46,8 @@ When upgrading between versions, follow this checklist:
 4. Run `composer update tag1/scolta-php`.
 5. Run `php artisan scolta:check-setup` (Laravel), `drush scolta:check-setup` (Drupal), or `wp scolta check-setup` (WordPress) to verify the environment.
 6. Run your test suite.
-7. If you use custom WASM paths, verify the WASM binary version matches the scolta-php version.
+7. Verify the WASM binary asset is served correctly — `scolta.wasm` must be publicly accessible from your platform's static asset path.
 
-## WASM Binary Compatibility
+## WASM Asset Compatibility
 
-The scolta-php package ships a pre-built `scolta_core.wasm` binary. When upgrading, the new WASM binary is included automatically. If you use a custom WASM path (`ScoltaWasm::setWasmPath()`), you must also update that binary.
-
-The WASM interface version is checked at load time. A mismatch between the WASM binary and scolta-php will throw a `RuntimeException` with a clear message.
+Scolta's scoring engine (`scolta-core`) compiles to `wasm32-unknown-unknown` via `wasm-pack --target web` and runs in the browser. The `scolta.wasm` binary ships as a static asset alongside `pagefind.js`. When upgrading scolta-php, a new platform adapter release ships the updated WASM asset. No server-side WASM runtime or PHP extension is required.
