@@ -78,7 +78,7 @@ class ArchitectureAccuracyTest extends TestCase
 
         $this->assertEmpty(
             $violations,
-            "CI workflows must not use continue-on-error: true. "
+            'CI workflows must not use continue-on-error: true. '
             . "Fix the underlying failure instead of muting it.\n"
             . implode("\n", $violations)
         );
