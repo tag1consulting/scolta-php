@@ -267,6 +267,46 @@ class PagefindBinaryTest extends TestCase
     }
 
     // -------------------------------------------------------------------
+    // isExecutable() visibility and internal usage (Part 3A)
+    // -------------------------------------------------------------------
+
+    /**
+     * Verify that resolve() internally uses isExecutable() without exposing it.
+     *
+     * If isExecutable() were removed or broken, resolve() would return null
+     * even with a valid binary.
+     */
+    public function testResolveCallsIsExecutableInternally(): void
+    {
+        $resolver = new PagefindBinary(
+            configuredPath: $this->fakeBinary,
+            projectDir: $this->tempDir,
+        );
+
+        $path = $resolver->resolve();
+        $this->assertNotNull($path, 'resolve() must find the fake binary via internal isExecutable() call');
+        $this->assertSame($this->fakeBinary, $path);
+
+        $status = $resolver->status();
+        $this->assertTrue($status['available']);
+        $this->assertSame('configured', $status['via']);
+    }
+
+    /**
+     * Verify that isExecutable() is not callable from outside the class.
+     *
+     * If visibility changes from private to public/protected, this fails.
+     */
+    public function testIsExecutableIsPrivate(): void
+    {
+        $reflection = new \ReflectionMethod(PagefindBinary::class, 'isExecutable');
+        $this->assertTrue(
+            $reflection->isPrivate(),
+            'isExecutable() must remain private — callers use resolve() + status()'
+        );
+    }
+
+    // -------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------
 
