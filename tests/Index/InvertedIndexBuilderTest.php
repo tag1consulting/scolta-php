@@ -73,6 +73,30 @@ class InvertedIndexBuilderTest extends TestCase
         $this->assertGreaterThan(0, $page['wordCount']);
     }
 
+    public function testContentFieldStartsWithTitle(): void
+    {
+        // The fragment content must mirror what PagefindHtmlBuilder puts in <body>
+        // ("<h1>Title</h1><p>body</p>" → "Title. body..."), so that
+        // scolta-core's content_match_score sees title words in the excerpt and
+        // applies the same content boost as body matches.
+        $result = $this->builder->build([
+            $this->makeItem('doc-1', 'My Great Title', 'Body content here for testing purposes.'),
+        ]);
+
+        $page = array_values($result['pages'])[0];
+        $this->assertStringStartsWith('My Great Title. ', $page['content']);
+        $this->assertStringContainsString('Body content', $page['content']);
+    }
+
+    public function testContentFieldBodyOnlyWhenTitleEmpty(): void
+    {
+        $item = new ContentItem('doc-1', '', '<p>Body content here for testing purposes, long enough.</p>', 'https://example.com', '2026-01-01');
+        $result = $this->builder->build([$item]);
+
+        $page = array_values($result['pages'])[0];
+        $this->assertStringStartsNotWith('. ', $page['content']);
+    }
+
     public function testPositionsAreTracked(): void
     {
         $result = $this->builder->build([

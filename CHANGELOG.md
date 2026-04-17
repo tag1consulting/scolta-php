@@ -11,6 +11,8 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ### Fixed
 
 - **PHP indexer**: `PagefindFormatWriter` now copies `pagefind-worker.js`, `wasm.en.pagefind`, and `wasm.unknown.pagefind` into the built index directory alongside `pagefind.js`. Previously the browser runtime assets were missing when using the PHP indexer (no pagefind binary), causing search to hang at "Searching…".
+- **PHP indexer**: `InvertedIndexBuilder` now prepends the page title to the fragment `content` field, matching what `PagefindHtmlBuilder` produces for the binary path (`<h1>title</h1>…`). Previously, title words were absent from the content excerpt, so `scolta-core`'s `content_match_score` never fired for title-only matches, reducing their ranking by the full `content_match_boost` (0.4 by default). Affects all three platform adapters (Drupal, Laravel, WordPress) whenever the PHP indexer is used.
+- **PHP indexer**: Title sanitization now strips `<script>` and `<style>` block content (not just tags) before the title is stored or prepended to the content field, preventing script inner-text from leaking into the search index.
 
 ## [0.2.2] - 2026-04-16
 

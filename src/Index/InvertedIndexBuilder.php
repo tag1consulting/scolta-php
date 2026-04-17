@@ -54,7 +54,10 @@ class InvertedIndexBuilder
             // Tokenize title and body separately for weight differentiation.
             // Strip HTML tags and decode entities — CMS adapters may pass
             // titles like "<b>Bold Title</b>" or "Title &amp; Subtitle".
-            $cleanTitle = html_entity_decode(strip_tags($item->title), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            // Remove <script>/<style> blocks first so their inner text (e.g.
+            // "alert('xss')") is discarded, not kept as plain text by strip_tags.
+            $titleRaw = preg_replace('/<(script|style)[^>]*>.*?<\/\1>/si', '', $item->title) ?? $item->title;
+            $cleanTitle = html_entity_decode(strip_tags($titleRaw), ENT_QUOTES | ENT_HTML5, 'UTF-8');
             $titleTokens = $this->tokenizer->tokenize($cleanTitle);
             $bodyTokens = $this->tokenizer->tokenize($cleanText, mb_strlen($cleanTitle) + 1);
 
@@ -67,12 +70,19 @@ class InvertedIndexBuilder
 
             $wordCount = count($titleTokens) + count($bodyTokens) + count($urlTokens);
 
+            // Fragment content mirrors what PagefindHtmlBuilder puts in <body>:
+            // "<h1>title</h1><p>body...</p>". Pagefind extracts that as
+            // "Title. Body..." in the content field. We must do the same so
+            // scolta-core's content_match_score sees title words in the excerpt,
+            // giving title-matching pages the same content boost as body matches.
+            $content = $cleanTitle !== '' ? $cleanTitle . '. ' . $cleanText : $cleanText;
+
             // Build page entry.
             $pages[$pageNum] = [
                 'id' => $item->id,
                 'url' => $item->url,
                 'title' => $cleanTitle,
-                'content' => $cleanText,
+                'content' => $content,
                 'wordCount' => $wordCount,
                 'date' => $item->date,
                 'filters' => $item->siteName !== '' ? ['site' => $item->siteName] : [],
@@ -80,7 +90,7 @@ class InvertedIndexBuilder
                     'title' => $cleanTitle,
                     'date' => $item->date,
                 ]),
-                'hash' => hash('sha256', $cleanText),
+                'hash' => hash('sha256', $content),
             ];
 
             // Index title tokens with title weight.
