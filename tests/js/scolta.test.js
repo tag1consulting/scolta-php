@@ -171,6 +171,34 @@ describe('scolta.js structure', () => {
         expect(jsSource).toContain(".get('q')");
         expect(jsSource).toContain('replaceState');
     });
+
+    test('renderFilters hides sidebar when one or fewer filter entries', () => {
+        expect(jsSource).toMatch(/entries\.length\s*<=\s*1/);
+        expect(jsSource).not.toMatch(/entries\.length\s*===\s*0/);
+    });
+
+    test('merge_results uses N-set format with sets array', () => {
+        expect(jsSource).toContain('sets:');
+        expect(jsSource).toMatch(/sets:\s*\[/);
+        expect(jsSource).not.toMatch(/original:\s*original/);
+        expect(jsSource).not.toMatch(/expanded:\s*expanded/);
+    });
+
+    test('AI context extraction uses batch_extract_context when available', () => {
+        expect(jsSource).toContain('batch_extract_context');
+        expect(jsSource).toContain('WASM context extraction failed');
+    });
+
+    test('sanitizeQueryForLogging utility exists', () => {
+        expect(jsSource).toContain('sanitizeQueryForLogging');
+        expect(jsSource).toContain('sanitize_query');
+    });
+
+    test('priority page boosting is supported when configured', () => {
+        expect(jsSource).toContain('match_priority_pages');
+        expect(jsSource).toContain('priority_pages');
+        expect(jsSource).toContain('Priority page matching failed');
+    });
 });
 
 describe('scolta.css structure', () => {

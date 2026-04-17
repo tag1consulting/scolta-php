@@ -247,6 +247,21 @@
     return (instanceConfig && instanceConfig.disclaimer) || '';
   }
 
+  function getInstancePriorityPages() {
+    return (instanceConfig && instanceConfig.priority_pages) || [];
+  }
+
+  // Sanitize a query before logging to strip PII (emails, phones, SSNs, etc.).
+  // Use sanitizeQueryForLogging(query) whenever logging search queries.
+  function sanitizeQueryForLogging(query) {
+    if (!scoltaWasm || !scoltaWasm.sanitize_query) return query;
+    try {
+      return scoltaWasm.sanitize_query(JSON.stringify({ query: query }));
+    } catch (e) {
+      return query;
+    }
+  }
+
   // Initialize Pagefind and preload the WASM index.
   async function initPagefind() {
     const pagefindPath = (instanceConfig && instanceConfig.pagefindPath) || '/pagefind/pagefind.js';
@@ -380,7 +395,35 @@
       </div>`;
 
     const topN = results.slice(0, CONFIG.AI_SUMMARY_TOP_N);
-    const context = buildLLMContext(topN);
+    let context;
+    if (scoltaWasm && scoltaWasm.batch_extract_context) {
+      try {
+        const contextItems = topN.map(r => ({
+          content: stripHtml(r.data.content || r.data.excerpt || ''),
+          url: r.data.meta?.url || '',
+          title: r.data.meta?.title || '',
+        }));
+        const extractInput = JSON.stringify({
+          query: query,
+          items: contextItems,
+          config: {
+            max_length: CONFIG.AI_SUMMARY_MAX_CHARS,
+            intro_length: 200,
+            snippet_radius: 80,
+            separator: "\n\n---\n\n",
+          },
+        });
+        const extractOutput = JSON.parse(scoltaWasm.batch_extract_context(extractInput));
+        context = extractOutput.map((item, i) =>
+          `[${i + 1}] ${item.title}\n${item.url}\n${item.context}`
+        ).join('\n\n');
+      } catch (e) {
+        console.warn('[scolta] WASM context extraction failed, using fallback', e);
+        context = buildLLMContext(topN);
+      }
+    } else {
+      context = buildLLMContext(topN);
+    }
 
     try {
       const fullQuery = expandedTerms.length > 0
@@ -808,9 +851,12 @@
         date: r.data.meta?.date || '',
       }));
       const input = JSON.stringify({
-        original: original,
-        expanded: expanded,
-        config: { expand_primary_weight: getInstanceConfig().EXPAND_PRIMARY_WEIGHT },
+        sets: [
+          { results: original, weight: 1.0 },
+          { results: expanded, weight: getInstanceConfig().EXPAND_PRIMARY_WEIGHT },
+        ],
+        deduplicate_by: "url",
+        normalize_urls: true,
       });
       try {
         const output = scoltaWasm.merge_results(input);
@@ -1013,7 +1059,7 @@
 
     const meaningfulTerms = extractSearchTerms(query);
     const searchQuery = meaningfulTerms.length > 0 ? meaningfulTerms.join(' ') : query;
-    console.log('[scolta:search] Filtered query:', JSON.stringify(searchQuery), '(original:', JSON.stringify(query), ')');
+    console.log('[scolta:search] Filtered query:', JSON.stringify(sanitizeQueryForLogging(searchQuery)), '(original:', JSON.stringify(sanitizeQueryForLogging(query)), ')');
 
     allHighlightTerms = meaningfulTerms.length > 0
       ? meaningfulTerms.filter(t => t.length > 2)
@@ -1042,6 +1088,29 @@
 
     allScoredResults.sort((a, b) => b.score - a.score);
     allScoredResults = deduplicateByTitle(allScoredResults);
+
+    const priorityPages = getInstancePriorityPages();
+    if (priorityPages.length > 0 && scoltaWasm && scoltaWasm.match_priority_pages) {
+      try {
+        const priorityInput = JSON.stringify({ query: currentQuery, priority_pages: priorityPages });
+        const priorityMatches = JSON.parse(scoltaWasm.match_priority_pages(priorityInput));
+        if (priorityMatches && priorityMatches.length > 0) {
+          const priorityMap = {};
+          priorityMatches.forEach(pm => {
+            priorityMap[(pm.url || '').replace(/\/$/, '').toLowerCase()] = pm;
+          });
+          allScoredResults.forEach(result => {
+            const url = (result.data.meta?.url || result.data.url || '').replace(/\/$/, '').toLowerCase();
+            if (priorityMap[url]) {
+              result.score = (result.score || 0) + (priorityMap[url].boost || 100);
+            }
+          });
+          allScoredResults.sort((a, b) => b.score - a.score);
+        }
+      } catch (e) {
+        console.warn('[scolta] Priority page matching failed', e);
+      }
+    }
 
     if (!preserveFilters) {
       filterCounts = computeFilterCounts(allScoredResults);
@@ -1102,7 +1171,7 @@
   function renderFilters() {
     const container = els.filters;
     const entries = Object.entries(filterCounts).sort((a, b) => b[1] - a[1]);
-    if (entries.length === 0) {
+    if (entries.length <= 1) {
       container.innerHTML = "";
       els.layout.classList.remove("has-filters");
       return;

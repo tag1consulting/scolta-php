@@ -243,4 +243,85 @@ describe('scolta.js behavioral tests', () => {
         );
         expect(jsSource).toContain('"popstate"');
     });
+
+    test('doSearch sets ?q= parameter via replaceState', async () => {
+        const { window } = createWindow();
+        const replaceStateSpy = jest.spyOn(window.history, 'replaceState');
+
+        const input = window.document.querySelector('#scolta-query');
+        const btn = window.document.querySelector('#scolta-search-btn');
+
+        input.value = 'containers';
+        btn.click();
+
+        await new Promise(r => setTimeout(r, 100));
+
+        const calls = replaceStateSpy.mock.calls;
+        expect(calls.length).toBeGreaterThan(0);
+        const lastUrl = calls[calls.length - 1][2];
+        expect(lastUrl).toMatch(/[?&]q=/);
+    });
+
+    test('clearSearch removes ?q= from URL', async () => {
+        const { window } = createWindow();
+        const replaceStateSpy = jest.spyOn(window.history, 'replaceState');
+
+        const input = window.document.querySelector('#scolta-query');
+        const btn = window.document.querySelector('#scolta-search-btn');
+        const clear = window.document.querySelector('#scolta-search-clear');
+
+        input.value = 'containers';
+        btn.click();
+        await new Promise(r => setTimeout(r, 100));
+
+        clear.click();
+        await new Promise(r => setTimeout(r, 50));
+
+        const calls = replaceStateSpy.mock.calls;
+        const lastUrl = calls[calls.length - 1][2];
+        expect(lastUrl).not.toMatch(/[?&]q=/);
+    });
+
+    test('popstate with ?q= restores search input value', async () => {
+        const { window } = createWindow();
+
+        window.history.pushState({}, '', '?q=kubernetes');
+        window.dispatchEvent(new window.PopStateEvent('popstate', { state: {} }));
+
+        await new Promise(r => setTimeout(r, 100));
+
+        const input = window.document.querySelector('#scolta-query');
+        expect(input.value).toBe('kubernetes');
+    });
+
+    test('popstate without ?q= clears search input', async () => {
+        const { window } = createWindow();
+
+        const input = window.document.querySelector('#scolta-query');
+        const btn = window.document.querySelector('#scolta-search-btn');
+        input.value = 'test query';
+        btn.click();
+        await new Promise(r => setTimeout(r, 100));
+
+        window.history.pushState({}, '', '/');
+        window.dispatchEvent(new window.PopStateEvent('popstate', { state: {} }));
+        await new Promise(r => setTimeout(r, 50));
+
+        expect(input.value).toBe('');
+    });
+
+    test('results from a single site do not add has-filters class', async () => {
+        const { window } = createWindow();
+        const layout = window.document.querySelector('#scolta-layout');
+
+        const input = window.document.querySelector('#scolta-query');
+        const btn = window.document.querySelector('#scolta-search-btn');
+
+        input.value = 'kubernetes';
+        btn.click();
+
+        await new Promise(r => setTimeout(r, 100));
+
+        expect(layout.classList.contains('has-filters')).toBe(false);
+    });
 });
