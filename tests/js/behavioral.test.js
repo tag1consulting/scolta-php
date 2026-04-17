@@ -112,6 +112,19 @@ describe('scolta.js behavioral tests', () => {
         expect(layout.style.display).toBe('none');
     });
 
+    test('layout does not have has-filters class initially', () => {
+        const { window } = createWindow();
+        const layout = window.document.querySelector('#scolta-layout');
+        expect(layout.classList.contains('has-filters')).toBe(false);
+    });
+
+    test('filters aside is empty initially', () => {
+        const { window } = createWindow();
+        const filters = window.document.querySelector('#scolta-filters');
+        expect(filters).not.toBeNull();
+        expect(filters.innerHTML).toBe('');
+    });
+
     test('no-results is hidden initially', () => {
         const { window } = createWindow();
         const noResults = window.document.querySelector('#scolta-no-results');

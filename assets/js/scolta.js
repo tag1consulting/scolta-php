@@ -1102,8 +1102,13 @@
   function renderFilters() {
     const container = els.filters;
     const entries = Object.entries(filterCounts).sort((a, b) => b[1] - a[1]);
-    if (entries.length === 0) { container.innerHTML = ""; return; }
+    if (entries.length === 0) {
+      container.innerHTML = "";
+      els.layout.classList.remove("has-filters");
+      return;
+    }
 
+    els.layout.classList.add("has-filters");
     let html = "<h3>Site</h3>";
     for (const [site, count] of entries) {
       const isActive = activeFilters.has(site);

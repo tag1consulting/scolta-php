@@ -198,4 +198,12 @@ describe('scolta.css structure', () => {
         expect(css).toContain('.scolta-load-more');
         expect(css).toContain('.scolta-expanded-term');
     });
+
+    test('layout defaults to single column without has-filters', () => {
+        const css = fs.readFileSync(cssPath, 'utf-8');
+        expect(css).toContain('.scolta-layout');
+        expect(css).toContain('.scolta-layout.has-filters');
+        expect(css).toMatch(/\.scolta-layout\.has-filters\s*\{[^}]*grid-template-columns:\s*220px/);
+        expect(css).toMatch(/\.scolta-layout\s*\{[^}]*grid-template-columns:\s*1fr/);
+    });
 });
