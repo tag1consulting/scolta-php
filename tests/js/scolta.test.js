@@ -59,15 +59,15 @@ describe('scolta.js structure', () => {
     });
 
     test('contains recencyScore function', () => {
-        expect(jsSource).toContain('function recencyScore(');
+        expect(jsSource).toContain('function recencyScoreFallback(');
     });
 
     test('contains titleMatchScore function', () => {
-        expect(jsSource).toContain('function titleMatchScore(');
+        expect(jsSource).toContain('function titleMatchScoreFallback(');
     });
 
     test('contains contentMatchScore function', () => {
-        expect(jsSource).toContain('function contentMatchScore(');
+        expect(jsSource).toContain('function contentMatchScoreFallback(');
     });
 
     test('contains deduplicateByTitle function', () => {
