@@ -55,7 +55,13 @@ All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Platfo
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `expandPrimaryWeight` | float | `0.7` | Weight given to original query results vs expanded results during merge |
+| `expandPrimaryWeight` | float | `0.7` | Weight applied to expanded-query results during N-set merge (original results always have weight 1.0) |
+
+### Scoring: Priority Pages
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `priorityPages` | array | `[]` | Pages that receive a score boost when their URL pattern or keywords match the query. Each entry: `{ url_pattern, keywords, boost }`. Matched pages are sorted to the top regardless of Pagefind rank. Processed by WASM `match_priority_pages()` when available. |
 
 ### Scoring: Language and Stop Words
 

@@ -4,16 +4,23 @@ All notable changes to scolta-php will be documented in this file.
 
 This project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages.
 
-## [Unreleased]
-
-## [0.2.3] - Unreleased
+## [0.2.3] - 2026-04-17
 
 ### Fixed
+- Filter sidebar hidden on single-site installs (was showing useless single checkbox)
+- **PHP indexer**: `PagefindFormatWriter` now copies `pagefind-worker.js`, `wasm.en.pagefind`, and `wasm.unknown.pagefind` into the built index directory alongside `pagefind.js`. Previously the browser runtime assets were missing when using the PHP indexer, causing search to hang at "Searching…".
+- **PHP indexer**: `InvertedIndexBuilder` now prepends the page title to the fragment `content` field, matching what `PagefindHtmlBuilder` produces for the binary path. Previously, title words were absent from the content excerpt, so `content_match_score` never fired for title-only matches.
+- **PHP indexer**: `InvertedIndexBuilder` now indexes title tokens into body positions (`locs`) as well as title meta positions (`meta_locs`). Pagefind's WASM requires at least one body position to generate a highlighted excerpt for a match.
+- **PHP indexer**: Title sanitization now strips `<script>` and `<style>` block content (not just tags) before the title is stored, preventing script inner-text from leaking into the search index.
 
-- **PHP indexer**: `PagefindFormatWriter` now copies `pagefind-worker.js`, `wasm.en.pagefind`, and `wasm.unknown.pagefind` into the built index directory alongside `pagefind.js`. Previously the browser runtime assets were missing when using the PHP indexer (no pagefind binary), causing search to hang at "Searching…".
-- **PHP indexer**: `InvertedIndexBuilder` now prepends the page title to the fragment `content` field, matching what `PagefindHtmlBuilder` produces for the binary path (`<h1>title</h1>…`). Previously, title words were absent from the content excerpt, so `scolta-core`'s `content_match_score` never fired for title-only matches, reducing their ranking by the full `content_match_boost` (0.4 by default). Affects all three platform adapters (Drupal, Laravel, WordPress) whenever the PHP indexer is used.
-- **PHP indexer**: `InvertedIndexBuilder` now indexes title tokens into body positions (`locs`) as well as title meta positions (`meta_locs`). Previously title tokens went only to `meta_locs`; pagefind's WASM requires at least one body position to generate a highlighted excerpt for a match, so pages that matched only in the title received empty excerpts and `scolta-core`'s `content_match_score` could not fire regardless of the `content` field fix above. This mirrors how the binary pagefind indexer treats `<h1>` content (indexed in both `locs` and `meta_locs`).
-- **PHP indexer**: Title sanitization now strips `<script>` and `<style>` block content (not just tags) before the title is stored or prepended to the content field, preventing script inner-text from leaking into the search index.
+### Added
+- AI summary context via WASM `batch_extract_context()` with graceful fallback to naive truncation
+- Query PII sanitization via `sanitizeQueryForLogging()` utility (uses WASM when available)
+- Priority page boosting via WASM `match_priority_pages()` with configurable URL patterns and boost weights
+- URL sync: search query synced to `?q=` parameter via `replaceState`; `popstate` and page-load restore; behavioral test coverage
+
+### Changed
+- `merge_results` call updated to N-set format (`sets` array with weights, `deduplicate_by`, `normalize_urls`)
 
 ## [0.2.2] - 2026-04-16
 
