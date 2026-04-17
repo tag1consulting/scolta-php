@@ -127,11 +127,34 @@ class InvertedIndexBuilderTest extends TestCase
             $pageEntries = array_filter($result['index'][$stemmed], fn ($k) => is_int($k), ARRAY_FILTER_USE_KEY);
             $entry = array_values($pageEntries)[0] ?? null;
             if ($entry !== null) {
-                // Title tokens go to meta_positions (not positions weight 50).
+                // Title tokens go to meta_positions (for pagefind meta_locs).
                 $this->assertNotEmpty($entry['meta_positions'], 'Title word should have meta_positions');
             }
         }
         $this->assertTrue(true);
+    }
+
+    public function testTitleTokensAlsoInBodyPositions(): void
+    {
+        // Title-only words must appear in body positions (locs) as well as
+        // meta_positions (meta_locs). Without body locs, pagefind's WASM cannot
+        // generate a highlighted excerpt for title-only matches, which prevents
+        // scolta-core's content_match_score from firing. This mirrors the binary
+        // pagefind indexer which indexes <h1> content in both locs and meta_locs.
+        $result = $this->builder->build([
+            $this->makeItem('doc-1', 'Zirconium', 'Banana cherry date elderberry fig grape enough text.'),
+        ]);
+
+        $stemmed = (new Stemmer('en'))->stem('zirconium');
+        $this->assertArrayHasKey($stemmed, $result['index'], 'Title word should be in index');
+
+        $pageEntries = array_filter($result['index'][$stemmed], fn ($k) => is_int($k), ARRAY_FILTER_USE_KEY);
+        $entry = array_values($pageEntries)[0] ?? null;
+        $this->assertNotNull($entry, 'Should have at least one page entry');
+
+        // Must have both meta_positions and body positions.
+        $this->assertNotEmpty($entry['meta_positions'], 'Title word should have meta_positions');
+        $this->assertNotEmpty($entry['positions'], 'Title word must also have body positions (locs) for excerpt generation');
     }
 
     public function testFiltersIncluded(): void

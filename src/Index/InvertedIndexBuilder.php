@@ -128,11 +128,21 @@ class InvertedIndexBuilder
                 ];
             }
 
-            // Title tokens go to meta_positions (Pagefind encodes these
-            // in meta_locs with field index markers, not in body locs).
-            // Body/URL tokens go to positions (encoded in locs).
+            // Title tokens go to meta_positions (encoded in meta_locs with
+            // field index markers) AND to body positions (encoded in locs).
+            // The binary pagefind indexer does the same: <h1> content appears
+            // in both locs and meta_locs in the pf_index. Without body locs,
+            // pagefind's WASM cannot generate a highlighted excerpt for
+            // title-only matches, so the scored excerpt is empty and
+            // scolta-core's content_match_score never fires.
+            // Body/URL tokens go only to positions (encoded in locs).
             if ($weight === self::TITLE_WEIGHT) {
                 $index[$stemmed][$pageNum]['meta_positions'][] = $position;
+                // Also index in body positions so pagefind generates highlighted excerpts.
+                if (!isset($index[$stemmed][$pageNum]['positions'][self::BODY_WEIGHT])) {
+                    $index[$stemmed][$pageNum]['positions'][self::BODY_WEIGHT] = [];
+                }
+                $index[$stemmed][$pageNum]['positions'][self::BODY_WEIGHT][] = $position;
             } else {
                 if (!isset($index[$stemmed][$pageNum]['positions'][$weight])) {
                     $index[$stemmed][$pageNum]['positions'][$weight] = [];
