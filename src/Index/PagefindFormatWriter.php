@@ -146,10 +146,13 @@ class PagefindFormatWriter
             json_encode($entry, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
         );
 
-        // Copy bundled pagefind.js if available.
-        $bundledJs = dirname(__DIR__, 2) . '/assets/pagefind/pagefind.js';
-        if (file_exists($bundledJs)) {
-            copy($bundledJs, $buildDir . '/pagefind.js');
+        // Copy bundled pagefind runtime assets (JS, WASM, worker) if available.
+        $assetsDir = dirname(__DIR__, 2) . '/assets/pagefind';
+        foreach (['pagefind.js', 'pagefind-worker.js', 'wasm.en.pagefind', 'wasm.unknown.pagefind'] as $asset) {
+            $src = $assetsDir . '/' . $asset;
+            if (file_exists($src)) {
+                copy($src, $buildDir . '/' . $asset);
+            }
         }
     }
 

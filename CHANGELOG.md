@@ -8,6 +8,10 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [0.2.3] - Unreleased
 
+### Fixed
+
+- **PHP indexer**: `PagefindFormatWriter` now copies `pagefind-worker.js`, `wasm.en.pagefind`, and `wasm.unknown.pagefind` into the built index directory alongside `pagefind.js`. Previously the browser runtime assets were missing when using the PHP indexer (no pagefind binary), causing search to hang at "Searching…".
+
 ## [0.2.2] - 2026-04-16
 
 ### Added
