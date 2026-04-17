@@ -164,6 +164,13 @@ describe('scolta.js structure', () => {
         expect(jsSource).toContain('searchVersion');
         expect(jsSource).toContain('followUpVersion !== searchVersion');
     });
+
+    test('search updates URL with query parameter', () => {
+        expect(jsSource).toContain("searchParams.set('q'");
+        expect(jsSource).toContain("searchParams.delete('q'");
+        expect(jsSource).toContain(".get('q')");
+        expect(jsSource).toContain('replaceState');
+    });
 });
 
 describe('scolta.css structure', () => {

@@ -983,6 +983,16 @@
     abortController = new AbortController();
 
     currentQuery = query;
+
+    // Update URL with search query for shareable/bookmarkable searches.
+    try {
+      var url = new URL(window.location.href);
+      url.searchParams.set('q', query);
+      history.replaceState(null, '', url.toString());
+    } catch (e) {
+      // Silently ignore — URL sync is non-critical.
+    }
+
     displayedCount = 0;
     allScoredResults = [];
     conversationMessages = [];
@@ -1073,6 +1083,16 @@
     conversationMessages = [];
     followUpCount = 0;
     activeFilters.clear();
+
+    // Remove search query from URL.
+    try {
+      var url = new URL(window.location.href);
+      url.searchParams.delete('q');
+      history.replaceState(null, '', url.toString());
+    } catch (e) {
+      // Silently ignore.
+    }
+
     window.scrollTo({ top: 0, behavior: 'smooth' });
     els.queryInput.focus();
   }
@@ -1296,9 +1316,39 @@
       }
     });
 
+    // Handle browser back/forward navigation between searches.
+    window.addEventListener("popstate", () => {
+      try {
+        var urlParams = new URLSearchParams(window.location.search);
+        var urlQuery = urlParams.get('q');
+        if (urlQuery) {
+          els.queryInput.value = urlQuery;
+          els.searchClear.style.display = "block";
+          doSearch();
+        } else {
+          clearSearch();
+        }
+      } catch (e) {
+        // Silently ignore.
+      }
+    });
+
     // Load Pagefind and Scolta WASM in parallel.
     Promise.all([initPagefind(), initScoltaWasm()]).then(() => {
       console.log("[scolta] Ready — Pagefind + WASM loaded");
+
+      // If URL contains ?q=<query>, auto-execute the search.
+      try {
+        var urlParams = new URLSearchParams(window.location.search);
+        var urlQuery = urlParams.get('q');
+        if (urlQuery) {
+          els.queryInput.value = urlQuery;
+          els.searchClear.style.display = "block";
+          doSearch();
+        }
+      } catch (e) {
+        // Silently ignore — URL parsing is non-critical.
+      }
     });
 
     console.log("[scolta] Initialized");

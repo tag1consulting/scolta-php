@@ -194,4 +194,40 @@ describe('scolta.js behavioral tests', () => {
 
         expect(window.fetch).toHaveBeenCalled();
     });
+
+    test('doSearch updates URL with query parameter', () => {
+        const jsSource = fs.readFileSync(
+            path.join(__dirname, '../../assets/js/scolta.js'), 'utf-8'
+        );
+        const doSearchBody = jsSource.match(/async function doSearch[\s\S]*?els\.layout\.style\.display/);
+        expect(doSearchBody).not.toBeNull();
+        expect(doSearchBody[0]).toContain("searchParams.set('q'");
+        expect(doSearchBody[0]).toContain('replaceState');
+    });
+
+    test('clearSearch removes query from URL', () => {
+        const jsSource = fs.readFileSync(
+            path.join(__dirname, '../../assets/js/scolta.js'), 'utf-8'
+        );
+        const clearBody = jsSource.match(/function clearSearch[\s\S]*?queryInput\.focus/);
+        expect(clearBody).not.toBeNull();
+        expect(clearBody[0]).toContain("searchParams.delete('q'");
+        expect(clearBody[0]).toContain('replaceState');
+    });
+
+    test('init reads query from URL after Pagefind loads', () => {
+        const jsSource = fs.readFileSync(
+            path.join(__dirname, '../../assets/js/scolta.js'), 'utf-8'
+        );
+        const initBody = jsSource.match(/Promise\.all\(\[initPagefind[\s\S]*?Initialized/);
+        expect(initBody).not.toBeNull();
+        expect(initBody[0]).toContain(".get('q')");
+    });
+
+    test('popstate listener registered for back/forward navigation', () => {
+        const jsSource = fs.readFileSync(
+            path.join(__dirname, '../../assets/js/scolta.js'), 'utf-8'
+        );
+        expect(jsSource).toContain('"popstate"');
+    });
 });
