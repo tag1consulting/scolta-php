@@ -40,7 +40,12 @@ final class HealthChecker
         );
         $binaryStatus = $resolver->status();
 
-        $indexExists = file_exists($this->indexOutputDir . '/pagefind.js');
+        // PhpIndexer writes into a pagefind/ subdirectory of outputDir (atomic
+        // swap from .scolta-building → pagefind/). The binary pipeline also
+        // uses --output-path {outputDir}/pagefind. Check both locations so the
+        // health check works regardless of which pipeline last built the index.
+        $indexExists = file_exists($this->indexOutputDir . '/pagefind/pagefind.js')
+            || file_exists($this->indexOutputDir . '/pagefind.js');
 
         $aiConfigured = !empty($this->config->aiApiKey);
 
