@@ -1,6 +1,53 @@
 /* @ts-self-types="./scolta_core.d.ts" */
 
 /**
+ * Extract context from multiple content items in one call.
+ *
+ * # Stability
+ * Status: experimental
+ * Since: 0.2.3
+ *
+ * Input: JSON string with shape:
+ * ```json
+ * {
+ *   "items": [{ "content": "...", "url": "...", "title": "..." }],
+ *   "query": "search terms",
+ *   "config": { "max_length": 6000 }
+ * }
+ * ```
+ *
+ * Output: JSON string — array of `{ url, title, context }` objects.
+ * @param {string} input
+ * @returns {string}
+ */
+export function batch_extract_context(input) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.batch_extract_context(retptr, ptr0, len0);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        var ptr2 = r0;
+        var len2 = r1;
+        if (r3) {
+            ptr2 = 0; len2 = 0;
+            throw takeObject(r2);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+        wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
  * Score multiple queries against their respective result sets in a single call.
  *
  * Input: JSON string with shape:
@@ -70,6 +117,53 @@ export function describe() {
 }
 
 /**
+ * Extract the most relevant portion of article content for LLM context.
+ *
+ * # Stability
+ * Status: experimental
+ * Since: 0.2.3
+ *
+ * Input: JSON string with shape:
+ * ```json
+ * {
+ *   "content": "full article text...",
+ *   "query": "search terms",
+ *   "config": { "max_length": 6000, "intro_length": 2000, "snippet_radius": 500 }
+ * }
+ * ```
+ *
+ * Output: JSON string — extracted context string.
+ * @param {string} input
+ * @returns {string}
+ */
+export function extract_context(input) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.extract_context(retptr, ptr0, len0);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        var ptr2 = r0;
+        var len2 = r1;
+        if (r3) {
+            ptr2 = 0; len2 = 0;
+            throw takeObject(r2);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+        wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
  * Get a raw prompt template by name.
  *
  * Input: Prompt name string ("expand_query", "summarize", "follow_up").
@@ -105,12 +199,66 @@ export function get_prompt(name) {
 }
 
 /**
- * Merge original and expanded search results.
+ * Find priority pages matching a query.
+ *
+ * # Stability
+ * Status: experimental
+ * Since: 0.2.3
  *
  * Input: JSON string with shape:
- *   `{ "original": [...], "expanded": [...], "config": {...} }`
+ * ```json
+ * { "query": "search terms", "priority_pages": [...] }
+ * ```
  *
- * Output: JSON string — merged and deduplicated results.
+ * Output: JSON string — array of matching priority page objects.
+ * @param {string} input
+ * @returns {string}
+ */
+export function match_priority_pages(input) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.match_priority_pages(retptr, ptr0, len0);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        var ptr2 = r0;
+        var len2 = r1;
+        if (r3) {
+            ptr2 = 0; len2 = 0;
+            throw takeObject(r2);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+        wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
+ * Merge N scored result sets with per-set weights and deduplication.
+ *
+ * Input: JSON string with shape:
+ * ```json
+ * {
+ *   "sets": [
+ *     { "results": [...], "weight": 1.0 },
+ *     { "results": [...], "weight": 0.7 }
+ *   ],
+ *   "deduplicate_by": "url",
+ *   "case_sensitive": false,
+ *   "exclude_urls": ["/admin"],
+ *   "normalize_urls": true
+ * }
+ * ```
+ *
+ * Output: JSON string — merged, weighted, and deduplicated results array.
  * @param {string} input
  * @returns {string}
  */
@@ -151,9 +299,15 @@ export function merge_results(input) {
  *    ["term1", "term2"]
  *    ```
  *
- * 2. **JSON object** — allows specifying a language for stop word filtering.
+ * 2. **JSON object** — full configuration including language, generic-term filtering,
+ *    and merging with an existing term set.
  *    ```json
- *    { "text": "[\"term1\", \"term2\"]", "language": "de" }
+ *    {
+ *      "text": "[\"term1\", \"term2\"]",
+ *      "language": "en",
+ *      "generic_terms": ["platform", "solution"],
+ *      "existing_terms": ["drupal"]
+ *    }
  *    ```
  *
  * Output: JSON string — array of extracted, filtered terms.
@@ -225,6 +379,52 @@ export function resolve_prompt(input) {
 }
 
 /**
+ * Redact PII from a query string before analytics logging.
+ *
+ * # Stability
+ * Status: experimental
+ * Since: 0.2.3
+ *
+ * Input: JSON string with shape:
+ * ```json
+ * {
+ *   "query": "contact user@example.com",
+ *   "config": { "redact_email": true, "redact_phone": true }
+ * }
+ * ```
+ *
+ * Output: JSON string — sanitized query string.
+ * @param {string} input
+ * @returns {string}
+ */
+export function sanitize_query(input) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.sanitize_query(retptr, ptr0, len0);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        var ptr2 = r0;
+        var len2 = r1;
+        if (r3) {
+            ptr2 = 0; len2 = 0;
+            throw takeObject(r2);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+        wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
  * Score search results against a query.
  *
  * Input: JSON string with shape:
@@ -262,21 +462,32 @@ export function score_results(input) {
 }
 
 /**
- * Convert scoring config to JavaScript-friendly format.
+ * Trim conversation history to fit within a character limit.
  *
- * Input: JSON string of scoring config.
- * Output: JSON string with JS-style keys (UPPER_SNAKE_CASE).
+ * # Stability
+ * Status: experimental
+ * Since: 0.2.3
+ *
+ * Input: JSON string with shape:
+ * ```json
+ * {
+ *   "messages": [{ "role": "user", "content": "..." }],
+ *   "config": { "max_length": 12000, "preserve_first_n": 2, "removal_unit": 2 }
+ * }
+ * ```
+ *
+ * Output: JSON string — trimmed messages array.
  * @param {string} input
  * @returns {string}
  */
-export function to_js_scoring_config(input) {
+export function truncate_conversation(input) {
     let deferred3_0;
     let deferred3_1;
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
         const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.to_js_scoring_config(retptr, ptr0, len0);
+        wasm.truncate_conversation(retptr, ptr0, len0);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
