@@ -44,6 +44,10 @@ function createWindow(html = '<div id="scolta-search"></div>', config = {}) {
     // Suppress console noise.
     window.console = { log: jest.fn(), error: jest.fn(), warn: jest.fn() };
 
+    // JSDOM doesn't implement scrollTo — stub it so the VirtualConsole
+    // doesn't emit "Not implemented" noise on every clearSearch call.
+    window.scrollTo = () => {};
+
     // Load scolta.js WITHOUT auto-init (don't set config before eval).
     window.eval(patchedSource);
 

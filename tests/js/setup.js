@@ -11,3 +11,4 @@ global.mockPagefind = {
     init: jest.fn().mockResolvedValue(undefined),
     search: jest.fn().mockResolvedValue({ results: [] }),
 };
+
