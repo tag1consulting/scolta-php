@@ -7,6 +7,8 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ## [0.2.4] - Unreleased
 
 ### Fixed
+- **`merge_results` TypeScript declaration**: `scolta_core.d.ts` now documents the N-set input shape (`{ sets, deduplicate_by, normalize_urls }`) that the implementation has used since 0.2.3. The old `{ original, expanded, config }` shape comment was stale.
+- **`mergeResults` behavioral tests**: Added five behavioral Jest tests in `behavioral.test.js` that actually invoke `mergeResults` at runtime (JS fallback path) and assert deduplication and score-wins semantics. The previous test was a string-match only.
 - **`HealthChecker` `index_exists`**: Now checks `{outputDir}/pagefind/pagefind.js` first (the location both `PhpIndexer` and the Pagefind binary pipeline write to since 0.2.3), falling back to the legacy flat `{outputDir}/pagefind.js`. Previously `index_exists` always returned `false` for fresh PHP-indexer builds and `true` only for sites retaining a stale pre-0.2.3 flat file.
 
 ## [0.2.3] - 2026-04-17

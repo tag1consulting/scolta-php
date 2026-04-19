@@ -329,3 +329,135 @@ describe('scolta.js behavioral tests', () => {
         expect(layout.classList.contains('has-filters')).toBe(false);
     });
 });
+
+// =============================================================================
+// mergeResults behavioral tests (JS fallback — no WASM in test environment)
+//
+// Gap 4a: the existing string-match test only confirmed the source contains
+// "sets:" and doesn't contain "original:". These tests exercise the actual
+// runtime path: deduplication by URL and score-wins semantics.
+// =============================================================================
+
+// Patch the source to expose the private mergeResults function on window so it
+// can be called directly. The comment anchor is unique in the file.
+const mergeResultsExposedSource = patchedSource.replace(
+    '// SHARED SEARCH HELPERS',
+    '// SHARED SEARCH HELPERS\n  window.__mergeResults = mergeResults;'
+);
+
+function createWindowForMerge() {
+    const dom = new JSDOM(
+        '<!DOCTYPE html><html><body><div id="scolta-search"></div></body></html>',
+        { url: 'https://example.com', runScripts: 'dangerously' }
+    );
+    const win = dom.window;
+    win.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve([]),
+        text: () => Promise.resolve('[]'),
+        status: 200,
+    });
+    win.console = { log: jest.fn(), error: jest.fn(), warn: jest.fn() };
+    win.scrollTo = () => {};
+    win.eval(mergeResultsExposedSource);
+    // Initialize the instance — this triggers createInstance(), which is where
+    // mergeResults is defined and our window.__mergeResults injection runs.
+    win.scolta = {
+        scoring: {},
+        endpoints: { expand: '/e', summarize: '/s', followup: '/f' },
+        pagefindPath: '/pf.js',
+        siteName: 'Test',
+        container: '#scolta-search',
+        allowedLinkDomains: [],
+        disclaimer: '',
+    };
+    win.Scolta.init('#scolta-search');
+    return win;
+}
+
+function makeResult(url, score, title = '') {
+    return {
+        score,
+        data: { url, excerpt: '', meta: { title, url } },
+    };
+}
+
+describe('mergeResults behavioral tests (JS fallback)', () => {
+
+    test('mergeResults is exposed and callable after patching', () => {
+        const win = createWindowForMerge();
+        expect(typeof win.__mergeResults).toBe('function');
+    });
+
+    test('deduplication: overlapping URL appears exactly once in merged output', () => {
+        const win = createWindowForMerge();
+        const set1 = [makeResult('https://example.com/page-a', 0.9)];
+        const set2 = [makeResult('https://example.com/page-a', 0.5)];
+
+        const merged = win.__mergeResults(set1, set2);
+        const urls = merged.map(r => r.data.meta?.url || r.data.url);
+
+        expect(urls.filter(u => u === 'https://example.com/page-a').length).toBe(1);
+    });
+
+    test('weight: when same URL appears in both sets, higher score wins', () => {
+        const win = createWindowForMerge();
+        // set1 is the primary (weight 1.0); set2 is expanded (weight 0.7).
+        // When the primary score is higher, it must win.
+        const set1 = [makeResult('https://example.com/shared', 0.9)];
+        const set2 = [makeResult('https://example.com/shared', 0.4)];
+
+        const merged = win.__mergeResults(set1, set2);
+        const shared = merged.find(r => (r.data.meta?.url || r.data.url) === 'https://example.com/shared');
+
+        expect(shared).toBeDefined();
+        expect(shared.score).toBe(0.9);
+    });
+
+    test('unique URLs from both sets all appear in the merged result', () => {
+        const win = createWindowForMerge();
+        const set1 = [
+            makeResult('https://example.com/a', 0.9),
+            makeResult('https://example.com/b', 0.7),
+        ];
+        const set2 = [
+            makeResult('https://example.com/c', 0.8),
+            makeResult('https://example.com/d', 0.6),
+        ];
+
+        const merged = win.__mergeResults(set1, set2);
+
+        expect(merged.length).toBe(4);
+        const urls = new Set(merged.map(r => r.data.meta?.url || r.data.url));
+        expect(urls.has('https://example.com/a')).toBe(true);
+        expect(urls.has('https://example.com/b')).toBe(true);
+        expect(urls.has('https://example.com/c')).toBe(true);
+        expect(urls.has('https://example.com/d')).toBe(true);
+    });
+
+    test('two-set fixture: overlapping + unique URLs yields correct count and winning score', () => {
+        const win = createWindowForMerge();
+        const set1 = [
+            makeResult('https://example.com/shared', 0.9),
+            makeResult('https://example.com/only-in-primary', 0.8),
+        ];
+        const set2 = [
+            makeResult('https://example.com/shared', 0.3),
+            makeResult('https://example.com/only-in-expanded', 0.7),
+        ];
+
+        const merged = win.__mergeResults(set1, set2);
+
+        // Three distinct URLs.
+        expect(merged.length).toBe(3);
+
+        // Shared URL uses the higher score from set1.
+        const shared = merged.find(r => (r.data.meta?.url || r.data.url) === 'https://example.com/shared');
+        expect(shared.score).toBe(0.9);
+
+        // Both unique-only URLs are present.
+        const urls = new Set(merged.map(r => r.data.meta?.url || r.data.url));
+        expect(urls.has('https://example.com/only-in-primary')).toBe(true);
+        expect(urls.has('https://example.com/only-in-expanded')).toBe(true);
+    });
+});

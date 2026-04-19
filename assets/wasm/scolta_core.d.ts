@@ -36,12 +36,26 @@ export function describe(): string;
 export function get_prompt(name: string): string;
 
 /**
- * Merge original and expanded search results.
+ * Merge N scored result sets with per-set weights.
  *
  * Input: JSON string with shape:
- *   `{ "original": [...], "expanded": [...], "config": {...} }`
+ * ```json
+ * {
+ *   "sets": [
+ *     { "results": [...], "weight": 1.0 },
+ *     { "results": [...], "weight": 0.7 }
+ *   ],
+ *   "deduplicate_by": "url",
+ *   "normalize_urls": true
+ * }
+ * ```
  *
- * Output: JSON string — merged and deduplicated results.
+ * Each `results` entry has `{ title, url, score, excerpt, date }`.
+ * `deduplicate_by` is the field used to detect duplicates across sets.
+ * `normalize_urls` strips trailing slashes and fragments before comparing.
+ *
+ * Output: JSON string — merged, weighted, and deduplicated results sorted
+ * descending by combined score.
  */
 export function merge_results(input: string): string;
 
