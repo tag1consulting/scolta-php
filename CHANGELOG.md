@@ -7,6 +7,7 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ## [0.2.4] - Unreleased
 
 ### Fixed
+- **Stale WASM binary**: `assets/wasm/scolta_core_bg.wasm` was built from scolta-core `0.2.2-dev` and had never been updated since. The scolta-core 0.2.3 release added `batch_extract_context`, `sanitize_query`, `match_priority_pages`, and the N-set `merge_results` format; all of those WASM calls were silently falling back to their JS implementations in every 0.2.3 install. Rebuilt from scolta-core 0.2.4-dev (binary size: 1.1 MB, up from 256 KB; increase reflects the new algorithms).
 - **`merge_results` TypeScript declaration**: `scolta_core.d.ts` now documents the N-set input shape (`{ sets, deduplicate_by, normalize_urls }`) that the implementation has used since 0.2.3. The old `{ original, expanded, config }` shape comment was stale.
 - **`mergeResults` behavioral tests**: Added five behavioral Jest tests in `behavioral.test.js` that actually invoke `mergeResults` at runtime (JS fallback path) and assert deduplication and score-wins semantics. The previous test was a string-match only.
 - **`HealthChecker` `index_exists`**: Now checks `{outputDir}/pagefind/pagefind.js` first (the location both `PhpIndexer` and the Pagefind binary pipeline write to since 0.2.3), falling back to the legacy flat `{outputDir}/pagefind.js`. Previously `index_exists` always returned `false` for fresh PHP-indexer builds and `true` only for sites retaining a stale pre-0.2.3 flat file.
