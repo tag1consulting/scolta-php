@@ -4,7 +4,7 @@ All notable changes to scolta-php will be documented in this file.
 
 This project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages.
 
-## [0.2.4] - Unreleased
+## [0.2.4] - 2026-04-21
 
 ### Added
 - **Phrase-proximity scoring** (requires updated WASM from scolta-core 0.2.4): `scoreResults()` now passes `data.locations` (Pagefind word positions) to the WASM scorer. Adjacent phrase matches (terms appearing consecutive in the document) receive a ×2.5 content-boost multiplier; near-phrase (within 5 words) receives ×1.5. Fixes exact-phrase results ranking below title-only hits.
