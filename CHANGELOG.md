@@ -6,6 +6,12 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [0.2.4] - Unreleased
 
+### Added
+- **Phrase-proximity scoring** (requires updated WASM from scolta-core 0.2.4): `scoreResults()` now passes `data.locations` (Pagefind word positions) to the WASM scorer. Adjacent phrase matches (terms appearing consecutive in the document) receive a ×2.5 content-boost multiplier; near-phrase (within 5 words) receives ×1.5. Fixes exact-phrase results ranking below title-only hits.
+- **Quoted-phrase forced mode**: Queries wrapped in double-quotes (e.g. `"hello world"`) activate `forced_phrase` in the Rust scorer and suppress OR fallback — the user explicitly asked for phrase results, not individual-term broadening.
+- **WASM config key fix**: `scoreResults()` now converts SCREAMING_SNAKE_CASE config keys to `snake_case` before sending to WASM. Previously all scoring config from the admin UI was silently ignored by the scorer (it always used Rust defaults). Admin-configured values for `title_match_boost`, `content_match_boost`, recency strategy, etc. now apply correctly.
+- **`ScoltaConfig` phrase fields**: `phraseAdjacentMultiplier` (2.5), `phraseNearMultiplier` (1.5), `phraseNearWindow` (5), `phraseWindow` (15) with corresponding `PHRASE_*` keys in `toJsScoringConfig()`.
+
 ### Fixed
 - **Stale WASM binary**: `assets/wasm/scolta_core_bg.wasm` was built from scolta-core `0.2.2-dev` and had never been updated since. The scolta-core 0.2.3 release added `batch_extract_context`, `sanitize_query`, `match_priority_pages`, and the N-set `merge_results` format; all of those WASM calls were silently falling back to their JS implementations in every 0.2.3 install. Rebuilt from scolta-core 0.2.4-dev (binary size: 1.1 MB, up from 256 KB; increase reflects the new algorithms).
 - **`merge_results` TypeScript declaration**: `scolta_core.d.ts` now documents the N-set input shape (`{ sets, deduplicate_by, normalize_urls }`) that the implementation has used since 0.2.3. The old `{ original, expanded, config }` shape comment was stale.

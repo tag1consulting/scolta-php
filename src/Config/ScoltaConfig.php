@@ -46,6 +46,12 @@ class ScoltaConfig
     public float $titleAllTermsMultiplier = 1.5;
     public float $contentMatchBoost = 0.4;
 
+    // -- Scoring: Phrase proximity --
+    public float $phraseAdjacentMultiplier = 2.5;
+    public float $phraseNearMultiplier = 1.5;
+    public int $phraseNearWindow = 5;
+    public int $phraseWindow = 15;
+
     // -- Scoring: Expanded terms --
     public float $expandPrimaryWeight = 0.7;
 
@@ -120,6 +126,10 @@ class ScoltaConfig
             'TITLE_MATCH_BOOST' => $this->titleMatchBoost,
             'TITLE_ALL_TERMS_MULTIPLIER' => $this->titleAllTermsMultiplier,
             'CONTENT_MATCH_BOOST' => $this->contentMatchBoost,
+            'PHRASE_ADJACENT_MULTIPLIER' => $this->phraseAdjacentMultiplier,
+            'PHRASE_NEAR_MULTIPLIER' => $this->phraseNearMultiplier,
+            'PHRASE_NEAR_WINDOW' => $this->phraseNearWindow,
+            'PHRASE_WINDOW' => $this->phraseWindow,
             'EXCERPT_LENGTH' => $this->excerptLength,
             'RESULTS_PER_PAGE' => $this->resultsPerPage,
             'MAX_PAGEFIND_RESULTS' => $this->maxPagefindResults,

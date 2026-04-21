@@ -210,6 +210,10 @@
       TITLE_MATCH_BOOST: s.TITLE_MATCH_BOOST ?? 1.0,
       TITLE_ALL_TERMS_MULTIPLIER: s.TITLE_ALL_TERMS_MULTIPLIER ?? 1.5,
       CONTENT_MATCH_BOOST: s.CONTENT_MATCH_BOOST ?? 0.4,
+      PHRASE_ADJACENT_MULTIPLIER: s.PHRASE_ADJACENT_MULTIPLIER ?? 2.5,
+      PHRASE_NEAR_MULTIPLIER: s.PHRASE_NEAR_MULTIPLIER ?? 1.5,
+      PHRASE_NEAR_WINDOW: s.PHRASE_NEAR_WINDOW ?? 5,
+      PHRASE_WINDOW: s.PHRASE_WINDOW ?? 15,
       EXCERPT_LENGTH: s.EXCERPT_LENGTH ?? 300,
       RESULTS_PER_PAGE: s.RESULTS_PER_PAGE ?? 10,
       MAX_PAGEFIND_RESULTS: s.MAX_PAGEFIND_RESULTS ?? 50,
@@ -733,11 +737,19 @@
         date: data.meta?.date || '',
         pagefind_index: i,
         score: loaded.length > 1 ? 1 - (i / (loaded.length - 1)) : 1,
+        locations: data.locations || [],
       }));
+      // WASM config keys are snake_case; getInstanceConfig() returns
+      // SCREAMING_SNAKE_CASE for the platform adapter layer. Convert here.
+      const screaming = getInstanceConfig();
+      const wasmConfig = {};
+      for (const [k, v] of Object.entries(screaming)) {
+        wasmConfig[k.toLowerCase()] = v;
+      }
       const input = JSON.stringify({
         query: query,
         results: results,
-        config: getInstanceConfig(),
+        config: wasmConfig,
       });
       try {
         const output = scoltaWasm.score_results(input);
@@ -1059,6 +1071,13 @@
 
     const meaningfulTerms = extractSearchTerms(query);
     const searchQuery = meaningfulTerms.length > 0 ? meaningfulTerms.join(' ') : query;
+    // Detect quoted phrase: user typed "hello world" with surrounding double-quotes.
+    // Pagefind receives the unquoted terms; the Rust scorer receives the quoted form
+    // so extract_query() can set forced_phrase = true and apply phrase multipliers.
+    const trimmedQuery = query.trim();
+    const isForcedPhrase =
+      trimmedQuery.startsWith('"') && trimmedQuery.endsWith('"') && trimmedQuery.length > 2;
+    const scorerQuery = isForcedPhrase ? trimmedQuery : searchQuery;
     console.log('[scolta:search] Filtered query:', JSON.stringify(sanitizeQueryForLogging(searchQuery)), '(original:', JSON.stringify(sanitizeQueryForLogging(query)), ')');
 
     allHighlightTerms = meaningfulTerms.length > 0
@@ -1071,14 +1090,14 @@
       : expandQuery(query);
 
     const primarySearch = await pagefindSearch(searchQuery, activeFilters);
-    allScoredResults = await loadAndScoreSearch(primarySearch, searchQuery, 1.0);
+    allScoredResults = await loadAndScoreSearch(primarySearch, scorerQuery, 1.0);
 
     // OR fallback: only activate when AND search returns ZERO results.
     // This prevents diluting precision when the user provides many terms
-    // to find a specific piece of content. When it activates, we set a flag
-    // so the UI can inform the user that the search was broadened.
+    // to find a specific piece of content. Forced-phrase queries (quoted)
+    // never fall back to OR — the user explicitly asked for phrase results.
     usedOrFallback = false;
-    if (meaningfulTerms.length > 1 && primarySearch.results.length === 0) {
+    if (!isForcedPhrase && meaningfulTerms.length > 1 && primarySearch.results.length === 0) {
       console.log('[scolta:search] AND returned 0 results — running OR fallback');
       const orQueries = meaningfulTerms.map(term => ({ term, weight: 0.6 }));
       const orResults = await searchAndLoadParallel(orQueries, activeFilters, searchQuery);

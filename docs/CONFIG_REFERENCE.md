@@ -51,6 +51,19 @@ All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Platfo
 | `titleAllTermsMultiplier` | float | `1.5` | Multiplier when all search terms appear in title |
 | `contentMatchBoost` | float | `0.4` | Boost for content/excerpt keyword matches |
 
+### Scoring: Phrase Proximity
+
+Applied when a query contains two or more terms and Pagefind word positions
+(`locations`) are available. The content boost is multiplied by the phrase
+factor before being added to the final score; the title boost is unaffected.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `phraseAdjacentMultiplier` | float | `2.5` | Content-boost multiplier when all query terms appear adjacent (span ≤ terms−1 positions). Ensures "hello world" adjacent in body ranks above title hits. |
+| `phraseNearMultiplier` | float | `1.5` | Content-boost multiplier when all terms are within `phraseNearWindow` word positions. |
+| `phraseNearWindow` | int | `5` | Maximum word-position span for the near-phrase bonus. |
+| `phraseWindow` | int | `15` | Maximum span considered "phrase-related" (no bonus beyond this). Reserved for future use. |
+
 ### Scoring: Expanded Terms
 
 | Property | Type | Default | Description |
@@ -148,6 +161,10 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 | `titleMatchBoost` | `scoring.title_match_boost` | `scoring.title_match_boost` | `title_match_boost` |
 | `titleAllTermsMultiplier` | `scoring.title_all_terms_multiplier` | `scoring.title_all_terms_multiplier` | `title_all_terms_multiplier` |
 | `contentMatchBoost` | `scoring.content_match_boost` | `scoring.content_match_boost` | `content_match_boost` |
+| `phraseAdjacentMultiplier` | `scoring.phrase_adjacent_multiplier` | `scoring.phrase_adjacent_multiplier` | `phrase_adjacent_multiplier` |
+| `phraseNearMultiplier` | `scoring.phrase_near_multiplier` | `scoring.phrase_near_multiplier` | `phrase_near_multiplier` |
+| `phraseNearWindow` | `scoring.phrase_near_window` | `scoring.phrase_near_window` | `phrase_near_window` |
+| `phraseWindow` | `scoring.phrase_window` | `scoring.phrase_window` | `phrase_window` |
 | `expandPrimaryWeight` | `scoring.expand_primary_weight` | `scoring.expand_primary_weight` | `expand_primary_weight` |
 | `language` | `scoring.language` | `scoring.language` / `SCOLTA_LANGUAGE` | `language` |
 | `customStopWords` | `scoring.custom_stop_words` | `scoring.custom_stop_words` | `custom_stop_words` |
