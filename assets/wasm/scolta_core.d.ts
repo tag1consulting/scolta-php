@@ -2,6 +2,26 @@
 /* eslint-disable */
 
 /**
+ * Extract context from multiple content items in one call.
+ *
+ * # Stability
+ * Status: experimental
+ * Since: 0.2.3
+ *
+ * Input: JSON string with shape:
+ * ```json
+ * {
+ *   "items": [{ "content": "...", "url": "...", "title": "..." }],
+ *   "query": "search terms",
+ *   "config": { "max_length": 6000 }
+ * }
+ * ```
+ *
+ * Output: JSON string — array of `{ url, title, context }` objects.
+ */
+export function batch_extract_context(input: string): string;
+
+/**
  * Score multiple queries against their respective result sets in a single call.
  *
  * Input: JSON string with shape:
@@ -28,6 +48,26 @@ export function batch_score_results(input: string): string;
 export function describe(): string;
 
 /**
+ * Extract the most relevant portion of article content for LLM context.
+ *
+ * # Stability
+ * Status: experimental
+ * Since: 0.2.3
+ *
+ * Input: JSON string with shape:
+ * ```json
+ * {
+ *   "content": "full article text...",
+ *   "query": "search terms",
+ *   "config": { "max_length": 6000, "intro_length": 2000, "snippet_radius": 500 }
+ * }
+ * ```
+ *
+ * Output: JSON string — extracted context string.
+ */
+export function extract_context(input: string): string;
+
+/**
  * Get a raw prompt template by name.
  *
  * Input: Prompt name string ("expand_query", "summarize", "follow_up").
@@ -36,7 +76,23 @@ export function describe(): string;
 export function get_prompt(name: string): string;
 
 /**
- * Merge N scored result sets with per-set weights.
+ * Find priority pages matching a query.
+ *
+ * # Stability
+ * Status: experimental
+ * Since: 0.2.3
+ *
+ * Input: JSON string with shape:
+ * ```json
+ * { "query": "search terms", "priority_pages": [...] }
+ * ```
+ *
+ * Output: JSON string — array of matching priority page objects.
+ */
+export function match_priority_pages(input: string): string;
+
+/**
+ * Merge N scored result sets with per-set weights and deduplication.
  *
  * Input: JSON string with shape:
  * ```json
@@ -46,16 +102,13 @@ export function get_prompt(name: string): string;
  *     { "results": [...], "weight": 0.7 }
  *   ],
  *   "deduplicate_by": "url",
+ *   "case_sensitive": false,
+ *   "exclude_urls": ["/admin"],
  *   "normalize_urls": true
  * }
  * ```
  *
- * Each `results` entry has `{ title, url, score, excerpt, date }`.
- * `deduplicate_by` is the field used to detect duplicates across sets.
- * `normalize_urls` strips trailing slashes and fragments before comparing.
- *
- * Output: JSON string — merged, weighted, and deduplicated results sorted
- * descending by combined score.
+ * Output: JSON string — merged, weighted, and deduplicated results array.
  */
 export function merge_results(input: string): string;
 
@@ -69,9 +122,15 @@ export function merge_results(input: string): string;
  *    ["term1", "term2"]
  *    ```
  *
- * 2. **JSON object** — allows specifying a language for stop word filtering.
+ * 2. **JSON object** — full configuration including language, generic-term filtering,
+ *    and merging with an existing term set.
  *    ```json
- *    { "text": "[\"term1\", \"term2\"]", "language": "de" }
+ *    {
+ *      "text": "[\"term1\", \"term2\"]",
+ *      "language": "en",
+ *      "generic_terms": ["platform", "solution"],
+ *      "existing_terms": ["drupal"]
+ *    }
  *    ```
  *
  * Output: JSON string — array of extracted, filtered terms.
@@ -89,6 +148,25 @@ export function parse_expansion(input: string): string;
 export function resolve_prompt(input: string): string;
 
 /**
+ * Redact PII from a query string before analytics logging.
+ *
+ * # Stability
+ * Status: experimental
+ * Since: 0.2.3
+ *
+ * Input: JSON string with shape:
+ * ```json
+ * {
+ *   "query": "contact user@example.com",
+ *   "config": { "redact_email": true, "redact_phone": true }
+ * }
+ * ```
+ *
+ * Output: JSON string — sanitized query string.
+ */
+export function sanitize_query(input: string): string;
+
+/**
  * Score search results against a query.
  *
  * Input: JSON string with shape:
@@ -99,12 +177,23 @@ export function resolve_prompt(input: string): string;
 export function score_results(input: string): string;
 
 /**
- * Convert scoring config to JavaScript-friendly format.
+ * Trim conversation history to fit within a character limit.
  *
- * Input: JSON string of scoring config.
- * Output: JSON string with JS-style keys (UPPER_SNAKE_CASE).
+ * # Stability
+ * Status: experimental
+ * Since: 0.2.3
+ *
+ * Input: JSON string with shape:
+ * ```json
+ * {
+ *   "messages": [{ "role": "user", "content": "..." }],
+ *   "config": { "max_length": 12000, "preserve_first_n": 2, "removal_unit": 2 }
+ * }
+ * ```
+ *
+ * Output: JSON string — trimmed messages array.
  */
-export function to_js_scoring_config(input: string): string;
+export function truncate_conversation(input: string): string;
 
 /**
  * Return the scolta-core version string.
@@ -115,14 +204,18 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly batch_extract_context: (a: number, b: number, c: number) => void;
     readonly batch_score_results: (a: number, b: number, c: number) => void;
     readonly describe: (a: number) => void;
+    readonly extract_context: (a: number, b: number, c: number) => void;
     readonly get_prompt: (a: number, b: number, c: number) => void;
+    readonly match_priority_pages: (a: number, b: number, c: number) => void;
     readonly merge_results: (a: number, b: number, c: number) => void;
     readonly parse_expansion: (a: number, b: number, c: number) => void;
     readonly resolve_prompt: (a: number, b: number, c: number) => void;
+    readonly sanitize_query: (a: number, b: number, c: number) => void;
     readonly score_results: (a: number, b: number, c: number) => void;
-    readonly to_js_scoring_config: (a: number, b: number, c: number) => void;
+    readonly truncate_conversation: (a: number, b: number, c: number) => void;
     readonly version: (a: number) => void;
     readonly __wbindgen_add_to_stack_pointer: (a: number) => number;
     readonly __wbindgen_export: (a: number, b: number) => number;
