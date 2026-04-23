@@ -4,6 +4,16 @@ All notable changes to scolta-php will be documented in this file.
 
 This project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages.
 
+## [0.3.1] - 2026-04-23
+
+### Fixed
+- **Release workflow**: Trigger now accepts both `v0.x.x` and bare `0.x.x` tag formats. The 0.3.0 tag lacked the `v` prefix, preventing the workflow from firing.
+
+### Added
+- **`MemoryBudgetSuggestion::checkProfileFit()`**: New static method that checks whether a named profile fits within the given PHP `memory_limit` (or auto-detects it). Returns a status (`safe`/`warn`) and a human-readable warning string when the profile's target RAM exceeds 70% of the limit. Accepts an optional `?int $limitBytes` parameter for testability.
+- **`MemoryBudgetSuggestion::getMemoryLimitText()`**: Returns the PHP `memory_limit` as a human-readable string ("256 MB", "unlimited", "unknown"). Used by admin UIs to display the current limit inline.
+- **`MemoryBudgetConfig`** and **`MemoryBudgetRepository`** in `src/Config/`: Shared value object and interface for platform adapters to persist and resolve the memory budget profile without duplicating logic.
+
 ## [0.3.0] - 2026-04-23
 
 ### Added
