@@ -10,11 +10,13 @@
     </testsuite>
   </testsuites>
 
-  <!-- Exclude the benchmark group from the default test run.
-       To run benchmarks: ./vendor/bin/phpunit tests/Benchmark/ -group benchmark -->
+  <!-- Exclude slow groups from the default test run.
+       Benchmarks:    vendor/bin/phpunit tests/Benchmark/ -group benchmark
+       Large-content: vendor/bin/phpunit tests/LargeContent/ -group large-content -->
   <groups>
     <exclude>
       <group>benchmark</group>
+      <group>large-content</group>
     </exclude>
   </groups>
 

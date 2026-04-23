@@ -10,22 +10,22 @@ use Tag1\Scolta\Storage\StorageDriverInterface;
 /**
  * Orchestrate the PHP indexing pipeline.
  *
- * Three-phase pipeline:
- * 1. processChunk() — tokenize and index N pages, write partial to disk
- * 2. (repeat for all chunks)
- * 3. finalize() — merge partials, write Pagefind format, atomic swap
+ * Public API is preserved for backward compatibility; internals delegate to
+ * BuildCoordinator and IndexBuildOrchestrator. Framework adapters should
+ * prefer IndexBuildOrchestrator::build() directly for new code.
  *
- * Smart rebuild: caches per-page word lists in BuildState. On subsequent
- * builds, only re-tokenizes pages whose content changed. Unchanged pages
- * reuse cached word lists. Output is byte-identical either way.
+ * Bug fixed (0.3.0): processChunk() no longer calls cleanup() + initiateBuild()
+ * unconditionally on chunk 0. That wiped resume state. Initialization is now
+ * handled by BuildCoordinator::prepare(), which only fires on a fresh/restart
+ * intent and is called at most once per build.
  */
 class PhpIndexer
 {
-    private BuildState $state;
-    private InvertedIndexBuilder $builder;
-    private IndexMerger $merger;
-    private PagefindFormatWriter $writer;
-    private StorageDriverInterface $storage;
+    private readonly BuildCoordinator $coordinator;
+    private readonly InvertedIndexBuilder $builder;
+    private readonly IndexMerger $merger;
+    private readonly StorageDriverInterface $storage;
+    private readonly MemoryBudget $budget;
 
     /** @var array<string, array> Per-page word list cache keyed by content hash. */
     private array $pageWordCache = [];
@@ -36,82 +36,71 @@ class PhpIndexer
     /** Global page offset for sequential page numbering across chunks. */
     private int $currentPageOffset = 0;
 
+    /** Whether prepare() has been called for this build session. */
+    private bool $prepared = false;
+
     public function __construct(
         private readonly string $stateDir,
         private readonly string $outputDir,
         ?string $hmacSecret = null,
         string $language = 'en',
         ?StorageDriverInterface $storage = null,
+        ?MemoryBudget $budget = null,
     ) {
-        $this->storage = $storage ?? new FilesystemDriver();
-        $this->state = new BuildState($stateDir, $hmacSecret);
+        $this->storage     = $storage ?? new FilesystemDriver();
+        $this->coordinator = new BuildCoordinator($stateDir, $hmacSecret);
+        $this->budget      = $budget ?? MemoryBudget::default();
 
         $tokenizer = new Tokenizer();
-        $stemmer = new Stemmer($language);
+        $stemmer   = new Stemmer($language);
         $this->builder = new InvertedIndexBuilder($tokenizer, $stemmer);
-        $this->merger = new IndexMerger();
-        $this->writer = new PagefindFormatWriter(new CborEncoder());
+        $this->merger  = new IndexMerger();
 
-        // Load page word cache if it exists.
         $this->loadPageWordCache();
     }
 
     /**
      * Process a chunk of content items.
      *
-     * Uses smart rebuild: checks per-page content hashes against the cache.
-     * Only re-tokenizes pages whose content changed.
-     *
-     * @param \Tag1\Scolta\Export\ContentItem[] $items Content items to index.
+     * @param \Tag1\Scolta\Export\ContentItem[] $items
      * @param int $chunkNumber Chunk number (0-based).
-     * @param int|null $totalPages Total pages across all chunks (for manifest).
+     * @param int|null $totalPages Total pages across all chunks.
      * @return int Number of pages processed in this chunk.
      */
     public function processChunk(array $items, int $chunkNumber, ?int $totalPages = null): int
     {
-        // Initialize build state on first chunk.
-        if ($chunkNumber === 0) {
-            $this->state->cleanup();
-            $this->state->initiateBuild([
-                'total_pages' => $totalPages ?? count($items),
-                'chunk_size' => count($items),
-            ]);
+        // Prepare once on the first chunk — fixes the resume-state wipe bug.
+        if (!$this->prepared) {
+            $intent = BuildIntent::fresh(
+                $totalPages ?? count($items),
+                $this->budget,
+                ['language' => 'en'],
+            );
+            $this->coordinator->prepare($intent);
+            $this->prepared = true;
         }
 
-        // Build partial index.
         $partial = $this->builder->build($items, $this->currentPageOffset);
         $this->currentPageOffset += count($partial['pages']);
 
-        // Track cache keys for pruning.
         foreach ($items as $item) {
             $this->usedCacheKeys[] = self::contentHash($item);
         }
 
-        // Write to disk.
-        $this->state->recordChunk($chunkNumber, $partial);
+        $this->coordinator->commitChunk($chunkNumber, $partial);
 
         return count($partial['pages']);
     }
 
     /**
      * Finalize the build: stream-merge chunks, write Pagefind format, atomic swap.
-     *
-     * Uses a streaming pipeline to keep peak RAM proportional to the number
-     * of chunks (not the total index size):
-     *   1. One pass over all chunks to stream fragment files (pages).
-     *   2. One N-way merge pass over all chunk index streams (terms).
-     *   3. Atomic swap of the completed build directory.
-     *
-     * If any chunk file is in the pre-0.2.5 serialized format the method
-     * falls back to the legacy in-memory path so partially-completed builds
-     * that pre-date the upgrade are not silently discarded.
      */
     public function finalize(): BuildResult
     {
         $startTime = microtime(true);
 
         try {
-            $chunkFiles = $this->state->getChunkFiles();
+            $chunkFiles = $this->coordinator->chunkFiles();
             if (count($chunkFiles) === 0) {
                 return new BuildResult(
                     success: false,
@@ -123,34 +112,20 @@ class PhpIndexer
                 );
             }
 
-            try {
-                $streamWriter = new StreamingFormatWriter(new CborEncoder());
-                $streamWriter->beginWrite($this->outputDir);
-                $this->merger->mergeStreaming($chunkFiles, $streamWriter);
-                $streamWriter->endWrite();
-            } catch (OldChunkFormatException) {
-                // One or more chunks pre-date 0.2.5. Fall back to the legacy
-                // in-memory path for this build; next build will use v2 chunks.
-                $partials = [];
-                for ($i = 0, $count = count($chunkFiles); $i < $count; $i++) {
-                    $partials[] = $this->state->readChunk($i);
-                }
-                $merged = $this->merger->merge($partials);
-                unset($partials);
-                $this->writer->write($merged['index'], $merged['pages'], $this->outputDir);
-                unset($merged);
-            }
+            $streamWriter = new StreamingFormatWriter(new CborEncoder(), budget: $this->budget);
+            $streamWriter->beginWrite($this->outputDir);
+            $this->merger->mergeStreaming($chunkFiles, $streamWriter, $this->budget);
+            $streamWriter->endWrite();
 
-            $memPeakMb = round(memory_get_peak_usage(true) / 1048576, 1);
-
-            $pageCount = $this->state->getPagesProcessed();
+            $peakMb    = round(memory_get_peak_usage(true) / 1_048_576, 1);
+            $pageCount = $this->coordinator->pagesProcessed();
 
             $this->atomicSwap();
 
             $fileCount = $this->countFiles($this->outputDir . '/pagefind');
 
-            $this->state->releaseLock();
-            $this->state->cleanup();
+            $this->coordinator->release();
+            $this->prepared = false;
 
             $this->prunePageWordCache();
             $this->savePageWordCache();
@@ -159,13 +134,13 @@ class PhpIndexer
 
             return new BuildResult(
                 success: true,
-                message: "Built index for {$pageCount} pages ({$fileCount} files, peak {$memPeakMb} MB)",
+                message: "Built index for {$pageCount} pages ({$fileCount} files, peak {$peakMb} MB)",
                 pageCount: $pageCount,
                 fileCount: $fileCount,
                 elapsedSeconds: round($elapsed, 3),
             );
         } catch (\Throwable $e) {
-            $this->state->releaseLock();
+            $this->coordinator->releaseLockOnly();
             $elapsed = microtime(true) - $startTime;
 
             return new BuildResult(
@@ -182,7 +157,7 @@ class PhpIndexer
     /**
      * Check if a build is needed by comparing content fingerprints.
      *
-     * @param \Tag1\Scolta\Export\ContentItem[] $items All content items.
+     * @param \Tag1\Scolta\Export\ContentItem[] $items
      * @return string|null New fingerprint if build needed, null if up to date.
      */
     public function shouldBuild(array $items): ?string
@@ -202,10 +177,6 @@ class PhpIndexer
 
     /**
      * Compute a deterministic fingerprint for a set of content items.
-     *
-     * The prefix 'php-indexer-v1:' ensures the fingerprint changes when
-     * switching from binary→PHP indexer (or across indexer versions), so
-     * shouldBuild() correctly triggers a rebuild after an indexer change.
      *
      * @param \Tag1\Scolta\Export\ContentItem[] $items
      */
@@ -227,15 +198,12 @@ class PhpIndexer
         return hash($algo, $item->url . "\0" . $item->bodyHtml);
     }
 
-    /**
-     * Atomic swap: .scolta-building → pagefind.
-     */
     private function atomicSwap(): void
     {
         $buildDir = $this->outputDir . '/.scolta-building';
         $finalDir = $this->outputDir . '/pagefind';
-        $oldDir = $this->outputDir . '/.scolta-old';
-        $newDir = $this->outputDir . '/.scolta-new';
+        $oldDir   = $this->outputDir . '/.scolta-old';
+        $newDir   = $this->outputDir . '/.scolta-new';
 
         if (!$this->storage->exists($buildDir)) {
             throw new \RuntimeException('Build directory does not exist');
