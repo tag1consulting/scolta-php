@@ -94,7 +94,17 @@ class PhpIndexer
     }
 
     /**
-     * Finalize the build: merge chunks, write Pagefind format, atomic swap.
+     * Finalize the build: stream-merge chunks, write Pagefind format, atomic swap.
+     *
+     * Uses a streaming pipeline to keep peak RAM proportional to the number
+     * of chunks (not the total index size):
+     *   1. One pass over all chunks to stream fragment files (pages).
+     *   2. One N-way merge pass over all chunk index streams (terms).
+     *   3. Atomic swap of the completed build directory.
+     *
+     * If any chunk file is in the pre-0.2.5 serialized format the method
+     * falls back to the legacy in-memory path so partially-completed builds
+     * that pre-date the upgrade are not silently discarded.
      */
     public function finalize(): BuildResult
     {
@@ -113,15 +123,28 @@ class PhpIndexer
                 );
             }
 
-            $partials = [];
-            for ($i = 0, $count = count($chunkFiles); $i < $count; $i++) {
-                $partials[] = $this->state->readChunk($i);
+            try {
+                $streamWriter = new StreamingFormatWriter(new CborEncoder());
+                $streamWriter->beginWrite($this->outputDir);
+                $this->merger->mergeStreaming($chunkFiles, $streamWriter);
+                $streamWriter->endWrite();
+            } catch (OldChunkFormatException) {
+                // One or more chunks pre-date 0.2.5. Fall back to the legacy
+                // in-memory path for this build; next build will use v2 chunks.
+                $partials = [];
+                for ($i = 0, $count = count($chunkFiles); $i < $count; $i++) {
+                    $partials[] = $this->state->readChunk($i);
+                }
+                $merged = $this->merger->merge($partials);
+                unset($partials);
+                $this->writer->write($merged['index'], $merged['pages'], $this->outputDir);
+                unset($merged);
             }
 
-            $merged = $this->merger->merge($partials);
-            $pageCount = count($merged['pages']);
+            $memPeakMb = round(memory_get_peak_usage(true) / 1048576, 1);
 
-            $this->writer->write($merged['index'], $merged['pages'], $this->outputDir);
+            $pageCount = $this->state->getPagesProcessed();
+
             $this->atomicSwap();
 
             $fileCount = $this->countFiles($this->outputDir . '/pagefind');
@@ -129,7 +152,6 @@ class PhpIndexer
             $this->state->releaseLock();
             $this->state->cleanup();
 
-            // Prune unused cache entries and save.
             $this->prunePageWordCache();
             $this->savePageWordCache();
 
@@ -137,7 +159,7 @@ class PhpIndexer
 
             return new BuildResult(
                 success: true,
-                message: "Built index for {$pageCount} pages ({$fileCount} files)",
+                message: "Built index for {$pageCount} pages ({$fileCount} files, peak {$memPeakMb} MB)",
                 pageCount: $pageCount,
                 fileCount: $fileCount,
                 elapsedSeconds: round($elapsed, 3),

@@ -61,32 +61,40 @@ class BuildStateTest extends TestCase
         $state = new BuildState($this->tmpDir);
         $state->initiateBuild(['total_pages' => 10]);
 
-        $data = ['index' => ['word' => [1 => ['positions' => [25 => [5]]]]], 'pages' => [1 => ['url' => '/a']]];
+        $data = [
+            'pages' => [1 => ['url' => '/a', 'wordCount' => 5, 'content' => '', 'meta' => [], 'filters' => []]],
+            'index' => ['word' => [1 => ['positions' => [25 => [5]], 'meta_positions' => []]]],
+        ];
         $state->recordChunk(0, $data);
 
         $read = $state->readChunk(0);
-        $this->assertSame($data, $read);
+        $this->assertEquals($data['pages'], $read['pages']);
+        $this->assertEquals($data['index'], $read['index']);
     }
 
     public function testHmacVerification(): void
     {
         $secret = 'test-secret-key';
-        $state = new BuildState($this->tmpDir, $secret);
+        $state  = new BuildState($this->tmpDir, $secret);
         $state->initiateBuild(['total_pages' => 10]);
 
-        $data = ['test' => 'data'];
+        $data = [
+            'pages' => [0 => ['url' => '/a', 'wordCount' => 3, 'content' => '', 'meta' => [], 'filters' => []]],
+            'index' => ['hello' => [0 => ['positions' => [25 => [1]], 'meta_positions' => []]]],
+        ];
         $state->recordChunk(0, $data);
 
-        // Read with correct secret.
+        // Read with correct secret succeeds.
         $read = $state->readChunk(0);
-        $this->assertSame($data, $read);
+        $this->assertEquals($data['pages'], $read['pages']);
+        $this->assertEquals($data['index'], $read['index']);
     }
 
     public function testHmacVerificationFailsWithWrongSecret(): void
     {
         $state1 = new BuildState($this->tmpDir, 'correct-secret');
         $state1->initiateBuild(['total_pages' => 10]);
-        $state1->recordChunk(0, ['test' => 'data']);
+        $state1->recordChunk(0, ['pages' => [], 'index' => ['word' => []]]);
 
         $state2 = new BuildState($this->tmpDir, 'wrong-secret');
         $this->expectException(\RuntimeException::class);
