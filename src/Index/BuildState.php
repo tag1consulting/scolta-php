@@ -87,27 +87,25 @@ class BuildState
     }
 
     /**
-     * Record a completed chunk.
+     * Record a completed chunk in v2 streaming format.
      *
-     * @param int $chunkNumber Chunk number (0-based).
+     * Writes a ChunkWriter v2 file so finalize() can stream pages and terms
+     * without loading the full chunk into RAM.
+     *
+     * @param int   $chunkNumber Chunk number (0-based).
      * @param array $partialData Partial index data from InvertedIndexBuilder.
      */
     public function recordChunk(int $chunkNumber, array $partialData): void
     {
-        $serialized = serialize($partialData);
-
-        if ($this->hmacSecret !== null) {
-            $hmac = hash_hmac('sha256', $serialized, $this->hmacSecret, true);
-            $serialized = $hmac . $serialized;
-        }
-
         $filename = sprintf('chunk-%03d.dat', $chunkNumber);
-        file_put_contents($this->stateDir . '/' . $filename, $serialized);
+        $path     = $this->stateDir . '/' . $filename;
+
+        (new ChunkWriter())->write($path, $partialData, $this->hmacSecret);
 
         // Update manifest.
         $manifest = $this->readManifest();
         if ($manifest !== null) {
-            $manifest['chunks_written'] = $chunkNumber + 1;
+            $manifest['chunks_written']  = $chunkNumber + 1;
             $manifest['pages_processed'] = ($manifest['pages_processed'] ?? 0) + count($partialData['pages'] ?? []);
             file_put_contents(
                 $this->stateDir . '/' . self::MANIFEST_FILE,
@@ -119,19 +117,52 @@ class BuildState
     /**
      * Read a chunk from disk.
      *
+     * Supports both the v2 streaming format (written by ChunkWriter since
+     * 0.2.5) and the legacy v1 serialized format (pre-0.2.5).
+     *
      * @param int $chunkNumber Chunk number (0-based).
-     * @return array The unserialized chunk data.
-     * @throws \RuntimeException If file missing or HMAC invalid.
+     * @return array The unserialized chunk data as {pages: ..., index: ...}.
+     * @throws \RuntimeException If file missing, HMAC invalid, or data malformed.
      */
     public function readChunk(int $chunkNumber): array
     {
         $filename = sprintf('chunk-%03d.dat', $chunkNumber);
-        $path = $this->stateDir . '/' . $filename;
+        $path     = $this->stateDir . '/' . $filename;
 
         if (!file_exists($path)) {
             throw new \RuntimeException("Chunk file not found: {$filename}");
         }
 
+        // Detect format by first byte: v2 starts with '{' (JSON header line).
+        $fp = fopen($path, 'rb');
+        if ($fp === false) {
+            throw new \RuntimeException("Failed to open chunk file: {$filename}");
+        }
+        $firstByte = fread($fp, 1);
+        fclose($fp);
+
+        if ($firstByte === '{') {
+            // v2 streaming format (ChunkWriter).
+            if ($this->hmacSecret !== null) {
+                $reader = new ChunkReader($path);
+                if (!$reader->verifyHmac($this->hmacSecret)) {
+                    throw new \RuntimeException("HMAC verification failed for chunk: {$filename}");
+                }
+            }
+            $reader = new ChunkReader($path);
+            $pages  = [];
+            foreach ($reader->openPages() as $pageNum => $pageData) {
+                $pages[$pageNum] = $pageData;
+            }
+            $index = [];
+            foreach ($reader->openIndex() as [$term, $termData]) {
+                $index[$term] = $termData;
+            }
+
+            return ['pages' => $pages, 'index' => $index];
+        }
+
+        // v1 legacy format: PHP serialize with optional binary HMAC prefix.
         $data = file_get_contents($path);
         if ($data === false) {
             throw new \RuntimeException("Failed to read chunk file: {$filename}");
@@ -141,15 +172,12 @@ class BuildState
             if (strlen($data) < 32) {
                 throw new \RuntimeException("Chunk file too small for HMAC: {$filename}");
             }
-
-            $storedHmac = substr($data, 0, 32);
-            $serialized = substr($data, 32);
-
+            $storedHmac   = substr($data, 0, 32);
+            $serialized   = substr($data, 32);
             $expectedHmac = hash_hmac('sha256', $serialized, $this->hmacSecret, true);
             if (!hash_equals($storedHmac, $expectedHmac)) {
                 throw new \RuntimeException("HMAC verification failed for chunk: {$filename}");
             }
-
             $data = $serialized;
         }
 
