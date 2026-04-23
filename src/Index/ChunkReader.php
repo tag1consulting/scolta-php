@@ -24,7 +24,7 @@ class ChunkReader
      * Stream page records in insertion order.
      *
      * @return \Generator<int, array> Yields pageNum => pageData.
-     * @throws OldChunkFormatException if the file uses the pre-0.2.5 format.
+     * @throws \RuntimeException if the file is not in v2 format.
      * @throws \RuntimeException       on I/O failure.
      */
     public function openPages(): \Generator
@@ -53,7 +53,7 @@ class ChunkReader
      * end-of-records sentinel is reached.
      *
      * @return \Generator<int, array{0: string, 1: array}> Yields [term, termData].
-     * @throws OldChunkFormatException if the file uses the pre-0.2.5 format.
+     * @throws \RuntimeException if the file is not in v2 format.
      * @throws \RuntimeException       on I/O failure.
      */
     public function openIndex(): \Generator
@@ -174,9 +174,9 @@ class ChunkReader
 
         $firstByte = $line[0] ?? '';
         if ($firstByte !== '{') {
-            // Pre-0.2.5 chunks start with PHP serialized data ('a:', 'N;', etc.).
-            throw new OldChunkFormatException(
-                "Chunk uses pre-0.2.5 serialized format (not streamable): {$this->path}"
+            throw new \RuntimeException(
+                "Chunk is not in v2 streaming format (first byte is not '{'). "
+                . "Delete the state directory and re-run a fresh build: {$this->path}"
             );
         }
 

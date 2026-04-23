@@ -7,7 +7,6 @@ namespace Tag1\Scolta\Tests\Index;
 use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\Index\ChunkReader;
 use Tag1\Scolta\Index\ChunkWriter;
-use Tag1\Scolta\Index\OldChunkFormatException;
 
 class ChunkWriterReaderTest extends TestCase
 {
@@ -168,7 +167,8 @@ class ChunkWriterReaderTest extends TestCase
         file_put_contents($path, serialize(['index' => [], 'pages' => []]));
 
         $reader = new ChunkReader($path);
-        $this->expectException(OldChunkFormatException::class);
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/not in v2 streaming format/');
         iterator_to_array($reader->openPages());
     }
 
