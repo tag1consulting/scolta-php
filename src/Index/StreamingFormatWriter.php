@@ -31,13 +31,15 @@ namespace Tag1\Scolta\Index;
  */
 class StreamingFormatWriter
 {
-    private const DELIMITER     = 'pagefind_dcd';
-    private const MAX_CHUNK_KB  = 40000;
+    private const DELIMITER = 'pagefind_dcd';
+
+    /** Flush threshold used when no MemoryBudget is provided. */
+    private const DEFAULT_FLUSH_BYTES = 40_000;
 
     // ── State initialised by beginWrite() ──────────────────────────────────
 
-    private string $outputDir  = '';
-    private string $buildDir   = '';
+    private string $outputDir = '';
+    private string $buildDir  = '';
 
     /** Sequential page number → minimal metadata. */
     private array $pageMeta = [];
@@ -62,12 +64,17 @@ class StreamingFormatWriter
     /** Completed index chunks: [{from, to, hash}]. */
     private array $indexChunkMeta = [];
 
+    /** Active flush threshold (bytes), derived from the MemoryBudget. */
+    private int $flushBytes;
+
     // ───────────────────────────────────────────────────────────────────────
 
     public function __construct(
         private readonly CborEncoder $cbor,
         private readonly string $pagefindVersion = '',
+        ?MemoryBudget $budget = null,
     ) {
+        $this->flushBytes = $budget?->fragmentFlushBytes() ?? self::DEFAULT_FLUSH_BYTES;
     }
 
     private function getVersion(): string
@@ -159,7 +166,7 @@ class StreamingFormatWriter
         $pageCount    = count($termData) - (isset($termData['_variants']) ? 1 : 0);
         $estimatedSize = strlen($term) * 2 + $pageCount * 20;
 
-        if ($this->currentChunkSize + $estimatedSize > self::MAX_CHUNK_KB
+        if ($this->currentChunkSize + $estimatedSize > $this->flushBytes
             && count($this->currentChunkItems) > 0) {
             $this->flushIndexChunk();
         }

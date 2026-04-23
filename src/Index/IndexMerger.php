@@ -109,27 +109,31 @@ class IndexMerger
     /**
      * Stream pages and terms from chunk files into a StreamingFormatWriter.
      *
-     * Phase 1 — pages: each chunk's pages are streamed in order via
-     * ChunkReader::openPages(). Page numbers are already globally sequential
-     * (assigned by InvertedIndexBuilder with a per-chunk offset), so no
-     * remapping is needed.
+     * Phase 1 — pages: each original chunk's pages are streamed sequentially.
+     * Page numbers are already globally sequential (InvertedIndexBuilder assigns
+     * them with a per-chunk offset), so no remapping is needed. This phase never
+     * needs fan-in reduction — only one file handle is open at a time.
      *
      * Phase 2 — N-way term merge: one ChunkReader::openIndex() generator per
-     * chunk is seeded into a SplMinHeap keyed on [term, chunk_index]. The
-     * heap always yields the lexicographically smallest outstanding term.
-     * When multiple chunks share the same term (same word appears in pages
-     * from different chunks) their entries are merged via mergeEntries()
-     * before being passed to the writer.
+     * chunk is seeded into a SplMinHeap. When $budget->mergeOpenFileHandles()
+     * is exceeded, a recursive pre-merge pass reduces fan-in by merging term
+     * streams from batches of chunks into temporary term-only files before the
+     * final pass. Pre-merged files contain no pages; phase 1 always reads from
+     * the original paths.
      *
      * Peak RAM: O(chunk_count) generator frames + O(1) term data per step.
      *
      * @param string[]              $chunkPaths Paths to v2 chunk files.
      * @param StreamingFormatWriter $writer     Writer positioned after beginWrite().
-     * @throws OldChunkFormatException if any chunk uses the pre-0.2.5 format.
+     * @param MemoryBudget|null     $budget     Controls file-handle soft cap.
      */
-    public function mergeStreaming(array $chunkPaths, StreamingFormatWriter $writer): void
-    {
-        // ── Phase 1: stream pages ─────────────────────────────────────────
+    public function mergeStreaming(
+        array $chunkPaths,
+        StreamingFormatWriter $writer,
+        ?MemoryBudget $budget = null,
+    ): void {
+        // ── Phase 1: stream pages from ALL original chunks ────────────────
+        // Always uses sequential access (one handle at a time) — no fan-in issue.
         foreach ($chunkPaths as $path) {
             $reader = new ChunkReader($path);
             foreach ($reader->openPages() as $pageNum => $pageData) {
@@ -138,6 +142,123 @@ class IndexMerger
         }
 
         // ── Phase 2: N-way merge of sorted term streams ───────────────────
+        $cap       = $budget?->mergeOpenFileHandles() ?? PHP_INT_MAX;
+        $termPaths = count($chunkPaths) > $cap
+            ? $this->preMergeTerms($chunkPaths, $cap)
+            : $chunkPaths;
+
+        $this->nWayTermMerge($termPaths, $writer);
+    }
+
+    /**
+     * Recursively reduce term-stream fan-in by merging batches into
+     * temporary terms-only chunk files.
+     *
+     * Each batch of $cap chunks is merged via N-way heap (O(1) RAM per term)
+     * and written to a temporary ChunkWriter file with an empty pages section.
+     * Phase 1 is unaffected — it reads from the original paths.
+     *
+     * Temporary files are stored in sys_get_temp_dir() and may be cleaned up
+     * by the caller; they are not cleaned here to allow the final nWayTermMerge
+     * to read them. PHP's process exit will collect any leaks.
+     *
+     * @param string[] $chunkPaths
+     * @return string[] Reduced set of (possibly temporary) paths for phase 2.
+     */
+    private function preMergeTerms(array $chunkPaths, int $cap): array
+    {
+        if (count($chunkPaths) <= $cap) {
+            return $chunkPaths;
+        }
+
+        $tmpDir = sys_get_temp_dir() . '/scolta-premerge-' . uniqid('', true);
+        @mkdir($tmpDir, 0755, true);
+
+        $batches   = array_chunk($chunkPaths, $cap);
+        $outPaths  = [];
+
+        foreach ($batches as $i => $batch) {
+            if (count($batch) === 1) {
+                $outPaths[] = $batch[0];
+                continue;
+            }
+
+            $tmpPath = $tmpDir . sprintf('/premerge-%03d.dat', $i);
+            $this->streamMergeTermsToFile($batch, $tmpPath);
+            $outPaths[] = $tmpPath;
+        }
+
+        // Recurse until fan-in ≤ cap.
+        return $this->preMergeTerms($outPaths, $cap);
+    }
+
+    /**
+     * N-way stream-merge the term sections of $batch chunks, writing a
+     * terms-only chunk file at $outputPath.
+     *
+     * Writes one merged term record at a time directly to the output file —
+     * never accumulates the full vocabulary in RAM. Memory usage is O(one
+     * term's page entries), not O(vocabulary × pages).
+     *
+     * The output uses the same v2 binary format as ChunkWriter so ChunkReader
+     * can read it. term_count is left as 0 in the header because openIndex()
+     * uses the sentinel, not the count.
+     */
+    private function streamMergeTermsToFile(array $batch, string $outputPath): void
+    {
+        $iterators = [];
+        $heap      = new \SplMinHeap();
+
+        foreach ($batch as $idx => $path) {
+            $reader = new ChunkReader($path);
+            $gen    = $reader->openIndex();
+            if ($gen->valid()) {
+                $iterators[$idx] = $gen;
+                $heap->insert([$gen->current()[0], $idx]);
+            }
+        }
+
+        $fp = fopen($outputPath, 'wb');
+        if ($fp === false) {
+            throw new \RuntimeException("Cannot open pre-merge output: {$outputPath}");
+        }
+
+        try {
+            fwrite($fp, json_encode(['v' => 2, 'page_count' => 0, 'term_count' => 0]) . "\n");
+
+            while (!$heap->isEmpty()) {
+                [$minTerm] = $heap->top();
+
+                $allEntries = [];
+                while (!$heap->isEmpty() && $heap->top()[0] === $minTerm) {
+                    [, $chunkIdx] = $heap->extract();
+                    $allEntries[] = $iterators[$chunkIdx]->current()[1];
+
+                    $iterators[$chunkIdx]->next();
+                    if ($iterators[$chunkIdx]->valid()) {
+                        $heap->insert([$iterators[$chunkIdx]->current()[0], $chunkIdx]);
+                    }
+                }
+
+                $merged  = $this->mergeEntries($allEntries);
+                $payload = serialize([$minTerm, $merged]);
+                fwrite($fp, pack('V', strlen($payload)));
+                fwrite($fp, $payload);
+                unset($merged, $allEntries, $payload);
+            }
+
+            fwrite($fp, "\x00\x00\x00\x00");
+            fwrite($fp, json_encode(['hmac' => '']) . "\n");
+        } finally {
+            fclose($fp);
+        }
+    }
+
+    /**
+     * N-way heap merge of term streams from the given chunk paths.
+     */
+    private function nWayTermMerge(array $chunkPaths, StreamingFormatWriter $writer): void
+    {
         /** @var \Generator[] $iterators */
         $iterators = [];
         $heap      = new \SplMinHeap();
@@ -152,10 +273,8 @@ class IndexMerger
         }
 
         while (!$heap->isEmpty()) {
-            // Peek at the minimum term without extracting.
             [$minTerm] = $heap->top();
 
-            // Drain all iterators that are currently at this term.
             $allEntries = [];
             while (!$heap->isEmpty() && $heap->top()[0] === $minTerm) {
                 [, $chunkIdx] = $heap->extract();

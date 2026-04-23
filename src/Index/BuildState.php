@@ -115,13 +115,10 @@ class BuildState
     }
 
     /**
-     * Read a chunk from disk.
-     *
-     * Supports both the v2 streaming format (written by ChunkWriter since
-     * 0.2.5) and the legacy v1 serialized format (pre-0.2.5).
+     * Read a chunk from disk (v2 streaming format only).
      *
      * @param int $chunkNumber Chunk number (0-based).
-     * @return array The unserialized chunk data as {pages: ..., index: ...}.
+     * @return array The chunk data as {pages: ..., index: ...}.
      * @throws \RuntimeException If file missing, HMAC invalid, or data malformed.
      */
     public function readChunk(int $chunkNumber): array
@@ -133,66 +130,53 @@ class BuildState
             throw new \RuntimeException("Chunk file not found: {$filename}");
         }
 
-        // Detect format by first byte: v2 starts with '{' (JSON header line).
-        $fp = fopen($path, 'rb');
-        if ($fp === false) {
-            throw new \RuntimeException("Failed to open chunk file: {$filename}");
-        }
-        $firstByte = fread($fp, 1);
-        fclose($fp);
-
-        if ($firstByte === '{') {
-            // v2 streaming format (ChunkWriter).
-            if ($this->hmacSecret !== null) {
-                $reader = new ChunkReader($path);
-                if (!$reader->verifyHmac($this->hmacSecret)) {
-                    throw new \RuntimeException("HMAC verification failed for chunk: {$filename}");
-                }
-            }
-            $reader = new ChunkReader($path);
-            $pages  = [];
-            foreach ($reader->openPages() as $pageNum => $pageData) {
-                $pages[$pageNum] = $pageData;
-            }
-            $index = [];
-            foreach ($reader->openIndex() as [$term, $termData]) {
-                $index[$term] = $termData;
-            }
-
-            return ['pages' => $pages, 'index' => $index];
-        }
-
-        // v1 legacy format: PHP serialize with optional binary HMAC prefix.
-        $data = file_get_contents($path);
-        if ($data === false) {
-            throw new \RuntimeException("Failed to read chunk file: {$filename}");
-        }
-
         if ($this->hmacSecret !== null) {
-            if (strlen($data) < 32) {
-                throw new \RuntimeException("Chunk file too small for HMAC: {$filename}");
-            }
-            $storedHmac   = substr($data, 0, 32);
-            $serialized   = substr($data, 32);
-            $expectedHmac = hash_hmac('sha256', $serialized, $this->hmacSecret, true);
-            if (!hash_equals($storedHmac, $expectedHmac)) {
+            $reader = new ChunkReader($path);
+            if (!$reader->verifyHmac($this->hmacSecret)) {
                 throw new \RuntimeException("HMAC verification failed for chunk: {$filename}");
             }
-            $data = $serialized;
         }
 
-        $result = unserialize($data, ['allowed_classes' => false]);
-        if (!is_array($result)) {
-            throw new \RuntimeException("Invalid chunk data in: {$filename}");
+        $reader = new ChunkReader($path);
+        $pages  = [];
+        foreach ($reader->openPages() as $pageNum => $pageData) {
+            $pages[$pageNum] = $pageData;
+        }
+        $index = [];
+        foreach ($reader->openIndex() as [$term, $termData]) {
+            $index[$term] = $termData;
         }
 
-        return $result;
+        return ['pages' => $pages, 'index' => $index];
     }
 
     /**
      * Release the build lock.
      */
     public function releaseLock(): void
+    {
+        $this->dropLockFileOnly();
+
+        $manifest = $this->readManifest();
+        if ($manifest !== null) {
+            $manifest['status'] = 'idle';
+            file_put_contents(
+                $this->stateDir . '/' . self::MANIFEST_FILE,
+                json_encode($manifest, JSON_PRETTY_PRINT)
+            );
+        }
+    }
+
+    /**
+     * Release the lock handle and delete the lock file without touching
+     * the manifest status, leaving the build resumable.
+     */
+    public function releaseLockOnly(): void
+    {
+        $this->dropLockFileOnly();
+    }
+
+    private function dropLockFileOnly(): void
     {
         if ($this->lockHandle !== null) {
             flock($this->lockHandle, LOCK_UN);
@@ -203,15 +187,6 @@ class BuildState
         $lockFile = $this->stateDir . '/' . self::LOCK_FILE;
         if (file_exists($lockFile)) {
             @unlink($lockFile);
-        }
-
-        $manifest = $this->readManifest();
-        if ($manifest !== null) {
-            $manifest['status'] = 'idle';
-            file_put_contents(
-                $this->stateDir . '/' . self::MANIFEST_FILE,
-                json_encode($manifest, JSON_PRETTY_PRINT)
-            );
         }
     }
 
