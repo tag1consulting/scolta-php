@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/tag1consulting/scolta-php/actions/workflows/ci.yml/badge.svg)](https://github.com/tag1consulting/scolta-php/actions/workflows/ci.yml)
 
-Scolta is a browser-side search engine: the index lives in static files, scoring runs in the browser via WebAssembly, and an optional AI layer handles query expansion and summarization. No search server required. "Scolta" is archaic Italian for sentinel — someone watching for what matters.
+Scolta is a scoring, ranking, and AI layer built on [Pagefind](https://pagefind.app/). Pagefind is the search engine — it builds the static index, runs the browser-side WASM search, produces word-position data, and generates excerpts. Scolta takes Pagefind's results and re-ranks them with configurable title/content/recency/priority boosts, then optionally passes them through an AI layer for query expansion, summarization, and follow-up generation. No search server required. "Scolta" is archaic Italian for sentinel — someone watching for what matters.
 
 This package is the shared PHP library. Platform adapters (WordPress, Drupal, Laravel) depend on it for content export, AI client, indexing, configuration, and shared frontend assets.
 
@@ -26,6 +26,8 @@ composer install
 All tests pass without any native runtime. The WASM module ships as a pre-built binary in `assets/wasm/`.
 
 ## Optional Upgrades
+
+The search engine itself is Pagefind in both cases — the PHP indexer and the Pagefind binary indexer are two ways to produce the same Pagefind-compatible index. Choose based on your hosting constraints; the search experience is equivalent.
 
 ### Upgrade to the Pagefind binary indexer
 
@@ -219,6 +221,10 @@ Scoring runs entirely in the browser via the WASM module loaded by `scolta.js`. 
 composer install
 ./vendor/bin/phpunit
 ```
+
+## Credits
+
+Scolta is built on [Pagefind](https://pagefind.app/) by [CloudCannon](https://cloudcannon.com/). Without Pagefind, Scolta has no search to score — the index format, WASM search engine, word-position data, and excerpt generation are all Pagefind's. Scolta's contribution is the layer that sits on top: configurable scoring, multi-adapter ranking parity, AI features, and platform glue.
 
 ## License
 
