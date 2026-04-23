@@ -35,7 +35,7 @@ class ChunkWriterReaderTest extends TestCase
         return [
             'pages' => [
                 $pageOffset     => ['url' => "/page-{$pageOffset}", 'wordCount' => 10, 'content' => 'hello world', 'meta' => ['title' => "Page {$pageOffset}"], 'filters' => []],
-                $pageOffset + 1 => ['url' => "/page-" . ($pageOffset + 1), 'wordCount' => 5, 'content' => 'foo bar', 'meta' => ['title' => "Page " . ($pageOffset + 1)], 'filters' => []],
+                $pageOffset + 1 => ['url' => '/page-' . ($pageOffset + 1), 'wordCount' => 5, 'content' => 'foo bar', 'meta' => ['title' => 'Page ' . ($pageOffset + 1)], 'filters' => []],
             ],
             'index' => [
                 'zebra' => [$pageOffset     => ['positions' => [25 => [1, 3]], 'meta_positions' => []]],
