@@ -4,17 +4,31 @@ All notable changes to scolta-php will be documented in this file.
 
 This project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages.
 
-## [0.2.5] - Unreleased
+## [0.3.0] - 2026-04-23
+
+### Added
+- **`MemoryBudget`**: Three named profiles (`conservative` / `balanced` / `aggressive`) controlling chunk size, flush threshold, merge handle count, and total RAM budget. Conservative targets ≤ 96 MB peak RSS and is the runtime default.
+- **`BuildIntent`**: Immutable value object encoding the caller's intent — `fresh`, `resume`, or `restart` — so the orchestrator can make a single consistent decision without re-reading flags at every call site.
+- **`BuildCoordinator`**: State machine over `BuildState`; exposes `shouldResume()`, `startFresh()`, `commitChunk()`, and `releaseLockOnly()`. Separates "what to do next" logic from both the loop and the raw file I/O in `BuildState`.
+- **`IndexBuildOrchestrator`**: Single authoritative chunk-loop entry point. Accepts a `ContentSourceInterface`, `MemoryBudget`, `BuildIntent`, and optional `ProgressReporterInterface`; drives the full build pipeline from content gather → chunk write → pre-merge → final merge.
+- **`ProgressReporterInterface`** / **`NullProgressReporter`**: Adapter contract for surfacing build progress to framework-specific UIs (Artisan progress bar, WP-CLI progress bar, Drush output).
+- **`StatusReport`**: Immutable result object returned by `IndexBuildOrchestrator::build()`; carries page count, elapsed time, peak RAM, and success flag.
+- **`MemoryBudgetSuggestion`**: Advisory helper that inspects `memory_limit` and corpus size to suggest a budget profile.
+- **`MemoryTelemetry`**: PSR-3 log helper that emits phase-boundary RAM readings for diagnosing memory usage in production.
+- **`BuildState::releaseLockOnly()`**: Drops the build lock without resetting manifest status to `idle`, leaving a paused build resumable.
+
+### Changed
+- **`PhpIndexer`**: Delegates chunk-loop and merge orchestration to `IndexBuildOrchestrator`; retains only content-gather and fingerprint-check responsibilities.
+- **`IndexMerger::streamMergeTermsToFile()`**: Rewrote to stream one term at a time directly to the output file handle (raw v2 binary format, no `ChunkWriter` allocation). Eliminates the last source of OOM: previously the pre-merge step accumulated the entire merged vocabulary in RAM before writing.
 
 ### Fixed
 - **PHP indexer OOM on large corpora**: `PhpIndexer::finalize()` previously loaded all chunk data into RAM simultaneously (one deserialized array per chunk + full merged index + a second copy during page-number remapping), causing fatal out-of-memory errors on sites with thousands of pages. The merge pipeline is now fully streaming: chunks are written in a new v2 format (length-prefixed `serialize()` records with sorted terms), merged via an N-way `SplMinHeap` pass that keeps only one term in memory at a time, and handed directly to `StreamingFormatWriter` which writes Pagefind fragment files incrementally. Peak RAM is now ~5-10 MB regardless of corpus size.
 
-### Added
+### Added (streaming infrastructure)
 - **`ChunkWriter`**: writes v2 streaming chunk files (JSON header, alphabetically-sorted length-prefixed records, HMAC footer).
-- **`ChunkReader`**: reads v2 chunk files lazily via `openPages()` and `openIndex()` generators; throws `OldChunkFormatException` for pre-0.2.5 serialized files.
+- **`ChunkReader`**: reads v2 chunk files lazily via `openPages()` and `openIndex()` generators; throws `RuntimeException` for pre-0.3.0 serialized files.
 - **`StreamingFormatWriter`**: Pagefind-compatible index writer that accepts pages and terms one at a time, keeping peak RAM independent of corpus size.
 - **`IndexMerger::mergeStreaming()`**: N-way streaming merge using `SplMinHeap`; replaces the removed `mergeFromFiles()` method.
-- **`OldChunkFormatException`**: thrown by `ChunkReader` when a pre-0.2.5 chunk is detected; caught by `PhpIndexer::finalize()` to trigger a legacy fallback path for in-progress builds.
 
 ## [0.2.4] - 2026-04-21
 
