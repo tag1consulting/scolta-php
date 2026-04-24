@@ -6,7 +6,11 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Fixed
+- **Search result URLs rendering as `#`**: `scolta.js` line 1273 fell through to `"#"` because `data.meta.url` is never populated — `StreamingFormatWriter` writes `url` at the fragment top level, not inside the `meta` sub-object, and explicitly filters `url` out of `meta`. Every other URL read-site in `scolta.js` carried the `|| data.url` fallback; line 1273 was missing it. Fixed: `data.meta?.url || data.url || "#"`. Present since the streaming writer landed in 0.3.0.
+
 ### Added
+- **`ContentExporter::filterItems(iterable $items): \Generator`**: Generator counterpart to `exportToItems()`. Yields `ContentItem` objects one at a time without materializing the full result set in RAM. Framework adapters that stream content via a generator MUST use this instead of `exportToItems()`. Existing `exportToItems()` is unchanged.
 - **Recipe catalog fixture** (`tests/fixtures/recipes/`): 20 Pagefind-compatible HTML files representing a multilingual recipe corpus used in README examples. Covers cross-dialect vocabulary pairs (aubergine/eggplant, courgette/zucchini, rocket/arugula, capsicum/bell pepper, coriander/cilantro, scallion/spring onion) and diet/cuisine filter attributes.
 
 ## [0.3.1] - 2026-04-23

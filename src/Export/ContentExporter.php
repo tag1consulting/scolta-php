@@ -109,6 +109,30 @@ class ContentExporter
     }
 
     /**
+     * Filter content items lazily by minimum content length.
+     *
+     * Generator version of exportToItems() — yields ContentItem objects one at
+     * a time without pre-loading the entire result set into RAM. Use this in
+     * framework adapters where the input comes from a paginated generator so
+     * that peak RSS stays bounded regardless of corpus size.
+     *
+     * @param iterable<ContentItem> $items Items to filter (array or generator).
+     * @return \Generator<ContentItem>     Items that pass the minimum length check.
+     *
+     * @since 0.3.2
+     * @stability experimental
+     */
+    public function filterItems(iterable $items): \Generator
+    {
+        foreach ($items as $item) {
+            $cleaned = HtmlCleaner::clean($item->bodyHtml);
+            if (mb_strlen($cleaned) >= $this->minContentLength) {
+                yield $item;
+            }
+        }
+    }
+
+    /**
      * Get export statistics.
      *
      * @return array{exported: int, skipped: int}
