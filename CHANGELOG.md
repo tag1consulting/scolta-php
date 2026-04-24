@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Added
+- **`MemoryTelemetry` now logs elapsed wall-clock time**: Every `emit()` call now includes `elapsed_s` in its PSR-3 context and appends `+{elapsed_s}s` to the log message. Framework adapters wired to a real logger (e.g. `Scolta_WP_CLI_Logger` with `--debug`) will now show per-phase wall-clock time, making it trivial to distinguish a slow gather step from a slow indexer without a profiler.
+
 ### Fixed
 - **Search result URLs rendering as `#`**: `scolta.js` line 1273 fell through to `"#"` because `data.meta.url` is never populated — `StreamingFormatWriter` writes `url` at the fragment top level, not inside the `meta` sub-object, and explicitly filters `url` out of `meta`. Every other URL read-site in `scolta.js` carried the `|| data.url` fallback; line 1273 was missing it. Fixed: `data.meta?.url || data.url || "#"`. Present since the streaming writer landed in 0.3.0.
 
