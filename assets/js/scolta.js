@@ -1270,7 +1270,7 @@
     for (let i = displayedCount; i < showing; i++) {
       const { data } = filtered[i];
       const title = data.meta?.title || "Untitled";
-      const url = data.meta?.url || "#";
+      const url = data.meta?.url || data.url || "#";
       const site = data.meta?.site || "";
       const date = data.meta?.date || "";
       const excerpt = truncateExcerpt(data.excerpt || "", CONFIG.EXCERPT_LENGTH);

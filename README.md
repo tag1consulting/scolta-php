@@ -2,11 +2,81 @@
 
 [![CI](https://github.com/tag1consulting/scolta-php/actions/workflows/ci.yml/badge.svg)](https://github.com/tag1consulting/scolta-php/actions/workflows/ci.yml)
 
-Scolta is a scoring, ranking, and AI layer built on [Pagefind](https://pagefind.app/). Pagefind is the search engine — it builds the static index, runs the browser-side WASM search, produces word-position data, and generates excerpts. Scolta takes Pagefind's results and re-ranks them with configurable title/content/recency/priority boosts, then optionally passes them through an AI layer for query expansion, summarization, and follow-up generation. No search server required. "Scolta" is archaic Italian for sentinel — someone watching for what matters.
+PHP library that indexes content into Pagefind-compatible search indexes, plus the shared orchestration, memory-budget management, and AI client used by Scolta's CMS adapters.
 
-This package is the shared PHP library. Platform adapters (WordPress, Drupal, Laravel) depend on it for content export, AI client, indexing, configuration, and shared frontend assets.
+## Status
 
-## Quick Install
+Beta. Scolta is installable and in active use. The API surface documented here will not break within the 0.x minor series without a deprecation notice and a replacement in place. Expect breaking changes before 1.0. Test in staging before deploying to production. File bugs at the repo issue tracker.
+
+## What Is Scolta?
+
+Scolta is a scoring, ranking, and AI layer built on [Pagefind](https://pagefind.app/). Pagefind is the search engine: it builds a static inverted index at publish time, runs a browser-side WASM search engine, produces word-position data, and generates highlighted excerpts. Scolta takes Pagefind's result set and re-ranks it with configurable boosts — title match weight, content match weight, recency decay curves, and phrase-proximity multipliers. No search server required. Queries resolve in the visitor's browser against the pre-built static index.
+
+This package is the PHP foundation for all three CMS adapters. It handles the parts that are the same regardless of platform: indexing content to Pagefind-compatible HTML files, AI provider communication, configuration management, memory budgeting, and the shared browser assets (`scolta.js`, `scolta.css`, and the pre-built WASM module). The CMS adapters (scolta-drupal, scolta-laravel, scolta-wp) depend on this package and add only their platform-specific concerns.
+
+The LLM tier — query expansion, result summarization, follow-up questions — is optional. When enabled, it sends the query text and selected result excerpts to a configured LLM provider. The base search tier shares nothing with any third party; it runs entirely in the visitor's browser.
+
+## Running Example
+
+The examples in this README and the other Scolta repos use a recipe catalog as the concrete data set. Recipes are a good showcase because recipe vocabulary has cross-dialect mismatches that basic keyword search handles poorly:
+
+- A search for `aubergine parmesan` should surface *Eggplant Parmigiana*.
+- A search for `chinese noodle soup` should surface *Lanzhou Beef Noodles*, *Wonton Soup*, and *Dan Dan Noodles*.
+- A search for `gluten free pasta` should surface *Zucchini Spaghetti with Pesto* and *Rice Noodle Stir-Fry*.
+- A search for `quick dinner under 30 min` should surface *Pad Kra Pao*, *Dan Dan Noodles*, *Steak Frites*, and others.
+
+The recipe fixture lives at `tests/fixtures/recipes/` — 20 HTML files in Pagefind-compatible format, one per recipe.
+
+Here is how to index the recipe catalog outside any CMS, using the `IndexBuildOrchestrator` directly:
+
+```php
+<?php
+require_once __DIR__ . '/vendor/autoload.php';
+
+use Tag1\Scolta\Export\ContentItem;
+use Tag1\Scolta\Index\IndexBuildOrchestrator;
+use Tag1\Scolta\Index\BuildIntent;
+use Tag1\Scolta\Config\MemoryBudget;
+
+// Load the 20 recipe HTML files from the fixture directory
+$fixtures = glob(__DIR__ . '/tests/fixtures/recipes/*.html');
+$items = [];
+foreach ($fixtures as $file) {
+    $dom = new DOMDocument();
+    @$dom->loadHTMLFile($file);
+    $body = $dom->getElementById(basename($file, '.html'));
+    $id   = pathinfo($file, PATHINFO_FILENAME);
+    $title = $dom->getElementsByTagName('title')[0]->textContent;
+
+    $items[] = new ContentItem(
+        id:       $id,
+        title:    $title,
+        bodyHtml: $dom->saveHTML($body),
+        url:      '/recipes/' . $id,
+        date:     '2024-03-01',
+        siteName: 'Recipe Catalog',
+    );
+}
+
+// Run the build using the conservative memory profile (128 MB-safe)
+$orchestrator = new IndexBuildOrchestrator(
+    stateDir:  '/tmp/scolta-state',
+    outputDir: '/var/www/html/pagefind',
+    language:  'en',
+);
+
+$result = $orchestrator->build(
+    intent: BuildIntent::fresh(count($items), MemoryBudget::conservative()),
+    pages:  $items,
+);
+
+printf("Indexed %d recipes in %.1fs\n", $result->pageCount, $result->elapsedSeconds);
+// Indexed 20 recipes in 0.3s
+```
+
+After indexing, the `/var/www/html/pagefind/` directory contains a Pagefind-compatible static index. Point a browser at it and load `scolta.js` to get a working search UI with vocabulary-mismatch handling.
+
+## Installation
 
 ```bash
 composer require tag1/scolta-php
@@ -14,99 +84,147 @@ composer require tag1/scolta-php
 
 **Requirements:** PHP 8.1+, `ext-intl` (Unicode tokenization).
 
-Platform adapters install this package automatically — you only need to install it directly if you are building a custom adapter.
+Platform adapters install this package automatically. Install it directly only when building a custom adapter or a non-CMS integration.
 
-## Verify It Works
+## Configuration and Quickstart
 
-```bash
-composer install
-./vendor/bin/phpunit
+All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Construct it with `ScoltaConfig::fromArray()`:
+
+```php
+use Tag1\Scolta\Config\ScoltaConfig;
+
+$config = ScoltaConfig::fromArray([
+    // AI provider (optional — omit for base search only)
+    'ai_provider'         => 'anthropic',
+    'ai_api_key'          => getenv('SCOLTA_API_KEY'),
+    'ai_model'            => 'claude-sonnet-4-5-20250929',
+    'ai_expand_query'     => true,
+    'ai_summarize'        => true,
+
+    // Scoring — tuned for a recipe catalog (no recency, title precision)
+    'scoring' => [
+        'title_match_boost'          => 1.5,
+        'title_all_terms_multiplier' => 2.0,
+        'content_match_boost'        => 0.4,
+        'recency_strategy'           => 'none',
+        'language'                   => 'en',
+    ],
+
+    // Site identity (used in AI prompts)
+    'site_name'        => 'Recipe Catalog',
+    'site_description' => 'a collection of 20 international recipes',
+]);
 ```
 
-All tests pass without any native runtime. The WASM module ships as a pre-built binary in `assets/wasm/`.
+For the full list of config keys and their defaults, see [docs/CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md).
+
+## What Scolta Replaces (and What It Doesn't)
+
+Scolta is a practical replacement for hosted search SaaS (Algolia, Coveo, SearchStax) and for small-to-medium self-hosted search installations used as a content search backend — Solr or Elasticsearch where your use case is page and document search, not log analytics.
+
+Scolta is not a replacement for:
+
+- Full-text database search with row-level access control (per-document permissions enforced at query time).
+- Log analytics or observability search built on Elasticsearch or OpenSearch.
+- Vector databases used as a general retrieval layer for RAG pipelines.
+- Enterprise search with audit logging, retention policies, or SSO-gated document visibility.
+
+If you need any of those, Scolta is the wrong tool.
+
+## Memory and Scale
+
+The default memory profile is `conservative`, which targets a peak RSS under 96 MB and works on shared hosting with a 128 MB `memory_limit`. Scolta never silently upgrades to a larger profile. To opt in to a larger profile:
+
+```php
+use Tag1\Scolta\Config\MemoryBudget;
+use Tag1\Scolta\Config\MemoryBudgetSuggestion;
+
+// Auto-detect and suggest a profile based on the current PHP memory_limit
+$suggestion = MemoryBudgetSuggestion::suggest();
+// $suggestion->profile is 'conservative', 'balanced', or 'aggressive'
+// $suggestion->warning is non-empty if the limit is tight
+
+// Or specify directly
+$budget = MemoryBudget::balanced();   // targets ~200 MB peak RSS
+$budget = MemoryBudget::aggressive(); // targets ~384 MB peak RSS
+
+// Or pass a budget in bytes
+$budget = MemoryBudget::fromBytes(256 * 1024 * 1024);
+```
+
+The trade-off: a larger budget means fewer, larger index chunks and faster builds. The `conservative` profile is always the default and always safe to use.
+
+Tested ceiling at the `conservative` profile: 50,000 pages. Higher counts likely work; not certified yet.
+
+You can also pass the profile string at the CLI via `--memory-budget=balanced` if the CMS adapter supports the flag.
+
+## AI Features and Privacy
+
+Scolta's AI tier is optional. When enabled:
+
+- The LLM receives: the query text, and the titles and excerpts of the top N results (default: 5, configurable via `ai_summary_top_n`).
+- The LLM does not receive: the full index contents, full page text, user session data, or visitor identity.
+- Which provider receives the query data depends on your `ai_provider` setting: `anthropic`, `openai`, or a self-hosted endpoint via `ai_base_url`.
+
+The base search tier — Pagefind index lookup and Scolta WASM scoring — runs entirely in the visitor's browser with no server-side involvement beyond serving the static index files.
 
 ## Optional Upgrades
 
-The search engine itself is Pagefind in both cases — the PHP indexer and the Pagefind binary indexer are two ways to produce the same Pagefind-compatible index. Choose based on your hosting constraints; the search experience is equivalent.
+### Indexer options
 
-### Upgrade to the Pagefind binary indexer
+Both indexers produce the same Pagefind-compatible index. The search experience is identical either way. Choose based on your hosting constraints.
 
-The PHP indexer works everywhere but is slower than the Pagefind binary. To upgrade:
+**PHP indexer** (the default): runs everywhere, no binary required. Around 3–4 seconds per 1,000 pages. Supports 14 languages via Snowball stemming (Catalan, Danish, Dutch, English, Finnish, French, German, Italian, Norwegian, Portuguese, Romanian, Russian, Spanish, Swedish).
+
+**Pagefind binary indexer**: 5–10× faster. Requires Node.js ≥ 18 or a direct binary download. Supports 33+ languages. Better for large sites or environments where the binary is installable.
+
+On managed hosting (WP Engine, Kinsta, Flywheel, Pantheon), `exec()` is disabled. The PHP indexer runs there automatically with no configuration change.
+
+To install the binary:
 
 ```bash
-# Install via npm (Node.js ≥ 18 required):
-npm install -g pagefind
-
-# Or download the binary directly (no Node.js required):
+# Download via the CLI command (no Node.js required):
 wp scolta download-pagefind          # WordPress
 drush scolta:download-pagefind       # Drupal
 php artisan scolta:download-pagefind # Laravel
+
+# Or install via npm (Node.js ≥ 18 required):
+npm install -g pagefind
 ```
 
-Then verify:
+`indexer: auto` (the default) uses the binary when available and falls back to PHP automatically.
 
-```bash
-wp scolta check-setup          # WordPress
-drush scolta:check-setup       # Drupal
-php artisan scolta:check-setup # Laravel
-```
+### Language support for the PHP indexer
 
-The health endpoint reports `indexer_active` (`"binary"` or `"php"`) and `indexer_upgrade_available`.
-
-### Indexer comparison
-
-| Feature | PHP Indexer | Pagefind Binary |
-| ------- | ----------- | --------------- |
-| Languages with stemming | 14 (Snowball) | 33+ |
-| Speed (1 000 pages) | ~3–4 seconds | ~0.3–0.5 seconds |
-| Dependencies | None (pure PHP) | Node.js or direct binary |
-| Shared / managed hosting | Yes | Only if binary installable |
-| Heading / anchor search | Not yet | Yes |
-| Custom sort fields | Not yet | Yes |
-
-`indexer: auto` (default) uses the binary when available and falls back to PHP automatically.
-
-**When to stay on PHP indexer:**
-
-- WP Engine, Kinsta, Flywheel, Pantheon, and other managed hosts that disable `exec()`
-- Any environment where installing a Node.js binary is not possible
-- Sites under ~5 000 pages where the speed difference is negligible
-
-### Language support
-
-The PHP indexer supports word stemming for 14 languages via Snowball algorithms: Catalan, Danish, Dutch, English, Finnish, French, German, Italian, Norwegian, Portuguese, Romanian, Russian, Spanish, Swedish.
-
-For other languages (Arabic, Greek, Hindi, Hungarian, Turkish, etc.), search works but "running" will not match "run." CJK languages (Chinese, Japanese, Korean) use character-level tokenization and do not require stemming. For full language parity with Pagefind's 33+ languages, use the binary indexer.
+For languages outside the 14 supported by Snowball, search works but inflected forms ("running", "ran") will not match a stemmed base ("run"). CJK languages (Chinese, Japanese, Korean) use character-level tokenization and do not require stemming. For full 33+ language stemming coverage, use the Pagefind binary indexer.
 
 ## Debugging
 
 ### "ext-intl not found"
-
-The PHP `intl` extension is required for Unicode tokenization. Install it:
 
 ```bash
 # Debian/Ubuntu
 sudo apt-get install php8.1-intl
 
 # macOS (Homebrew)
-brew install php && brew install --build-from-source php-intl
+brew install php
 ```
 
 Verify: `php -m | grep intl`
 
 ### "PhpIndexer produces empty output"
 
-Check that `ext-intl` is loaded and that the content items passed to the indexer have non-empty `bodyHtml`. The indexer skips items with no extractable text after HTML cleaning.
+Verify `ext-intl` is loaded and that the `ContentItem` objects passed to the indexer have non-empty `bodyHtml`. The indexer skips items where the cleaned text is shorter than 50 characters.
 
 ### "AI calls failing"
 
-1. Confirm the API key is set: check `SCOLTA_API_KEY` env var or the platform-specific constant.
-2. Check the model identifier — model names change with provider updates. Default: `claude-sonnet-4-5-20250929`.
-3. Enable Guzzle request logging: set `SCOLTA_DEBUG=1` to log raw request/response bodies.
+1. Confirm the API key: check `SCOLTA_API_KEY` env var or the platform-specific constant.
+2. Check the model identifier — model names change with provider releases. Default: `claude-sonnet-4-5-20250929`.
+3. Enable request logging: set `SCOLTA_DEBUG=1` to log raw request/response bodies via Guzzle.
 
-### Scoring results look wrong
+### "Scoring results look wrong"
 
-The browser-side WASM scorer (`scolta-core`) runs client-side via wasm-bindgen. If results appear unscored or identically ranked, confirm the `pagefind.js` and `scolta.wasm` assets are both loading without 404 errors. The WASM binary is a static file served from your platform's public directory — check your web server's static file headers.
+The browser-side WASM scorer (`scolta-core`) runs via wasm-bindgen. If results appear unscored or identically ranked, confirm both `pagefind.js` and `scolta_core_bg.wasm` are loading without 404 errors in the browser console.
 
 ## Configuration Reference
 
@@ -194,7 +312,7 @@ Platform Adapters             scolta-php (this package)    scolta-core (browser 
 (Drupal / WP / Laravel)
 
   ContentGatherer ─────────> ContentExporter ──────────> HtmlCleaner
-  CLI build command ────────> PhpIndexer                  PagefindHtmlBuilder
+  CLI build command ────────> IndexBuildOrchestrator       PagefindHtmlBuilder
   AiService ───────────────> AiClient
   SettingsForm ────────────> ScoltaConfig
   SearchPage ──────────────> DefaultPrompts               Scoring runs in browser
@@ -207,6 +325,8 @@ Platform Adapters             scolta-php (this package)    scolta-core (browser 
 - `AiClient` — provider-agnostic HTTP client for Anthropic and OpenAI APIs
 - `AiEndpointHandler` — shared expand / summarize / follow-up logic
 - `ContentExporter` — exports content items to Pagefind-compatible HTML files
+- `IndexBuildOrchestrator` — single authoritative chunk-loop entry point for all adapters
+- `MemoryBudget` / `MemoryBudgetSuggestion` — memory profile management
 - `PhpIndexer` — pure PHP indexer producing Pagefind-compatible index files
 - `HtmlCleaner` — HTML cleaning for content extraction
 - `DefaultPrompts` — prompt templates with variable resolution (pure PHP, no WASM)
@@ -228,4 +348,11 @@ Scolta is built on [Pagefind](https://pagefind.app/) by [CloudCannon](https://cl
 
 ## License
 
-GPL-2.0-or-later
+MIT
+
+## Related Packages
+
+- [scolta-core](https://github.com/tag1consulting/scolta-core) — Rust/WASM scoring, ranking, and AI layer that runs in the browser.
+- [scolta-drupal](https://github.com/tag1consulting/scolta-drupal) — Drupal 10/11 Search API backend with Drush commands, admin settings form, and a search block.
+- [scolta-laravel](https://github.com/tag1consulting/scolta-laravel) — Laravel 11/12 package with Artisan commands, a `Searchable` trait for Eloquent models, and a Blade search component.
+- [scolta-wp](https://github.com/tag1consulting/scolta-wp) — WordPress 6.x plugin with WP-CLI commands, Settings API page, and a `[scolta_search]` shortcode.

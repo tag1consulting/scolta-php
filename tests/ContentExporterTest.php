@@ -240,4 +240,61 @@ class ContentExporterTest extends TestCase
         $files = glob($this->tmpDir . '/*.html');
         $this->assertEmpty($files);
     }
+
+    // -------------------------------------------------------------------------
+    // filterItems() — generator counterpart to exportToItems()
+    // -------------------------------------------------------------------------
+
+    public function testFilterItemsReturnsGenerator(): void
+    {
+        $exporter = new ContentExporter($this->tmpDir);
+        $result = $exporter->filterItems([]);
+        $this->assertInstanceOf(\Generator::class, $result);
+    }
+
+    public function testFilterItemsYieldsOnlyPassingItems(): void
+    {
+        $exporter = new ContentExporter($this->tmpDir);
+
+        $items = [
+            new ContentItem('pass', 'Pass', '<p>' . str_repeat('word ', 20) . '</p>', '/pass', '2024-01-01'),
+            new ContentItem('fail', 'Fail', '<p>Hi</p>', '/fail', '2024-01-01'),
+        ];
+
+        $yielded = iterator_to_array($exporter->filterItems($items));
+        $this->assertCount(1, $yielded);
+        $this->assertSame('pass', $yielded[0]->id);
+    }
+
+    public function testFilterItemsAcceptsGenerator(): void
+    {
+        $exporter = new ContentExporter($this->tmpDir);
+
+        $source = (static function (): \Generator {
+            yield new ContentItem('a', 'A', '<p>' . str_repeat('word ', 20) . '</p>', '/a', '2024-01-01');
+            yield new ContentItem('b', 'B', '<p>Short</p>', '/b', '2024-01-01');
+            yield new ContentItem('c', 'C', '<p>' . str_repeat('word ', 20) . '</p>', '/c', '2024-01-01');
+        })();
+
+        $yielded = iterator_to_array($exporter->filterItems($source));
+        $this->assertCount(2, $yielded);
+        $this->assertSame('a', $yielded[0]->id);
+        $this->assertSame('c', $yielded[1]->id);
+    }
+
+    public function testFilterItemsDoesNotWriteFiles(): void
+    {
+        $exporter = new ContentExporter($this->tmpDir);
+        $exporter->prepareOutputDir();
+
+        $items = [
+            new ContentItem('1', 'Page', '<p>' . str_repeat('word ', 20) . '</p>', '/page', '2024-01-01'),
+        ];
+
+        // Consume the generator.
+        iterator_to_array($exporter->filterItems($items));
+
+        $files = glob($this->tmpDir . '/*.html');
+        $this->assertEmpty($files);
+    }
 }
