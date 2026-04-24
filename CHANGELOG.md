@@ -4,6 +4,11 @@ All notable changes to scolta-php will be documented in this file.
 
 This project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages.
 
+## [Unreleased]
+
+### Added
+- **Recipe catalog fixture** (`tests/fixtures/recipes/`): 20 Pagefind-compatible HTML files representing a multilingual recipe corpus used in README examples. Covers cross-dialect vocabulary pairs (aubergine/eggplant, courgette/zucchini, rocket/arugula, capsicum/bell pepper, coriander/cilantro, scallion/spring onion) and diet/cuisine filter attributes.
+
 ## [0.3.1] - 2026-04-23
 
 ### Fixed
