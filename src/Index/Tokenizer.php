@@ -59,10 +59,23 @@ class Tokenizer
             return [];
         }
 
+        // Track byte and char positions incrementally to avoid O(n²) behaviour.
+        // preg_match_all returns byte offsets; for multibyte text the byte offset
+        // and char offset diverge. We measure only the delta between successive
+        // matches rather than re-scanning from the start each time.
+        $prevByteEnd   = 0;
+        $charPos       = 0;
+
         foreach ($matches[0] as [$word, $byteOffset]) {
-            // Convert byte offset to character offset.
-            $charOffset = mb_strlen(substr($originalText, 0, $byteOffset));
-            $position = $startPosition + $charOffset;
+            // Advance char position by the gap between end of last word and
+            // start of this word (handles inter-word whitespace/punctuation).
+            $gapBytes = $byteOffset - $prevByteEnd;
+            if ($gapBytes > 0) {
+                $charPos += mb_strlen(substr($originalText, $prevByteEnd, $gapBytes));
+            }
+            $charOffset  = $charPos;
+            $prevByteEnd = $byteOffset + strlen($word);
+            $position    = $startPosition + $charOffset;
 
             // Handle compound words (before lowercasing to detect camelCase).
             $parts = $this->splitCompound($word);
@@ -88,6 +101,10 @@ class Tokenizer
                     'position' => $position + $partOffset,
                 ];
             }
+
+            // Advance char position past this word so the next gap is measured
+            // from the correct byte boundary.
+            $charPos += mb_strlen($word);
         }
 
         return $tokens;

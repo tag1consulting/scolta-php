@@ -41,6 +41,9 @@ class Stemmer
 
     private ?\Wamania\Snowball\Stemmer\Stemmer $stemmer = null;
 
+    /** @var array<string, string> Memoized results keyed by input word. */
+    private array $cache = [];
+
     /**
      * @param string $language Snowball language code ('en', 'fr', 'de', 'es', etc.).
      */
@@ -64,14 +67,19 @@ class Stemmer
      * Stem a word to its root form.
      *
      * Returns the word unchanged for unsupported languages.
+     * Results are memoized per instance — the Snowball algorithm is pure and
+     * deterministic, and the same words recur heavily across pages in a chunk.
      */
     public function stem(string $word): string
     {
-        if ($this->stemmer === null) {
-            return $word;
+        if (isset($this->cache[$word])) {
+            return $this->cache[$word];
         }
 
-        return $this->stemmer->stem($word);
+        $result = $this->stemmer === null ? $word : $this->stemmer->stem($word);
+        $this->cache[$word] = $result;
+
+        return $result;
     }
 
     /**

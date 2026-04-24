@@ -11,6 +11,10 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 - **`MemoryBudgetConfig::fromCliAndConfig(?string $cliBudgetOption, ?string $cliChunkOption, callable $configReader): MemoryBudget`**: Single call to resolve CLI flags over saved config with correct precedence and zero-chunk normalisation. Platform adapters pass a `$configReader` callable instead of a config array so loading is lazy.
 - **`AiControllerTrait`**: PHP trait providing `createHandler(object $aiService, ScoltaConfig $config): AiEndpointHandler` for platform AI controllers. Requires three abstract methods: `resolveCache(int $cacheTtl)`, `getCacheGeneration()`, `resolveEnricher()`. Used in place of an abstract base class so Drupal controllers can still extend `ControllerBase` and Laravel controllers can still extend `Illuminate\Routing\Controller`.
 
+### Performance
+- **`Stemmer::stem()` memoization**: Results are now cached per Stemmer instance. Within a single chunk, the same words recur hundreds of times across pages; the cache eliminates ~97%+ of Snowball calls in typical content. Measured 166× reduction in stemmer CPU time (1506 ms → 9 ms for a 200-page chunk), lifting overall `InvertedIndexBuilder::build()` throughput from ~110 pages/s to ~1,470 pages/s on the benchmark corpus.
+- **`Tokenizer::tokenize()` O(n) char-offset tracking**: The previous implementation computed character offsets with `mb_strlen(substr($text, 0, $byteOffset))` per token, allocating an increasingly long prefix string on every match. Replaced with incremental tracking — each call now measures only the delta from the previous match boundary. Tokenizer scaling is now exactly O(n) (×2.0 time per 2× words); the previous implementation scaled at O(n^1.7) and would degrade further for multibyte content.
+
 ## [0.3.2] - 2026-04-24
 
 Coordinated release with scolta-core, scolta-wp, scolta-drupal, scolta-laravel. Fixes a search-result rendering bug that affected every page since the streaming writer landed, and adds a streaming export path that enables the framework packages to drop their pre-load regression.
