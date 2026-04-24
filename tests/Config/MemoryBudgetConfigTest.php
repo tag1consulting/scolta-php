@@ -65,16 +65,76 @@ class MemoryBudgetConfigTest extends TestCase
         }
     }
 
-    public function testValidateAcceptsAllValidProfilesOnly(): void
+    public function testLoadByteStringProfile(): void
     {
-        // load() normalises invalid inputs, so validate() always passes after load().
-        // This test confirms the valid set is exactly the three named profiles.
+        // Byte strings like "256M" are accepted as memory budget values.
+        $cfg = MemoryBudgetConfig::load(['profile' => '256M']);
+        $this->assertSame('256M', $cfg->profile());
+    }
+
+    public function testLoadByteStringIsNotNormalisedToConservative(): void
+    {
+        // "512M" is a valid byte string — load() must NOT replace it with 'conservative'.
+        $cfg = MemoryBudgetConfig::load(['profile' => '512M']);
+        $this->assertSame('512M', $cfg->profile());
+    }
+
+    public function testLoadChunkSize(): void
+    {
+        $cfg = MemoryBudgetConfig::load(['profile' => 'conservative', 'chunk_size' => 75]);
+        $this->assertSame(75, $cfg->chunkSize());
+    }
+
+    public function testLoadZeroChunkSizeNormalisedToNull(): void
+    {
+        $cfg = MemoryBudgetConfig::load(['profile' => 'conservative', 'chunk_size' => 0]);
+        $this->assertNull($cfg->chunkSize());
+    }
+
+    public function testLoadNullChunkSizeIsNull(): void
+    {
+        $cfg = MemoryBudgetConfig::load(['profile' => 'conservative']);
+        $this->assertNull($cfg->chunkSize());
+    }
+
+    public function testToMemoryBudgetAppliesChunkSize(): void
+    {
+        $cfg    = MemoryBudgetConfig::load(['profile' => 'conservative', 'chunk_size' => 75]);
+        $budget = $cfg->toMemoryBudget();
+        $this->assertSame(75, $budget->chunkSize());
+        // Profile-level budget values are preserved.
+        $this->assertSame(MemoryBudget::conservative()->totalBudgetBytes(), $budget->totalBudgetBytes());
+    }
+
+    public function testToMemoryBudgetByteStringWithChunkSize(): void
+    {
+        $cfg    = MemoryBudgetConfig::load(['profile' => '256M', 'chunk_size' => 100]);
+        $budget = $cfg->toMemoryBudget();
+        $this->assertSame(100, $budget->chunkSize());
+    }
+
+    public function testToArrayIncludesChunkSize(): void
+    {
+        $cfg = MemoryBudgetConfig::load(['profile' => 'balanced', 'chunk_size' => 150]);
+        $arr = $cfg->toArray();
+        $this->assertArrayHasKey('chunk_size', $arr);
+        $this->assertSame(150, $arr['chunk_size']);
+    }
+
+    public function testValidateAcceptsNamedProfilesAndByteStrings(): void
+    {
         foreach (['conservative', 'balanced', 'aggressive'] as $p) {
             $this->assertEmpty(MemoryBudgetConfig::load(['profile' => $p])->validate());
         }
-        // An unknown profile is silently normalised to conservative by load(),
-        // so validate() on a loaded config always returns no errors.
-        $this->assertEmpty(MemoryBudgetConfig::load(['profile' => 'unknown'])->validate());
+        // Byte strings are now also valid.
+        $this->assertEmpty(MemoryBudgetConfig::load(['profile' => '256M'])->validate());
+        $this->assertEmpty(MemoryBudgetConfig::load(['profile' => '1G'])->validate());
+    }
+
+    public function testValidateRejectsNonsenseStrings(): void
+    {
+        // load() normalises 'turbo' → 'conservative', so the loaded config is valid.
+        $this->assertEmpty(MemoryBudgetConfig::load(['profile' => 'turbo'])->validate());
     }
 
     public function testSuggestReturnsArray(): void

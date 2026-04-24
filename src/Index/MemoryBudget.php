@@ -117,6 +117,36 @@ final class MemoryBudget
     }
 
     /**
+     * Build a budget from a memory string and optional chunk size override.
+     *
+     * This is the single call site every framework adapter should use.
+     * It encapsulates the three-tier precedence — explicit chunk size >
+     * memory profile default — so adapters don't repeat the inline pattern.
+     *
+     * ```php
+     * // Named profile, no chunk override
+     * MemoryBudget::fromOptions('balanced');
+     *
+     * // Arbitrary byte string with explicit chunk size
+     * MemoryBudget::fromOptions('256M', 100);
+     * ```
+     *
+     * @param string   $memoryBudget Profile name ("conservative") or byte string ("256M").
+     * @param int|null $chunkSize    Pages per chunk, or null to use the profile default.
+     * @since 0.3.2
+     * @stability experimental
+     */
+    public static function fromOptions(string $memoryBudget = 'conservative', ?int $chunkSize = null): self
+    {
+        $budget = self::fromString($memoryBudget);
+        if ($chunkSize !== null && $chunkSize >= 1) {
+            return $budget->withChunkSize($chunkSize);
+        }
+
+        return $budget;
+    }
+
+    /**
      * Return a copy of this budget with the chunk size overridden.
      *
      * Use this when the admin or CLI specifies a chunk size independently of
