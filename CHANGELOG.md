@@ -7,6 +7,7 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ## [Unreleased]
 
 ### Added
+- **`MemoryBudget::withChunkSize(int $chunkSize): self`**: Returns a new `MemoryBudget` instance with the chunk size overridden independently of the memory profile. The merge open-file-handle cap is adjusted upward to match when the new chunk size exceeds the profile default. Enables sites to tune chunk size and memory budget as two independent knobs rather than being forced into one of the three named profiles. Available to all framework adapters via `--chunk-size` CLI flags and admin settings.
 - **`MemoryTelemetry` now logs elapsed wall-clock time**: Every `emit()` call now includes `elapsed_s` in its PSR-3 context and appends `+{elapsed_s}s` to the log message. Framework adapters wired to a real logger (e.g. `Scolta_WP_CLI_Logger` with `--debug`) will now show per-phase wall-clock time, making it trivial to distinguish a slow gather step from a slow indexer without a profiler.
 
 ### Fixed

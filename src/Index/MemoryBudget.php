@@ -116,6 +116,30 @@ final class MemoryBudget
         return self::conservative();
     }
 
+    /**
+     * Return a copy of this budget with the chunk size overridden.
+     *
+     * Use this when the admin or CLI specifies a chunk size independently of
+     * the memory profile — e.g., `--chunk-size=100`. The merge open-file-handle
+     * cap is adjusted upward to match the new chunk size when necessary, since
+     * the pre-merge pass fan-in limit should be at least as large as one chunk.
+     *
+     * @param positive-int $chunkSize Pages per chunk (must be ≥ 1).
+     * @since 0.3.2
+     * @stability experimental
+     */
+    public function withChunkSize(int $chunkSize): self
+    {
+        return new self(
+            profile: $this->profile,
+            chunkSize: $chunkSize,
+            fragmentFlushBytes: $this->fragmentFlushBytes,
+            wordIndexChunkBytes: $this->wordIndexChunkBytes,
+            mergeOpenFileHandles: max($chunkSize, $this->mergeOpenFileHandles),
+            totalBudgetBytes: $this->totalBudgetBytes,
+        );
+    }
+
     /** Pages per chunk. */
     public function chunkSize(): int
     {
