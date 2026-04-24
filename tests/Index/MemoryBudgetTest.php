@@ -100,4 +100,79 @@ class MemoryBudgetTest extends TestCase
             MemoryBudget::balanced()->chunkSize()
         );
     }
+
+    public function testWithChunkSizeOverridesChunkSize(): void
+    {
+        $base    = MemoryBudget::conservative(); // chunkSize = 50
+        $custom  = $base->withChunkSize(75);
+
+        $this->assertSame(75, $custom->chunkSize());
+        $this->assertSame(50, $base->chunkSize(), 'withChunkSize must not mutate the original');
+    }
+
+    public function testWithChunkSizePreservesOtherValues(): void
+    {
+        $base   = MemoryBudget::balanced();
+        $custom = $base->withChunkSize(100);
+
+        $this->assertSame($base->fragmentFlushBytes(), $custom->fragmentFlushBytes());
+        $this->assertSame($base->wordIndexChunkBytes(), $custom->wordIndexChunkBytes());
+        $this->assertSame($base->totalBudgetBytes(), $custom->totalBudgetBytes());
+        $this->assertSame($base->profile(), $custom->profile());
+    }
+
+    public function testWithChunkSizeLargerThanProfileHandlesScalesUpHandles(): void
+    {
+        // Conservative has mergeOpenFileHandles = 50.
+        // Requesting chunkSize = 300 should raise handles to at least 300.
+        $custom = MemoryBudget::conservative()->withChunkSize(300);
+
+        $this->assertSame(300, $custom->chunkSize());
+        $this->assertGreaterThanOrEqual(300, $custom->mergeOpenFileHandles());
+    }
+
+    public function testWithChunkSizeSmallerThanProfileHandlesDoesNotReduceHandles(): void
+    {
+        // Conservative has mergeOpenFileHandles = 50.
+        // A smaller chunk size (30) should keep handles at 50 (not drop to 30).
+        $custom = MemoryBudget::conservative()->withChunkSize(30);
+
+        $this->assertSame(30, $custom->chunkSize());
+        $this->assertGreaterThanOrEqual(30, $custom->mergeOpenFileHandles());
+    }
+
+    public function testFromOptionsNamedProfileNoOverride(): void
+    {
+        $b = MemoryBudget::fromOptions('balanced');
+        $this->assertSame('balanced', $b->profile());
+        $this->assertSame(MemoryBudget::balanced()->chunkSize(), $b->chunkSize());
+    }
+
+    public function testFromOptionsWithChunkSizeOverride(): void
+    {
+        $b = MemoryBudget::fromOptions('conservative', 75);
+        $this->assertSame('conservative', $b->profile());
+        $this->assertSame(75, $b->chunkSize());
+    }
+
+    public function testFromOptionsByteStringWithChunkOverride(): void
+    {
+        $b = MemoryBudget::fromOptions('256M', 100);
+        $this->assertSame(100, $b->chunkSize());
+        // 256M routes to balanced threshold — verify memory budget applied
+        $this->assertGreaterThan(96 * 1024 * 1024, $b->totalBudgetBytes());
+    }
+
+    public function testFromOptionsNullChunkSizeUsesProfileDefault(): void
+    {
+        $b = MemoryBudget::fromOptions('aggressive', null);
+        $this->assertSame(MemoryBudget::aggressive()->chunkSize(), $b->chunkSize());
+    }
+
+    public function testFromOptionsZeroChunkSizeIsIgnored(): void
+    {
+        // 0 is not a valid chunk size; fromOptions must ignore it and keep the profile default.
+        $b = MemoryBudget::fromOptions('conservative', 0);
+        $this->assertSame(MemoryBudget::conservative()->chunkSize(), $b->chunkSize());
+    }
 }

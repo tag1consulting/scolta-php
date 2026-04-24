@@ -9,17 +9,23 @@ use Psr\Log\LoggerInterface;
 /**
  * Emits PSR-3 memory-usage events at build phase boundaries.
  *
+ * Each event includes elapsed wall-clock seconds since the telemetry object
+ * was constructed. With a logger wired to WP-CLI/Drush --debug output, this
+ * lets operators see exactly which phase is slow without a profiler.
+ *
  * Warns at 75% of PHP memory_limit, aborts at 90%.
  */
 final class MemoryTelemetry
 {
     private readonly int $limitBytes;
+    private readonly float $buildStartTime;
 
     public function __construct(
         private readonly LoggerInterface $logger,
         private readonly MemoryBudget $budget,
     ) {
-        $this->limitBytes = self::parseMemoryLimit();
+        $this->limitBytes     = self::parseMemoryLimit();
+        $this->buildStartTime = microtime(true);
     }
 
     /**
@@ -29,14 +35,16 @@ final class MemoryTelemetry
      */
     public function emit(string $phase, array $extra = []): void
     {
-        $current = memory_get_usage(true);
-        $peak    = memory_get_peak_usage(true);
-        $pct     = $this->limitBytes > 0
+        $current   = memory_get_usage(true);
+        $peak      = memory_get_peak_usage(true);
+        $pct       = $this->limitBytes > 0
             ? round($peak / $this->limitBytes * 100, 1)
             : 0.0;
+        $elapsed   = round(microtime(true) - $this->buildStartTime, 2);
 
         $context = array_merge([
             'phase'      => $phase,
+            'elapsed_s'  => $elapsed,
             'current_mb' => round($current / 1_048_576, 1),
             'peak_mb'    => round($peak / 1_048_576, 1),
             'budget_mb'  => round($this->budget->totalBudgetBytes() / 1_048_576, 1),
@@ -45,7 +53,7 @@ final class MemoryTelemetry
 
         if ($pct >= 90.0 && $this->limitBytes > 0) {
             $this->logger->error(
-                '[scolta] Memory at {limit_pct}% of PHP memory_limit at phase {phase}. Aborting.',
+                '[scolta] Memory at {limit_pct}% of PHP memory_limit at phase {phase} (+{elapsed_s}s). Aborting.',
                 $context
             );
             throw new \RuntimeException(
@@ -56,12 +64,12 @@ final class MemoryTelemetry
 
         if ($pct >= 75.0 && $this->limitBytes > 0) {
             $this->logger->warning(
-                '[scolta] Memory at {limit_pct}% of PHP memory_limit at phase {phase}.',
+                '[scolta] Memory at {limit_pct}% of PHP memory_limit at phase {phase} (+{elapsed_s}s).',
                 $context
             );
         } else {
             $this->logger->info(
-                '[scolta] Phase {phase}: {peak_mb} MB peak ({limit_pct}% of limit).',
+                '[scolta] Phase {phase}: {peak_mb} MB peak ({limit_pct}% of limit) +{elapsed_s}s.',
                 $context
             );
         }
