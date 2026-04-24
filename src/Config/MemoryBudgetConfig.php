@@ -101,6 +101,32 @@ final class MemoryBudgetConfig
     }
 
     /**
+     * Resolve a MemoryBudget from CLI options and persisted config in one step.
+     *
+     * CLI flags take precedence over saved config. Adapters pass a $configReader
+     * callable so they can lazily provide their platform-specific config array.
+     *
+     * @param string|null $cliBudgetOption Value of --memory-budget (or null if absent).
+     * @param string|null $cliChunkOption  Value of --chunk-size (or null if absent).
+     * @param callable    $configReader    Returns array{profile?: string, chunk_size?: int|string|null}.
+     *
+     * @since     0.3.3
+     * @stability experimental
+     */
+    public static function fromCliAndConfig(
+        ?string $cliBudgetOption,
+        ?string $cliChunkOption,
+        callable $configReader,
+    ): MemoryBudget {
+        $config    = $configReader();
+        $budgetStr = $cliBudgetOption ?? ($config['profile'] ?? 'conservative');
+        $rawChunk  = $cliChunkOption ?? ($config['chunk_size'] ?? null);
+        $chunkSize = ($rawChunk !== null && (int) $rawChunk >= 1) ? (int) $rawChunk : null;
+
+        return MemoryBudget::fromOptions((string) $budgetStr, $chunkSize);
+    }
+
+    /**
      * Return the advisory suggestion from MemoryBudgetSuggestion.
      *
      * @return array{profile: string, reason: string, detected_limit_bytes: int|null, confidence: string}

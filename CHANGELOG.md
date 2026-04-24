@@ -4,6 +4,13 @@ All notable changes to scolta-php will be documented in this file.
 
 This project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages.
 
+## [Unreleased]
+
+### Added
+- **`BuildIntentFactory::fromFlags(bool $resume, bool $restart, int $totalCount, MemoryBudget $budget): BuildIntent`**: Centralises the `match(true)` resume/restart/fresh dispatch pattern duplicated across all three adapter CLIs. Resume takes precedence over restart; both ignore $totalCount for resume.
+- **`MemoryBudgetConfig::fromCliAndConfig(?string $cliBudgetOption, ?string $cliChunkOption, callable $configReader): MemoryBudget`**: Single call to resolve CLI flags over saved config with correct precedence and zero-chunk normalisation. Platform adapters pass a `$configReader` callable instead of a config array so loading is lazy.
+- **`AiControllerTrait`**: PHP trait providing `createHandler(object $aiService, ScoltaConfig $config): AiEndpointHandler` for platform AI controllers. Requires three abstract methods: `resolveCache(int $cacheTtl)`, `getCacheGeneration()`, `resolveEnricher()`. Used in place of an abstract base class so Drupal controllers can still extend `ControllerBase` and Laravel controllers can still extend `Illuminate\Routing\Controller`.
+
 ## [0.3.2] - 2026-04-24
 
 Coordinated release with scolta-core, scolta-wp, scolta-drupal, scolta-laravel. Fixes a search-result rendering bug that affected every page since the streaming writer landed, and adds a streaming export path that enables the framework packages to drop their pre-load regression.
