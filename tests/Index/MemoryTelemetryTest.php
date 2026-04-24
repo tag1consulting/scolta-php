@@ -37,8 +37,11 @@ class MemoryTelemetryTest extends TestCase
         $telemetry->emit('some_phase');
 
         $message = $log->records[0]['message'];
-        $this->assertStringContainsString('{elapsed_s}', $message,
-            'Log message template must contain {elapsed_s} placeholder');
+        $this->assertStringContainsString(
+            '{elapsed_s}',
+            $message,
+            'Log message template must contain {elapsed_s} placeholder'
+        );
     }
 
     public function testElapsedSecondsIsNonDecreasing(): void
