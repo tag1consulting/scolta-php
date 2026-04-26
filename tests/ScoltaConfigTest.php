@@ -286,6 +286,7 @@ class ScoltaConfigTest extends TestCase
         $config = ScoltaConfig::fromArray([
             'title_match_boost' => 2.0,
             'content_match_boost' => 0.8,
+            'excerpt_length' => 500,
             'results_per_page' => 20,
             'max_pagefind_results' => 100,
             'ai_expand_query' => false,
@@ -300,6 +301,7 @@ class ScoltaConfigTest extends TestCase
 
         $this->assertEquals(2.0, $js['TITLE_MATCH_BOOST']);
         $this->assertEquals(0.8, $js['CONTENT_MATCH_BOOST']);
+        $this->assertEquals(500, $js['EXCERPT_LENGTH']);
         $this->assertEquals(20, $js['RESULTS_PER_PAGE']);
         $this->assertEquals(100, $js['MAX_PAGEFIND_RESULTS']);
         $this->assertFalse($js['AI_EXPAND_QUERY']);
