@@ -223,11 +223,6 @@ class ChunkWriterReaderTest extends TestCase
         $state->recordChunk(0, $this->makePartial(0));
 
         // Find the chunk file and corrupt it.
-        $chunkPath = $this->tmpDir . '/state-' . array_map(
-            fn($f) => basename(dirname($f)),
-            glob($this->tmpDir . '/state-*/chunk-000.dat') ?: []
-        )[0] ?? null;
-
         $chunkFiles = glob($this->tmpDir . '/state-*/chunk-000.dat') ?: [];
         $this->assertNotEmpty($chunkFiles, 'chunk-000.dat must exist after recordChunk()');
         $chunkFile = $chunkFiles[0];
