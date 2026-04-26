@@ -184,6 +184,47 @@ class AiEndpointHandlerTest extends TestCase
         $this->assertStringContainsString('_2_', $key2);
     }
 
+    public function testCacheTtlZeroNeverReadsCache(): void
+    {
+        $cache = new TrackingCacheDriver();
+        $ai = new MockAiService('["term1", "term2"]');
+        $handler = $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 0);
+
+        $handler->handleExpandQuery('test query');
+
+        $this->assertEquals(0, $cache->getCalls, 'cache->get() should never be called when cacheTtl=0');
+    }
+
+    public function testCacheTtlZeroNeverWritesCache(): void
+    {
+        $cache = new TrackingCacheDriver();
+        $ai = new MockAiService('["term1", "term2"]');
+        $handler = $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 0);
+
+        $handler->handleExpandQuery('test query');
+
+        $this->assertEquals(0, $cache->setCalls, 'cache->set() should never be called when cacheTtl=0');
+    }
+
+    public function testMaxFollowUpsZeroBlocksImmediately(): void
+    {
+        $handler = $this->makeHandler(maxFollowUps: 0);
+
+        // Even the very first follow-up (3 messages: initial + reply + follow-up)
+        // should be rejected when maxFollowUps=0.
+        // Formula: intdiv(3 - 2, 2) = 0 >= maxFollowUps=0 => rejected.
+        $messages = [
+            ['role' => 'user', 'content' => 'initial question'],
+            ['role' => 'assistant', 'content' => 'first reply'],
+            ['role' => 'user', 'content' => 'follow-up attempt'],
+        ];
+
+        $result = $handler->handleFollowUp($messages);
+
+        $this->assertFalse($result['ok']);
+        $this->assertEquals(429, $result['status']);
+    }
+
     // ===================================================================
     // Response parsing
     // ===================================================================
@@ -467,7 +508,7 @@ class AiEndpointHandlerTest extends TestCase
 
     private function makeHandler(
         ?MockAiService $aiService = null,
-        ?InMemoryCacheDriver $cache = null,
+        ?CacheDriverInterface $cache = null,
         int $generation = 1,
         int $cacheTtl = 0,
         int $maxFollowUps = 3,
@@ -553,6 +594,31 @@ class InMemoryCacheDriver implements CacheDriverInterface
 
     public function set(string $key, mixed $value, int $ttlSeconds): void
     {
+        $this->store[$key] = $value;
+    }
+}
+
+/**
+ * Cache driver that tracks how many times get() and set() are called.
+ */
+class TrackingCacheDriver implements CacheDriverInterface
+{
+    public int $getCalls = 0;
+    public int $setCalls = 0;
+
+    /** @var array<string, mixed> */
+    private array $store = [];
+
+    public function get(string $key): mixed
+    {
+        $this->getCalls++;
+
+        return $this->store[$key] ?? null;
+    }
+
+    public function set(string $key, mixed $value, int $ttlSeconds): void
+    {
+        $this->setCalls++;
         $this->store[$key] = $value;
     }
 }

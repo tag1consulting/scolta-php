@@ -255,4 +255,97 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals('step', $js['RECENCY_STRATEGY']);
         $this->assertEquals([[30, 1.0], [365, 0.0]], $js['RECENCY_CURVE']);
     }
+
+    // -------------------------------------------------------------------
+    // toJsScoringConfig — completeness and correctness
+    // -------------------------------------------------------------------
+
+    public function testToJsScoringConfigContainsAllExpectedKeys(): void
+    {
+        $js = (new ScoltaConfig())->toJsScoringConfig();
+
+        $expected = [
+            'RECENCY_BOOST_MAX', 'RECENCY_HALF_LIFE_DAYS', 'RECENCY_PENALTY_AFTER_DAYS',
+            'RECENCY_MAX_PENALTY', 'TITLE_MATCH_BOOST', 'TITLE_ALL_TERMS_MULTIPLIER',
+            'CONTENT_MATCH_BOOST', 'PHRASE_ADJACENT_MULTIPLIER', 'PHRASE_NEAR_MULTIPLIER',
+            'PHRASE_NEAR_WINDOW', 'PHRASE_WINDOW', 'EXCERPT_LENGTH', 'RESULTS_PER_PAGE',
+            'MAX_PAGEFIND_RESULTS', 'AI_EXPAND_QUERY', 'AI_SUMMARIZE', 'AI_SUMMARY_TOP_N',
+            'AI_SUMMARY_MAX_CHARS', 'EXPAND_PRIMARY_WEIGHT', 'AI_MAX_FOLLOWUPS',
+            'AI_LANGUAGES', 'LANGUAGE', 'CUSTOM_STOP_WORDS', 'RECENCY_STRATEGY', 'RECENCY_CURVE',
+        ];
+
+        foreach ($expected as $key) {
+            $this->assertArrayHasKey($key, $js, "Missing key: {$key}");
+        }
+
+        $this->assertCount(25, $js, 'Expected exactly 25 keys in toJsScoringConfig()');
+    }
+
+    public function testToJsScoringConfigValuesMatchConfig(): void
+    {
+        $config = ScoltaConfig::fromArray([
+            'title_match_boost' => 2.0,
+            'content_match_boost' => 0.8,
+            'results_per_page' => 20,
+            'max_pagefind_results' => 100,
+            'ai_expand_query' => false,
+            'ai_summarize' => false,
+            'ai_summary_top_n' => 3,
+            'ai_summary_max_chars' => 1500,
+            'max_follow_ups' => 5,
+            'expand_primary_weight' => 0.6,
+        ]);
+
+        $js = $config->toJsScoringConfig();
+
+        $this->assertEquals(2.0, $js['TITLE_MATCH_BOOST']);
+        $this->assertEquals(0.8, $js['CONTENT_MATCH_BOOST']);
+        $this->assertEquals(20, $js['RESULTS_PER_PAGE']);
+        $this->assertEquals(100, $js['MAX_PAGEFIND_RESULTS']);
+        $this->assertFalse($js['AI_EXPAND_QUERY']);
+        $this->assertFalse($js['AI_SUMMARIZE']);
+        $this->assertEquals(3, $js['AI_SUMMARY_TOP_N']);
+        $this->assertEquals(1500, $js['AI_SUMMARY_MAX_CHARS']);
+        $this->assertEquals(5, $js['AI_MAX_FOLLOWUPS']);
+        $this->assertEquals(0.6, $js['EXPAND_PRIMARY_WEIGHT']);
+    }
+
+    public function testToJsScoringConfigPhraseProximityFields(): void
+    {
+        $config = ScoltaConfig::fromArray([
+            'phrase_adjacent_multiplier' => 3.0,
+            'phrase_near_multiplier' => 2.0,
+            'phrase_near_window' => 8,
+            'phrase_window' => 20,
+        ]);
+
+        $js = $config->toJsScoringConfig();
+
+        $this->assertEquals(3.0, $js['PHRASE_ADJACENT_MULTIPLIER']);
+        $this->assertEquals(2.0, $js['PHRASE_NEAR_MULTIPLIER']);
+        $this->assertEquals(8, $js['PHRASE_NEAR_WINDOW']);
+        $this->assertEquals(20, $js['PHRASE_WINDOW']);
+    }
+
+    public function testToJsScoringConfigSensitiveKeysAbsent(): void
+    {
+        $js = (new ScoltaConfig())->toJsScoringConfig();
+
+        $serverSideOnly = [
+            'cacheTtl', 'cache_ttl',
+            'aiApiKey', 'ai_api_key', 'API_KEY',
+            'aiBaseUrl', 'ai_base_url', 'BASE_URL',
+            'aiProvider', 'ai_provider',
+            'aiModel', 'ai_model',
+            'siteName', 'site_name',
+            'siteDescription', 'site_description',
+            'promptExpandQuery', 'prompt_expand_query',
+            'promptSummarize', 'prompt_summarize',
+            'promptFollowUp', 'prompt_follow_up',
+        ];
+
+        foreach ($serverSideOnly as $key) {
+            $this->assertArrayNotHasKey($key, $js, "Server-side key should not be in JS output: {$key}");
+        }
+    }
 }

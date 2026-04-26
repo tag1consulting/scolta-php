@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Added
+- **Scoring behavior tests (Phase 1).** `ScoltaConfigTest`: completeness check for all 25 `toJsScoringConfig()` keys, value-mapping assertions, phrase-proximity field assertions, and a negative test confirming server-side keys (`cacheTtl`, `aiApiKey`, etc.) are absent from the JS output. `AiEndpointHandlerTest`: `testCacheTtlZeroNeverReadsCache`, `testCacheTtlZeroNeverWritesCache`, `testMaxFollowUpsZeroBlocksImmediately` (with `TrackingCacheDriver`). New `tests/Service/AiServiceAdapterTest.php`: custom prompt overrides returned raw without `{SITE_NAME}` substitution; default prompts resolve site name and description; empty overrides fall back to default.
+
 ## [0.3.3] - 2026-04-26
 
 ### Added
