@@ -350,4 +350,25 @@ class ScoltaConfigTest extends TestCase
             $this->assertArrayNotHasKey($key, $js, "Server-side key should not be in JS output: {$key}");
         }
     }
+
+    // -------------------------------------------------------------------
+    // AI configuration — flags and languages in JS output
+    // -------------------------------------------------------------------
+
+    public function testAiLanguagesFlagsPropagateToJsOutput(): void
+    {
+        $config = ScoltaConfig::fromArray([
+            'ai_languages' => ['en', 'fr', 'de'],
+            'ai_expand_query' => false,
+            'ai_summarize' => false,
+            'max_follow_ups' => 0,
+        ]);
+
+        $js = $config->toJsScoringConfig();
+
+        $this->assertEquals(['en', 'fr', 'de'], $js['AI_LANGUAGES']);
+        $this->assertFalse($js['AI_EXPAND_QUERY']);
+        $this->assertFalse($js['AI_SUMMARIZE']);
+        $this->assertEquals(0, $js['AI_MAX_FOLLOWUPS']);
+    }
 }
