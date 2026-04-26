@@ -52,6 +52,10 @@ class ChunkWriter
                 ? hash_init('sha256', HASH_HMAC, $hmacSecret)
                 : null;
 
+            // CRC32 is always computed regardless of hmacSecret; provides
+            // corruption detection without a shared secret.
+            $crcCtx = hash_init('crc32b');
+
             // Records use PHP serialize() rather than JSON to preserve integer
             // keys (page numbers, position weights) through the round-trip.
             foreach ($pages as $pageNum => $pageData) {
@@ -63,6 +67,8 @@ class ChunkWriter
                     hash_update($hmacCtx, $lenPacked);
                     hash_update($hmacCtx, $payload);
                 }
+                hash_update($crcCtx, $lenPacked);
+                hash_update($crcCtx, $payload);
             }
 
             foreach ($index as $term => $termData) {
@@ -74,6 +80,8 @@ class ChunkWriter
                     hash_update($hmacCtx, $lenPacked);
                     hash_update($hmacCtx, $payload);
                 }
+                hash_update($crcCtx, $lenPacked);
+                hash_update($crcCtx, $payload);
             }
 
             // End-of-records sentinel: a 4-byte zero length is impossible for
@@ -81,7 +89,8 @@ class ChunkWriter
             fwrite($fp, "\x00\x00\x00\x00");
 
             $hmac   = $hmacCtx !== null ? hash_final($hmacCtx) : '';
-            $footer = json_encode(['hmac' => $hmac]);
+            $crc32  = hash_final($crcCtx);
+            $footer = json_encode(['hmac' => $hmac, 'crc32' => $crc32]);
             fwrite($fp, $footer . "\n");
         } finally {
             fclose($fp);

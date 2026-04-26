@@ -18,6 +18,9 @@ class BuildState
     /** Maximum lock age before considering it stale (1 hour). */
     private const STALE_LOCK_SECONDS = 3600;
 
+    /** Temp-file suffix used for atomic manifest writes. */
+    private const MANIFEST_TMP_SUFFIX = '.tmp';
+
     /** @var resource|null Open file handle holding the exclusive flock. */
     private $lockHandle = null;
 
@@ -43,6 +46,18 @@ class BuildState
     public function initiateBuild(array $manifest): bool
     {
         $lockFile = $this->stateDir . '/' . self::LOCK_FILE;
+
+        // Release a stale lock before attempting acquisition. This handles the
+        // case where a prior process died (segfault, OOM) and left the lock
+        // file behind. If the OS already released the flock, flock() below
+        // would succeed regardless — but we also clear the file so subsequent
+        // isRunning()/shouldResume() calls see a clean state.
+        if (file_exists($lockFile)) {
+            $lockData = file_get_contents($lockFile);
+            if ($lockData !== false && $this->isLockStale($lockData)) {
+                @unlink($lockFile);
+            }
+        }
 
         // Open the lock file for writing (creates it if missing).
         $fp = fopen($lockFile, 'c');
@@ -78,10 +93,7 @@ class BuildState
             'status' => 'building',
         ], $manifest);
 
-        file_put_contents(
-            $this->stateDir . '/' . self::MANIFEST_FILE,
-            json_encode($manifest, JSON_PRETTY_PRINT)
-        );
+        $this->commitManifest($manifest);
 
         return true;
     }
@@ -107,10 +119,7 @@ class BuildState
         if ($manifest !== null) {
             $manifest['chunks_written']  = $chunkNumber + 1;
             $manifest['pages_processed'] = ($manifest['pages_processed'] ?? 0) + count($partialData['pages'] ?? []);
-            file_put_contents(
-                $this->stateDir . '/' . self::MANIFEST_FILE,
-                json_encode($manifest, JSON_PRETTY_PRINT)
-            );
+            $this->commitManifest($manifest);
         }
     }
 
@@ -137,6 +146,18 @@ class BuildState
             }
         }
 
+        // CRC32 is always written (0.3.3+). Validates data integrity without
+        // a shared secret — detects disk corruption or partial writes.
+        // Pre-0.3.3 chunks have no CRC32 in the footer; verifyCrc32() returns
+        // true for those (backward-compatible).
+        $reader = new ChunkReader($path);
+        if (!$reader->verifyCrc32()) {
+            throw new \RuntimeException(
+                "CRC32 validation failed for chunk: {$filename}. "
+                . 'The chunk may be corrupted — delete the state directory and re-run a fresh build.'
+            );
+        }
+
         $reader = new ChunkReader($path);
         $pages  = [];
         foreach ($reader->openPages() as $pageNum => $pageData) {
@@ -160,10 +181,7 @@ class BuildState
         $manifest = $this->readManifest();
         if ($manifest !== null) {
             $manifest['status'] = 'idle';
-            file_put_contents(
-                $this->stateDir . '/' . self::MANIFEST_FILE,
-                json_encode($manifest, JSON_PRETTY_PRINT)
-            );
+            $this->commitManifest($manifest);
         }
     }
 
@@ -362,47 +380,92 @@ class BuildState
     }
 
     /**
+     * Write the manifest atomically: write to .tmp, then rename.
+     *
+     * A process crash during the write leaves at most a .tmp file, which
+     * readManifest() reads as a fallback. After rename() succeeds the write is
+     * durable — rename() on POSIX is atomic; on Windows it is best-effort
+     * (falls back to copy+delete).
+     *
+     * @throws \RuntimeException on I/O failure.
+     */
+    private function commitManifest(array $manifest): void
+    {
+        $manifestPath = $this->stateDir . '/' . self::MANIFEST_FILE;
+        $tempPath     = $manifestPath . self::MANIFEST_TMP_SUFFIX;
+
+        $json = json_encode($manifest, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
+
+        if (file_put_contents($tempPath, $json, LOCK_EX) === false) {
+            throw new \RuntimeException("Failed to write manifest temp file: {$tempPath}");
+        }
+
+        if (!rename($tempPath, $manifestPath)) {
+            @unlink($tempPath);
+            throw new \RuntimeException("Failed to atomic-rename manifest: {$tempPath} → {$manifestPath}");
+        }
+    }
+
+    /**
      * Read the manifest file.
+     *
+     * Primary path: manifest.json. If it is absent or contains invalid JSON
+     * (e.g. partial write during a crash), falls back to manifest.json.tmp —
+     * which may be a complete write that never got renamed. If neither file
+     * yields valid JSON, returns null (fresh build).
      */
     private function readManifest(): ?array
     {
-        $path = $this->stateDir . '/' . self::MANIFEST_FILE;
-        if (!file_exists($path)) {
-            return null;
+        $path    = $this->stateDir . '/' . self::MANIFEST_FILE;
+        $tmpPath = $path . self::MANIFEST_TMP_SUFFIX;
+
+        foreach ([$path, $tmpPath] as $candidate) {
+            if (!file_exists($candidate)) {
+                continue;
+            }
+            $data = file_get_contents($candidate);
+            if ($data === false) {
+                continue;
+            }
+            $manifest = json_decode($data, true);
+            if (is_array($manifest)) {
+                return $manifest;
+            }
         }
 
-        $data = file_get_contents($path);
-        if ($data === false) {
-            return null;
-        }
-
-        $manifest = json_decode($data, true);
-
-        return is_array($manifest) ? $manifest : null;
+        return null;
     }
 
     /**
      * Check if a lock is stale (PID dead or too old).
+     *
+     * Primary check: PID + timestamp written into the lock file content.
+     * Fallback: if the content is malformed (e.g. corrupted write), falls back
+     * to lock file mtime — platform-independent and unaffected by PID reuse.
      */
     private function isLockStale(string $lockData): bool
     {
         $parts = explode(':', $lockData, 2);
-        if (count($parts) !== 2) {
-            return true;
+        if (count($parts) === 2) {
+            [$pid, $timestamp] = $parts;
+
+            // Check age from embedded timestamp.
+            if (time() - (int) $timestamp > self::STALE_LOCK_SECONDS) {
+                return true;
+            }
+
+            // Check if PID is still alive (POSIX only).
+            if (function_exists('posix_kill')) {
+                return !posix_kill((int) $pid, 0);
+            }
+
+            return false;
         }
 
-        [$pid, $timestamp] = $parts;
+        // Malformed content — fall back to lock file mtime.
+        $lockPath = $this->stateDir . '/' . self::LOCK_FILE;
+        $mtime    = @filemtime($lockPath);
 
-        // Check age.
-        if (time() - (int) $timestamp > self::STALE_LOCK_SECONDS) {
-            return true;
-        }
-
-        // Check if PID is still alive (POSIX only).
-        if (function_exists('posix_kill')) {
-            return !posix_kill((int) $pid, 0);
-        }
-
-        return false;
+        return $mtime === false || (time() - $mtime > self::STALE_LOCK_SECONDS);
     }
 }

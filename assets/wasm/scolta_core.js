@@ -527,18 +527,17 @@ export function version() {
         wasm.__wbindgen_export3(deferred1_0, deferred1_1, 1);
     }
 }
-
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
-        __wbg_Error_2e59b1b37a9a34c3: function(arg0, arg1) {
+        __wbg_Error_960c155d3d49e4c2: function(arg0, arg1) {
             const ret = Error(getStringFromWasm0(arg0, arg1));
             return addHeapObject(ret);
         },
-        __wbg___wbindgen_throw_81fc77679af83bc6: function(arg0, arg1) {
+        __wbg___wbindgen_throw_6b64449b9b9ed33c: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },
-        __wbg_now_88621c9c9a4f3ffc: function() {
+        __wbg_now_a9b7df1cbee90986: function() {
             const ret = Date.now();
             return ret;
         },

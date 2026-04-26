@@ -172,6 +172,76 @@ class ChunkWriterReaderTest extends TestCase
         iterator_to_array($reader->openPages());
     }
 
+    public function testCrc32VerificationPassesOnValidChunk(): void
+    {
+        $writer = new ChunkWriter();
+        $path   = $this->tmpDir . '/chunk-crc.dat';
+        $writer->write($path, $this->makePartial(0));
+
+        $reader = new ChunkReader($path);
+        $this->assertTrue($reader->verifyCrc32(), 'CRC32 must pass on a freshly written chunk');
+    }
+
+    public function testCrc32VerificationFailsOnCorruptedChunk(): void
+    {
+        $writer = new ChunkWriter();
+        $path   = $this->tmpDir . '/chunk-crc-corrupt.dat';
+        $writer->write($path, $this->makePartial(0));
+
+        // Flip one byte in the middle of the file (skip the header line).
+        $raw = file_get_contents($path);
+        $mid = (int) (strlen($raw) / 2);
+        $raw[$mid] = chr(ord($raw[$mid]) ^ 0xFF);
+        file_put_contents($path, $raw);
+
+        $reader = new ChunkReader($path);
+        $this->assertFalse($reader->verifyCrc32(), 'CRC32 must fail on a byte-flipped chunk');
+    }
+
+    public function testCrc32VerificationSkippedForPreV033Chunks(): void
+    {
+        // A chunk without a crc32 footer field (simulating pre-0.3.3 format).
+        $path = $this->tmpDir . '/chunk-no-crc.dat';
+
+        $fp = fopen($path, 'wb');
+        fwrite($fp, json_encode(['v' => 2, 'page_count' => 0, 'term_count' => 0]) . "\n");
+        fwrite($fp, "\x00\x00\x00\x00");                // sentinel
+        fwrite($fp, json_encode(['hmac' => '']) . "\n"); // no crc32 field
+        fclose($fp);
+
+        $reader = new ChunkReader($path);
+        $this->assertTrue(
+            $reader->verifyCrc32(),
+            'verifyCrc32() must return true (skip, not fail) for chunks without crc32 footer'
+        );
+    }
+
+    public function testCorruptedChunkIsRejectedByBuildState(): void
+    {
+        $state = new \Tag1\Scolta\Index\BuildState($this->tmpDir . '/state-' . uniqid());
+        $state->initiateBuild(['total_pages' => 2]);
+        $state->recordChunk(0, $this->makePartial(0));
+
+        // Find the chunk file and corrupt it.
+        $chunkPath = $this->tmpDir . '/state-' . array_map(
+            fn($f) => basename(dirname($f)),
+            glob($this->tmpDir . '/state-*/chunk-000.dat') ?: []
+        )[0] ?? null;
+
+        $chunkFiles = glob($this->tmpDir . '/state-*/chunk-000.dat') ?: [];
+        $this->assertNotEmpty($chunkFiles, 'chunk-000.dat must exist after recordChunk()');
+        $chunkFile = $chunkFiles[0];
+
+        $raw = file_get_contents($chunkFile);
+        $mid = (int) (strlen($raw) / 2);
+        $raw[$mid] = chr(ord($raw[$mid]) ^ 0xFF);
+        file_put_contents($chunkFile, $raw);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/CRC32/');
+        $state->readChunk(0);
+    }
+
     public function testEmptyPartialRoundTrip(): void
     {
         $writer = new ChunkWriter();

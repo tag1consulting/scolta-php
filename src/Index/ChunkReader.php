@@ -158,6 +158,65 @@ class ChunkReader
     }
 
     /**
+     * Verify the CRC32 checksum stored in the file footer.
+     *
+     * Reads all record bytes and compares against the `crc32` field written by
+     * ChunkWriter. Pre-0.3.3 chunks have no `crc32` in the footer — this method
+     * returns true for those (backward-compatible, no error).
+     *
+     * Returns false on any I/O or format error rather than throwing.
+     */
+    public function verifyCrc32(): bool
+    {
+        $fp = fopen($this->path, 'rb');
+        if ($fp === false) {
+            return false;
+        }
+
+        try {
+            $this->readHeader($fp);
+
+            $crcCtx = hash_init('crc32b');
+
+            while (true) {
+                $lenRaw = fread($fp, 4);
+                if ($lenRaw === false || strlen($lenRaw) < 4) {
+                    return false;
+                }
+                $len = unpack('V', $lenRaw)[1];
+                if ($len === 0) {
+                    break; // Sentinel — not included in checksum.
+                }
+                $payload = fread($fp, $len);
+                if ($payload === false || strlen($payload) < $len) {
+                    return false;
+                }
+                hash_update($crcCtx, pack('V', $len));
+                hash_update($crcCtx, $payload);
+            }
+
+            $expected = hash_final($crcCtx);
+
+            $line = fgets($fp);
+            if ($line === false) {
+                return false;
+            }
+            $footer = json_decode(trim($line), true);
+
+            // No crc32 field → pre-0.3.3 chunk, skip validation.
+            if (!is_array($footer) || !isset($footer['crc32'])) {
+                return true;
+            }
+
+            return hash_equals($expected, (string) $footer['crc32']);
+        } catch (\Throwable) {
+            return false;
+        } finally {
+            fclose($fp);
+        }
+    }
+
+    /**
      * Read and validate the chunk header line.
      *
      * @param resource $fp Open file handle positioned at start of file.

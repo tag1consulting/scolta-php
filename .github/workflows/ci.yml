@@ -204,6 +204,32 @@ jobs:
             (echo "FAIL: Invalid version format" && exit 1)
           echo "PASS"
 
+  antipatterns:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for known bad patterns
+        run: |
+          FAIL=0
+
+          # href="#" without URL fallback in JS assets
+          if grep -rn '|| "#"' assets/js/ 2>/dev/null | grep -qv '|| data\.url'; then
+            echo "FAIL: bare '|| \"#\"' found in assets/js/ without data.url fallback"
+            grep -rn '|| "#"' assets/js/ | grep -v '|| data\.url'
+            FAIL=1
+          fi
+
+          # IndexBuildOrchestrator constructed without a logger or progress reporter
+          if grep -rn 'new IndexBuildOrchestrator' src/ 2>/dev/null | grep -qvE 'logger|progress'; then
+            echo "FAIL: IndexBuildOrchestrator constructed without logger/progress in src/"
+            grep -rn 'new IndexBuildOrchestrator' src/ | grep -vE 'logger|progress'
+            FAIL=1
+          fi
+
+          [ $FAIL -eq 0 ] && echo "PASS: No known bad patterns found."
+          exit $FAIL
+
   fixture-freshness:
     name: Concordance fixture version check
     runs-on: ubuntu-latest
