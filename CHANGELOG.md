@@ -16,6 +16,13 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 - **Display behavior tests (Phase 2).** Added `excerpt_length` to `testToJsScoringConfigValuesMatchConfig` to confirm `EXCERPT_LENGTH` in JS output reflects config.
 - **Scoring behavior tests (Phase 1).** `ScoltaConfigTest`: completeness check for all 25 `toJsScoringConfig()` keys, value-mapping assertions, phrase-proximity field assertions, and a negative test confirming server-side keys (`cacheTtl`, `aiApiKey`, etc.) are absent from the JS output. `AiEndpointHandlerTest`: `testCacheTtlZeroNeverReadsCache`, `testCacheTtlZeroNeverWritesCache`, `testMaxFollowUpsZeroBlocksImmediately` (with `TrackingCacheDriver`). New `tests/Service/AiServiceAdapterTest.php`: custom prompt overrides returned raw without `{SITE_NAME}` substitution; default prompts resolve site name and description; empty overrides fall back to default.
 
+### Fixed
+- **Summarize and follow_up prompts now include a GROUNDING CHECK section.** The new section
+  instructs the LLM to verify each fact against the provided excerpts before citing it, extract
+  whatever IS relevant from partially-matching excerpts, note any gaps, and suggest specific search
+  terms — replacing the old binary "no results" fallback that could cause the LLM to hallucinate
+  or discard partially-relevant content entirely.
+
 ## [0.3.3] - 2026-04-26
 
 ### Added
