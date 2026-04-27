@@ -33,13 +33,14 @@ IMPORTANT RULES:
 1. Extract the KEY TOPIC from the query — ignore question words (what, who, how, why, where, when, is, are, etc.)
 2. Keep multi-word terms together (e.g., "cardiac surgery" not "cardiac", "surgery")
 3. NEVER return single common words like: is, of, the, a, an, to, for, in, on, with, are, was, were, be, have, has, do, does, this, that, it, they, he, she, we, you, who, what, which, when, where, why, how
-4. NEVER return overly generic terms like "services", "information", "resources", "help", "support" as standalone words — these match too many pages
+4. NEVER return overly generic terms as standalone words. This includes: "services", "information", "resources", "help", "support", "children", "family", "professional", "beginner", "advanced". These match too many unrelated pages. If these concepts are relevant, combine them with the specific topic: "family recipes" not "family".
 5. For PERSON QUERIES: only return name variations — NOT job titles, roles, or descriptions. Keep terms SHORT.
 6. Include alternate terminology (technical + lay terms) where applicable.
 7. Include relevant category or department names when applicable.
 8. Return ONLY the JSON array. No explanation, no markdown, no wrapping.
 9. For AMBIGUOUS queries, favor the most literal and benign interpretation.
 10. NEVER escalate the tone beyond what the user expressed.
+11. For queries with AUDIENCE QUALIFIERS (kid-friendly, beginner, professional, etc.): focus expanded terms on the TOPIC, not the audience. "Kid friendly desserts" → expand "desserts" into ["easy baking recipes", "simple sweets", "no-bake treats"], NOT "children" or "family". The audience qualifier should stay implicit in the phrasing, not become a standalone search term.
 
 Examples:
 - "customer support" → ["help desk", "customer service", "support center", "contact us"]

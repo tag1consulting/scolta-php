@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Changed
+- Improve: `expand_query` prompt now instructs the LLM to avoid standalone audience/demographic terms (children, family, professional, etc.), reducing false matches from contextual noise. Adds explicit rule 11 for AUDIENCE QUALIFIERS directing expansion to focus on the topic, not the audience.
+
 ### Added
 - **`indexer` property test coverage.** Added `testIndexerDefaultsToAuto` and `testFromArrayMapsIndexer` to `ScoltaConfigTest` — the `indexer` property (default `'auto'`, accepts `'php'`/`'binary'`/`'auto'`) had zero test coverage.
 - **AI feature toggle enforcement in `AiEndpointHandler`.** When `aiExpandQuery=false` or `aiSummarize=false`, the handler now returns `['ok'=>false, 'status'=>404, 'error'=>'Feature disabled']` immediately without calling the AI service. `AiControllerTrait::createHandler()` passes these flags from `ScoltaConfig`. Added five tests: disabled returns 404, disabled does not call AI service (expand and summarize), follow-up unaffected by either toggle.

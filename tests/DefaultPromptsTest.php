@@ -70,4 +70,30 @@ class DefaultPromptsTest extends TestCase
 
         $this->assertEquals('[] []', $result);
     }
+
+    // -------------------------------------------------------------------------
+    // PR fix/expand-query-prompt — audience qualifier and generic terms rules
+    // -------------------------------------------------------------------------
+
+    public function testExpandQueryTemplateContainsAudienceQualifierRule(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
+
+        $this->assertStringContainsString(
+            'AUDIENCE QUALIFIERS',
+            $template,
+            'expand_query template must contain an AUDIENCE QUALIFIERS rule'
+        );
+    }
+
+    public function testExpandQueryTemplateGenericTermsListIncludesChildren(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
+
+        $this->assertStringContainsString(
+            '"children"',
+            $template,
+            'expand_query generic-terms prohibition list must include "children"'
+        );
+    }
 }
