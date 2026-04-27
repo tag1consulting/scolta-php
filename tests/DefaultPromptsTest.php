@@ -96,4 +96,52 @@ class DefaultPromptsTest extends TestCase
             'expand_query generic-terms prohibition list must include "children"'
         );
     }
+
+    // -------------------------------------------------------------------------
+    // PR fix/summarize-grounding — hallucination guardrail
+    // -------------------------------------------------------------------------
+
+    public function testSummarizeTemplateContainsGroundingCheck(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
+
+        $this->assertStringContainsString(
+            'GROUNDING CHECK',
+            $template,
+            'summarize template must contain a GROUNDING CHECK section'
+        );
+    }
+
+    public function testFollowUpTemplateContainsGroundingCheck(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::FOLLOW_UP);
+
+        $this->assertStringContainsString(
+            'GROUNDING CHECK',
+            $template,
+            'follow_up template must contain a GROUNDING CHECK section'
+        );
+    }
+
+    public function testSummarizeTemplatePartialRelevanceInstruction(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
+
+        $this->assertMatchesRegularExpression(
+            '/whatever IS relevant|partial.{0,30}relevant|extract.{0,50}relevant/i',
+            $template,
+            'summarize template must instruct extraction of partial relevance rather than binary yes/no'
+        );
+    }
+
+    public function testSummarizeTemplateNoBinaryFallback(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
+
+        $this->assertStringNotContainsString(
+            "The search results don't directly address this topic. You may want to try different search terms",
+            $template,
+            'summarize template must not use the old binary fallback phrasing — use partial-relevance extraction instead'
+        );
+    }
 }
