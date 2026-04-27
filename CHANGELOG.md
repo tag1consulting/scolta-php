@@ -6,6 +6,8 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-04-27
+
 ### Changed
 - Improve: `expand_query` prompt now instructs the LLM to avoid standalone audience/demographic terms (children, family, professional, etc.), reducing false matches from contextual noise. Adds explicit rule 11 for AUDIENCE QUALIFIERS directing expansion to focus on the topic, not the audience.
 
