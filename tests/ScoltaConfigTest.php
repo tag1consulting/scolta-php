@@ -166,6 +166,18 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals(365, $config->recencyHalfLifeDays);
     }
 
+    public function testIndexerDefaultsToAuto(): void
+    {
+        $config = ScoltaConfig::fromArray([]);
+        $this->assertSame('auto', $config->indexer);
+    }
+
+    public function testFromArrayMapsIndexer(): void
+    {
+        $config = ScoltaConfig::fromArray(['indexer' => 'binary']);
+        $this->assertSame('binary', $config->indexer);
+    }
+
     // -------------------------------------------------------------------
     // toAiClientConfig
     // -------------------------------------------------------------------
