@@ -129,7 +129,10 @@ class StreamingFormatWriter
 
         $hash       = 'en_' . substr(hash('sha256', (string) $pageNum . $pageData['url']), 0, 10);
         $compressed = gzencode(self::DELIMITER . $fragment, 9);
-        file_put_contents($this->buildDir . "/fragment/{$hash}.pf_fragment", $compressed);
+        $fragPath   = $this->buildDir . "/fragment/{$hash}.pf_fragment";
+        if (file_put_contents($fragPath, $compressed) === false) {
+            throw new \RuntimeException("Failed to write file: {$fragPath}");
+        }
 
         // Retain only what pf_meta needs (~40 bytes per page).
         $this->pageMeta[$pageNum] = [
@@ -193,7 +196,10 @@ class StreamingFormatWriter
             $this->ensureDir($this->buildDir . '/filter');
             $filterHash = 'en_' . substr(hash('sha256', $filterData), 0, 10);
             $compressed = gzencode(self::DELIMITER . $filterData, 9);
-            file_put_contents($this->buildDir . "/filter/{$filterHash}.pf_filter", $compressed);
+            $filterPath = $this->buildDir . "/filter/{$filterHash}.pf_filter";
+            if (file_put_contents($filterPath, $compressed) === false) {
+                throw new \RuntimeException("Failed to write file: {$filterPath}");
+            }
         }
 
         $filterNames = array_keys($this->filterData);
@@ -203,7 +209,10 @@ class StreamingFormatWriter
         $metaCbor   = $this->buildMetadata($filterNames, $filterHash, $metaFields);
         $metaHash   = 'en_' . substr(hash('sha256', $metaCbor), 0, 10);
         $compressed = gzencode(self::DELIMITER . $metaCbor, 9);
-        file_put_contents($this->buildDir . "/pagefind.{$metaHash}.pf_meta", $compressed);
+        $metaPath   = $this->buildDir . "/pagefind.{$metaHash}.pf_meta";
+        if (file_put_contents($metaPath, $compressed) === false) {
+            throw new \RuntimeException("Failed to write file: {$metaPath}");
+        }
 
         // Write pagefind-entry.json.
         $entry = [
@@ -217,10 +226,10 @@ class StreamingFormatWriter
             ],
             'include_characters' => [],
         ];
-        file_put_contents(
-            $this->buildDir . '/pagefind-entry.json',
-            json_encode($entry, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
-        );
+        $entryPath = $this->buildDir . '/pagefind-entry.json';
+        if (file_put_contents($entryPath, json_encode($entry, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) === false) {
+            throw new \RuntimeException("Failed to write file: {$entryPath}");
+        }
 
         // Copy bundled runtime assets.
         $assetsDir = dirname(__DIR__, 2) . '/assets/pagefind';
@@ -247,7 +256,10 @@ class StreamingFormatWriter
         $cborData   = $this->cbor->encodeArray([$innerArray]);
         $hash       = 'en_' . substr(hash('sha256', implode(',', $this->currentChunkWords)), 0, 10);
         $compressed = gzencode(self::DELIMITER . $cborData, 9);
-        file_put_contents($this->buildDir . "/index/{$hash}.pf_index", $compressed);
+        $indexPath  = $this->buildDir . "/index/{$hash}.pf_index";
+        if (file_put_contents($indexPath, $compressed) === false) {
+            throw new \RuntimeException("Failed to write file: {$indexPath}");
+        }
 
         $this->indexChunkMeta[] = [
             'from' => $this->currentChunkWords[0],
@@ -429,8 +441,7 @@ class StreamingFormatWriter
         if (is_dir($dir)) {
             return;
         }
-        @mkdir($dir, 0755, true);
-        if (!is_dir($dir)) {
+        if (!mkdir($dir, 0755, true) && !is_dir($dir)) {
             throw new \RuntimeException("Failed to create directory: {$dir}");
         }
     }

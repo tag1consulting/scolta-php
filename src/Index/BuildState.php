@@ -55,6 +55,7 @@ class BuildState
         if (file_exists($lockFile)) {
             $lockData = file_get_contents($lockFile);
             if ($lockData !== false && $this->isLockStale($lockData)) {
+                // Suppress: file may already be removed by concurrent process (TOCTOU-safe cleanup).
                 @unlink($lockFile);
             }
         }
@@ -204,6 +205,7 @@ class BuildState
 
         $lockFile = $this->stateDir . '/' . self::LOCK_FILE;
         if (file_exists($lockFile)) {
+            // Suppress: file may already be removed by concurrent process (TOCTOU-safe cleanup).
             @unlink($lockFile);
         }
     }
@@ -401,6 +403,7 @@ class BuildState
         }
 
         if (!rename($tempPath, $manifestPath)) {
+            // Suppress: temp file may already be removed by concurrent process (TOCTOU-safe cleanup).
             @unlink($tempPath);
             throw new \RuntimeException("Failed to atomic-rename manifest: {$tempPath} → {$manifestPath}");
         }
