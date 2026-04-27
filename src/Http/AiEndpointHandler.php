@@ -38,6 +38,8 @@ class AiEndpointHandler
      * @param PromptEnricherInterface   $promptEnricher  Prompt enricher for site-specific context injection.
      * @param array                     $aiLanguages     Supported languages for multilingual responses.
      * @param LoggerInterface           $logger          PSR-3 logger (defaults to NullLogger).
+     * @param bool                      $aiExpandQuery   Whether the expand-query feature is enabled.
+     * @param bool                      $aiSummarize     Whether the summarize feature is enabled.
      */
     public function __construct(
         private readonly object $aiService,
@@ -48,6 +50,8 @@ class AiEndpointHandler
         private readonly PromptEnricherInterface $promptEnricher = new NullEnricher(),
         private readonly array $aiLanguages = ['en'],
         private readonly LoggerInterface $logger = new NullLogger(),
+        private readonly bool $aiExpandQuery = true,
+        private readonly bool $aiSummarize = true,
     ) {
     }
 
@@ -59,6 +63,10 @@ class AiEndpointHandler
      */
     public function handleExpandQuery(string $query): array
     {
+        if (!$this->aiExpandQuery) {
+            return ['ok' => false, 'status' => 404, 'error' => 'Feature disabled'];
+        }
+
         $query = trim($query);
 
         if ($query === '' || strlen($query) > 500) {
@@ -111,6 +119,10 @@ class AiEndpointHandler
      */
     public function handleSummarize(string $query, string $context): array
     {
+        if (!$this->aiSummarize) {
+            return ['ok' => false, 'status' => 404, 'error' => 'Feature disabled'];
+        }
+
         $query = trim($query);
         $context = trim($context);
 

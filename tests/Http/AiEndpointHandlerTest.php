@@ -503,6 +503,60 @@ class AiEndpointHandlerTest extends TestCase
     }
 
     // ===================================================================
+    // AI feature toggles
+    // ===================================================================
+
+    public function testExpandQueryDisabledReturns404(): void
+    {
+        $handler = $this->makeHandler(aiExpandQuery: false);
+        $result = $handler->handleExpandQuery('test query');
+
+        $this->assertFalse($result['ok']);
+        $this->assertEquals(404, $result['status']);
+        $this->assertEquals('Feature disabled', $result['error']);
+    }
+
+    public function testExpandQueryDisabledDoesNotCallAiService(): void
+    {
+        $ai = new MockAiService('["term1", "term2"]');
+        $handler = $this->makeHandler(aiService: $ai, aiExpandQuery: false);
+        $handler->handleExpandQuery('test query');
+
+        $this->assertEquals(0, $ai->callCount, 'AI service should not be called when expand query is disabled');
+    }
+
+    public function testSummarizeDisabledReturns404(): void
+    {
+        $handler = $this->makeHandler(aiSummarize: false);
+        $result = $handler->handleSummarize('test query', 'some context');
+
+        $this->assertFalse($result['ok']);
+        $this->assertEquals(404, $result['status']);
+        $this->assertEquals('Feature disabled', $result['error']);
+    }
+
+    public function testSummarizeDisabledDoesNotCallAiService(): void
+    {
+        $ai = new MockAiService('A summary.');
+        $handler = $this->makeHandler(aiService: $ai, aiSummarize: false);
+        $handler->handleSummarize('test query', 'some context');
+
+        $this->assertEquals(0, $ai->callCount, 'AI service should not be called when summarize is disabled');
+    }
+
+    public function testFollowUpUnaffectedByExpandQueryToggle(): void
+    {
+        // follow-up has no enable/disable toggle; it should always proceed.
+        $ai = new MockAiService('follow up response');
+        $handler = $this->makeHandler(aiService: $ai, aiExpandQuery: false, aiSummarize: false);
+        $messages = [['role' => 'user', 'content' => 'hello']];
+        $result = $handler->handleFollowUp($messages);
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(1, $ai->callCount);
+    }
+
+    // ===================================================================
     // Helpers
     // ===================================================================
 
@@ -514,6 +568,8 @@ class AiEndpointHandlerTest extends TestCase
         int $maxFollowUps = 3,
         ?PromptEnricherInterface $enricher = null,
         array $aiLanguages = ['en'],
+        bool $aiExpandQuery = true,
+        bool $aiSummarize = true,
     ): AiEndpointHandler {
         return new AiEndpointHandler(
             aiService: $aiService ?? new MockAiService('["term1", "term2"]'),
@@ -523,6 +579,8 @@ class AiEndpointHandlerTest extends TestCase
             maxFollowUps: $maxFollowUps,
             promptEnricher: $enricher ?? new NullEnricher(),
             aiLanguages: $aiLanguages,
+            aiExpandQuery: $aiExpandQuery,
+            aiSummarize: $aiSummarize,
         );
     }
 }

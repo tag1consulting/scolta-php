@@ -65,13 +65,15 @@ trait AiControllerTrait
     final protected function createHandler(object $aiService, ScoltaConfig $config): AiEndpointHandler
     {
         return new AiEndpointHandler(
-            $aiService,
-            $this->resolveCache($config->cacheTtl),
-            $this->getCacheGeneration(),
-            $config->cacheTtl,
-            $config->maxFollowUps,
-            $this->resolveEnricher(),
-            $config->aiLanguages,
+            aiService: $aiService,
+            cache: $this->resolveCache($config->cacheTtl),
+            generation: $this->getCacheGeneration(),
+            cacheTtl: $config->cacheTtl,
+            maxFollowUps: $config->maxFollowUps,
+            promptEnricher: $this->resolveEnricher(),
+            aiLanguages: $config->aiLanguages,
+            aiExpandQuery: $config->aiExpandQuery,
+            aiSummarize: $config->aiSummarize,
         );
     }
 }
