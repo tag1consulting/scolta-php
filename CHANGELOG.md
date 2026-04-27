@@ -17,6 +17,12 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 - **Scoring behavior tests (Phase 1).** `ScoltaConfigTest`: completeness check for all 25 `toJsScoringConfig()` keys, value-mapping assertions, phrase-proximity field assertions, and a negative test confirming server-side keys (`cacheTtl`, `aiApiKey`, etc.) are absent from the JS output. `AiEndpointHandlerTest`: `testCacheTtlZeroNeverReadsCache`, `testCacheTtlZeroNeverWritesCache`, `testMaxFollowUpsZeroBlocksImmediately` (with `TrackingCacheDriver`). New `tests/Service/AiServiceAdapterTest.php`: custom prompt overrides returned raw without `{SITE_NAME}` substitution; default prompts resolve site name and description; empty overrides fall back to default.
 
 ### Fixed
+- **Hygiene:** Replaced `uniqid('', true)` with `bin2hex(random_bytes(8))` in `IndexMerger` — avoids period-containing directory names that can confuse cleanup scripts.
+- **Hygiene:** Removed `@` error suppression from `mkdir` calls in `IndexMerger`, `PagefindFormatWriter`, and `StreamingFormatWriter`; replaced with explicit `is_dir()` fallback + `RuntimeException`.
+- **Hygiene:** Removed `@unserialize` in `PhpIndexer`; replaced with `try/catch \Throwable` so corrupt cache entries surface in logs instead of silently recomputing.
+- **Hygiene:** Added `=== false` error checks to all bare `file_put_contents` calls in `ContentExporter`, `PagefindFormatWriter`, and `StreamingFormatWriter`.
+- **Hygiene:** Added TOCTOU-safe comments to intentional `@unlink` calls in `BuildState`.
+- **Hygiene:** Added source-parse tests preventing reintroduction of `@mkdir`, `@unlink` outside `BuildState`, `uniqid(..., true)`, unchecked `file_put_contents`, and `unserialize` without `allowed_classes`.
 - **Summarize and follow_up prompts now include a GROUNDING CHECK section.** The new section
   instructs the LLM to verify each fact against the provided excerpts before citing it, extract
   whatever IS relevant from partially-matching excerpts, note any gaps, and suggest specific search

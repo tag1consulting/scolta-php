@@ -171,8 +171,10 @@ class IndexMerger
             return $chunkPaths;
         }
 
-        $tmpDir = sys_get_temp_dir() . '/scolta-premerge-' . uniqid('', true);
-        @mkdir($tmpDir, 0755, true);
+        $tmpDir = sys_get_temp_dir() . '/scolta-premerge-' . bin2hex(random_bytes(8));
+        if (!mkdir($tmpDir, 0755, true) && !is_dir($tmpDir)) {
+            throw new \RuntimeException("Failed to create temp directory: {$tmpDir}");
+        }
 
         $batches   = array_chunk($chunkPaths, $cap);
         $outPaths  = [];

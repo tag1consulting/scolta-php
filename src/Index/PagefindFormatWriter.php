@@ -72,7 +72,10 @@ class PagefindFormatWriter
             $hash = 'en_' . substr(hash('sha256', (string) $pageNum . $page['url']), 0, 10);
             $page['fragmentHash'] = $hash;
             $compressed = gzencode(self::DELIMITER . $fragment, 9);
-            file_put_contents($buildDir . "/fragment/{$hash}.pf_fragment", $compressed);
+            $fragPath = $buildDir . "/fragment/{$hash}.pf_fragment";
+            if (file_put_contents($fragPath, $compressed) === false) {
+                throw new \RuntimeException("Failed to write file: {$fragPath}");
+            }
         }
         unset($page);
 
@@ -95,7 +98,10 @@ class PagefindFormatWriter
             $cborData = $this->cbor->encodeArray([$innerArray]);
             $hash = 'en_' . substr(hash('sha256', implode(',', $chunkWords)), 0, 10);
             $compressed = gzencode(self::DELIMITER . $cborData, 9);
-            file_put_contents($buildDir . "/index/{$hash}.pf_index", $compressed);
+            $indexPath = $buildDir . "/index/{$hash}.pf_index";
+            if (file_put_contents($indexPath, $compressed) === false) {
+                throw new \RuntimeException("Failed to write file: {$indexPath}");
+            }
 
             $indexChunkMeta[] = [
                 'from' => $chunkWords[0],
@@ -111,7 +117,10 @@ class PagefindFormatWriter
             $this->ensureDir($buildDir . '/filter');
             $filterHash = 'en_' . substr(hash('sha256', $filterData), 0, 10);
             $compressed = gzencode(self::DELIMITER . $filterData, 9);
-            file_put_contents($buildDir . "/filter/{$filterHash}.pf_filter", $compressed);
+            $filterPath = $buildDir . "/filter/{$filterHash}.pf_filter";
+            if (file_put_contents($filterPath, $compressed) === false) {
+                throw new \RuntimeException("Failed to write file: {$filterPath}");
+            }
         }
 
         // Collect meta fields dynamically from page data.
@@ -126,7 +135,10 @@ class PagefindFormatWriter
         $metaCbor = $this->buildMetadata($pages, $indexChunkMeta, $filterNames, $filterHash, $metaFields);
         $metaHash = 'en_' . substr(hash('sha256', $metaCbor), 0, 10);
         $compressed = gzencode(self::DELIMITER . $metaCbor, 9);
-        file_put_contents($buildDir . "/pagefind.{$metaHash}.pf_meta", $compressed);
+        $metaPath = $buildDir . "/pagefind.{$metaHash}.pf_meta";
+        if (file_put_contents($metaPath, $compressed) === false) {
+            throw new \RuntimeException("Failed to write file: {$metaPath}");
+        }
 
         // Write entry.json (plain JSON, NOT gzipped).
         // The hash here MUST match the meta filename hash above.
@@ -141,10 +153,10 @@ class PagefindFormatWriter
             ],
             'include_characters' => [],
         ];
-        file_put_contents(
-            $buildDir . '/pagefind-entry.json',
-            json_encode($entry, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
-        );
+        $entryPath = $buildDir . '/pagefind-entry.json';
+        if (file_put_contents($entryPath, json_encode($entry, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) === false) {
+            throw new \RuntimeException("Failed to write file: {$entryPath}");
+        }
 
         // Copy bundled pagefind runtime assets (JS, WASM, worker) if available.
         $assetsDir = dirname(__DIR__, 2) . '/assets/pagefind';
@@ -500,11 +512,7 @@ class PagefindFormatWriter
         if (is_dir($dir)) {
             return;
         }
-        // Suppress the warning — mkdir may fail with E_WARNING if a parallel
-        // process creates the directory between the is_dir() check and mkdir().
-        // The subsequent is_dir() confirms success either way.
-        @mkdir($dir, 0755, true);
-        if (!is_dir($dir)) {
+        if (!mkdir($dir, 0755, true) && !is_dir($dir)) {
             throw new \RuntimeException("Failed to create directory: {$dir}");
         }
     }

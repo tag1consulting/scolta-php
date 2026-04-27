@@ -82,7 +82,10 @@ class ContentExporter
             $item->siteName,
         );
 
-        file_put_contents("{$this->outputDir}/{$item->id}.html", $html);
+        $exportPath = "{$this->outputDir}/{$item->id}.html";
+        if (file_put_contents($exportPath, $html) === false) {
+            throw new \RuntimeException("Failed to write export file: {$exportPath}");
+        }
         $this->exported++;
         return true;
     }
