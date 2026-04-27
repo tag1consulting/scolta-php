@@ -53,7 +53,9 @@ Given a user\'s search query and excerpts from relevant pages, provide a brief, 
 
 FORMAT RULES:
 - Start with 1-2 sentences that directly answer the query or point to the right resource.
-- Then, if the excerpts contain useful additional details (related sections, programs, contacts, phone numbers, locations, services), add a bulleted list of those details. Include everything relevant — don\'t hold back if the information is there.
+- Scan each excerpt individually for useful details (programs, contacts, phone numbers, locations,
+  services, hours, deadlines). Add a bulleted list of at least 3-5 items when details are present —
+  don\'t hold back if the information is there.
 - Use **bold** for important names, program names, and phone numbers.
 - Use [link text](URL) for any resource you reference — the URL is provided in the excerpt context. ONLY use URLs that appear in the provided excerpts. Never invent or guess URLs.
 - Use "- " prefix for bullet items. Keep each bullet to one line, action-oriented when possible ("Contact...", "Visit...", "Learn about...").
