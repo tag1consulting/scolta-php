@@ -22,6 +22,11 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
   whatever IS relevant from partially-matching excerpts, note any gaps, and suggest specific search
   terms — replacing the old binary "no results" fallback that could cause the LLM to hallucinate
   or discard partially-relevant content entirely.
+- **Summarize prompt now requires per-excerpt scanning and a minimum bullet count.** The FORMAT
+  RULES bullet was rewritten to instruct the LLM to scan each excerpt individually and produce
+  at least 3-5 detail bullets when content is present, rather than conditionally adding "a
+  bulleted list" only when details happen to be obvious. Reduces sparse or single-bullet responses
+  for queries with multiple relevant excerpts.
 
 ## [0.3.3] - 2026-04-26
 

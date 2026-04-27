@@ -144,4 +144,30 @@ class DefaultPromptsTest extends TestCase
             'summarize template must not use the old binary fallback phrasing — use partial-relevance extraction instead'
         );
     }
+
+    // -------------------------------------------------------------------------
+    // PR fix/summarize-detail-extraction — richer detail extraction
+    // -------------------------------------------------------------------------
+
+    public function testSummarizeTemplateSpecifiesMinimumBullets(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
+
+        $this->assertMatchesRegularExpression(
+            '/at least [3-9]|minimum [3-9]|[3-9]-[5-9] bullets?|[3-9]\+ bullets?/i',
+            $template,
+            'summarize template must specify a minimum bullet count for detail extraction'
+        );
+    }
+
+    public function testSummarizeTemplateExtractPerExcerpt(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
+
+        $this->assertMatchesRegularExpression(
+            '/each excerpt|per excerpt|every excerpt|from each result/i',
+            $template,
+            'summarize template must instruct per-excerpt detail extraction'
+        );
+    }
 }
