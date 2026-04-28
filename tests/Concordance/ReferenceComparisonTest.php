@@ -202,14 +202,15 @@ class ReferenceComparisonTest extends TestCase
             // where PHP counts 36 (per-character tokenization). Contractions and
             // HTML entities also diverge significantly. Skip pages where Pagefind
             // counts < 5 words (these are edge cases where tokenization is
-            // fundamentally different) and allow 75% for others.
-            // Known 50%+ divergences: contractions page (Pagefind keeps
-            // "don't" as 1 word, PHP splits to "don" + "t"), HTML entities
-            // page (Pagefind collapses entities, PHP expands them first).
+            // fundamentally different).
+            // Known divergences: contractions page (Pagefind keeps "don't" as 1 word,
+            // PHP splits to "don" + "t") and HTML entities page (Pagefind collapses
+            // entities, PHP expands them first) — measured max ratio 0.435.
+            // Threshold set to measured + 0.02 = 0.46 (2026-04-27, after URL token fix).
             if ($refFrag['word_count'] < 5) {
                 continue;
             }
-            if ($ratio > 0.75) {
+            if ($ratio > 0.46) {
                 $divergences[] = sprintf(
                     '%s: ref=%d, php=%d (%.0f%% off)',
                     $url,
@@ -220,7 +221,7 @@ class ReferenceComparisonTest extends TestCase
             }
         }
 
-        $this->assertEmpty($divergences, "Word count divergences >10%:\n" . implode("\n", $divergences));
+        $this->assertEmpty($divergences, "Word count divergences >46%:\n" . implode("\n", $divergences));
     }
 
     public function testFragmentMetaFieldsPresent(): void

@@ -65,11 +65,16 @@ class TokenizerTest extends TestCase
         $this->assertSame([], $this->tokenizer->tokenize('   '));
     }
 
+    /**
+     * Tokenizer returns character offsets by design.
+     * InvertedIndexBuilder converts these to word indices before writing the index.
+     * See PositionSemanticsTest for the index-level verification.
+     */
     public function testPositionTracking(): void
     {
         $tokens = $this->tokenizer->tokenize('hello world');
-        $this->assertSame(0, $tokens[0]['position']);
-        $this->assertSame(6, $tokens[1]['position']);
+        $this->assertSame(0, $tokens[0]['position']); // char offset
+        $this->assertSame(6, $tokens[1]['position']); // char offset
     }
 
     public function testStartPositionOffset(): void
