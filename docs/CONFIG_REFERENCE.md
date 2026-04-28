@@ -68,7 +68,7 @@ factor before being added to the final score; the title boost is unaffected.
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `expandPrimaryWeight` | float | `0.7` | Weight applied to expanded-query results during N-set merge (original results always have weight 1.0) |
+| `expandPrimaryWeight` | float | `0.5` | Weight applied to original query results during N-set merge. Lower values give AI-expanded terms more relative influence (better intent matching); higher values make literal keyword matches dominate. Set to 0.7+ if you want exact terms to dominate. |
 
 ### Scoring: Priority Pages
 
@@ -104,8 +104,8 @@ factor before being added to the final score; the title boost is unaffected.
 |----------|------|---------|-------------|
 | `aiExpandQuery` | bool | `true` | Enable AI query expansion |
 | `aiSummarize` | bool | `true` | Enable AI result summarization |
-| `aiSummaryTopN` | int | `5` | Number of top results sent to AI for summarization |
-| `aiSummaryMaxChars` | int | `2000` | Maximum characters of content sent to AI for summarization |
+| `aiSummaryTopN` | int | `10` | Number of top results sent to AI for summarization |
+| `aiSummaryMaxChars` | int | `4000` | Maximum characters of content sent to AI for summarization |
 
 ### Multilingual
 

@@ -6,6 +6,14 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Changed
+- **`expand_primary_weight` default lowered to 0.5** (was 0.7) — gives AI-expanded terms more influence for intent-based queries. Literal keyword matches no longer dominate over semantically correct expansions. Users who prefer the previous behavior can set `expand_primary_weight: 0.7` in their config.
+- **`ai_summary_top_n` default raised to 10** (was 5) — the AI sees more results and has more material to curate from, improving curation quality for constraint queries and diverse result sets.
+- **`ai_summary_max_chars` default raised to 4000** (was 2000) — supports the increased `ai_summary_top_n` with enough excerpt content for the AI to make good decisions.
+- **Default summarize prompt rewritten** — new prompt instructs the AI to act as a knowledgeable curator, not a search results narrator: filters results that contradict the query (e.g. egg-containing results for an egg-free query), presents 4-6 items instead of deep-diving into one, eliminates hedging language. Grounding constraint (use only provided excerpts) preserved.
+- **Default expand_query prompt adds rule 12** — constraint queries ("without X," "X-free," "gluten-free," etc.) now preserve the constraint in expansions rather than dropping it.
+- **Default follow_up prompt adds constraint preservation** — conversational context now explicitly maintains query constraints (dietary, allergies, preferences) across follow-up turns.
+
 ### Fixed
 - **PHP indexer positions use word indices instead of character offsets** — phrase proximity scoring now works correctly for multi-word queries.
 - **Title tokens no longer duplicated into body positions** — matches Pagefind binary behavior.

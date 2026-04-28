@@ -53,7 +53,7 @@ class ScoltaConfig
     public int $phraseWindow = 15;
 
     // -- Scoring: Expanded terms --
-    public float $expandPrimaryWeight = 0.7;
+    public float $expandPrimaryWeight = 0.5;
 
     // -- Scoring: Language and stop words --
     public string $language = 'en';
@@ -77,8 +77,8 @@ class ScoltaConfig
     // -- AI feature toggles --
     public bool $aiExpandQuery = true;
     public bool $aiSummarize = true;
-    public int $aiSummaryTopN = 5;
-    public int $aiSummaryMaxChars = 2000;
+    public int $aiSummaryTopN = 10;
+    public int $aiSummaryMaxChars = 4000;
 
     // -- Multilingual --
     public array $aiLanguages = ['en'];
