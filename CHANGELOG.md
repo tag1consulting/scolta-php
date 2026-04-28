@@ -6,6 +6,10 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+_No changes yet._
+
+## [0.3.5] - 2026-04-28
+
 ### Changed
 - **`expand_primary_weight` default lowered to 0.5** (was 0.7) — gives AI-expanded terms more influence for intent-based queries. Literal keyword matches no longer dominate over semantically correct expansions. Users who prefer the previous behavior can set `expand_primary_weight: 0.7` in their config.
 - **`ai_summary_top_n` default raised to 10** (was 5) — the AI sees more results and has more material to curate from, improving curation quality for constraint queries and diverse result sets.
