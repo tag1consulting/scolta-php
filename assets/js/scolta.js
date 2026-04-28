@@ -727,7 +727,7 @@
   }
 
   // Score a set of loaded results against a query.
-  function scoreResults(loaded, query, sourceWeight) {
+  function scoreResults(loaded, query, sourceWeight, primaryQuery) {
     if (scoltaWasm) {
       // WASM scoring — canonical Rust implementation
       const results = loaded.map((data, i) => ({
@@ -750,6 +750,7 @@
         query: query,
         results: results,
         config: wasmConfig,
+        primary_query: primaryQuery || undefined,
       });
       try {
         const output = scoltaWasm.score_results(input);
@@ -952,7 +953,7 @@
     for (const [term, items] of byTerm) {
       const weight = items[0].weight;
       const loaded = items.map(i => i.data);
-      const scoredVsTerm = scoreResults(loaded, term, weight);
+      const scoredVsTerm = scoreResults(loaded, term, weight, originalQuery);
       const scoredVsOriginal = scoreResults(loaded, originalQuery, weight * 0.5);
 
       const best = scoredVsTerm.map((r, idx) => ({

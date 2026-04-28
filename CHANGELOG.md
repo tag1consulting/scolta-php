@@ -15,6 +15,7 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 - **Default follow_up prompt adds constraint preservation** — conversational context now explicitly maintains query constraints (dietary, allergies, preferences) across follow-up turns.
 
 ### Fixed
+- **JS search layer now passes `primary_query` to WASM scoring for expanded-query results** — enables the cross-query title boost added in scolta-core 0.3.4. Previously, expanded-query results could not receive title boost from the original query terms, causing ranking bias against semantically correct results whose titles matched the user's original query but not the AI-expanded terms.
 - **PHP indexer positions use word indices instead of character offsets** — phrase proximity scoring now works correctly for multi-word queries.
 - **Title tokens no longer duplicated into body positions** — matches Pagefind binary behavior.
 - **Word count excludes URL tokens** — fragment `word_count` now matches content word count.
