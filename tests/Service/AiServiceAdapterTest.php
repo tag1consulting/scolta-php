@@ -188,7 +188,7 @@ class AiServiceAdapterTest extends TestCase
         $config = ScoltaConfig::fromArray([
             'ai_expansion_model' => 'claude-haiku-4-5-20251001',
         ]);
-        $adapter = new class($config) extends AiServiceAdapter {
+        $adapter = new class ($config) extends AiServiceAdapter {
             protected function tryFrameworkAi(string $systemPrompt, string $userMessage, int $maxTokens): ?string
             {
                 return 'framework-response';
