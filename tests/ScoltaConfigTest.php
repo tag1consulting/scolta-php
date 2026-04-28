@@ -34,14 +34,14 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals(1.0, $config->titleMatchBoost);
         $this->assertEquals(1.5, $config->titleAllTermsMultiplier);
         $this->assertEquals(0.4, $config->contentMatchBoost);
-        $this->assertEquals(0.7, $config->expandPrimaryWeight);
+        $this->assertEquals(0.5, $config->expandPrimaryWeight);
         $this->assertEquals(300, $config->excerptLength);
         $this->assertEquals(10, $config->resultsPerPage);
         $this->assertEquals(50, $config->maxPagefindResults);
         $this->assertTrue($config->aiExpandQuery);
         $this->assertTrue($config->aiSummarize);
-        $this->assertEquals(5, $config->aiSummaryTopN);
-        $this->assertEquals(2000, $config->aiSummaryMaxChars);
+        $this->assertEquals(10, $config->aiSummaryTopN);
+        $this->assertEquals(4000, $config->aiSummaryMaxChars);
         $this->assertEquals('', $config->promptExpandQuery);
         $this->assertEquals('', $config->promptSummarize);
         $this->assertEquals('', $config->promptFollowUp);
