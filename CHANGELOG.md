@@ -6,6 +6,10 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Added
+- **`ScoltaConfig::$aiExpansionModel`** (default `''`): Optional model identifier for query expansion. When set, the expand-query operation uses this model instead of `aiModel`. Leave empty to use `aiModel` for all operations. Useful for routing expansion through a smaller, cheaper model (e.g., `claude-haiku-4-5-20251001`) while keeping summarize and follow-up on a more capable model. Zero-config — existing installs are unaffected.
+- **`AiServiceAdapter::messageForOperation(string $operation, ...): string`**: New method that selects the correct model for the given operation before delegating to the built-in `AiClient`. Platform framework integrations (`tryFrameworkAi`) take precedence as before.
+
 ### Changed
 - **Default summarize prompt: stronger constraint filtering** — FILTER rule now explicitly instructs the AI not to report what it filtered out or that most results contained X. New DIG rule instructs the AI to look harder at remaining excerpts when a filter removes most results (partial matches, substitution notes, vegan/allergy variations all count). VARIETY rule now prevents deep-diving into a single result's details when the user asked a broad question.
 

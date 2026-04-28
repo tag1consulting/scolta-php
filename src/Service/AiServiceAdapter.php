@@ -87,6 +87,37 @@ class AiServiceAdapter
     }
 
     /**
+     * Send a single-turn message with operation-specific model routing.
+     *
+     * Uses the expansion model for 'expand_query' when configured, falling
+     * back to the primary model for all other operations. Framework AI
+     * integrations (tryFrameworkAi) take precedence over the model override.
+     *
+     * @param string $operation   The operation: 'expand_query', 'summarize', or 'follow_up'.
+     * @param string $systemPrompt The system prompt.
+     * @param string $userMessage  The user message.
+     * @param int    $maxTokens    Maximum response tokens.
+     *
+     * @return string The AI response text.
+     *
+     * @since 0.3.6
+     * @stability experimental
+     */
+    public function messageForOperation(string $operation, string $systemPrompt, string $userMessage, int $maxTokens = 512): string
+    {
+        $result = $this->tryFrameworkAi($systemPrompt, $userMessage, $maxTokens);
+        if ($result !== null) {
+            return $result;
+        }
+
+        $model = ($operation === 'expand_query' && $this->config->aiExpansionModel !== '')
+            ? $this->config->aiExpansionModel
+            : null;
+
+        return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens, $model);
+    }
+
+    /**
      * Get the expand-query system prompt (custom override or default).
      */
     public function getExpandPrompt(): string

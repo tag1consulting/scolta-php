@@ -90,7 +90,8 @@ class AiEndpointHandler
             );
             $systemPrompt = $this->appendLanguageInstruction($systemPrompt, 'expand_query');
 
-            $response = $this->aiService->message(
+            $response = $this->aiService->messageForOperation(
+                'expand_query',
                 $systemPrompt,
                 'Expand this search query: ' . $query,
                 512,
