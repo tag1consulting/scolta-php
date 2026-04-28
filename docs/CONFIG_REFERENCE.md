@@ -10,7 +10,8 @@ All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Platfo
 |----------|------|---------|-------------|
 | `aiProvider` | string | `'anthropic'` | AI provider identifier (`anthropic`, `openai`) |
 | `aiApiKey` | string | `''` | API key for the AI provider |
-| `aiModel` | string | `'claude-sonnet-4-5-20250929'` | Model identifier |
+| `aiModel` | string | `'claude-sonnet-4-5-20250929'` | Model identifier for summarize and follow-up |
+| `aiExpansionModel` | string | `''` | Optional model for query expansion (empty = use `aiModel`) |
 | `aiBaseUrl` | string | `''` | Custom API base URL (empty = provider default) |
 
 ### Site Identity

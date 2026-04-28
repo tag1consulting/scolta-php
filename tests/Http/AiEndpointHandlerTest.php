@@ -627,6 +627,11 @@ class MockAiService
         return $this->response;
     }
 
+    public function messageForOperation(string $operation, string $systemPrompt, string $userMessage, int $maxTokens): string
+    {
+        return $this->message($systemPrompt, $userMessage, $maxTokens);
+    }
+
     public function conversation(string $systemPrompt, array $messages, int $maxTokens): string
     {
         if ($this->throwOnConversation) {

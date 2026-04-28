@@ -21,6 +21,7 @@ class ScoltaConfig
     public string $aiProvider = 'anthropic';
     public string $aiApiKey = '';
     public string $aiModel = 'claude-sonnet-4-5-20250929';
+    public string $aiExpansionModel = '';
     public string $aiBaseUrl = '';
 
     // -- Site identity --

@@ -178,4 +178,60 @@ class AiServiceAdapterTest extends TestCase
         $this->assertStringNotContainsString('{SITE_NAME}', $resolved);
         $this->assertStringNotContainsString('{SITE_DESCRIPTION}', $resolved);
     }
+
+    // -------------------------------------------------------------------
+    // messageForOperation — framework path takes precedence
+    // -------------------------------------------------------------------
+
+    public function testMessageForOperationUsesFrameworkPathWhenAvailable(): void
+    {
+        $config = ScoltaConfig::fromArray([
+            'ai_expansion_model' => 'claude-haiku-4-5-20251001',
+        ]);
+        $adapter = new class($config) extends AiServiceAdapter {
+            protected function tryFrameworkAi(string $systemPrompt, string $userMessage, int $maxTokens): ?string
+            {
+                return 'framework-response';
+            }
+        };
+
+        $result = $adapter->messageForOperation('expand_query', 'sys', 'user', 512);
+
+        $this->assertEquals('framework-response', $result);
+    }
+
+    // -------------------------------------------------------------------
+    // aiExpansionModel config property defaults and fromArray mapping
+    // -------------------------------------------------------------------
+
+    public function testAiExpansionModelDefaultsToEmpty(): void
+    {
+        $config = new ScoltaConfig();
+
+        $this->assertSame('', $config->aiExpansionModel);
+    }
+
+    public function testAiExpansionModelMapsFromArray(): void
+    {
+        $config = ScoltaConfig::fromArray([
+            'ai_expansion_model' => 'claude-haiku-4-5-20251001',
+        ]);
+
+        $this->assertSame('claude-haiku-4-5-20251001', $config->aiExpansionModel);
+    }
+
+    public function testAiExpansionModelNotIncludedInAiClientConfig(): void
+    {
+        $config = ScoltaConfig::fromArray([
+            'ai_model' => 'claude-sonnet-4-5-20250929',
+            'ai_expansion_model' => 'claude-haiku-4-5-20251001',
+        ]);
+
+        $clientConfig = $config->toAiClientConfig();
+
+        $this->assertArrayHasKey('model', $clientConfig);
+        $this->assertSame('claude-sonnet-4-5-20250929', $clientConfig['model']);
+        $this->assertArrayNotHasKey('expansion_model', $clientConfig);
+        $this->assertArrayNotHasKey('ai_expansion_model', $clientConfig);
+    }
 }
