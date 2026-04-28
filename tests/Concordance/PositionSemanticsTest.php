@@ -80,7 +80,7 @@ class PositionSemanticsTest extends TestCase
                 20,
                 $pos,
                 "Position {$pos} looks like a character offset, not a word index. "
-                . "Expected small sequential integers (0-11 for this content)."
+                . 'Expected small sequential integers (0-11 for this content).'
             );
         }
 
@@ -177,7 +177,7 @@ class PositionSemanticsTest extends TestCase
         $this->assertSame(
             $contentWordCount,
             $fragment['word_count'],
-            "word_count should match content word count (no URL tokens). "
+            'word_count should match content word count (no URL tokens). '
             . "content_words={$contentWordCount}, word_count={$fragment['word_count']}"
         );
     }
@@ -236,7 +236,10 @@ class PositionSemanticsTest extends TestCase
                     if ($pos > $cap) {
                         $overflows[] = sprintf(
                             "'%s': pos=%d > cap=%d (maxWordCount=%d)",
-                            $word, $pos, $cap, $maxWordCount
+                            $word,
+                            $pos,
+                            $cap,
+                            $maxWordCount
                         );
                     }
                 }
