@@ -134,13 +134,13 @@ class InvertedIndexBuilderTest extends TestCase
         $this->assertTrue(true);
     }
 
-    public function testTitleTokensAlsoInBodyPositions(): void
+    public function testTitleOnlyWordsNotInBodyPositions(): void
     {
-        // Title-only words must appear in body positions (locs) as well as
-        // meta_positions (meta_locs). Without body locs, pagefind's WASM cannot
-        // generate a highlighted excerpt for title-only matches, which prevents
-        // scolta-core's content_match_score from firing. This mirrors the binary
-        // pagefind indexer which indexes <h1> content in both locs and meta_locs.
+        // Title-only words (not repeated in body) must appear in meta_positions
+        // only — matching the Pagefind binary indexer. Body tokens start at a
+        // higher word index so title words will appear in body positions only if
+        // the body text also contains them. Duplicating title positions into body
+        // positions produces incorrect phrase proximity spans.
         $result = $this->builder->build([
             $this->makeItem('doc-1', 'Zirconium', 'Banana cherry date elderberry fig grape enough text.'),
         ]);
@@ -152,9 +152,28 @@ class InvertedIndexBuilderTest extends TestCase
         $entry = array_values($pageEntries)[0] ?? null;
         $this->assertNotNull($entry, 'Should have at least one page entry');
 
-        // Must have both meta_positions and body positions.
+        // Title-only word: meta_positions set, body positions empty.
         $this->assertNotEmpty($entry['meta_positions'], 'Title word should have meta_positions');
-        $this->assertNotEmpty($entry['positions'], 'Title word must also have body positions (locs) for excerpt generation');
+        $this->assertEmpty($entry['positions'], 'Title-only word must NOT have body positions');
+    }
+
+    public function testTitleWordRepeatedInBodyHasBodyPositions(): void
+    {
+        // A word appearing in both title and body should have meta_positions
+        // from the title AND body positions from the body tokenization.
+        $result = $this->builder->build([
+            $this->makeItem('doc-1', 'Apple', 'The apple tree produces apples every season in the orchard.'),
+        ]);
+
+        $stemmed = (new Stemmer('en'))->stem('apple');
+        $this->assertArrayHasKey($stemmed, $result['index'], "'apple' must be in index");
+
+        $pageEntries = array_filter($result['index'][$stemmed], fn ($k) => is_int($k), ARRAY_FILTER_USE_KEY);
+        $entry = array_values($pageEntries)[0] ?? null;
+        $this->assertNotNull($entry);
+
+        $this->assertNotEmpty($entry['meta_positions'], "Title 'apple' should have meta_positions");
+        $this->assertNotEmpty($entry['positions'], "Body 'apple' should also have body positions");
     }
 
     public function testFiltersIncluded(): void

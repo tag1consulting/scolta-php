@@ -6,6 +6,11 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Fixed
+- **PHP indexer positions use word indices instead of character offsets** — phrase proximity scoring now works correctly for multi-word queries.
+- **Title tokens no longer duplicated into body positions** — matches Pagefind binary behavior.
+- **Word count excludes URL tokens** — fragment `word_count` now matches content word count.
+
 ## [0.3.4] - 2026-04-27
 
 ### Changed
