@@ -6,7 +6,8 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
-_No changes yet._
+### Changed
+- **Default summarize prompt: stronger constraint filtering** — FILTER rule now explicitly instructs the AI not to report what it filtered out or that most results contained X. New DIG rule instructs the AI to look harder at remaining excerpts when a filter removes most results (partial matches, substitution notes, vegan/allergy variations all count). VARIETY rule now prevents deep-diving into a single result's details when the user asked a broad question.
 
 ## [0.3.5] - 2026-04-28
 
