@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Fixed
+- **Phrase proximity scoring now works for multi-word queries** — `computeContentWordLocations` replaces Pagefind's `data.locations` (which are not word positions) with real 0-indexed word positions derived from `data.content`. Pages containing adjacent query terms now correctly receive the 2.5× `phrase_adjacent_multiplier` boost from scolta-core.
+
 ### Added
 - **`ScoltaConfig::$aiExpansionModel`** (default `''`): Optional model identifier for query expansion. When set, the expand-query operation uses this model instead of `aiModel`. Leave empty to use `aiModel` for all operations. Useful for routing expansion through a smaller, cheaper model (e.g., `claude-haiku-4-5-20251001`) while keeping summarize and follow-up on a more capable model. Zero-config — existing installs are unaffected.
 - **`AiServiceAdapter::messageForOperation(string $operation, ...): string`**: New method that selects the correct model for the given operation before delegating to the built-in `AiClient`. Platform framework integrations (`tryFrameworkAi`) take precedence as before.

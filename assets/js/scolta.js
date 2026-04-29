@@ -726,19 +726,41 @@
     return pagefind.search(query, searchOpts);
   }
 
+  // Pagefind's data.locations are not word positions — compute from content instead.
+  function computeContentWordLocations(content, queryTerms) {
+    if (!content || !queryTerms || queryTerms.length < 2) return null;
+    const words = content.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 0);
+    const termsLower = queryTerms.map(t => t.toLowerCase().replace(/[^a-z0-9]/g, ''));
+    const locations = [];
+    words.forEach((word, idx) => {
+      if (termsLower.some(term => {
+        if (word === term) return true;
+        const minLen = Math.max(3, Math.min(word.length, term.length) - 2);
+        return word.substring(0, minLen) === term.substring(0, minLen);
+      })) {
+        locations.push(idx);
+      }
+    });
+    return locations.length >= queryTerms.length ? locations : null;
+  }
+
   // Score a set of loaded results against a query.
   function scoreResults(loaded, query, sourceWeight, primaryQuery) {
     if (scoltaWasm) {
       // WASM scoring — canonical Rust implementation
-      const results = loaded.map((data, i) => ({
-        title: data.meta?.title || '',
-        url: data.meta?.url || data.url || '',
-        excerpt: data.excerpt || '',
-        date: data.meta?.date || '',
-        pagefind_index: i,
-        score: loaded.length > 1 ? 1 - (i / (loaded.length - 1)) : 1,
-        locations: data.locations || [],
-      }));
+      const queryTerms = extractSearchTerms(query);
+      const results = loaded.map((data, i) => {
+        const contentLocations = computeContentWordLocations(data.content || '', queryTerms);
+        return {
+          title: data.meta?.title || '',
+          url: data.meta?.url || data.url || '',
+          excerpt: data.excerpt || '',
+          date: data.meta?.date || '',
+          pagefind_index: i,
+          score: loaded.length > 1 ? 1 - (i / (loaded.length - 1)) : 1,
+          locations: contentLocations || data.locations || [],
+        };
+      });
       // WASM config keys are snake_case; getInstanceConfig() returns
       // SCREAMING_SNAKE_CASE for the platform adapter layer. Convert here.
       const screaming = getInstanceConfig();
