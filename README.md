@@ -6,7 +6,7 @@ PHP library that indexes content into Pagefind-compatible search indexes, plus t
 
 ## Status
 
-Beta. Scolta is installable and in active use. The API surface documented here will not break within the 0.x minor series without a deprecation notice and a replacement in place. Expect breaking changes before 1.0. Test in staging before deploying to production. File bugs at the repo issue tracker.
+Scolta is in active production use across Drupal, WordPress, and Laravel. The API documented here is stable within the 0.x minor series — no changes without a deprecation notice and a replacement in place. Some capabilities are still maturing toward a 1.0 release; test in staging when upgrading between minor versions. File bugs at the repo issue tracker.
 
 ## What Is Scolta?
 
@@ -118,18 +118,11 @@ $config = ScoltaConfig::fromArray([
 
 For the full list of config keys and their defaults, see [docs/CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md).
 
-## What Scolta Replaces (and What It Doesn't)
+## What Scolta Is Built For
 
-Scolta is a practical replacement for hosted search SaaS (Algolia, Coveo, SearchStax) and for small-to-medium self-hosted search installations used as a content search backend — Solr or Elasticsearch where your use case is page and document search, not log analytics.
+Scolta is designed for content search on publishing platforms: pages, posts, documentation, product catalogs, and other human-authored content indexed at build time. This package is the PHP foundation shared by the Drupal, WordPress, and Laravel adapters — the platforms behind enterprise content operations, government and university portals, media publishing, and product-driven businesses.
 
-Scolta is not a replacement for:
-
-- Full-text database search with row-level access control (per-document permissions enforced at query time).
-- Log analytics or observability search built on Elasticsearch or OpenSearch.
-- Vector databases used as a general retrieval layer for RAG pipelines.
-- Enterprise search with audit logging, retention policies, or SSO-gated document visibility.
-
-If you need any of those, Scolta is the wrong tool.
+The static-index architecture eliminates the search server. No Solr, no Elasticsearch, no hosted SaaS subscription to operate or pay for. Scolta replaces those for content sites where the search use case is full-text relevance, recency, and phrase matching. Teams on managed hosting (WP Engine, Kinsta, Pantheon, Flywheel) where exec() is disabled will find the PHP indexer runs there without any configuration change.
 
 ## Memory and Scale
 
