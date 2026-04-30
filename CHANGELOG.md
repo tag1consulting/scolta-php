@@ -8,6 +8,11 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 _No changes yet._
 
+## [0.3.7] - 2026-04-30
+
+### Improved
+- Documentation: clearer use-case descriptions, cross-platform search consistency messaging.
+
 ## [0.3.6] - 2026-04-29
 
 ### Fixed
