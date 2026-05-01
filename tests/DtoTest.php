@@ -31,6 +31,19 @@ class DtoTest extends TestCase
         $this->assertEquals('', $item->siteName);
     }
 
+    public function testContentItemLanguageDefaults(): void
+    {
+        $item = new ContentItem(
+            id: '1',
+            title: 'T',
+            bodyHtml: 'B',
+            url: 'https://x.com',
+            date: '2024-01-01',
+        );
+
+        $this->assertEquals('en', $item->language);
+    }
+
     // -------------------------------------------------------------------
     // TrackerRecord
     // -------------------------------------------------------------------

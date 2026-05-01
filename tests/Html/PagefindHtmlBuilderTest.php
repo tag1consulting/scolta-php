@@ -81,10 +81,54 @@ class PagefindHtmlBuilderTest extends TestCase
             siteName: '',
         );
 
-        // Should NOT have a data-pagefind-filter attribute.
-        $this->assertStringNotContainsString('data-pagefind-filter', $html);
+        // Site filter absent, but language filter is always present.
+        $this->assertStringNotContainsString('data-pagefind-filter="site:', $html);
+        $this->assertStringContainsString('data-pagefind-filter="language:en"', $html);
 
         // Should still have data-pagefind-body.
         $this->assertStringContainsString('data-pagefind-body', $html);
+    }
+
+    public function testDefaultLanguageIsEnglish(): void
+    {
+        $html = PagefindHtmlBuilder::build(
+            id: 'doc-4',
+            title: 'English',
+            body: 'Body',
+            url: 'https://example.com',
+        );
+
+        $this->assertStringContainsString('<html lang="en">', $html);
+        $this->assertStringContainsString('data-pagefind-filter="language:en"', $html);
+    }
+
+    public function testLanguageAttribute(): void
+    {
+        $html = PagefindHtmlBuilder::build(
+            id: 'doc-5',
+            title: 'Español',
+            body: 'Contenido en español',
+            url: 'https://example.com/es',
+            date: '2024-06-15',
+            siteName: 'Mi Sitio',
+            language: 'es',
+        );
+
+        $this->assertStringContainsString('<html lang="es">', $html);
+        $this->assertStringContainsString('data-pagefind-filter="language:es"', $html);
+    }
+
+    public function testLanguageValueIsEscaped(): void
+    {
+        $html = PagefindHtmlBuilder::build(
+            id: 'doc-6',
+            title: 'Test',
+            body: 'Body',
+            url: 'https://example.com',
+            language: 'zh-Hant',
+        );
+
+        $this->assertStringContainsString('<html lang="zh-Hant">', $html);
+        $this->assertStringContainsString('data-pagefind-filter="language:zh-Hant"', $html);
     }
 }

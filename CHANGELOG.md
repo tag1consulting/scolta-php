@@ -6,7 +6,10 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
-_No changes yet._
+### Added
+- **`ContentItem::$language`** (default `'en'`): New optional constructor parameter. Platform adapters pass the BCP-47 language code so the exporter and HTML builder can tag each document with the correct language.
+- **`PagefindHtmlBuilder::build()` now accepts `string $language = 'en'`**: The generated HTML now includes `<html lang="...">` and `<span data-pagefind-filter="language:...">` so Pagefind can filter search results by language. Existing callers are unaffected (defaults to `'en'`).
+- **`ContentExporter::export()` forwards language to HTML output**: The `language` field on `ContentItem` is now passed through to `PagefindHtmlBuilder`, so every exported HTML file carries the correct `lang` attribute and language filter span.
 
 ## [0.3.7] - 2026-04-30
 

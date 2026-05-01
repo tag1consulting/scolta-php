@@ -80,6 +80,7 @@ class ContentExporter
             $item->url,
             $item->date,
             $item->siteName,
+            $item->language,
         );
 
         $exportPath = "{$this->outputDir}/{$item->id}.html";
