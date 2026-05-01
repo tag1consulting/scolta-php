@@ -4,7 +4,7 @@ All notable changes to scolta-php will be documented in this file.
 
 This project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages.
 
-## [Unreleased]
+## [0.3.8] - 2026-05-01
 
 ### Added
 - **`ContentItem::$language`** (default `'en'`): New optional constructor parameter. Platform adapters pass the BCP-47 language code so the exporter and HTML builder can tag each document with the correct language.
