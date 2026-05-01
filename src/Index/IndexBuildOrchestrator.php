@@ -35,6 +35,10 @@ final class IndexBuildOrchestrator
         ?StorageDriverInterface $storage = null,
     ) {
         $this->coordinator = new BuildCoordinator($stateDir, $hmacSecret);
+        // TODO: Per-document language stemming. Currently the entire index uses
+        // one language's stemming rules. Multilingual content is indexed and
+        // searchable but stemming quality degrades for non-primary languages.
+        // The binary/Pagefind path handles this correctly via <html lang="...">.
         $this->builder     = new InvertedIndexBuilder(new Tokenizer(), new Stemmer($language));
         $this->merger      = new IndexMerger();
         $this->storage     = $storage ?? new FilesystemDriver();

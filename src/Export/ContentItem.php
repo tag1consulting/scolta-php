@@ -26,6 +26,8 @@ class ContentItem
         public readonly string $date,
         /** Site name for Pagefind filtering/faceting. */
         public readonly string $siteName = '',
+        /** Language code for multi-language Pagefind filtering. */
+        public readonly string $language = 'en',
     ) {
     }
 }

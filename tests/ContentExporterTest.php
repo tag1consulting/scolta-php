@@ -145,6 +145,28 @@ class ContentExporterTest extends TestCase
         $this->assertStringContainsString('Good Article', $html);
     }
 
+    public function testExportIncludesLanguageInHtml(): void
+    {
+        $exporter = new ContentExporter($this->tmpDir, minContentLength: 10);
+        $exporter->prepareOutputDir();
+
+        $item = new ContentItem(
+            id: 'es-1',
+            title: 'Artículo en Español',
+            bodyHtml: '<p>Este es un artículo en español con suficiente contenido para indexar.</p>',
+            url: 'https://x.com/es/articulo',
+            date: '2024-06-15',
+            siteName: 'Mi Sitio',
+            language: 'es',
+        );
+
+        $exporter->export($item);
+
+        $html = file_get_contents($this->tmpDir . '/es-1.html');
+        $this->assertStringContainsString('<html lang="es">', $html);
+        $this->assertStringContainsString('data-pagefind-filter="language:es"', $html);
+    }
+
     public function testExportTracksMultipleItems(): void
     {
         $exporter = new ContentExporter($this->tmpDir, minContentLength: 20);
