@@ -341,6 +341,70 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals(20, $js['PHRASE_WINDOW']);
     }
 
+    // -------------------------------------------------------------------
+    // Preset system
+    // -------------------------------------------------------------------
+
+    public function testDefaultPresetIsEmpty(): void
+    {
+        $config = new ScoltaConfig();
+        $this->assertSame('', $config->preset);
+    }
+
+    public function testGetPresetsReturnsAllPresets(): void
+    {
+        $presets = ScoltaConfig::getPresets();
+        $this->assertIsArray($presets);
+        $this->assertArrayHasKey('content_catalog', $presets);
+    }
+
+    public function testContentCatalogPresetSetsExpectedDefaults(): void
+    {
+        $config = ScoltaConfig::fromArray(['preset' => 'content_catalog']);
+
+        $this->assertSame('content_catalog', $config->preset);
+        $this->assertSame('none', $config->recencyStrategy);
+        $this->assertEquals(2.0, $config->titleMatchBoost);
+        $this->assertEquals(2.5, $config->titleAllTermsMultiplier);
+        $this->assertEquals(0.5, $config->contentMatchBoost);
+        $this->assertEquals(15, $config->aiSummaryTopN);
+        $this->assertEquals(75, $config->maxPagefindResults);
+        $this->assertEquals(12, $config->resultsPerPage);
+    }
+
+    public function testExplicitValuesOverridePreset(): void
+    {
+        $config = ScoltaConfig::fromArray([
+            'preset' => 'content_catalog',
+            'title_match_boost' => 3.0,
+            'results_per_page' => 20,
+        ]);
+
+        // Explicit values win over preset.
+        $this->assertEquals(3.0, $config->titleMatchBoost);
+        $this->assertEquals(20, $config->resultsPerPage);
+        // Preset values not explicitly overridden remain.
+        $this->assertSame('none', $config->recencyStrategy);
+        $this->assertEquals(2.5, $config->titleAllTermsMultiplier);
+    }
+
+    public function testUnknownPresetIsIgnoredGracefully(): void
+    {
+        $config = ScoltaConfig::fromArray(['preset' => 'nonexistent_preset']);
+        // Unknown preset — property stays empty, defaults apply.
+        $this->assertSame('', $config->preset);
+        $this->assertEquals(1.0, $config->titleMatchBoost);
+    }
+
+    public function testFromArrayWithoutPresetPreservesOldBehavior(): void
+    {
+        $config = ScoltaConfig::fromArray(['title_match_boost' => 1.8]);
+        $this->assertSame('', $config->preset);
+        $this->assertEquals(1.8, $config->titleMatchBoost);
+        // Other defaults unchanged.
+        $this->assertSame('exponential', $config->recencyStrategy);
+    }
+
     public function testToJsScoringConfigSensitiveKeysAbsent(): void
     {
         $js = (new ScoltaConfig())->toJsScoringConfig();

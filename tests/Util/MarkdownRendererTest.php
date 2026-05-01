@@ -138,4 +138,48 @@ class MarkdownRendererTest extends TestCase
 
         $this->assertSame($expected, MarkdownRenderer::render($input));
     }
+
+    // -------------------------------------------------------------------
+    // Broken link cleanup (AI truncation recovery)
+    // -------------------------------------------------------------------
+
+    public function testTruncatedLinkNoClosingParenBecomsBold(): void
+    {
+        // AI truncated before closing paren — label should render as bold.
+        $result = MarkdownRenderer::render('Try [Chocolate Cake](https://example.com/recipe');
+        $this->assertStringContainsString('<strong>Chocolate Cake</strong>', $result);
+        $this->assertStringNotContainsString('<a ', $result);
+    }
+
+    public function testOrphanBracketNoBecomesBold(): void
+    {
+        // [text] with no (url) following — label should render as bold.
+        $result = MarkdownRenderer::render('See the [recipe guide] for details');
+        $this->assertStringContainsString('<strong>recipe guide</strong>', $result);
+        $this->assertStringNotContainsString('<a ', $result);
+    }
+
+    public function testValidLinkStillRendersAsAnchorAfterCleanup(): void
+    {
+        // Regression: well-formed links must still work after cleanBrokenLinks runs.
+        $result = MarkdownRenderer::render('[Example](https://example.com)');
+        $this->assertStringContainsString('<a href="https://example.com"', $result);
+        $this->assertStringNotContainsString('<strong>Example</strong>', $result);
+    }
+
+    public function testMixedValidAndBrokenLinksOnSameLine(): void
+    {
+        $input = 'See [Good Link](https://example.com) and also [Broken](https://cut';
+        $result = MarkdownRenderer::render($input);
+        $this->assertStringContainsString('<a href="https://example.com"', $result);
+        $this->assertStringContainsString('<strong>Broken</strong>', $result);
+    }
+
+    public function testOrphanBracketInListItem(): void
+    {
+        $input = '- Try [the recipe] today';
+        $result = MarkdownRenderer::render($input);
+        $this->assertStringContainsString('<li>', $result);
+        $this->assertStringContainsString('<strong>the recipe</strong>', $result);
+    }
 }

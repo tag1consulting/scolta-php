@@ -6,7 +6,16 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
-_No changes yet._
+### Added
+- **`ScoltaConfig::PRESETS` constant and `getPresets()` method**: Named scoring presets that can be applied via `fromArray(['preset' => 'content_catalog'])`. Preset values are applied first; any other keys in the same call override the preset. The initial preset `content_catalog` is tuned for recipe/catalog sites — disables recency decay, boosts title matching, and increases AI summary depth.
+- **`ScoltaConfig::$preset` property**: Tracks which preset (if any) was applied. Defaults to `''` (no preset).
+
+### Fixed
+- **`MarkdownRenderer`: broken/truncated markdown links no longer appear as raw bracket syntax** — `[text](unclosed-url` and orphaned `[text]` patterns (produced when AI output is truncated mid-link) are now converted to `**text**` (bold) rather than passed through as literal bracket characters.
+
+### Changed
+- **Default prompts — VARIETY rule strengthened**: Added explicit stop rule: if writing more than two sentences about a single item, move on. Prevents single-result deep-dives on broad queries.
+- **Default prompts — CATEGORY curation rule added**: Category-level queries ("chocolate recipes", "vegan appetizers") are now treated as browse requests; each bullet must be a different option within the category.
 
 ## [0.3.8] - 2026-05-01
 

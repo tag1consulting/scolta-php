@@ -93,14 +93,53 @@ class ScoltaConfig
     /** @var string 'auto' | 'php' | 'binary' */
     public string $indexer = 'auto';
 
+    // -- Scoring preset --
+    /** @var string Named preset to apply before explicit overrides (empty = no preset). */
+    public string $preset = '';
+
+    /**
+     * Named scoring presets. Applied by fromArray() before explicit values so
+     * site-level overrides always win.
+     *
+     * @var array<string, array<string, mixed>>
+     */
+    public const PRESETS = [
+        'content_catalog' => [
+            'recency_strategy' => 'none',
+            'title_match_boost' => 2.0,
+            'title_all_terms_multiplier' => 2.5,
+            'content_match_boost' => 0.5,
+            'ai_summary_top_n' => 15,
+            'max_pagefind_results' => 75,
+            'results_per_page' => 12,
+        ],
+    ];
+
     /**
      * Create from an associative array (e.g., from Drupal config, wp_options, or Laravel config).
+     *
+     * If a `preset` key is present, the named preset's values are applied first.
+     * Any other keys in `$values` override the preset.
      */
     public static function fromArray(array $values): self
     {
         $config = new self();
 
+        // Apply preset defaults before explicit values so overrides always win.
+        if (!empty($values['preset']) && isset(self::PRESETS[$values['preset']])) {
+            $config->preset = $values['preset'];
+            foreach (self::PRESETS[$values['preset']] as $key => $value) {
+                $property = lcfirst(str_replace('_', '', ucwords($key, '_')));
+                if (property_exists($config, $property)) {
+                    $config->$property = $value;
+                }
+            }
+        }
+
         foreach ($values as $key => $value) {
+            if ($key === 'preset') {
+                continue;
+            }
             // Convert snake_case keys to camelCase property names.
             $property = lcfirst(str_replace('_', '', ucwords($key, '_')));
             if (property_exists($config, $property)) {
@@ -109,6 +148,16 @@ class ScoltaConfig
         }
 
         return $config;
+    }
+
+    /**
+     * Return all available preset names and their default values.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    public static function getPresets(): array
+    {
+        return self::PRESETS;
     }
 
     /**

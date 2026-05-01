@@ -122,6 +122,18 @@ factor before being added to the final score; the title boost is unaffected.
 | `promptSummarize` | string | `''` | Custom prompt for summarization (empty = use DefaultPrompts) |
 | `promptFollowUp` | string | `''` | Custom prompt for follow-up conversations (empty = use DefaultPrompts) |
 
+### Scoring Presets
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `preset` | string | `''` | Named scoring preset to apply before explicit values (empty = no preset). Preset values are overridden by any keys also present in the same `fromArray()` call. |
+
+Available presets:
+
+| Preset | Purpose | Key Changes |
+|--------|---------|-------------|
+| `content_catalog` | Recipe/catalog sites where content quality matters more than freshness | `recencyStrategy: none`, `titleMatchBoost: 2.0`, `titleAllTermsMultiplier: 2.5`, `contentMatchBoost: 0.5`, `aiSummaryTopN: 15`, `maxPagefindResults: 75`, `resultsPerPage: 12` |
+
 ## Platform Config Mapping
 
 Each platform adapter maps its native config format to `ScoltaConfig::fromArray()`. The table below shows the snake_case key used in each platform's config system.
@@ -209,12 +221,30 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 
 Creates a config instance from an associative array. Keys are expected in snake_case and are automatically converted to camelCase property names. Unknown keys are silently ignored.
 
+If a `preset` key is present, the named preset's values are applied first so that any other keys in the same call override them.
+
 ```php
+// Use a preset with a site-specific override.
+$config = ScoltaConfig::fromArray([
+    'preset' => 'content_catalog',
+    'results_per_page' => 20,  // overrides the preset's default of 12
+]);
+
+// Without a preset.
 $config = ScoltaConfig::fromArray([
     'ai_provider' => 'anthropic',
     'title_match_boost' => 1.2,
     'results_per_page' => 20,
 ]);
+```
+
+### `ScoltaConfig::getPresets(): array`
+
+Returns all available preset names and their default values.
+
+```php
+$presets = ScoltaConfig::getPresets();
+// ['content_catalog' => ['recency_strategy' => 'none', ...]]
 ```
 
 ### `ScoltaConfig::toJsScoringConfig(): array`

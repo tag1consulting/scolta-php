@@ -78,6 +78,8 @@ final class MarkdownRenderer
      */
     private static function renderInline(string $text): string
     {
+        $text = self::cleanBrokenLinks($text);
+
         // Escape all HTML entities first for XSS safety.
         $text = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
 
@@ -91,6 +93,21 @@ final class MarkdownRenderer
             $text,
         );
 
+        return $text;
+    }
+
+    /**
+     * Remove or salvage broken markdown link syntax produced by truncated AI output.
+     *
+     * Converts [text](unclosed-url to **text** and [text] (no url) to **text**.
+     * Must run before htmlspecialchars() since it matches raw markdown characters.
+     */
+    private static function cleanBrokenLinks(string $text): string
+    {
+        // [text]( with no closing ) — truncated URL, keep the label as bold.
+        $text = preg_replace('/\[([^\]]+)\]\([^)]*$/', '**$1**', $text);
+        // [text] with no following (url) — orphaned bracket, keep label as bold.
+        $text = preg_replace('/\[([^\]]+)\](?!\()/', '**$1**', $text);
         return $text;
     }
 }
