@@ -6,6 +6,8 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-05-02
+
 ### Added
 - **`ScoltaConfig::PRESETS` constant and `getPresets()` method**: Named scoring presets that can be applied via `fromArray(['preset' => 'content_catalog'])`. Preset values are applied first; any other keys in the same call override the preset. Five preset entries ship in this release (including `'none'` for the default / no-preset state):
   - `none` — no preset; all scoring parameters use Scolta defaults
