@@ -98,55 +98,83 @@ class ScoltaConfig
     public string $preset = '';
 
     /**
-     * Named scoring presets. Applied by fromArray() before explicit values so
-     * site-level overrides always win.
+     * Named scoring presets with labels and descriptions for adapter UIs.
      *
-     * @var array<string, array<string, mixed>>
+     * Each entry has:
+     *   'label'       — human-readable name for dropdowns
+     *   'description' — one-paragraph explanation shown to site admins
+     *   'values'      — snake_case scoring parameters passed to fromArray()
+     *
+     * Applied by fromArray() before explicit values so site-level overrides
+     * always win.
+     *
+     * @var array<string, array{label: string, description: string, values: array<string, mixed>}>
      */
     public const PRESETS = [
+        'none' => [
+            'label' => 'Start from Scratch',
+            'description' => 'No preset applied. All scoring parameters use Scolta defaults. This is your starting point for fully custom configuration — select this as your starting point — or leave it as-is. You can optionally adjust any individual setting below.',
+            'values' => [],
+        ],
         'content_catalog' => [
-            'recency_strategy' => 'none',
-            'title_match_boost' => 2.0,
-            'title_all_terms_multiplier' => 2.5,
-            'content_match_boost' => 0.5,
-            'ai_summary_top_n' => 15,
-            'max_pagefind_results' => 75,
-            'results_per_page' => 12,
+            'label' => 'Recipe & Content Catalog',
+            'description' => 'Best for recipe sites, wikis, and content collections with structured titles. Strongly prioritizes title matches — a recipe called "Chocolate Brownies" ranks high for that search — and shows more results per page for browsing. Newer and older content rank equally since catalog items stay relevant over time. Select this as your starting point — or leave it as-is. You can optionally adjust any individual setting below.',
+            'values' => [
+                'recency_strategy' => 'none',
+                'title_match_boost' => 2.0,
+                'title_all_terms_multiplier' => 2.5,
+                'content_match_boost' => 0.5,
+                'ai_summary_top_n' => 15,
+                'max_pagefind_results' => 75,
+                'results_per_page' => 12,
+            ],
         ],
         'reference' => [
-            'recency_strategy' => 'none',
-            'title_match_boost' => 2.0,
-            'title_all_terms_multiplier' => 2.5,
-            'content_match_boost' => 0.5,
-            'expand_primary_weight' => 0.6,
-            'ai_summary_top_n' => 15,
-            'max_pagefind_results' => 75,
-            'results_per_page' => 12,
-            'excerpt_length' => 350,
+            'label' => 'Documentation & Reference',
+            'description' => 'Best for knowledge bases, documentation, encyclopedias, and compliance references. Strongly favors exact title matches and understands domain synonyms (e.g., searching "GDPR" also finds "data protection regulation"). Newer and older content rank equally since reference material stays relevant over time. Select this as your starting point — or leave it as-is. You can optionally adjust any individual setting below.',
+            'values' => [
+                'recency_strategy' => 'none',
+                'title_match_boost' => 2.0,
+                'title_all_terms_multiplier' => 2.5,
+                'content_match_boost' => 0.5,
+                'expand_primary_weight' => 0.6,
+                'ai_summary_top_n' => 15,
+                'max_pagefind_results' => 75,
+                'results_per_page' => 12,
+                'excerpt_length' => 350,
+            ],
         ],
         'ecommerce' => [
-            'recency_strategy' => 'none',
-            'title_match_boost' => 1.5,
-            'title_all_terms_multiplier' => 2.0,
-            'content_match_boost' => 0.6,
-            'expand_primary_weight' => 0.7,
-            'ai_summary_top_n' => 12,
-            'max_pagefind_results' => 75,
-            'results_per_page' => 12,
-            'excerpt_length' => 300,
+            'label' => 'E-commerce & Product Store',
+            'description' => 'Best for online stores and product catalogs. People shop in their own words, not yours — so this preset reads product descriptions closely and interprets searches broadly. A search for "sparkly blue gift" finds lapis lazuli, not just items with those exact words. Newer and older products rank equally. Select this as your starting point — or leave it as-is. You can optionally adjust any individual setting below.',
+            'values' => [
+                'recency_strategy' => 'none',
+                'title_match_boost' => 1.5,
+                'title_all_terms_multiplier' => 2.0,
+                'content_match_boost' => 0.6,
+                'expand_primary_weight' => 0.7,
+                'ai_summary_top_n' => 12,
+                'max_pagefind_results' => 75,
+                'results_per_page' => 12,
+                'excerpt_length' => 300,
+            ],
         ],
         'blog' => [
-            'recency_strategy' => 'exponential',
-            'recency_boost_max' => 0.1,
-            'recency_half_life_days' => 365,
-            'title_match_boost' => 1.5,
-            'title_all_terms_multiplier' => 2.0,
-            'content_match_boost' => 0.5,
-            'expand_primary_weight' => 0.7,
-            'ai_summary_top_n' => 12,
-            'max_pagefind_results' => 60,
-            'results_per_page' => 10,
-            'excerpt_length' => 350,
+            'label' => 'Blog & Editorial',
+            'description' => 'Best for blogs, news sites, and editorial content. Gives a gentle boost to newer posts while keeping older content findable, and interprets searches broadly so readers searching by topic or feeling ("scary moment", "funny story") get good results. Select this as your starting point — or leave it as-is. You can optionally adjust any individual setting below.',
+            'values' => [
+                'recency_strategy' => 'exponential',
+                'recency_boost_max' => 0.1,
+                'recency_half_life_days' => 365,
+                'title_match_boost' => 1.5,
+                'title_all_terms_multiplier' => 2.0,
+                'content_match_boost' => 0.5,
+                'expand_primary_weight' => 0.7,
+                'ai_summary_top_n' => 12,
+                'max_pagefind_results' => 60,
+                'results_per_page' => 10,
+                'excerpt_length' => 350,
+            ],
         ],
     ];
 
@@ -163,7 +191,10 @@ class ScoltaConfig
         // Apply preset defaults before explicit values so overrides always win.
         if (!empty($values['preset']) && isset(self::PRESETS[$values['preset']])) {
             $config->preset = $values['preset'];
-            foreach (self::PRESETS[$values['preset']] as $key => $value) {
+            // Support both new nested structure (values key) and legacy flat array.
+            $presetData = self::PRESETS[$values['preset']];
+            $presetValues = $presetData['values'] ?? $presetData;
+            foreach ($presetValues as $key => $value) {
                 $property = lcfirst(str_replace('_', '', ucwords($key, '_')));
                 if (property_exists($config, $property)) {
                     $config->$property = $value;
@@ -186,13 +217,29 @@ class ScoltaConfig
     }
 
     /**
-     * Return all available preset names and their default values.
+     * Return all available presets with their labels, descriptions, and values.
      *
-     * @return array<string, array<string, mixed>>
+     * Adapter UIs read from this to build dropdowns and help text.
+     * The 'none' entry represents "no preset — use defaults."
+     *
+     * @return array<string, array{label: string, description: string, values: array<string, mixed>}>
      */
     public static function getPresets(): array
     {
         return self::PRESETS;
+    }
+
+    /**
+     * Return only the scoring values for the named preset.
+     *
+     * Returns an empty array for 'none' or unknown preset names.
+     *
+     * @param string $name Preset key (e.g., 'content_catalog').
+     * @return array<string, mixed> Snake_case scoring parameters.
+     */
+    public static function getPresetValues(string $name): array
+    {
+        return self::PRESETS[$name]['values'] ?? [];
     }
 
     /**

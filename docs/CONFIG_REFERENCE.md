@@ -128,14 +128,17 @@ factor before being added to the final score; the title boost is unaffected.
 |----------|------|---------|-------------|
 | `preset` | string | `''` | Named scoring preset to apply before explicit values (empty = no preset). Preset values are overridden by any keys also present in the same `fromArray()` call. |
 
+Each preset entry has three keys: `label` (human-readable name for UI dropdowns), `description` (one-paragraph explanation for admins), and `values` (scoring parameters). Adapter UIs read from `getPresets()` to build pickers without hardcoding any of these strings.
+
 Available presets:
 
-| Preset | Purpose | Key Changes |
-|--------|---------|-------------|
-| `content_catalog` | Recipe/catalog sites where content quality matters more than freshness | `recencyStrategy: none`, `titleMatchBoost: 2.0`, `titleAllTermsMultiplier: 2.5`, `contentMatchBoost: 0.5`, `aiSummaryTopN: 15`, `maxPagefindResults: 75`, `resultsPerPage: 12` |
-| `reference` | Knowledge bases, documentation, encyclopedias, medical/compliance references | `recencyStrategy: none`, `titleMatchBoost: 2.0`, `titleAllTermsMultiplier: 2.5`, `contentMatchBoost: 0.5`, `expandPrimaryWeight: 0.6`, `aiSummaryTopN: 15`, `maxPagefindResults: 75`, `resultsPerPage: 12`, `excerptLength: 350` |
-| `ecommerce` | Product catalogs and stores with natural-language queries | `recencyStrategy: none`, `titleMatchBoost: 1.5`, `titleAllTermsMultiplier: 2.0`, `contentMatchBoost: 0.6`, `expandPrimaryWeight: 0.7`, `aiSummaryTopN: 12`, `maxPagefindResults: 75`, `resultsPerPage: 12`, `excerptLength: 300` |
-| `blog` | Narrative/editorial content with gentle temporal relevance | `recencyStrategy: exponential`, `recencyBoostMax: 0.1`, `recencyHalfLifeDays: 365`, `titleMatchBoost: 1.5`, `titleAllTermsMultiplier: 2.0`, `contentMatchBoost: 0.5`, `expandPrimaryWeight: 0.7`, `aiSummaryTopN: 12`, `maxPagefindResults: 60`, `resultsPerPage: 10`, `excerptLength: 350` |
+| Preset | Label | Purpose | Key `values` |
+|--------|-------|---------|-------------|
+| `none` | Start from Scratch | No preset; use defaults | _(empty)_ |
+| `content_catalog` | Recipe & Content Catalog | Recipe/catalog sites where content quality matters more than freshness | `recencyStrategy: none`, `titleMatchBoost: 2.0`, `titleAllTermsMultiplier: 2.5`, `contentMatchBoost: 0.5`, `aiSummaryTopN: 15`, `maxPagefindResults: 75`, `resultsPerPage: 12` |
+| `reference` | Documentation & Reference | Knowledge bases, documentation, encyclopedias, medical/compliance references | `recencyStrategy: none`, `titleMatchBoost: 2.0`, `titleAllTermsMultiplier: 2.5`, `contentMatchBoost: 0.5`, `expandPrimaryWeight: 0.6`, `aiSummaryTopN: 15`, `maxPagefindResults: 75`, `resultsPerPage: 12`, `excerptLength: 350` |
+| `ecommerce` | E-commerce & Product Store | Product catalogs and stores with natural-language queries | `recencyStrategy: none`, `titleMatchBoost: 1.5`, `titleAllTermsMultiplier: 2.0`, `contentMatchBoost: 0.6`, `expandPrimaryWeight: 0.7`, `aiSummaryTopN: 12`, `maxPagefindResults: 75`, `resultsPerPage: 12`, `excerptLength: 300` |
+| `blog` | Blog & Editorial | Narrative/editorial content with gentle temporal relevance | `recencyStrategy: exponential`, `recencyBoostMax: 0.1`, `recencyHalfLifeDays: 365`, `titleMatchBoost: 1.5`, `titleAllTermsMultiplier: 2.0`, `contentMatchBoost: 0.5`, `expandPrimaryWeight: 0.7`, `aiSummaryTopN: 12`, `maxPagefindResults: 60`, `resultsPerPage: 10`, `excerptLength: 350` |
 
 ### Choosing a Preset
 
@@ -253,11 +256,26 @@ $config = ScoltaConfig::fromArray([
 
 ### `ScoltaConfig::getPresets(): array`
 
-Returns all available preset names and their default values.
+Returns all available presets with their full metadata (label, description, values).
 
 ```php
 $presets = ScoltaConfig::getPresets();
-// ['content_catalog' => ['recency_strategy' => 'none', ...]]
+// [
+//   'none' => ['label' => 'Start from Scratch', 'description' => '...', 'values' => []],
+//   'content_catalog' => ['label' => 'Recipe & Content Catalog', 'description' => '...', 'values' => [...]],
+//   ...
+// ]
+```
+
+### `ScoltaConfig::getPresetValues(string $name): array`
+
+Returns only the scoring `values` for a named preset. Returns `[]` for `'none'` or unknown names.
+
+```php
+$values = ScoltaConfig::getPresetValues('content_catalog');
+// ['recency_strategy' => 'none', 'title_match_boost' => 2.0, ...]
+
+ScoltaConfig::getPresetValues('none');  // []
 ```
 
 ### `ScoltaConfig::toJsScoringConfig(): array`

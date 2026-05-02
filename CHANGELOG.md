@@ -7,11 +7,14 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ## [Unreleased]
 
 ### Added
-- **`ScoltaConfig::PRESETS` constant and `getPresets()` method**: Named scoring presets that can be applied via `fromArray(['preset' => 'content_catalog'])`. Preset values are applied first; any other keys in the same call override the preset. Four presets ship in this release:
+- **`ScoltaConfig::PRESETS` constant and `getPresets()` method**: Named scoring presets that can be applied via `fromArray(['preset' => 'content_catalog'])`. Preset values are applied first; any other keys in the same call override the preset. Five preset entries ship in this release (including `'none'` for the default / no-preset state):
+  - `none` — no preset; all scoring parameters use Scolta defaults
   - `content_catalog` — recipe/catalog sites: recency off, strong title boost, browse-oriented result depth
   - `reference` — knowledge bases, docs, encyclopedias, medical/compliance: recency off, precise title lookup, higher synonym expansion weight, longer excerpts
   - `ecommerce` — product stores: recency off, description-weighted scoring, high synonym expansion for natural-language queries
   - `blog` — narrative/editorial content: gentle recency bias, moderate title boost, high synonym expansion for thematic queries, longer excerpts
+- **`ScoltaConfig::getPresets()` now returns rich metadata**: Each preset entry includes `label` (human-readable name for UI dropdowns), `description` (explanation for admins), and `values` (scoring parameters). Adapter UIs read from this to build pickers without hardcoding strings.
+- **`ScoltaConfig::getPresetValues(string $name): array`**: New helper that returns only the scoring `values` sub-array for a named preset, ready for use with `fromArray()`. Returns empty array for `'none'` or unknown names.
 - **`ScoltaConfig::$preset` property**: Tracks which preset (if any) was applied. Defaults to `''` (no preset).
 
 ### Fixed

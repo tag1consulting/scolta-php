@@ -355,7 +355,41 @@ class ScoltaConfigTest extends TestCase
     {
         $presets = ScoltaConfig::getPresets();
         $this->assertIsArray($presets);
-        $this->assertArrayHasKey('content_catalog', $presets);
+
+        $expectedKeys = ['none', 'content_catalog', 'reference', 'ecommerce', 'blog'];
+        foreach ($expectedKeys as $key) {
+            $this->assertArrayHasKey($key, $presets, "Missing preset: {$key}");
+            $this->assertArrayHasKey('label', $presets[$key], "Preset '{$key}' missing label");
+            $this->assertArrayHasKey('description', $presets[$key], "Preset '{$key}' missing description");
+            $this->assertArrayHasKey('values', $presets[$key], "Preset '{$key}' missing values");
+            $this->assertNotEmpty($presets[$key]['label'], "Preset '{$key}' label is empty");
+            $this->assertNotEmpty($presets[$key]['description'], "Preset '{$key}' description is empty");
+            $this->assertStringContainsString(
+                'starting point',
+                $presets[$key]['description'],
+                "Preset '{$key}' description must contain 'starting point'"
+            );
+        }
+    }
+
+    public function testGetPresetValuesReturnsOnlyValues(): void
+    {
+        $values = ScoltaConfig::getPresetValues('content_catalog');
+        $this->assertIsArray($values);
+        $this->assertArrayHasKey('recency_strategy', $values);
+        $this->assertArrayNotHasKey('label', $values);
+        $this->assertArrayNotHasKey('description', $values);
+        $this->assertArrayNotHasKey('values', $values);
+    }
+
+    public function testGetPresetValuesForNoneReturnsEmpty(): void
+    {
+        $this->assertSame([], ScoltaConfig::getPresetValues('none'));
+    }
+
+    public function testGetPresetValuesForUnknownReturnsEmpty(): void
+    {
+        $this->assertSame([], ScoltaConfig::getPresetValues('nonexistent'));
     }
 
     public function testContentCatalogPresetSetsExpectedDefaults(): void
