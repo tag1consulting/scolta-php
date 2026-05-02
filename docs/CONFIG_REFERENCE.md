@@ -133,6 +133,19 @@ Available presets:
 | Preset | Purpose | Key Changes |
 |--------|---------|-------------|
 | `content_catalog` | Recipe/catalog sites where content quality matters more than freshness | `recencyStrategy: none`, `titleMatchBoost: 2.0`, `titleAllTermsMultiplier: 2.5`, `contentMatchBoost: 0.5`, `aiSummaryTopN: 15`, `maxPagefindResults: 75`, `resultsPerPage: 12` |
+| `reference` | Knowledge bases, documentation, encyclopedias, medical/compliance references | `recencyStrategy: none`, `titleMatchBoost: 2.0`, `titleAllTermsMultiplier: 2.5`, `contentMatchBoost: 0.5`, `expandPrimaryWeight: 0.6`, `aiSummaryTopN: 15`, `maxPagefindResults: 75`, `resultsPerPage: 12`, `excerptLength: 350` |
+| `ecommerce` | Product catalogs and stores with natural-language queries | `recencyStrategy: none`, `titleMatchBoost: 1.5`, `titleAllTermsMultiplier: 2.0`, `contentMatchBoost: 0.6`, `expandPrimaryWeight: 0.7`, `aiSummaryTopN: 12`, `maxPagefindResults: 75`, `resultsPerPage: 12`, `excerptLength: 300` |
+| `blog` | Narrative/editorial content with gentle temporal relevance | `recencyStrategy: exponential`, `recencyBoostMax: 0.1`, `recencyHalfLifeDays: 365`, `titleMatchBoost: 1.5`, `titleAllTermsMultiplier: 2.0`, `contentMatchBoost: 0.5`, `expandPrimaryWeight: 0.7`, `aiSummaryTopN: 12`, `maxPagefindResults: 60`, `resultsPerPage: 10`, `excerptLength: 350` |
+
+### Choosing a Preset
+
+| Site type | Preset |
+|-----------|--------|
+| Recipe sites, product/content catalogs | `content_catalog` |
+| Documentation, knowledge bases, encyclopedias, medical/compliance references | `reference` |
+| E-commerce / product stores | `ecommerce` |
+| Blogs, editorial, narrative content | `blog` |
+| News sites | No preset — use defaults with explicit recency tuning (`recencyHalfLifeDays`, `recencyPenaltyAfterDays`) |
 
 ## Platform Config Mapping
 

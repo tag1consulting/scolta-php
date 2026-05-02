@@ -396,6 +396,56 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals(1.0, $config->titleMatchBoost);
     }
 
+    public function testReferencePresetSetsExpectedDefaults(): void
+    {
+        $config = ScoltaConfig::fromArray(['preset' => 'reference']);
+
+        $this->assertSame('reference', $config->preset);
+        $this->assertSame('none', $config->recencyStrategy);
+        $this->assertEquals(2.0, $config->titleMatchBoost);
+        $this->assertEquals(2.5, $config->titleAllTermsMultiplier);
+        $this->assertEquals(0.5, $config->contentMatchBoost);
+        $this->assertEquals(0.6, $config->expandPrimaryWeight);
+        $this->assertEquals(15, $config->aiSummaryTopN);
+        $this->assertEquals(75, $config->maxPagefindResults);
+        $this->assertEquals(12, $config->resultsPerPage);
+        $this->assertEquals(350, $config->excerptLength);
+    }
+
+    public function testEcommercePresetSetsExpectedDefaults(): void
+    {
+        $config = ScoltaConfig::fromArray(['preset' => 'ecommerce']);
+
+        $this->assertSame('ecommerce', $config->preset);
+        $this->assertSame('none', $config->recencyStrategy);
+        $this->assertEquals(1.5, $config->titleMatchBoost);
+        $this->assertEquals(2.0, $config->titleAllTermsMultiplier);
+        $this->assertEquals(0.6, $config->contentMatchBoost);
+        $this->assertEquals(0.7, $config->expandPrimaryWeight);
+        $this->assertEquals(12, $config->aiSummaryTopN);
+        $this->assertEquals(75, $config->maxPagefindResults);
+        $this->assertEquals(12, $config->resultsPerPage);
+        $this->assertEquals(300, $config->excerptLength);
+    }
+
+    public function testBlogPresetSetsExpectedDefaults(): void
+    {
+        $config = ScoltaConfig::fromArray(['preset' => 'blog']);
+
+        $this->assertSame('blog', $config->preset);
+        $this->assertSame('exponential', $config->recencyStrategy);
+        $this->assertEquals(0.1, $config->recencyBoostMax);
+        $this->assertEquals(365, $config->recencyHalfLifeDays);
+        $this->assertEquals(1.5, $config->titleMatchBoost);
+        $this->assertEquals(2.0, $config->titleAllTermsMultiplier);
+        $this->assertEquals(0.5, $config->contentMatchBoost);
+        $this->assertEquals(0.7, $config->expandPrimaryWeight);
+        $this->assertEquals(12, $config->aiSummaryTopN);
+        $this->assertEquals(60, $config->maxPagefindResults);
+        $this->assertEquals(10, $config->resultsPerPage);
+        $this->assertEquals(350, $config->excerptLength);
+    }
+
     public function testFromArrayWithoutPresetPreservesOldBehavior(): void
     {
         $config = ScoltaConfig::fromArray(['title_match_boost' => 1.8]);
