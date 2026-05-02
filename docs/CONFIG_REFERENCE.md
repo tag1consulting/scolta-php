@@ -122,6 +122,31 @@ factor before being added to the final score; the title boost is unaffected.
 | `promptSummarize` | string | `''` | Custom prompt for summarization (empty = use DefaultPrompts) |
 | `promptFollowUp` | string | `''` | Custom prompt for follow-up conversations (empty = use DefaultPrompts) |
 
+### Scoring Presets
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `preset` | string | `''` | Named scoring preset to apply before explicit values (empty = no preset). Preset values are overridden by any keys also present in the same `fromArray()` call. |
+
+Available presets:
+
+| Preset | Purpose | Key Changes |
+|--------|---------|-------------|
+| `content_catalog` | Recipe/catalog sites where content quality matters more than freshness | `recencyStrategy: none`, `titleMatchBoost: 2.0`, `titleAllTermsMultiplier: 2.5`, `contentMatchBoost: 0.5`, `aiSummaryTopN: 15`, `maxPagefindResults: 75`, `resultsPerPage: 12` |
+| `reference` | Knowledge bases, documentation, encyclopedias, medical/compliance references | `recencyStrategy: none`, `titleMatchBoost: 2.0`, `titleAllTermsMultiplier: 2.5`, `contentMatchBoost: 0.5`, `expandPrimaryWeight: 0.6`, `aiSummaryTopN: 15`, `maxPagefindResults: 75`, `resultsPerPage: 12`, `excerptLength: 350` |
+| `ecommerce` | Product catalogs and stores with natural-language queries | `recencyStrategy: none`, `titleMatchBoost: 1.5`, `titleAllTermsMultiplier: 2.0`, `contentMatchBoost: 0.6`, `expandPrimaryWeight: 0.7`, `aiSummaryTopN: 12`, `maxPagefindResults: 75`, `resultsPerPage: 12`, `excerptLength: 300` |
+| `blog` | Narrative/editorial content with gentle temporal relevance | `recencyStrategy: exponential`, `recencyBoostMax: 0.1`, `recencyHalfLifeDays: 365`, `titleMatchBoost: 1.5`, `titleAllTermsMultiplier: 2.0`, `contentMatchBoost: 0.5`, `expandPrimaryWeight: 0.7`, `aiSummaryTopN: 12`, `maxPagefindResults: 60`, `resultsPerPage: 10`, `excerptLength: 350` |
+
+### Choosing a Preset
+
+| Site type | Preset |
+|-----------|--------|
+| Recipe sites, product/content catalogs | `content_catalog` |
+| Documentation, knowledge bases, encyclopedias, medical/compliance references | `reference` |
+| E-commerce / product stores | `ecommerce` |
+| Blogs, editorial, narrative content | `blog` |
+| News sites | No preset — use defaults with explicit recency tuning (`recencyHalfLifeDays`, `recencyPenaltyAfterDays`) |
+
 ## Platform Config Mapping
 
 Each platform adapter maps its native config format to `ScoltaConfig::fromArray()`. The table below shows the snake_case key used in each platform's config system.
@@ -209,12 +234,30 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 
 Creates a config instance from an associative array. Keys are expected in snake_case and are automatically converted to camelCase property names. Unknown keys are silently ignored.
 
+If a `preset` key is present, the named preset's values are applied first so that any other keys in the same call override them.
+
 ```php
+// Use a preset with a site-specific override.
+$config = ScoltaConfig::fromArray([
+    'preset' => 'content_catalog',
+    'results_per_page' => 20,  // overrides the preset's default of 12
+]);
+
+// Without a preset.
 $config = ScoltaConfig::fromArray([
     'ai_provider' => 'anthropic',
     'title_match_boost' => 1.2,
     'results_per_page' => 20,
 ]);
+```
+
+### `ScoltaConfig::getPresets(): array`
+
+Returns all available preset names and their default values.
+
+```php
+$presets = ScoltaConfig::getPresets();
+// ['content_catalog' => ['recency_strategy' => 'none', ...]]
 ```
 
 ### `ScoltaConfig::toJsScoringConfig(): array`
