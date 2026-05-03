@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Fixed
+- **`ContentItem` normalizes absolute URLs to relative paths** — the pagefind index stores URLs verbatim into the binary `.pf_fragment` files at build time. When a DDEV local URL (`https://myapp.ddev.site/path`) was passed as `ContentItem::$url`, that domain was baked into the index and served as the click-through URL on the hosted demo. The constructor now strips scheme and host from any URL that contains `://`, leaving only the path (and optional query/fragment). Relative URLs pass through unchanged. All platform adapters benefit automatically; no code changes needed in Drupal, WordPress, or Laravel integrations. Existing indexes must be rebuilt to get correct relative URLs.
+
 ### Changed
 - **`content_catalog` preset gains `expand_primary_weight: 0.9`** — validation testing showed that intent-based queries ("something about space") return zero raw pagefind results because stop words dominate the query. The AI expands to useful terms ("astronomy, celestial bodies") but at the old weight (default 0.5) those expanded results were diluted by the empty primary set. 0.9 gives AI-expanded results nearly equal weight to primary results, recovering the intent-based query path. Raised from implicit default (0.5) to 0.9.
 - **`ecommerce` preset `expand_primary_weight` raised to 0.8** — validation testing showed that natural-language product queries ("sparkly blue gift") succeed with AI expansion but the 0.7 weight left expanded results slightly under-weighted. 0.8 brings better balance for informal shopping queries without sacrificing precision for specific product name queries. Raised from 0.7 to 0.8.

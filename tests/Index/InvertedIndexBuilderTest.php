@@ -67,7 +67,7 @@ class InvertedIndexBuilderTest extends TestCase
         ]);
 
         $page = array_values($result['pages'])[0];
-        $this->assertSame('https://example.com/test', $page['url']);
+        $this->assertSame('/test', $page['url']); // absolute URLs are normalized to relative paths by ContentItem
         $this->assertSame('Test Title', $page['title']);
         $this->assertArrayHasKey('wordCount', $page);
         $this->assertGreaterThan(0, $page['wordCount']);
@@ -239,7 +239,8 @@ class InvertedIndexBuilderTest extends TestCase
         $this->assertSame('My Title', $page['meta']['title']);
         $this->assertSame('2026-01-01', $page['meta']['date']);
         // url is a top-level page property, not inside meta (Pagefind convention).
-        $this->assertSame('https://example.com/page', $page['url']);
+        // Absolute URLs are normalized to relative paths by ContentItem.
+        $this->assertSame('/page', $page['url']);
         $this->assertArrayNotHasKey('url', $page['meta']);
     }
 }

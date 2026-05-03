@@ -13,6 +13,9 @@ namespace Tag1\Scolta\Export;
  */
 class ContentItem
 {
+    /** Canonical URL — always stored as a relative path. */
+    public readonly string $url;
+
     public function __construct(
         /** Unique identifier (entity ID, post ID, etc.). Used as filename. */
         public readonly string $id,
@@ -20,8 +23,9 @@ class ContentItem
         public readonly string $title,
         /** Raw HTML body content. May include page chrome that needs stripping. */
         public readonly string $bodyHtml,
-        /** Canonical URL for this content. */
-        public readonly string $url,
+        /** Absolute or relative URL. Absolute URLs are stripped to a path so the
+         *  pagefind index is portable across environments (DDEV → production). */
+        string $url,
         /** Last-modified date in Y-m-d format. */
         public readonly string $date,
         /** Site name for Pagefind filtering/faceting. */
@@ -29,5 +33,15 @@ class ContentItem
         /** Language code for multi-language Pagefind filtering. */
         public readonly string $language = 'en',
     ) {
+        // Strip scheme and host so the baked-in URL works on any domain.
+        // An index built on DDEV (https://myapp.ddev.site/path) must serve
+        // correct links on production (https://myapp.example.com/path).
+        if (str_contains($url, '://')) {
+            $parsed = parse_url($url);
+            $url = ($parsed['path'] ?? '/')
+                . (isset($parsed['query']) ? '?' . $parsed['query'] : '')
+                . (isset($parsed['fragment']) ? '#' . $parsed['fragment'] : '');
+        }
+        $this->url = $url;
     }
 }
