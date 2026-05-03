@@ -401,6 +401,7 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals(2.0, $config->titleMatchBoost);
         $this->assertEquals(2.5, $config->titleAllTermsMultiplier);
         $this->assertEquals(0.5, $config->contentMatchBoost);
+        $this->assertEquals(0.9, $config->expandPrimaryWeight);
         $this->assertEquals(15, $config->aiSummaryTopN);
         $this->assertEquals(75, $config->maxPagefindResults);
         $this->assertEquals(12, $config->resultsPerPage);
@@ -455,7 +456,7 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals(1.5, $config->titleMatchBoost);
         $this->assertEquals(2.0, $config->titleAllTermsMultiplier);
         $this->assertEquals(0.6, $config->contentMatchBoost);
-        $this->assertEquals(0.7, $config->expandPrimaryWeight);
+        $this->assertEquals(0.8, $config->expandPrimaryWeight);
         $this->assertEquals(12, $config->aiSummaryTopN);
         $this->assertEquals(75, $config->maxPagefindResults);
         $this->assertEquals(12, $config->resultsPerPage);
