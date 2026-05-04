@@ -98,7 +98,10 @@ class InvertedIndexBuilder
                 'content' => $content,
                 'wordCount' => $wordCount,
                 'date' => $item->date,
-                'filters' => $item->siteName !== '' ? ['site' => $item->siteName] : [],
+                'filters' => array_merge(
+                    $item->siteName !== '' ? ['site' => $item->siteName] : [],
+                    $item->filters,
+                ),
                 'meta' => array_filter([
                     'title' => $cleanTitle,
                     'date' => $item->date,
