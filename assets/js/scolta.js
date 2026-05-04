@@ -404,7 +404,7 @@
       try {
         const contextItems = topN.map(r => ({
           content: stripHtml(r.data.content || r.data.excerpt || ''),
-          url: r.data.meta?.url || '',
+          url: ((u) => u.startsWith('/') ? window.location.origin + u : u)(r.data.meta?.url || ''),
           title: r.data.meta?.title || '',
         }));
         const extractInput = JSON.stringify({
@@ -502,7 +502,7 @@
     const CONFIG = getInstanceConfig();
     return results.map((r, i) => {
       const title = r.data.meta?.title || "Untitled";
-      const url = r.data.meta?.url || "";
+      const _u = r.data.meta?.url || ""; const url = _u.startsWith("/") ? window.location.origin + _u : _u;
       const useFullContent = i < 2;
       const text = useFullContent
         ? stripHtml(r.data.content || r.data.excerpt || "")
@@ -1161,23 +1161,23 @@
     renderFilters();
     renderResults();
 
-    // Phase 2: Expanded searches — asynchronous merge
-    expandPromise.then(expandedTerms => {
+    // Phase 2+3: Expand, merge, then summarize with the final reordered results.
+    // Summarize is intentionally deferred until after expansion so the AI sees
+    // the same ranking the user sees (expanded terms promote more relevant results).
+    expandPromise.then(async expandedTerms => {
       if (!preserveFilters) {
         lastExpandedTerms = expandedTerms;
       }
       renderExpandedTerms(expandedTerms, query);
-      mergeExpandedSearchResults(expandedTerms, query, searchQuery, preserveFilters, version);
-    });
+      await mergeExpandedSearchResults(expandedTerms, query, searchQuery, preserveFilters, version);
 
-    // Phase 3: AI summarization
-    const earlyExpandedTerms = lastExpandedTerms && !preserveFilters
-      ? null
-      : lastExpandedTerms;
-    const expandedLabel = earlyExpandedTerms
-      ? earlyExpandedTerms.filter(t => t.toLowerCase() !== query.toLowerCase())
-      : [];
-    summarizeResults(query, allScoredResults, expandedLabel);
+      if (version !== searchVersion) return;
+
+      const expandedLabel = expandedTerms
+        ? expandedTerms.filter(t => t.toLowerCase() !== query.toLowerCase())
+        : [];
+      summarizeResults(query, allScoredResults, expandedLabel);
+    });
   }
 
   function clearSearch() {
