@@ -8,6 +8,7 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ### Fixed
 - **AI summary now describes post-expansion results** — `summarizeResults()` was firing in parallel with the expansion merge, so the AI described the Phase 1 literal-keyword ranking while the displayed results showed the semantically-reordered Phase 2 ranking. Summarization is now deferred until after `mergeExpandedSearchResults()` completes. A `searchVersion` staleness check prevents summarizing results from a superseded search.
+- **Relative URLs from pagefind index are absolutized before use** — `ContentItem` normalizes stored URLs to relative paths for portability, but the JS needs absolute URLs in two places: the summarize API call (so the AI can include working links in the overview text) and result card `<a>` href attributes. Both now prepend `window.location.origin` when the URL starts with `/`.
 
 ### Added
 - **`ContentItem::$filters` and `PagefindHtmlBuilder` extra-filter support** — a new optional `filters: array<string, string>` parameter on `ContentItem` lets platform adapters attach arbitrary Pagefind filter attributes (e.g. `['base_topic' => 'Cardiology']`) that bypass `HtmlCleaner` and are emitted directly as `<span data-pagefind-filter="key:value" hidden>` elements in the exported HTML. `InvertedIndexBuilder` merges these into the page's `filters` map so the PHP indexer path also exposes them. Use case: topic-family deduplication, faceted navigation, or any per-document filter that should not be derived from body text.
