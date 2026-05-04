@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Added
+- **`ContentItem::$filters` and `PagefindHtmlBuilder` extra-filter support** — a new optional `filters: array<string, string>` parameter on `ContentItem` lets platform adapters attach arbitrary Pagefind filter attributes (e.g. `['base_topic' => 'Cardiology']`) that bypass `HtmlCleaner` and are emitted directly as `<span data-pagefind-filter="key:value" hidden>` elements in the exported HTML. `InvertedIndexBuilder` merges these into the page's `filters` map so the PHP indexer path also exposes them. Use case: topic-family deduplication, faceted navigation, or any per-document filter that should not be derived from body text.
+
 ### Fixed
 - **`ContentItem` normalizes absolute URLs to relative paths** — the pagefind index stores URLs verbatim into the binary `.pf_fragment` files at build time. When a DDEV local URL (`https://myapp.ddev.site/path`) was passed as `ContentItem::$url`, that domain was baked into the index and served as the click-through URL on the hosted demo. The constructor now strips scheme and host from any URL that contains `://`, leaving only the path (and optional query/fragment). Relative URLs pass through unchanged. All platform adapters benefit automatically; no code changes needed in Drupal, WordPress, or Laravel integrations. Existing indexes must be rebuilt to get correct relative URLs.
 

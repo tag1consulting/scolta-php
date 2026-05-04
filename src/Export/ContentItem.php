@@ -32,6 +32,10 @@ class ContentItem
         public readonly string $siteName = '',
         /** Language code for multi-language Pagefind filtering. */
         public readonly string $language = 'en',
+        /** Extra Pagefind filter attributes keyed by filter name.
+         *  e.g. ['base_topic' => 'Cardiology']. Values pass directly into
+         *  data-pagefind-filter — they bypass HtmlCleaner so HTML is not stripped. */
+        public readonly array $filters = [],
     ) {
         // Strip scheme and host so the baked-in URL works on any domain.
         // An index built on DDEV (https://myapp.ddev.site/path) must serve

@@ -185,6 +185,27 @@ class InvertedIndexBuilderTest extends TestCase
         $this->assertSame(['site' => 'MySite'], $page['filters']);
     }
 
+    public function testCustomFiltersIncluded(): void
+    {
+        $item = new ContentItem(
+            id: 'doc-1',
+            title: 'Title',
+            bodyHtml: '<p>Content for testing purposes here.</p>',
+            url: 'https://x.com',
+            date: '2026-01-01',
+            siteName: 'MySite',
+            filters: ['base_topic' => 'Cardiology', 'region' => 'Europe'],
+        );
+        $result = $this->builder->build([$item]);
+
+        $page = array_values($result['pages'])[0];
+        $this->assertSame([
+            'site' => 'MySite',
+            'base_topic' => 'Cardiology',
+            'region' => 'Europe',
+        ], $page['filters']);
+    }
+
     public function testShortContentSkipped(): void
     {
         $result = $this->builder->build([
