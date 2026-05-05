@@ -6,6 +6,10 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+_No changes yet._
+
+## [0.3.10] - 2026-05-05
+
 ### Fixed
 - **WASM merge URL lookup now handles normalized URL formats** — `merge_results` in WASM may normalize URLs (strip `.html`, trailing slash, lowercase) before deduplication, causing the JS result-data lookup to miss and fall back to a stub object. The data map now indexes each result under four key variants (raw, normalized, slash-stripped, both) and falls through them in order; misses are logged as `[scolta:merge] WASM URL lookup missed`.
 - **Title deduplication threshold lowered to 0.6 Jaccard** — the 0.7 threshold was too permissive for short titles and multi-word proper nouns. Threshold is now 0.6, with an additional secondary condition: any pair sharing ≥3 words where the intersection covers ≥60% of the shorter title is also considered duplicate.
