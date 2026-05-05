@@ -131,4 +131,45 @@ class PagefindHtmlBuilderTest extends TestCase
         $this->assertStringContainsString('<html lang="zh-Hant">', $html);
         $this->assertStringContainsString('data-pagefind-filter="language:zh-Hant"', $html);
     }
+
+    public function testExtraFiltersEmitted(): void
+    {
+        $html = PagefindHtmlBuilder::build(
+            id: 'doc-7',
+            title: 'Test',
+            body: 'Body',
+            url: 'https://example.com',
+            filters: ['base_topic' => 'Cardiology', 'region' => 'Europe'],
+        );
+
+        $this->assertStringContainsString('data-pagefind-filter="base_topic:Cardiology"', $html);
+        $this->assertStringContainsString('data-pagefind-filter="region:Europe"', $html);
+    }
+
+    public function testExtraFilterValuesAreEscaped(): void
+    {
+        $html = PagefindHtmlBuilder::build(
+            id: 'doc-8',
+            title: 'Test',
+            body: 'Body',
+            url: 'https://example.com',
+            filters: ['category' => 'Rock & Roll <genre>'],
+        );
+
+        $this->assertStringContainsString('data-pagefind-filter="category:Rock &amp; Roll &lt;genre&gt;"', $html);
+        $this->assertStringNotContainsString('Rock & Roll', $html);
+    }
+
+    public function testEmptyFiltersProducesNoExtraSpans(): void
+    {
+        $html = PagefindHtmlBuilder::build(
+            id: 'doc-9',
+            title: 'Test',
+            body: 'Body',
+            url: 'https://example.com',
+        );
+
+        // Only site (absent) and language filters — no extra spans.
+        $this->assertSame(1, substr_count($html, 'data-pagefind-filter='));
+    }
 }

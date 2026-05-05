@@ -18,6 +18,45 @@ class DtoTest extends TestCase
     // ContentItem
     // -------------------------------------------------------------------
 
+    public function testContentItemStripsAbsoluteUrl(): void
+    {
+        $item = new ContentItem(
+            id: '1',
+            title: 'T',
+            bodyHtml: 'B',
+            url: 'https://myapp.ddev.site/articles/foo-bar',
+            date: '2024-01-01',
+        );
+
+        $this->assertEquals('/articles/foo-bar', $item->url);
+    }
+
+    public function testContentItemPreservesRelativeUrl(): void
+    {
+        $item = new ContentItem(
+            id: '1',
+            title: 'T',
+            bodyHtml: 'B',
+            url: '/articles/foo-bar',
+            date: '2024-01-01',
+        );
+
+        $this->assertEquals('/articles/foo-bar', $item->url);
+    }
+
+    public function testContentItemStripsAbsoluteUrlWithQueryAndFragment(): void
+    {
+        $item = new ContentItem(
+            id: '1',
+            title: 'T',
+            bodyHtml: 'B',
+            url: 'https://example.com/search?q=test#results',
+            date: '2024-01-01',
+        );
+
+        $this->assertEquals('/search?q=test#results', $item->url);
+    }
+
     public function testContentItemSiteNameDefaults(): void
     {
         $item = new ContentItem(
@@ -42,6 +81,33 @@ class DtoTest extends TestCase
         );
 
         $this->assertEquals('en', $item->language);
+    }
+
+    public function testContentItemFiltersDefault(): void
+    {
+        $item = new ContentItem(
+            id: '1',
+            title: 'T',
+            bodyHtml: 'B',
+            url: 'https://x.com',
+            date: '2024-01-01',
+        );
+
+        $this->assertEquals([], $item->filters);
+    }
+
+    public function testContentItemFiltersPassthrough(): void
+    {
+        $item = new ContentItem(
+            id: '1',
+            title: 'T',
+            bodyHtml: 'B',
+            url: 'https://x.com',
+            date: '2024-01-01',
+            filters: ['base_topic' => 'Cardiology'],
+        );
+
+        $this->assertEquals(['base_topic' => 'Cardiology'], $item->filters);
     }
 
     // -------------------------------------------------------------------
