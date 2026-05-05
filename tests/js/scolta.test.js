@@ -124,8 +124,8 @@ describe('scolta.js structure', () => {
         expect(jsSource).toContain('RESULTS_PER_PAGE: s.RESULTS_PER_PAGE ?? 10');
     });
 
-    test('Jaccard dedup threshold is 0.7', () => {
-        expect(jsSource).toContain('>= 0.7');
+    test('Jaccard dedup threshold is 0.6', () => {
+        expect(jsSource).toContain('>= 0.6');
     });
 
     test('expand weight decay has minimum of 0.4', () => {
