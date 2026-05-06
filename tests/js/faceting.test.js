@@ -101,6 +101,14 @@ describe('faceting: source structure', () => {
         expect(scoltaSource).toContain('filterCounts = primarySearch.filters || {};');
     });
 
+    test('initPagefind merges all non-primary language instances', () => {
+        // pagefind.init() loads only the page language; mergeIndex must be called
+        // for every other language so filterCounts.language gets multiple values
+        // and renderFilters shows the language facet.
+        expect(scoltaSource).toContain('await pagefind.mergeIndex(basePath, { language: lang });');
+        expect(scoltaSource).toContain('if (lang !== primaryLang)');
+    });
+
     test('clearSearch resets activeFilters to empty object', () => {
         expect(scoltaSource).toContain('activeFilters = {};');
     });
