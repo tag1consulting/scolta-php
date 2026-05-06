@@ -172,9 +172,8 @@ describe('scolta.js structure', () => {
         expect(jsSource).toContain('replaceState');
     });
 
-    test('renderFilters hides sidebar when one or fewer filter entries', () => {
-        expect(jsSource).toMatch(/entries\.length\s*<=\s*1/);
-        expect(jsSource).not.toMatch(/entries\.length\s*===\s*0/);
+    test('renderFilters hides sidebar when no dimension has multiple values', () => {
+        expect(jsSource).toMatch(/dims\.length\s*===\s*0/);
     });
 
     test('merge_results uses N-set format with sets array', () => {
