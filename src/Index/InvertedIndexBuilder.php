@@ -155,8 +155,8 @@ class InvertedIndexBuilder
             ];
 
             $this->indexTokens($index, $tokenData['titleTokens'], $pageNum, self::TITLE_WEIGHT);
-            $this->indexTokens($index, $tokenData['bodyTokens'],  $pageNum, self::BODY_WEIGHT);
-            $this->indexTokens($index, $tokenData['urlTokens'],   $pageNum, self::BODY_WEIGHT);
+            $this->indexTokens($index, $tokenData['bodyTokens'], $pageNum, self::BODY_WEIGHT);
+            $this->indexTokens($index, $tokenData['urlTokens'], $pageNum, self::BODY_WEIGHT);
 
             $pageNum++;
         }

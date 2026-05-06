@@ -360,9 +360,9 @@ class PageWordCacheTest extends TestCase
         $cache = $this->readCacheFromDisk();
 
         $this->assertCount(3, $cache, 'Cache should have 3 entries: a, b-new, d');
-        $this->assertArrayHasKey(PhpIndexer::contentHash($a),    $cache, 'a unchanged');
+        $this->assertArrayHasKey(PhpIndexer::contentHash($a), $cache, 'a unchanged');
         $this->assertArrayHasKey(PhpIndexer::contentHash($bNew), $cache, 'b updated');
-        $this->assertArrayHasKey(PhpIndexer::contentHash($d),    $cache, 'd added');
+        $this->assertArrayHasKey(PhpIndexer::contentHash($d), $cache, 'd added');
         $this->assertArrayNotHasKey(PhpIndexer::contentHash($b), $cache, 'b old pruned');
         $this->assertArrayNotHasKey(PhpIndexer::contentHash($c), $cache, 'c deleted pruned');
     }
@@ -393,8 +393,11 @@ class PageWordCacheTest extends TestCase
         // On a non-force build with a cache hit, we reuse the cached token data.
         // The cleanTitle in the output comes from cached data, so it IS corrupted.
         $entry = reset($updatedCache);
-        $this->assertSame('__CORRUPTED__', $entry['cleanTitle'],
-            'Non-force build uses cached (corrupted) token data');
+        $this->assertSame(
+            '__CORRUPTED__',
+            $entry['cleanTitle'],
+            'Non-force build uses cached (corrupted) token data'
+        );
 
         // Now force: must bypass cache and re-tokenize.
         $indexer2 = new PhpIndexer($this->stateDir, $this->outputDir);
@@ -403,8 +406,11 @@ class PageWordCacheTest extends TestCase
 
         $freshCache = $this->readCacheFromDisk();
         $freshEntry = reset($freshCache);
-        $this->assertNotSame('__CORRUPTED__', $freshEntry['cleanTitle'],
-            'Force build must re-tokenize and overwrite corrupted cache');
+        $this->assertNotSame(
+            '__CORRUPTED__',
+            $freshEntry['cleanTitle'],
+            'Force build must re-tokenize and overwrite corrupted cache'
+        );
     }
 
     public function testForceBuildBypassesCacheLookupOrchestrator(): void
@@ -423,8 +429,11 @@ class PageWordCacheTest extends TestCase
 
         $freshCache = $this->readCacheFromDisk();
         $freshEntry = reset($freshCache);
-        $this->assertNotSame('__CORRUPTED__', $freshEntry['cleanTitle'],
-            'Force build on orchestrator must re-tokenize and overwrite corrupted cache');
+        $this->assertNotSame(
+            '__CORRUPTED__',
+            $freshEntry['cleanTitle'],
+            'Force build on orchestrator must re-tokenize and overwrite corrupted cache'
+        );
     }
 
     public function testForceBuildStillPopulatesCachePhpIndexer(): void
@@ -586,8 +595,11 @@ class PageWordCacheTest extends TestCase
         $indexer2->finalize();
         $cache2 = $this->readCacheFromDisk();
 
-        $this->assertSame(array_keys($cache1), array_keys($cache2),
-            'Cache keys must persist across PhpIndexer instances');
+        $this->assertSame(
+            array_keys($cache1),
+            array_keys($cache2),
+            'Cache keys must persist across PhpIndexer instances'
+        );
     }
 
     public function testEmptyItemSetResultsInEmptyCache(): void
@@ -600,7 +612,9 @@ class PageWordCacheTest extends TestCase
         $this->assertFalse($result->success);
 
         // Cache file should not exist (no items were processed).
-        $this->assertFileDoesNotExist($this->cacheFile(),
-            'Cache file must not be created when no items are processed');
+        $this->assertFileDoesNotExist(
+            $this->cacheFile(),
+            'Cache file must not be created when no items are processed'
+        );
     }
 }
