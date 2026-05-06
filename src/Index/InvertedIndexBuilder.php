@@ -145,6 +145,7 @@ class InvertedIndexBuilder
                 'date'      => $item->date,
                 'filters'   => array_merge(
                     $item->siteName !== '' ? ['site' => $item->siteName] : [],
+                    $item->language !== '' ? ['language' => $item->language] : [],
                     $item->filters,
                 ),
                 'meta'      => array_filter([

@@ -182,7 +182,24 @@ class InvertedIndexBuilderTest extends TestCase
         $result = $this->builder->build([$item]);
 
         $page = array_values($result['pages'])[0];
-        $this->assertSame(['site' => 'MySite'], $page['filters']);
+        $this->assertSame(['site' => 'MySite', 'language' => 'en'], $page['filters']);
+    }
+
+    public function testLanguageFilterIncluded(): void
+    {
+        $item = new ContentItem(
+            id: 'doc-1',
+            title: 'Title',
+            bodyHtml: '<p>Content for testing purposes here.</p>',
+            url: 'https://x.com',
+            date: '2026-01-01',
+            siteName: 'MySite',
+            language: 'fr',
+        );
+        $result = $this->builder->build([$item]);
+
+        $page = array_values($result['pages'])[0];
+        $this->assertSame('fr', $page['filters']['language']);
     }
 
     public function testCustomFiltersIncluded(): void
@@ -201,6 +218,7 @@ class InvertedIndexBuilderTest extends TestCase
         $page = array_values($result['pages'])[0];
         $this->assertSame([
             'site' => 'MySite',
+            'language' => 'en',
             'base_topic' => 'Cardiology',
             'region' => 'Europe',
         ], $page['filters']);
