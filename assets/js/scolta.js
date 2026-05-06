@@ -298,6 +298,25 @@
     const pagefindPath = (instanceConfig && instanceConfig.pagefindPath) || '/pagefind/pagefind.js';
     pagefind = await import(pagefindPath);
     await pagefind.init();
+
+    // Merge all language instances so multilingual facets appear.
+    // pagefind.init() loads only the page language; without merging,
+    // filterCounts.language has one value and renderFilters hides the facet.
+    const basePath = pagefindPath.replace(/pagefind\.js(\?.*)?$/, '');
+    try {
+      const resp = await fetch(basePath + 'pagefind-entry.json?ts=' + Date.now());
+      const entry = await resp.json();
+      const primaryLang = (document.querySelector('html')?.getAttribute('lang') || 'en')
+        .toLowerCase().split('-')[0];
+      for (const lang of Object.keys(entry.languages || {})) {
+        if (lang !== primaryLang) {
+          await pagefind.mergeIndex(basePath, { language: lang });
+        }
+      }
+    } catch (e) {
+      console.warn('[scolta] Multilingual merge skipped:', e.message);
+    }
+
     // Warm the index: triggers WASM compilation + fragment download.
     await pagefind.search("");
     console.log("[scolta] Pagefind index preloaded");
