@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Fixed
+- **Language and content-type facets now appear in the search sidebar.** `computeFilterCounts()` was reading `r.data.filters` on individual Pagefind result objects, which do not carry a `filters` property. Pagefind only exposes aggregate filter counts at the search-response level (`search.filters`). `doSearch()` now assigns `filterCounts = primarySearch.filters || {}` directly from the Pagefind search response, so facet checkboxes render correctly for all indexed filter dimensions (language, site, content_type, etc.).
+
 ### Added
 - **Multi-dimensional filter faceting in the search sidebar.** Language, site, content type, and any other Pagefind filter dimensions are now rendered as separate grouped checkboxes instead of a single hardcoded "Site" filter. Language codes are mapped to full display names (English, Spanish, etc.) via a `LANGUAGE_NAMES` map. Dimensions with only one unique value are hidden; visible dimensions are ordered language first, site second, then others alphabetically. Filter state is preserved in the URL via `f_<dim>=<value>` query parameters and restored on page load and browser back/forward navigation.
 - **Page-word cache for smart rebuilds.** `PhpIndexer::processChunk()` and `IndexBuildOrchestrator::build()` now consult a per-item token cache keyed by `contentHash(item)` (URL + body SHA-256). Items whose content has not changed since the last build skip HTML cleaning and tokenization entirely — only new or modified pages are re-tokenized. The cache is serialized to `{stateDir}/page-word-cache.php` and automatically pruned to the set of items seen in each build, so deleted pages never accumulate stale entries. Pass `$force = true` (or `--force` from a CLI command) to bypass cache lookups while still repopulating the cache with fresh token data.

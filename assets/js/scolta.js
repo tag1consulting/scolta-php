@@ -1107,7 +1107,6 @@
     displayedCount = 0;
 
     if (!preserveFilters) {
-      filterCounts = computeFilterCounts(allScoredResults);
       renderFilters();
     }
 
@@ -1228,7 +1227,9 @@
     }
 
     if (!preserveFilters) {
-      filterCounts = computeFilterCounts(allScoredResults);
+      // Pagefind exposes aggregate filter counts on the search response object,
+      // not on individual result.data() objects. Use them directly.
+      filterCounts = primarySearch.filters || {};
     }
 
     renderFilters();

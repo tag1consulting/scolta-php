@@ -97,6 +97,10 @@ describe('faceting: source structure', () => {
         expect(scoltaSource).toContain('activeFilters = initialFilters || {};');
     });
 
+    test('doSearch assigns filterCounts from primarySearch.filters', () => {
+        expect(scoltaSource).toContain('filterCounts = primarySearch.filters || {};');
+    });
+
     test('clearSearch resets activeFilters to empty object', () => {
         expect(scoltaSource).toContain('activeFilters = {};');
     });
@@ -241,10 +245,10 @@ const patchedSource = scoltaSource.replace(
     'pagefind = mockPagefind'
 );
 
-function buildMockPagefind(resultsList) {
+function buildMockPagefind(resultsList, searchFilters) {
     return {
         init: () => Promise.resolve(),
-        search: jest.fn(() => Promise.resolve({ results: resultsList })),
+        search: jest.fn(() => Promise.resolve({ results: resultsList, filters: searchFilters || {} })),
     };
 }
 
@@ -362,5 +366,71 @@ describe('faceting: URL encoding round-trip', () => {
         const urlAfterClear = new window.URL(window.location.href);
         expect(urlAfterClear.searchParams.get('q')).toBeNull();
         expect(urlAfterClear.searchParams.get('f_language')).toBeNull();
+    });
+});
+
+describe('faceting: filter sidebar rendered from search.filters', () => {
+    test('renders language facets from search response filters', async () => {
+        const filters = { language: { en: 100, es: 50, fr: 30 } };
+        const mock = buildMockPagefind([], filters);
+        const { window } = createWindow(mock);
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'test';
+        await inst.doSearch();
+
+        const filterContainer = window.document.querySelector('#scolta-filters');
+        expect(filterContainer.innerHTML).toContain('English');
+        expect(filterContainer.innerHTML).toContain('Spanish');
+        expect(filterContainer.innerHTML).toContain('French');
+    });
+
+    test('hides filter sidebar when search.filters has only one value per dimension', async () => {
+        const filters = { language: { en: 100 } };
+        const mock = buildMockPagefind([], filters);
+        const { window } = createWindow(mock);
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'test';
+        await inst.doSearch();
+
+        const filterContainer = window.document.querySelector('#scolta-filters');
+        expect(filterContainer.innerHTML).toBe('');
+    });
+
+    test('renders multiple dimensions from search.filters', async () => {
+        const filters = {
+            language: { en: 100, es: 50 },
+            content_type: { article: 80, page: 70 },
+        };
+        const mock = buildMockPagefind([], filters);
+        const { window } = createWindow(mock);
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'test';
+        await inst.doSearch();
+
+        const filterContainer = window.document.querySelector('#scolta-filters');
+        expect(filterContainer.innerHTML).toContain('Language');
+        expect(filterContainer.innerHTML).toContain('Content Type');
+        expect(filterContainer.innerHTML).toContain('English');
+        expect(filterContainer.innerHTML).toContain('Spanish');
+        expect(filterContainer.innerHTML).toContain('article');
+        expect(filterContainer.innerHTML).toContain('page');
+    });
+
+    test('preserves filter counts when toggling a filter', async () => {
+        const filters = { language: { en: 100, es: 50, fr: 30 } };
+        const mock = buildMockPagefind([], filters);
+        const { window } = createWindow(mock);
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'test';
+        await inst.doSearch();
+
+        // Toggle a filter — filterCounts should not change (preserveFilters=true).
+        await inst.toggleFilter('language', 'en');
+
+        const filterContainer = window.document.querySelector('#scolta-filters');
+        // All three language options should still be visible after toggling.
+        expect(filterContainer.innerHTML).toContain('English');
+        expect(filterContainer.innerHTML).toContain('Spanish');
+        expect(filterContainer.innerHTML).toContain('French');
     });
 });
