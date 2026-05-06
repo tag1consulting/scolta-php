@@ -62,12 +62,19 @@ class PhpIndexer
     /**
      * Process a chunk of content items.
      *
+     * Items whose content hash is already in the page-word cache are re-indexed
+     * from cached token data, skipping the expensive HTML cleaning and tokenization
+     * step. Items not in the cache are tokenized and their token data is stored for
+     * future builds. Pass $force = true to bypass cache lookups while still
+     * populating the cache (useful when --force is passed from a CLI command).
+     *
      * @param \Tag1\Scolta\Export\ContentItem[] $items
      * @param int $chunkNumber Chunk number (0-based).
      * @param int|null $totalPages Total pages across all chunks.
+     * @param bool $force Skip cache lookups (still populates cache on tokenization).
      * @return int Number of pages processed in this chunk.
      */
-    public function processChunk(array $items, int $chunkNumber, ?int $totalPages = null): int
+    public function processChunk(array $items, int $chunkNumber, ?int $totalPages = null, bool $force = false): int
     {
         // Prepare once on the first chunk — fixes the resume-state wipe bug.
         if (!$this->prepared) {
@@ -80,12 +87,27 @@ class PhpIndexer
             $this->prepared = true;
         }
 
-        $partial = $this->builder->build($items, $this->currentPageOffset);
-        $this->currentPageOffset += count($partial['pages']);
-
+        $tokenDataList = [];
         foreach ($items as $item) {
-            $this->usedCacheKeys[] = self::contentHash($item);
+            $hash = self::contentHash($item);
+            $this->usedCacheKeys[] = $hash;
+
+            if (!$force && isset($this->pageWordCache[$hash])) {
+                $tokenData = $this->pageWordCache[$hash];
+            } else {
+                $tokenData = $this->builder->tokenizeItem($item);
+                if ($tokenData !== null) {
+                    $this->pageWordCache[$hash] = $tokenData;
+                }
+            }
+
+            if ($tokenData !== null) {
+                $tokenDataList[] = ['item' => $item, 'tokenData' => $tokenData];
+            }
         }
+
+        $partial = $this->builder->buildFromTokenData($tokenDataList, $this->currentPageOffset);
+        $this->currentPageOffset += count($partial['pages']);
 
         $this->coordinator->commitChunk($chunkNumber, $partial);
 
@@ -245,12 +267,9 @@ class PhpIndexer
     {
         $cacheFile = $this->stateDir . '/page-word-cache.php';
         if ($this->storage->exists($cacheFile)) {
-            try {
-                $raw = $this->storage->get($cacheFile);
-                $data = unserialize($raw, ['allowed_classes' => false]);
-            } catch (\Throwable $e) {
-                $data = false;
-            }
+            $raw  = $this->storage->get($cacheFile);
+            // @ suppresses the PHP warning unserialize() emits on malformed input.
+            $data = @unserialize($raw, ['allowed_classes' => false]);
             if (is_array($data)) {
                 $this->pageWordCache = $data;
             }
