@@ -27,6 +27,12 @@ final class IndexBuildOrchestrator
     private readonly IndexMerger $merger;
     private readonly StorageDriverInterface $storage;
 
+    /** @var array<string, array> Per-page word list cache keyed by content hash. */
+    private array $pageWordCache = [];
+
+    /** @var string[] Content hashes seen in this build (for cache pruning). */
+    private array $usedCacheKeys = [];
+
     public function __construct(
         private readonly string $stateDir,
         private readonly string $outputDir,
@@ -42,21 +48,30 @@ final class IndexBuildOrchestrator
         $this->builder     = new InvertedIndexBuilder(new Tokenizer(), new Stemmer($language));
         $this->merger      = new IndexMerger();
         $this->storage     = $storage ?? new FilesystemDriver();
+
+        $this->loadPageWordCache();
     }
 
     /**
      * Run a complete index build.
      *
+     * Items whose content hash is already in the page-word cache are re-indexed
+     * from cached token data, skipping HTML cleaning and tokenization. Pass
+     * $force = true to bypass cache lookups while still populating the cache
+     * (used when --force is passed from a CLI command).
+     *
      * @param BuildIntent               $intent   Mode and memory budget.
      * @param iterable<ContentItem>     $pages    All content items to index.
      * @param LoggerInterface           $logger   PSR-3 logger (optional).
      * @param ProgressReporterInterface $progress Progress callback (optional).
+     * @param bool                      $force    Skip cache lookups (still populates cache).
      */
     public function build(
         BuildIntent $intent,
         iterable $pages,
         ?LoggerInterface $logger = null,
         ?ProgressReporterInterface $progress = null,
+        bool $force = false,
     ): StatusReport {
         $logger   = $logger   ?? new NullLogger();
         $progress = $progress ?? new NullProgressReporter();
@@ -88,11 +103,25 @@ final class IndexBuildOrchestrator
             $pagesInRun  = 0;
 
             foreach ($pages as $page) {
-                $chunk[] = $page;
+                $hash = PhpIndexer::contentHash($page);
+                $this->usedCacheKeys[] = $hash;
+
+                if (!$force && isset($this->pageWordCache[$hash])) {
+                    $tokenData = $this->pageWordCache[$hash];
+                } else {
+                    $tokenData = $this->builder->tokenizeItem($page);
+                    if ($tokenData !== null) {
+                        $this->pageWordCache[$hash] = $tokenData;
+                    }
+                }
+
+                if ($tokenData !== null) {
+                    $chunk[] = ['item' => $page, 'tokenData' => $tokenData];
+                }
 
                 if (count($chunk) >= $chunkSize) {
                     $telemetry->emit("chunk_start({$chunkNum})");
-                    $partial = $this->builder->build($chunk, $currentOffset);
+                    $partial = $this->builder->buildFromTokenData($chunk, $currentOffset);
                     $currentOffset += count($partial['pages']);
                     $pagesInRun    += count($partial['pages']);
                     $this->coordinator->commitChunk($chunkNum, $partial);
@@ -107,7 +136,7 @@ final class IndexBuildOrchestrator
             // Tail chunk.
             if (!empty($chunk)) {
                 $telemetry->emit("chunk_start({$chunkNum})");
-                $partial = $this->builder->build($chunk, $currentOffset);
+                $partial = $this->builder->buildFromTokenData($chunk, $currentOffset);
                 $pagesInRun += count($partial['pages']);
                 $this->coordinator->commitChunk($chunkNum, $partial);
                 $telemetry->emit("chunk_committed({$chunkNum})", ['pages' => count($partial['pages'])]);
@@ -133,6 +162,9 @@ final class IndexBuildOrchestrator
             $totalPagesProcessed = $this->coordinator->pagesProcessed();
             $chunksWritten       = count($chunkFiles);
             $this->coordinator->release();
+
+            $this->prunePageWordCache();
+            $this->savePageWordCache();
 
             return new StatusReport(
                 version: '0.3.0',
@@ -277,5 +309,35 @@ final class IndexBuildOrchestrator
         if ($this->storage->exists($oldDir)) {
             $this->storage->deleteDirectory($oldDir);
         }
+    }
+
+    private function loadPageWordCache(): void
+    {
+        $cacheFile = $this->stateDir . '/page-word-cache.php';
+        if ($this->storage->exists($cacheFile)) {
+            $raw  = $this->storage->get($cacheFile);
+            // @ suppresses the PHP warning unserialize() emits on malformed input.
+            $data = @unserialize($raw, ['allowed_classes' => false]);
+            if (is_array($data)) {
+                $this->pageWordCache = $data;
+            }
+        }
+    }
+
+    private function savePageWordCache(): void
+    {
+        $cacheFile = $this->stateDir . '/page-word-cache.php';
+        $this->storage->makeDirectory($this->stateDir);
+        $this->storage->put($cacheFile, serialize($this->pageWordCache));
+    }
+
+    private function prunePageWordCache(): void
+    {
+        if (empty($this->usedCacheKeys)) {
+            return;
+        }
+
+        $usedSet             = array_flip($this->usedCacheKeys);
+        $this->pageWordCache = array_intersect_key($this->pageWordCache, $usedSet);
     }
 }

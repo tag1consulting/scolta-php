@@ -6,7 +6,10 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
-_No changes yet._
+### Added
+- **Page-word cache for smart rebuilds.** `PhpIndexer::processChunk()` and `IndexBuildOrchestrator::build()` now consult a per-item token cache keyed by `contentHash(item)` (URL + body SHA-256). Items whose content has not changed since the last build skip HTML cleaning and tokenization entirely — only new or modified pages are re-tokenized. The cache is serialized to `{stateDir}/page-word-cache.php` and automatically pruned to the set of items seen in each build, so deleted pages never accumulate stale entries. Pass `$force = true` (or `--force` from a CLI command) to bypass cache lookups while still repopulating the cache with fresh token data.
+- **`InvertedIndexBuilder::tokenizeItem()`** — new public method that extracts a single item's token data (title, body, URL tokens; word count; cleaned title; content string) without building the index. Returns `null` for items whose body is too short to index. The return value is safe to serialize to a persistent cache.
+- **`InvertedIndexBuilder::buildFromTokenData()`** — new public method that assembles a partial inverted index from pre-tokenized item data. Item metadata fields that are not part of the content hash (date, siteName, filters) are always read from the current `ContentItem`, not from cached data.
 
 ## [0.3.10] - 2026-05-05
 

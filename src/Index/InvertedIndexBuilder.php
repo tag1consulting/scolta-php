@@ -35,88 +35,128 @@ class InvertedIndexBuilder
      */
     public function build(array $items, int $pageOffset = 0): array
     {
-        $index = [];
-        $pages = [];
-        $pageNum = $pageOffset;  // Start from caller-provided offset
-
+        $tokenDataList = [];
         foreach ($items as $item) {
-            // Page numbers MUST be sequential. pagefind.js resolves search
-            // results via pf_meta[1][page_num] where pf_meta[1] is a
-            // sequential array. crc32 hashing and non-sequential keys
-            // corrupt result resolution at runtime.
-
-            $cleanText = HtmlCleaner::clean($item->bodyHtml, $item->title);
-
-            if (strlen($cleanText) < 10) {
-                continue;
+            $tokenData = $this->tokenizeItem($item);
+            if ($tokenData !== null) {
+                $tokenDataList[] = ['item' => $item, 'tokenData' => $tokenData];
             }
+        }
 
-            // Tokenize title and body separately for weight differentiation.
-            // Strip HTML tags and decode entities — CMS adapters may pass
-            // titles like "<b>Bold Title</b>" or "Title &amp; Subtitle".
-            // Remove <script>/<style> blocks first so their inner text (e.g.
-            // "alert('xss')") is discarded, not kept as plain text by strip_tags.
-            $titleRaw = preg_replace('/<(script|style)[^>]*>.*?<\/\1>/si', '', $item->title) ?? $item->title;
-            $cleanTitle = html_entity_decode(strip_tags($titleRaw), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        return $this->buildFromTokenData($tokenDataList, $pageOffset);
+    }
 
-            // Pagefind uses word-sequential indices (0, 1, 2, 3...) not
-            // character offsets. Reindex after tokenization so positions are
-            // comparable across pages and phrase_proximity_multiplier fires.
-            $rawTitleTokens = $this->tokenizer->tokenize($cleanTitle);
-            $titleResult = $this->reindexToWordPositions($rawTitleTokens, 0);
-            $titleTokens = $titleResult['tokens'];
+    /**
+     * Extract tokenization data for a single content item.
+     *
+     * Returns the token arrays and derived text fields needed to build index
+     * entries. Returns null when the cleaned body is too short to index.
+     * The returned array is safe to serialize into a persistent cache — it
+     * contains no objects, only scalars and arrays.
+     *
+     * Tokenize title and body separately for weight differentiation.
+     * Strip HTML tags and decode entities — CMS adapters may pass
+     * titles like "<b>Bold Title</b>" or "Title &amp; Subtitle".
+     * Remove <script>/<style> blocks first so their inner text (e.g.
+     * "alert('xss')") is discarded, not kept as plain text by strip_tags.
+     *
+     * Pagefind uses word-sequential indices (0, 1, 2, 3...) not
+     * character offsets. Positions are reindexed after tokenization so
+     * they are comparable across pages and phrase_proximity_multiplier fires.
+     *
+     * @return array{titleTokens: array, bodyTokens: array, urlTokens: array,
+     *               wordCount: int, cleanTitle: string, content: string}|null
+     */
+    public function tokenizeItem(ContentItem $item): ?array
+    {
+        $cleanText = HtmlCleaner::clean($item->bodyHtml, $item->title);
+        if (strlen($cleanText) < 10) {
+            return null;
+        }
 
-            $rawBodyTokens = $this->tokenizer->tokenize($cleanText);
-            $bodyResult = $this->reindexToWordPositions($rawBodyTokens, $titleResult['nextIndex']);
-            $bodyTokens = $bodyResult['tokens'];
+        $titleRaw   = preg_replace('/<(script|style)[^>]*>.*?<\/\1>/si', '', $item->title) ?? $item->title;
+        $cleanTitle = html_entity_decode(strip_tags($titleRaw), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
-            // Tokenize URL path segments for search discovery.
-            $urlPath = parse_url($item->url, PHP_URL_PATH) ?? '';
-            $urlPath = preg_replace('/\.\w+$/', '', $urlPath); // Strip file extension.
-            $urlSegments = array_filter(explode('/', $urlPath), fn ($s) => strlen($s) > 0);
-            $urlText = implode(' ', $urlSegments);
-            $rawUrlTokens = $this->tokenizer->tokenize($urlText);
-            $urlResult = $this->reindexToWordPositions($rawUrlTokens, $bodyResult['nextIndex']);
-            $urlTokens = $urlResult['tokens'];
+        $rawTitleTokens = $this->tokenizer->tokenize($cleanTitle);
+        $titleResult    = $this->reindexToWordPositions($rawTitleTokens, 0);
+        $titleTokens    = $titleResult['tokens'];
 
-            // Pagefind word_count = content.split(' ').length — URL path
-            // tokens are NOT counted even though they are indexed.
-            $wordCount = count($titleTokens) + count($bodyTokens);
+        $rawBodyTokens = $this->tokenizer->tokenize($cleanText);
+        $bodyResult    = $this->reindexToWordPositions($rawBodyTokens, $titleResult['nextIndex']);
+        $bodyTokens    = $bodyResult['tokens'];
 
-            // Fragment content mirrors what PagefindHtmlBuilder puts in <body>:
-            // "<h1>title</h1><p>body...</p>". Pagefind extracts that as
-            // "Title. Body..." in the content field. We must do the same so
-            // scolta-core's content_match_score sees title words in the excerpt,
-            // giving title-matching pages the same content boost as body matches.
-            $content = $cleanTitle !== '' ? $cleanTitle . '. ' . $cleanText : $cleanText;
+        // Tokenize URL path segments for search discovery.
+        $urlPath     = parse_url($item->url, PHP_URL_PATH) ?? '';
+        $urlPath     = preg_replace('/\.\w+$/', '', $urlPath);
+        $urlSegments = array_filter(explode('/', $urlPath), fn ($s) => strlen($s) > 0);
+        $urlText     = implode(' ', $urlSegments);
+        $rawUrlTokens = $this->tokenizer->tokenize($urlText);
+        $urlResult   = $this->reindexToWordPositions($rawUrlTokens, $bodyResult['nextIndex']);
+        $urlTokens   = $urlResult['tokens'];
 
-            // Build page entry.
+        // Pagefind word_count = content.split(' ').length — URL path
+        // tokens are NOT counted even though they are indexed.
+        $wordCount = count($titleTokens) + count($bodyTokens);
+
+        // Fragment content mirrors what PagefindHtmlBuilder puts in <body>:
+        // "<h1>title</h1><p>body...</p>". Pagefind extracts that as
+        // "Title. Body..." in the content field. We must do the same so
+        // scolta-core's content_match_score sees title words in the excerpt,
+        // giving title-matching pages the same content boost as body matches.
+        $content = $cleanTitle !== '' ? $cleanTitle . '. ' . $cleanText : $cleanText;
+
+        return [
+            'titleTokens' => $titleTokens,
+            'bodyTokens'  => $bodyTokens,
+            'urlTokens'   => $urlTokens,
+            'wordCount'   => $wordCount,
+            'cleanTitle'  => $cleanTitle,
+            'content'     => $content,
+        ];
+    }
+
+    /**
+     * Build a partial index from pre-tokenized item data.
+     *
+     * Accepts the output of tokenizeItem() paired with the original ContentItem
+     * (for metadata fields not cached: date, siteName, filters). Page numbers
+     * are assigned sequentially from pageOffset.
+     *
+     * Page numbers MUST be sequential. pagefind.js resolves search results via
+     * pf_meta[1][page_num] where pf_meta[1] is a sequential array. Non-sequential
+     * keys corrupt result resolution at runtime.
+     *
+     * @param array<int, array{item: ContentItem, tokenData: array}> $tokenDataList
+     * @return array{index: array, pages: array}
+     */
+    public function buildFromTokenData(array $tokenDataList, int $pageOffset = 0): array
+    {
+        $index   = [];
+        $pages   = [];
+        $pageNum = $pageOffset;
+
+        foreach ($tokenDataList as ['item' => $item, 'tokenData' => $tokenData]) {
             $pages[$pageNum] = [
-                'id' => $item->id,
-                'url' => $item->url,
-                'title' => $cleanTitle,
-                'content' => $content,
-                'wordCount' => $wordCount,
-                'date' => $item->date,
-                'filters' => array_merge(
+                'id'        => $item->id,
+                'url'       => $item->url,
+                'title'     => $tokenData['cleanTitle'],
+                'content'   => $tokenData['content'],
+                'wordCount' => $tokenData['wordCount'],
+                'date'      => $item->date,
+                'filters'   => array_merge(
                     $item->siteName !== '' ? ['site' => $item->siteName] : [],
                     $item->filters,
                 ),
-                'meta' => array_filter([
-                    'title' => $cleanTitle,
-                    'date' => $item->date,
+                'meta'      => array_filter([
+                    'title' => $tokenData['cleanTitle'],
+                    'date'  => $item->date,
                 ]),
-                'hash' => hash('sha256', $content),
+                'hash'      => hash('sha256', $tokenData['content']),
             ];
 
-            // Index title tokens with title weight.
-            $this->indexTokens($index, $titleTokens, $pageNum, self::TITLE_WEIGHT);
-
-            // Index body tokens with default weight.
-            $this->indexTokens($index, $bodyTokens, $pageNum, self::BODY_WEIGHT);
-
-            // Index URL tokens with body weight.
-            $this->indexTokens($index, $urlTokens, $pageNum, self::BODY_WEIGHT);
+            $this->indexTokens($index, $tokenData['titleTokens'], $pageNum, self::TITLE_WEIGHT);
+            $this->indexTokens($index, $tokenData['bodyTokens'],  $pageNum, self::BODY_WEIGHT);
+            $this->indexTokens($index, $tokenData['urlTokens'],   $pageNum, self::BODY_WEIGHT);
 
             $pageNum++;
         }
