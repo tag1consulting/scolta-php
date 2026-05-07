@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Changed
+- **`indexer: auto` now always uses the PHP indexer.** Previously `auto` tried the Pagefind binary first and fell back to PHP. The PHP indexer works on all PHP hosting environments without `exec()` or Node.js, uses less memory, and supports fast incremental re-indexing. Use `indexer: binary` to keep the old binary-first behaviour.
+
 ### Fixed
 - **Language facets now appear when using the Pagefind binary indexer.** `initPagefind()` only loaded the page's primary language index; each per-language Pagefind index only contains its own language's pages, so `search.filters.language` had a single value and `renderFilters` suppressed it. `initPagefind()` now reads `pagefind-entry.json` after init and calls `pagefind.mergeIndex()` for every other language. The index path is passed as an absolute URL (`new URL(basePath, window.location.href).href`) to bypass Pagefind's same-index dedup guard, which compares string prefixes and would silently skip relative-path calls to the same index.
 - **Language and content-type facets now appear in the search sidebar.** `computeFilterCounts()` was reading `r.data.filters` on individual Pagefind result objects, which do not carry a `filters` property. Pagefind only exposes aggregate filter counts at the search-response level (`search.filters`). `doSearch()` now assigns `filterCounts = primarySearch.filters || {}` directly from the Pagefind search response, so facet checkboxes render correctly for all indexed filter dimensions (language, site, content_type, etc.).

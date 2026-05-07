@@ -90,7 +90,7 @@ class ScoltaConfig
     public string $promptFollowUp = '';
 
     // -- Indexer --
-    /** @var string 'auto' | 'php' | 'binary' */
+    /** @var string 'auto' (PHP indexer) | 'php' | 'binary' */
     public string $indexer = 'auto';
 
     // -- Scoring preset --

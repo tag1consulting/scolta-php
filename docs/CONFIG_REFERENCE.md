@@ -122,6 +122,12 @@ factor before being added to the final score; the title boost is unaffected.
 | `promptSummarize` | string | `''` | Custom prompt for summarization (empty = use DefaultPrompts) |
 | `promptFollowUp` | string | `''` | Custom prompt for follow-up conversations (empty = use DefaultPrompts) |
 
+### Build
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `indexer` | string | `'auto'` | Indexing backend used by CLI build commands. `auto` and `php` both use the pure-PHP indexer (no binary or Node.js required). `binary` explicitly uses the Pagefind CLI binary and fails if it is not found. |
+
 ### Scoring Presets
 
 | Property | Type | Default | Description |
@@ -230,6 +236,12 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 | `promptExpandQuery` | `prompt_expand_query` | `prompts.expand_query` | `prompt_expand_query` |
 | `promptSummarize` | `prompt_summarize` | `prompts.summarize` | `prompt_summarize` |
 | `promptFollowUp` | `prompt_follow_up` | `prompts.follow_up` | `prompt_follow_up` |
+
+### Build Keys
+
+| ScoltaConfig Property | Drupal | Laravel | WordPress |
+|----------------------|--------|---------|-----------|
+| `indexer` | `indexer` | `indexer` / `SCOLTA_INDEXER` | `indexer` |
 
 ## Methods
 
