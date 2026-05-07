@@ -117,8 +117,11 @@ class MemoryTelemetryTest extends TestCase
 
         // Must NOT throw — current is only 5%, peak is 95% but that's irrelevant.
         $this->assertNotEmpty($log->records);
-        $this->assertNotSame('error', $log->records[0]['level'],
-            'Abort threshold must use current live memory, not monotonic peak');
+        $this->assertNotSame(
+            'error',
+            $log->records[0]['level'],
+            'Abort threshold must use current live memory, not monotonic peak'
+        );
     }
 
     public function testAbortThresholdFiresOnHighCurrentMemory(): void
