@@ -6,6 +6,7 @@ namespace Tag1\Scolta\Tests\Index;
 
 use PHPUnit\Framework\TestCase;
 use Psr\Log\AbstractLogger;
+use Psr\Log\NullLogger;
 use Tag1\Scolta\Index\MemoryBudget;
 use Tag1\Scolta\Index\MemoryTelemetry;
 
@@ -73,6 +74,33 @@ class MemoryTelemetryTest extends TestCase
         $this->assertArrayHasKey('peak_mb', $ctx);
         $this->assertArrayHasKey('current_mb', $ctx);
         $this->assertArrayHasKey('limit_pct', $ctx);
+    }
+
+    public function testEmitIncludesSourceField(): void
+    {
+        $log       = new CapturingLogger();
+        $telemetry = new MemoryTelemetry($log, MemoryBudget::conservative());
+
+        $telemetry->emit('test_phase');
+
+        $ctx = $log->records[0]['context'];
+        $this->assertArrayHasKey('source', $ctx, 'emit() must include source in context');
+        $this->assertContains(
+            $ctx['source'],
+            ['rss', 'php'],
+            'source must be either "rss" (Linux /proc) or "php" (fallback)'
+        );
+    }
+
+    public function testEmitIncludesLimitMbField(): void
+    {
+        $log       = new CapturingLogger();
+        $telemetry = new MemoryTelemetry($log, MemoryBudget::conservative());
+
+        $telemetry->emit('test_phase');
+
+        $ctx = $log->records[0]['context'];
+        $this->assertArrayHasKey('limit_mb', $ctx, 'emit() must include limit_mb in context');
     }
 
     public function testEmitMergesExtraContext(): void
@@ -147,6 +175,62 @@ class MemoryTelemetryTest extends TestCase
         } finally {
             ini_set('memory_limit', '-1');
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Public RSS methods
+    // -------------------------------------------------------------------------
+
+    public function testGetCurrentRssBytesReturnsPositiveValue(): void
+    {
+        $telemetry = new MemoryTelemetry(new NullLogger(), MemoryBudget::conservative());
+        $rss = $telemetry->getCurrentRssBytes();
+        $this->assertGreaterThan(0, $rss, 'getCurrentRssBytes() must return a positive byte count');
+    }
+
+    public function testGetPeakRssBytesIsAtLeastCurrentRss(): void
+    {
+        $telemetry = new MemoryTelemetry(new NullLogger(), MemoryBudget::conservative());
+        $current = $telemetry->getCurrentRssBytes();
+        $peak    = $telemetry->getPeakRssBytes();
+        $this->assertGreaterThanOrEqual(
+            $current,
+            $peak,
+            'getPeakRssBytes() must be >= getCurrentRssBytes()'
+        );
+    }
+
+    public function testGetCurrentRssBytesReturnsInjectedValueWhenClosureProvided(): void
+    {
+        $injected  = 42 * 1_048_576; // 42 MB
+        $telemetry = new MemoryTelemetry(
+            new NullLogger(),
+            MemoryBudget::conservative(),
+            static fn () => $injected,
+        );
+        $this->assertSame($injected, $telemetry->getCurrentRssBytes());
+    }
+
+    public function testGetPeakRssBytesReturnsInjectedValueWhenClosureProvided(): void
+    {
+        $injected  = 55 * 1_048_576; // 55 MB
+        $telemetry = new MemoryTelemetry(
+            new NullLogger(),
+            MemoryBudget::conservative(),
+            null,
+            static fn () => $injected,
+        );
+        $this->assertSame($injected, $telemetry->getPeakRssBytes());
+    }
+
+    // -------------------------------------------------------------------------
+    // Effective limit getter
+    // -------------------------------------------------------------------------
+
+    public function testEffectiveLimitBytesReturnsNonNegativeValue(): void
+    {
+        $telemetry = new MemoryTelemetry(new NullLogger(), MemoryBudget::conservative());
+        $this->assertGreaterThanOrEqual(0, $telemetry->effectiveLimitBytes());
     }
 }
 

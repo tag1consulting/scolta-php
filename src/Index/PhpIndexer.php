@@ -123,6 +123,7 @@ class PhpIndexer
     public function finalize(): BuildResult
     {
         $startTime = microtime(true);
+        $telemetry = new MemoryTelemetry(new \Psr\Log\NullLogger(), $this->budget);
 
         try {
             $chunkFiles = $this->coordinator->chunkFiles();
@@ -142,7 +143,7 @@ class PhpIndexer
             $this->merger->mergeStreaming($chunkFiles, $streamWriter, $this->budget);
             $streamWriter->endWrite();
 
-            $peakMb    = round(memory_get_peak_usage(true) / 1_048_576, 1);
+            $peakMb    = round($telemetry->getPeakRssBytes() / 1_048_576, 1);
             $pageCount = $this->coordinator->pagesProcessed();
 
             $this->atomicSwap();
