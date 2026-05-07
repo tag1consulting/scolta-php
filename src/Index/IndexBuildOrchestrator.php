@@ -158,7 +158,7 @@ final class IndexBuildOrchestrator
             // `drush scolta:finalize`). The chunks are safely committed to disk.
             $limitBytes   = self::parseMemoryLimitBytes(ini_get('memory_limit') ?: '128M');
             $segmentBytes = memory_get_usage(true);
-            if ($limitBytes > 0 && $segmentBytes >= (int) ($limitBytes * 0.95)) {
+            if ($limitBytes > 0 && $segmentBytes >= (int) ($limitBytes * 0.75)) {
                 $this->cache->pruneAndSave();
                 $this->coordinator->releaseLockOnly();
                 $telemetry->emit('finalize_deferred', ['heap_pct' => round($segmentBytes / $limitBytes * 100, 1)]);
