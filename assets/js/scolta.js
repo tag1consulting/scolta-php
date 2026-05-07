@@ -302,15 +302,21 @@
     // Merge all language instances so multilingual facets appear.
     // pagefind.init() loads only the page language; without merging,
     // filterCounts.language has one value and renderFilters hides the facet.
+    //
+    // pagefind.mergeIndex() skips calls where indexPath is a prefix of the
+    // primary instance's basePath (same-index dedup guard). The primary
+    // basePath is a relative path; passing an absolute URL breaks the
+    // string-prefix check while still resolving to the same files.
     const basePath = pagefindPath.replace(/pagefind\.js(\?.*)?$/, '');
     try {
       const resp = await fetch(basePath + 'pagefind-entry.json?ts=' + Date.now());
       const entry = await resp.json();
       const primaryLang = (document.querySelector('html')?.getAttribute('lang') || 'en')
         .toLowerCase().split('-')[0];
+      const absoluteBase = new URL(basePath, window.location.href).href;
       for (const lang of Object.keys(entry.languages || {})) {
         if (lang !== primaryLang) {
-          await pagefind.mergeIndex(basePath, { language: lang });
+          await pagefind.mergeIndex(absoluteBase, { language: lang });
         }
       }
     } catch (e) {
