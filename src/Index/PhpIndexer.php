@@ -98,7 +98,14 @@ class PhpIndexer
             }
 
             if ($tokenData !== null) {
-                $tokenDataList[] = ['item' => $item, 'tokenData' => $tokenData];
+                $tokenDataList[] = ['item' => (object) [
+                    'id'       => $item->id,
+                    'url'      => $item->url,
+                    'date'     => $item->date,
+                    'siteName' => $item->siteName,
+                    'language' => $item->language,
+                    'filters'  => $item->filters,
+                ], 'tokenData' => $tokenData];
             }
         }
 
