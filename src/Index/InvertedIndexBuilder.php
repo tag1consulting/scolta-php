@@ -21,6 +21,19 @@ class InvertedIndexBuilder
     /** Weight for body content matches (default). */
     private const BODY_WEIGHT = 25;
 
+    /**
+     * Maximum positions stored per term per weight bucket per page.
+     *
+     * Common stop words ("the", "and", "of") appear hundreds of times per
+     * Wikipedia article. Without a cap, serializing merged position arrays
+     * across 6930 pages during the pre-merge phase requires 25+ MB of
+     * contiguous heap — enough to trigger OOM in constrained environments.
+     * 200 positions per weight bucket is sufficient for phrase-proximity
+     * scoring; additional occurrences are counted but their positions are
+     * discarded. Title positions are not capped (titles are short).
+     */
+    private const MAX_POSITIONS_PER_WEIGHT = 200;
+
     public function __construct(
         private readonly Tokenizer $tokenizer,
         private readonly Stemmer $stemmer,
@@ -224,7 +237,9 @@ class InvertedIndexBuilder
                 if (!isset($index[$stemmed][$pageNum]['positions'][$weight])) {
                     $index[$stemmed][$pageNum]['positions'][$weight] = [];
                 }
-                $index[$stemmed][$pageNum]['positions'][$weight][] = $position;
+                if (count($index[$stemmed][$pageNum]['positions'][$weight]) < self::MAX_POSITIONS_PER_WEIGHT) {
+                    $index[$stemmed][$pageNum]['positions'][$weight][] = $position;
+                }
             }
 
             // Track diacritic variants.
