@@ -134,6 +134,7 @@ final class IndexBuildOrchestrator
                     $chunkNum++;
                     $chunk = [];
                     unset($partial);
+                    gc_collect_cycles();
                 }
             }
 
