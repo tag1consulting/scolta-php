@@ -151,6 +151,33 @@ final class IndexBuildOrchestrator
 
             $progress->finish("{$pagesInRun} pages indexed");
 
+            // If PHP's segment allocator is at ≥95% of memory_limit (measured by
+            // memory_get_usage(true)), the heap is too fragmented to run the merge
+            // in this process — even small allocations will trigger OOM. Return
+            // early so the caller can restart in a fresh process (e.g. via
+            // `drush scolta:finalize`). The chunks are safely committed to disk.
+            $limitBytes   = self::parseMemoryLimitBytes(ini_get('memory_limit') ?: '128M');
+            $segmentBytes = memory_get_usage(true);
+            if ($limitBytes > 0 && $segmentBytes >= (int) ($limitBytes * 0.95)) {
+                $this->cache->pruneAndSave();
+                $this->coordinator->releaseLockOnly();
+                $telemetry->emit('finalize_deferred', ['heap_pct' => round($segmentBytes / $limitBytes * 100, 1)]);
+                $logger->warning('[scolta] PHP heap fragmented to ' . round($segmentBytes / $limitBytes * 100, 1) . '% of memory_limit after indexing. Merge deferred — run `drush scolta:finalize` to complete.');
+                return new StatusReport(
+                    version: '0.3.0',
+                    pagefindVersion: SupportedVersions::getVersionForMetadata(),
+                    resolvedIndexer: 'php',
+                    pagesProcessed: $pagesInRun,
+                    chunksWritten: $chunkNum,
+                    peakMemoryBytes: memory_get_peak_usage(true),
+                    memoryBudgetBytes: $budget->totalBudgetBytes(),
+                    durationSeconds: round(microtime(true) - $startTime, 3),
+                    outputDir: $this->outputDir,
+                    success: false,
+                    error: 'index_only_complete',
+                );
+            }
+
             // Merge and write.
             $telemetry->emit('merge_start');
             $chunkFiles   = $this->coordinator->chunkFiles();
@@ -289,6 +316,28 @@ final class IndexBuildOrchestrator
                 error: $e->getMessage(),
             );
         }
+    }
+
+    /**
+     * Parse a PHP memory_limit string (e.g. "512M", "2G", "-1") to bytes.
+     *
+     * Returns 0 for "-1" (unlimited) and for malformed values so callers
+     * can skip the heap-full guard safely.
+     */
+    private static function parseMemoryLimitBytes(string $val): int
+    {
+        $val = trim($val);
+        if ($val === '' || $val === '-1') {
+            return 0;
+        }
+        $unit  = strtolower($val[-1]);
+        $bytes = (int) $val;
+        return match ($unit) {
+            'g' => $bytes * 1_073_741_824,
+            'm' => $bytes * 1_048_576,
+            'k' => $bytes * 1_024,
+            default => $bytes,
+        };
     }
 
     private function atomicSwap(): void
