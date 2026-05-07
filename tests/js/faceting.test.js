@@ -101,11 +101,11 @@ describe('faceting: source structure', () => {
         expect(scoltaSource).toContain('filterCounts = primarySearch.filters || {};');
     });
 
-    test('initPagefind merges all non-primary language instances', () => {
-        // pagefind.init() loads only the page language; mergeIndex must be called
-        // for every other language so filterCounts.language gets multiple values
-        // and renderFilters shows the language facet.
-        expect(scoltaSource).toContain('await pagefind.mergeIndex(basePath, { language: lang });');
+    test('initPagefind merges all non-primary language instances via absolute URL', () => {
+        // pagefind.mergeIndex skips calls where indexPath is a string-prefix of
+        // the primary basePath. Passing an absolute URL bypasses the check.
+        expect(scoltaSource).toContain('await pagefind.mergeIndex(absoluteBase, { language: lang });');
+        expect(scoltaSource).toContain('const absoluteBase = new URL(basePath, window.location.href).href;');
         expect(scoltaSource).toContain('if (lang !== primaryLang)');
     });
 
