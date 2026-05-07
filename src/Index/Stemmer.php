@@ -41,8 +41,19 @@ class Stemmer
 
     private ?\Wamania\Snowball\Stemmer\Stemmer $stemmer = null;
 
-    /** @var array<string, string> Memoized results keyed by input word. */
+    /**
+     * Memoized stem results keyed by input word.
+     *
+     * Capped at CACHE_MAX_ENTRIES to bound memory on large corpora. Once the
+     * cap is reached, new words are still stemmed correctly but not cached.
+     * Common words are encountered first and will always be in the cache; rare
+     * words from long-tail vocabulary are re-stemmed on each occurrence.
+     *
+     * @var array<string, string>
+     */
     private array $cache = [];
+
+    private const CACHE_MAX_ENTRIES = 100_000;
 
     /**
      * @param string $language Snowball language code ('en', 'fr', 'de', 'es', etc.).
@@ -77,7 +88,10 @@ class Stemmer
         }
 
         $result = $this->stemmer === null ? $word : $this->stemmer->stem($word);
-        $this->cache[$word] = $result;
+
+        if (count($this->cache) < self::CACHE_MAX_ENTRIES) {
+            $this->cache[$word] = $result;
+        }
 
         return $result;
     }

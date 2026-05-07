@@ -25,8 +25,10 @@ use Tag1\Scolta\Storage\StorageDriverInterface;
  *     file when it reaches chunk size.
  *
  * Memory budget: manifest (~5 MB) + one loaded chunk (~2.5–5 MB) + write
- * buffer up to chunk size (~2.5–5 MB) ≈ 15 MB total. Compare previous
- * architecture: entire cache in one PHP array → 400+ MB for large corpora.
+ * buffer up to $maxWriteBufferBytes (default 4 MB) ≈ 15 MB total. Compare
+ * previous architecture: entire cache in one PHP array → 400+ MB for large
+ * corpora. The byte limit prevents OOM when pages have thousands of tokens
+ * (e.g. long encyclopedia articles) that would overflow the count-only budget.
  *
  * Cache chunk size matches the build pipeline's MemoryBudget::chunkSize(),
  * so it automatically adapts to constrained environments.
@@ -74,11 +76,23 @@ final class PageWordCache
 
     /**
      * Write buffer for new/updated entries.
-     * Flushed as a new chunk file when it reaches $chunkSize.
+     * Flushed as a new chunk file when it reaches $chunkSize OR $maxWriteBufferBytes.
      *
      * @var array<string, array>
      */
     private array $writeBuffer = [];
+
+    /**
+     * Estimated byte footprint of entries currently in the write buffer.
+     * Tracked to enforce the byte-based flush threshold.
+     */
+    private int $writeBufferBytes = 0;
+
+    /**
+     * Maximum estimated bytes to accumulate in the write buffer before flushing.
+     * 0 disables byte-based flushing (count-only mode).
+     */
+    private readonly int $maxWriteBufferBytes;
 
     /**
      * Next chunk number to use when flushing the write buffer.
@@ -90,11 +104,13 @@ final class PageWordCache
         StorageDriverInterface $storage,
         int $chunkSize = 50,
         ?LoggerInterface $logger = null,
+        int $maxWriteBufferBytes = 4 * 1024 * 1024,
     ) {
-        $this->stateDir  = $stateDir;
-        $this->storage   = $storage;
-        $this->chunkSize = max(1, $chunkSize);
-        $this->logger    = $logger ?? new NullLogger();
+        $this->stateDir           = $stateDir;
+        $this->storage            = $storage;
+        $this->chunkSize          = max(1, $chunkSize);
+        $this->logger             = $logger ?? new NullLogger();
+        $this->maxWriteBufferBytes = max(0, $maxWriteBufferBytes);
         $this->loadManifest();
     }
 
@@ -144,14 +160,24 @@ final class PageWordCache
      * Store token data for a content hash.
      *
      * Also records the hash as "used." Entries go into the write buffer.
-     * When the buffer reaches chunk size, it's flushed as a new chunk file.
+     * The buffer flushes when it reaches $chunkSize entries OR when the
+     * estimated byte footprint exceeds $maxWriteBufferBytes — whichever
+     * comes first. The byte limit prevents a single serialize() call from
+     * allocating tens of megabytes when pages contain thousands of tokens
+     * (e.g. long encyclopedia articles).
      */
     public function put(string $hash, array $tokenData): void
     {
         $this->usedKeys[$hash] = true;
         $this->writeBuffer[$hash] = $tokenData;
 
-        if (count($this->writeBuffer) >= $this->chunkSize) {
+        if ($this->maxWriteBufferBytes > 0) {
+            $this->writeBufferBytes += $this->estimateBytes($tokenData);
+        }
+
+        if (count($this->writeBuffer) >= $this->chunkSize
+            || ($this->maxWriteBufferBytes > 0 && $this->writeBufferBytes >= $this->maxWriteBufferBytes)
+        ) {
             $this->flushWriteBuffer();
         }
     }
@@ -324,7 +350,25 @@ final class PageWordCache
             $this->manifest[$hash] = $chunkNumber;
         }
 
-        $this->writeBuffer = [];
+        $this->writeBuffer      = [];
+        $this->writeBufferBytes = 0;
+    }
+
+    /**
+     * Estimate the serialized byte footprint of a single token-data entry.
+     *
+     * Counts all token records (each ~80 bytes serialized: 3 string fields +
+     * PHP array overhead) plus the raw content string. The estimate is
+     * intentionally conservative — it may undercount complex Unicode tokens —
+     * but is fast (no actual serialization) and sufficient for flush budgeting.
+     */
+    private function estimateBytes(array $tokenData): int
+    {
+        $tokenCount = count($tokenData['titleTokens'] ?? [])
+                    + count($tokenData['bodyTokens'] ?? [])
+                    + count($tokenData['urlTokens'] ?? []);
+
+        return $tokenCount * 80 + strlen($tokenData['content'] ?? '');
     }
 
     private function saveManifest(): void
