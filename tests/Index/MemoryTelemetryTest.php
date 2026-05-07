@@ -86,6 +86,68 @@ class MemoryTelemetryTest extends TestCase
         $this->assertSame(42, $ctx['pages']);
         $this->assertSame(3, $ctx['chunk']);
     }
+
+    // -------------------------------------------------------------------------
+    // Threshold uses current live memory, not monotonic peak
+    // -------------------------------------------------------------------------
+
+    public function testAbortThresholdUsesCurrentNotPeak(): void
+    {
+        $limit = 100 * 1_048_576; // 100 MB
+
+        // current = 5 MB (well under threshold), peak = 95 MB (would trip old code)
+        $current = 5 * 1_048_576;
+        $peak    = 95 * 1_048_576;
+
+        $log = new CapturingLogger();
+
+        // Set limit BEFORE construction so parseMemoryLimit() reads 100M.
+        ini_set('memory_limit', '100M');
+        try {
+            $telemetry = new MemoryTelemetry(
+                $log,
+                MemoryBudget::conservative(),
+                static fn () => $current,
+                static fn () => $peak,
+            );
+            $telemetry->emit('chunk_start');
+        } finally {
+            ini_set('memory_limit', '-1');
+        }
+
+        // Must NOT throw — current is only 5%, peak is 95% but that's irrelevant.
+        $this->assertNotEmpty($log->records);
+        $this->assertNotSame(
+            'error',
+            $log->records[0]['level'],
+            'Abort threshold must use current live memory, not monotonic peak'
+        );
+    }
+
+    public function testAbortThresholdFiresOnHighCurrentMemory(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/exceeds safe threshold/');
+
+        // current = 92 MB (over 90% threshold), peak = 92 MB
+        $current = 92 * 1_048_576;
+
+        $log = new CapturingLogger();
+
+        // Set limit BEFORE construction so parseMemoryLimit() reads 100M.
+        ini_set('memory_limit', '100M');
+        try {
+            $telemetry = new MemoryTelemetry(
+                $log,
+                MemoryBudget::conservative(),
+                static fn () => $current,
+                static fn () => $current,
+            );
+            $telemetry->emit('chunk_start');
+        } finally {
+            ini_set('memory_limit', '-1');
+        }
+    }
 }
 
 /**

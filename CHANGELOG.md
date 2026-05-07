@@ -7,6 +7,7 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ## [Unreleased]
 
 ### Fixed
+- **Memory-budget abort threshold now uses current live RSS, not monotonic peak.** `MemoryTelemetry` previously computed the threshold percentage from `memory_get_peak_usage()`, which only ever increases. On large-corpus builds with many small chunks (e.g. Wikipedia with `--chunk-size=10`), the accumulated peak from earlier chunks crossed 90% of the PHP memory limit long before actual live memory was under pressure, causing a false-positive abort. The threshold now uses `memory_get_usage()` (current live memory) instead, so the abort fires only when the process is genuinely close to its limit.
 - **Fixed OOM on large corpora caused by pageWordCache holding all token data in RAM.** The page-word cache previously deserialized the entire cache file (~2+ GB for large sites) into a single PHP array at construction. Fix: replaced the monolithic in-memory cache with a chunked disk-backed architecture. A lightweight manifest (hash → chunk number, ~5 MB for 44k pages) stays in memory; chunk files are loaded on demand one at a time. Peak cache memory drops from O(corpus size) to ~15 MB regardless of site size. Includes automatic migration from the legacy single-file format. Extracts duplicated cache logic from IndexBuildOrchestrator and PhpIndexer into a shared PageWordCache class.
 
 ### Changed

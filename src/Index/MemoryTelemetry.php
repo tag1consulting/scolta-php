@@ -13,32 +13,47 @@ use Psr\Log\LoggerInterface;
  * was constructed. With a logger wired to WP-CLI/Drush --debug output, this
  * lets operators see exactly which phase is slow without a profiler.
  *
- * Warns at 75% of PHP memory_limit, aborts at 90%.
+ * Warns at 75% of current live RSS, aborts at 90%. Thresholds use
+ * memory_get_usage() (live) not memory_get_peak_usage() (monotonic) so that
+ * large-corpus builds with many small chunks don't abort when past-chunk peaks
+ * accumulate above the threshold while current live RSS is well within bounds.
  */
 final class MemoryTelemetry
 {
     private readonly int $limitBytes;
     private readonly float $buildStartTime;
+    /** @var \Closure(): int */
+    private readonly \Closure $getCurrentMemory;
+    /** @var \Closure(): int */
+    private readonly \Closure $getPeakMemory;
 
+    /**
+     * @param \Closure(): int|null $getCurrentMemory Injectable for testing; defaults to memory_get_usage(true).
+     * @param \Closure(): int|null $getPeakMemory    Injectable for testing; defaults to memory_get_peak_usage(true).
+     */
     public function __construct(
         private readonly LoggerInterface $logger,
         private readonly MemoryBudget $budget,
+        ?\Closure $getCurrentMemory = null,
+        ?\Closure $getPeakMemory = null,
     ) {
-        $this->limitBytes     = self::parseMemoryLimit();
-        $this->buildStartTime = microtime(true);
+        $this->limitBytes       = self::parseMemoryLimit();
+        $this->buildStartTime   = microtime(true);
+        $this->getCurrentMemory = $getCurrentMemory ?? static fn () => memory_get_usage(true);
+        $this->getPeakMemory    = $getPeakMemory    ?? static fn () => memory_get_peak_usage(true);
     }
 
     /**
      * Record a telemetry event for a named build phase.
      *
-     * @throws \RuntimeException When memory usage exceeds 90% of PHP memory_limit.
+     * @throws \RuntimeException When current live memory exceeds 90% of PHP memory_limit.
      */
     public function emit(string $phase, array $extra = []): void
     {
-        $current   = memory_get_usage(true);
-        $peak      = memory_get_peak_usage(true);
+        $current   = ($this->getCurrentMemory)();
+        $peak      = ($this->getPeakMemory)();
         $pct       = $this->limitBytes > 0
-            ? round($peak / $this->limitBytes * 100, 1)
+            ? round($current / $this->limitBytes * 100, 1)
             : 0.0;
         $elapsed   = round(microtime(true) - $this->buildStartTime, 2);
 
