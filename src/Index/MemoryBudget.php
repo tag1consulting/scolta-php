@@ -24,13 +24,16 @@ final class MemoryBudget
         private readonly int $wordIndexChunkBytes,
         private readonly int $mergeOpenFileHandles,
         private readonly int $totalBudgetBytes,
+        private readonly int $tokenCacheChunkBytes,
     ) {
     }
 
     /**
      * Conservative: safe for shared hosts with PHP memory_limit ≤ 128 MB.
      *
-     * Peak RSS ≤ 96 MB for any corpus size. This is the runtime default.
+     * Targets peak RSS ≤ 96 MB for any corpus size. This is the runtime default.
+     * The 4 MB token-cache chunk limit prevents single serialize() allocations
+     * from exhausting memory when pages contain thousands of tokens.
      */
     public static function conservative(): self
     {
@@ -41,6 +44,7 @@ final class MemoryBudget
             wordIndexChunkBytes: 40_000,
             mergeOpenFileHandles: 50,
             totalBudgetBytes: 96 * 1024 * 1024,
+            tokenCacheChunkBytes: 4 * 1024 * 1024,
         );
     }
 
@@ -56,6 +60,7 @@ final class MemoryBudget
             wordIndexChunkBytes: 160_000,
             mergeOpenFileHandles: 200,
             totalBudgetBytes: 384 * 1024 * 1024,
+            tokenCacheChunkBytes: 16 * 1024 * 1024,
         );
     }
 
@@ -71,6 +76,7 @@ final class MemoryBudget
             wordIndexChunkBytes: 512_000,
             mergeOpenFileHandles: 500,
             totalBudgetBytes: 1024 * 1024 * 1024,
+            tokenCacheChunkBytes: 64 * 1024 * 1024,
         );
     }
 
@@ -167,6 +173,7 @@ final class MemoryBudget
             wordIndexChunkBytes: $this->wordIndexChunkBytes,
             mergeOpenFileHandles: max($chunkSize, $this->mergeOpenFileHandles),
             totalBudgetBytes: $this->totalBudgetBytes,
+            tokenCacheChunkBytes: $this->tokenCacheChunkBytes,
         );
     }
 
@@ -203,6 +210,21 @@ final class MemoryBudget
     public function totalBudgetBytes(): int
     {
         return $this->totalBudgetBytes;
+    }
+
+    /**
+     * Maximum bytes to buffer in PageWordCache before flushing to a chunk file.
+     *
+     * Bounds the serialization allocation for a single flush. Prevents OOM when
+     * large pages (e.g. long Wikipedia articles with thousands of tokens) would
+     * otherwise fill the write buffer with many megabytes before serialize() fires.
+     *
+     * @since 0.3.11
+     * @stability experimental
+     */
+    public function tokenCacheChunkBytes(): int
+    {
+        return $this->tokenCacheChunkBytes;
     }
 
     /** Human-readable profile name: "conservative" | "balanced" | "aggressive". */

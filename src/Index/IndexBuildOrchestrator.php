@@ -43,7 +43,11 @@ final class IndexBuildOrchestrator
         $this->builder     = new InvertedIndexBuilder(new Tokenizer(), new Stemmer($language));
         $this->merger      = new IndexMerger();
         $this->storage     = $storage ?? new FilesystemDriver();
-        $this->cache       = new PageWordCache($stateDir, $this->storage);
+        $this->cache       = new PageWordCache(
+            $stateDir,
+            $this->storage,
+            maxWriteBufferBytes: MemoryBudget::default()->tokenCacheChunkBytes(),
+        );
     }
 
     /**

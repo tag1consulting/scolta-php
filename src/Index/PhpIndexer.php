@@ -50,7 +50,12 @@ class PhpIndexer
         $stemmer   = new Stemmer($language);
         $this->builder = new InvertedIndexBuilder($tokenizer, $stemmer);
         $this->merger  = new IndexMerger();
-        $this->cache   = new PageWordCache($stateDir, $this->storage, chunkSize: $this->budget->chunkSize());
+        $this->cache   = new PageWordCache(
+            $stateDir,
+            $this->storage,
+            chunkSize: $this->budget->chunkSize(),
+            maxWriteBufferBytes: $this->budget->tokenCacheChunkBytes(),
+        );
     }
 
     /**

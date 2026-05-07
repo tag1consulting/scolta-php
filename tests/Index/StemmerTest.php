@@ -90,4 +90,24 @@ class StemmerTest extends TestCase
         $this->assertContains('ca', $langs);
         $this->assertCount(14, $langs);
     }
+
+    public function testStemIsConsistentWhetherCachedOrRecomputed(): void
+    {
+        $stemmer = new Stemmer('en');
+
+        // Stem each word twice. The second call hits the memoization cache.
+        // Both calls must return the same result — verifies the cap logic
+        // (once added) does not accidentally skip memoization for early words
+        // or corrupt results for repeated words.
+        $words = ['running', 'cats', 'computing', 'walks', 'testing', 'indexing'];
+        foreach ($words as $word) {
+            $first  = $stemmer->stem($word);
+            $second = $stemmer->stem($word);
+            $this->assertSame(
+                $first,
+                $second,
+                "stem('{$word}') must return identical results on repeated calls"
+            );
+        }
+    }
 }

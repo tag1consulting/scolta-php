@@ -36,9 +36,9 @@ class PageWordCacheUnitTest extends TestCase
     // Helpers
     // -------------------------------------------------------------------------
 
-    private function makeCache(int $chunkSize = 10): PageWordCache
+    private function makeCache(int $chunkSize = 10, int $maxWriteBufferBytes = 4 * 1024 * 1024): PageWordCache
     {
-        return new PageWordCache($this->stateDir, new FilesystemDriver(), $chunkSize);
+        return new PageWordCache($this->stateDir, new FilesystemDriver(), $chunkSize, null, $maxWriteBufferBytes);
     }
 
     private function tokenData(string $label): array
@@ -171,6 +171,38 @@ class PageWordCacheUnitTest extends TestCase
         // Two full flushes at chunk size 2 → chunks 0 and 1.
         $this->assertFileExists($this->chunkFile(0));
         $this->assertFileExists($this->chunkFile(1));
+    }
+
+    public function testByteThresholdTriggersFlusheBeforeCountThreshold(): void
+    {
+        // Each tokenData() entry estimates at ~173 bytes (2 tokens × 80 + 13 content chars).
+        // With maxWriteBufferBytes=300 and chunkSize=100, the 2nd put() should trip the
+        // byte threshold (2 × 173 = 346 ≥ 300) long before the count threshold (100).
+        $cache = $this->makeCache(chunkSize: 100, maxWriteBufferBytes: 300);
+
+        $cache->put('hash-0', $this->tokenData('item-0'));
+        $this->assertFileDoesNotExist($this->chunkFile(0), 'First put must not flush (1 entry < 300 bytes)');
+
+        $cache->put('hash-1', $this->tokenData('item-1'));
+        $this->assertFileExists(
+            $this->chunkFile(0),
+            'Second put must flush via byte threshold before count threshold (100) is reached'
+        );
+    }
+
+    public function testByteThresholdDataIsRetrievableAfterFlush(): void
+    {
+        $cache = $this->makeCache(chunkSize: 100, maxWriteBufferBytes: 300);
+
+        $data0 = $this->tokenData('item-0');
+        $data1 = $this->tokenData('item-1');
+        $cache->put('hash-0', $data0);
+        $cache->put('hash-1', $data1); // triggers byte flush
+        $cache->pruneAndSave();
+
+        $cache2 = $this->makeCache(chunkSize: 100, maxWriteBufferBytes: 300);
+        $this->assertSame($data0, $cache2->get('hash-0'));
+        $this->assertSame($data1, $cache2->get('hash-1'));
     }
 
     public function testDataRetrievableAfterFlushFromChunkFile(): void
