@@ -111,7 +111,16 @@ final class IndexBuildOrchestrator
                 }
 
                 if ($tokenData !== null) {
-                    $chunk[] = ['item' => $page, 'tokenData' => $tokenData];
+                    // Slim proxy: drop bodyHtml so it's freed as soon as the
+                    // generator advances, not held for the full chunk duration.
+                    $chunk[] = ['item' => (object) [
+                        'id'       => $page->id,
+                        'url'      => $page->url,
+                        'date'     => $page->date,
+                        'siteName' => $page->siteName,
+                        'language' => $page->language,
+                        'filters'  => $page->filters,
+                    ], 'tokenData' => $tokenData];
                 }
 
                 if (count($chunk) >= $chunkSize) {

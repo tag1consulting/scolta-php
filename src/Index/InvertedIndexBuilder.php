@@ -118,15 +118,17 @@ class InvertedIndexBuilder
     /**
      * Build a partial index from pre-tokenized item data.
      *
-     * Accepts the output of tokenizeItem() paired with the original ContentItem
-     * (for metadata fields not cached: date, siteName, filters). Page numbers
-     * are assigned sequentially from pageOffset.
+     * Accepts the output of tokenizeItem() paired with a metadata object for
+     * the item (id, url, date, siteName, language, filters). The object may be
+     * a ContentItem or any object with those public properties — callers may
+     * pass a slim proxy to release bodyHtml early and reduce memory pressure.
+     * Page numbers are assigned sequentially from pageOffset.
      *
      * Page numbers MUST be sequential. pagefind.js resolves search results via
      * pf_meta[1][page_num] where pf_meta[1] is a sequential array. Non-sequential
      * keys corrupt result resolution at runtime.
      *
-     * @param array<int, array{item: ContentItem, tokenData: array}> $tokenDataList
+     * @param array<int, array{item: object, tokenData: array}> $tokenDataList
      * @return array{index: array, pages: array}
      */
     public function buildFromTokenData(array $tokenDataList, int $pageOffset = 0): array
