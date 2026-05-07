@@ -55,18 +55,58 @@ class PageWordCacheTest extends TestCase
         );
     }
 
-    private function cacheFile(): string
+    private function manifestFile(): string
     {
-        return $this->stateDir . '/page-word-cache.php';
+        return $this->stateDir . '/token-cache-manifest.php';
     }
 
+    private function chunkDir(): string
+    {
+        return $this->stateDir . '/token-cache';
+    }
+
+    /**
+     * Read the full flattened cache (hash => tokenData) from the chunked disk format.
+     * Reads manifest + all chunk files referenced by the manifest.
+     */
     private function readCacheFromDisk(): array
     {
-        if (!file_exists($this->cacheFile())) {
+        if (!file_exists($this->manifestFile())) {
             return [];
         }
-        $data = unserialize(file_get_contents($this->cacheFile()), ['allowed_classes' => false]);
-        return is_array($data) ? $data : [];
+
+        $manifestRaw = file_get_contents($this->manifestFile());
+        $manifest = @unserialize($manifestRaw, ['allowed_classes' => false]);
+        if (!is_array($manifest)) {
+            return [];
+        }
+
+        // Group hashes by chunk number.
+        $chunkToHashes = [];
+        foreach ($manifest as $hash => $chunkNum) {
+            $chunkToHashes[$chunkNum][] = $hash;
+        }
+
+        $result = [];
+        foreach ($chunkToHashes as $chunkNum => $hashes) {
+            $chunkFile = $this->chunkDir()
+                . '/chunk-' . str_pad((string) $chunkNum, 6, '0', STR_PAD_LEFT) . '.php';
+            if (!file_exists($chunkFile)) {
+                continue;
+            }
+            $chunkRaw = file_get_contents($chunkFile);
+            $chunkData = @unserialize($chunkRaw, ['allowed_classes' => false]);
+            if (!is_array($chunkData)) {
+                continue;
+            }
+            foreach ($hashes as $hash) {
+                if (isset($chunkData[$hash])) {
+                    $result[$hash] = $chunkData[$hash];
+                }
+            }
+        }
+
+        return $result;
     }
 
     private function buildWithPhpIndexer(array $items, bool $force = false): void
@@ -105,6 +145,24 @@ class PageWordCacheTest extends TestCase
             $file->isDir() ? rmdir($file->getRealPath()) : unlink($file->getRealPath());
         }
         rmdir($dir);
+    }
+
+    /**
+     * Corrupt the cache entry for a given hash in-place (manifest + chunk file).
+     */
+    private function corruptCacheEntry(string $hash, string $field, string $value): void
+    {
+        $manifestRaw = file_get_contents($this->manifestFile());
+        $manifest = unserialize($manifestRaw, ['allowed_classes' => false]);
+        $chunkNum = $manifest[$hash];
+
+        $chunkFile = $this->chunkDir()
+            . '/chunk-' . str_pad((string) $chunkNum, 6, '0', STR_PAD_LEFT) . '.php';
+        $chunkRaw = file_get_contents($chunkFile);
+        $chunkData = unserialize($chunkRaw, ['allowed_classes' => false]);
+
+        $chunkData[$hash][$field] = $value;
+        file_put_contents($chunkFile, serialize($chunkData));
     }
 
     // =========================================================================
@@ -377,10 +435,8 @@ class PageWordCacheTest extends TestCase
         $this->buildWithPhpIndexer([$item]);
 
         // Corrupt the on-disk cache so any hit would produce wrong output.
-        $cache     = $this->readCacheFromDisk();
-        $key       = array_key_first($cache);
-        $cache[$key]['cleanTitle'] = '__CORRUPTED__';
-        file_put_contents($this->cacheFile(), serialize($cache));
+        $hash = PhpIndexer::contentHash($item);
+        $this->corruptCacheEntry($hash, 'cleanTitle', '__CORRUPTED__');
 
         // Without force: reads corrupted cache.
         $indexer = new PhpIndexer($this->stateDir, $this->outputDir);
@@ -419,10 +475,8 @@ class PageWordCacheTest extends TestCase
         $this->buildWithOrchestrator([$item]);
 
         // Corrupt the on-disk cache.
-        $cache     = $this->readCacheFromDisk();
-        $key       = array_key_first($cache);
-        $cache[$key]['cleanTitle'] = '__CORRUPTED__';
-        file_put_contents($this->cacheFile(), serialize($cache));
+        $hash = PhpIndexer::contentHash($item);
+        $this->corruptCacheEntry($hash, 'cleanTitle', '__CORRUPTED__');
 
         // Force build must bypass the corrupted entry and re-tokenize.
         $this->buildWithOrchestrator([$item], force: true);
@@ -550,11 +604,10 @@ class PageWordCacheTest extends TestCase
 
     public function testCorruptedCacheFileIsIgnoredAndBuildSucceeds(): void
     {
-        // Write a corrupted (non-serializable) cache file before first build.
-        file_put_contents($this->cacheFile(), 'THIS IS NOT VALID SERIALIZED DATA');
+        // Write a corrupted manifest before first build — cache must be ignored.
+        file_put_contents($this->manifestFile(), 'THIS IS NOT VALID SERIALIZED DATA');
 
-        $item   = $this->makeItem('a', 'content that should index fine despite corrupt cache');
-        $result = new \stdClass();
+        $item = $this->makeItem('a', 'content that should index fine despite corrupt cache');
 
         $indexer = new PhpIndexer($this->stateDir, $this->outputDir);
         $indexer->processChunk([$item], 0, 1);
@@ -566,11 +619,11 @@ class PageWordCacheTest extends TestCase
 
     public function testCorruptedCacheFileIsIgnoredOrchestrator(): void
     {
-        file_put_contents($this->cacheFile(), 'INVALID');
+        file_put_contents($this->manifestFile(), 'INVALID');
 
-        $item   = $this->makeItem('a', 'content for orchestrator with corrupt cache test');
+        $item         = $this->makeItem('a', 'content for orchestrator with corrupt cache test');
         $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
-        $report = $orchestrator->build(
+        $report       = $orchestrator->build(
             BuildIntent::fresh(1, MemoryBudget::conservative()),
             [$item],
         );
@@ -611,10 +664,10 @@ class PageWordCacheTest extends TestCase
         $result = $indexer->finalize();
         $this->assertFalse($result->success);
 
-        // Cache file should not exist (no items were processed).
+        // Manifest must not exist (no items were processed, pruneAndSave not called).
         $this->assertFileDoesNotExist(
-            $this->cacheFile(),
-            'Cache file must not be created when no items are processed'
+            $this->manifestFile(),
+            'Manifest must not be created when no items are processed'
         );
     }
 }
