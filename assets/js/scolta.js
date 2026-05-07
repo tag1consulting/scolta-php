@@ -222,6 +222,7 @@
   let lastExpandedTerms = null;
   let searchVersion = 0;
   let usedOrFallback = false;
+  let pagefindBase = '';   // Set during initPagefind(); used by resolveUrl().
 
   // --- DOM references (set during init) ---
   let els = {};
@@ -299,6 +300,10 @@
     pagefind = await import(pagefindPath);
     await pagefind.init();
 
+    // Record the base so resolveUrl() can strip it back off.
+    // pagefind's fullUrl() prepends this path to every stored root-relative URL.
+    pagefindBase = pagefindPath.replace(/\/pagefind\/pagefind\.js.*$/, '');
+
     // Merge all language instances so multilingual facets appear.
     // pagefind.init() loads only the page language; without merging,
     // filterCounts.language has one value and renderFilters hides the facet.
@@ -326,6 +331,17 @@
     // Warm the index: triggers WASM compilation + fragment download.
     await pagefind.search("");
     console.log("[scolta] Pagefind index preloaded");
+  }
+
+  // Strip the pagefind base path that fullUrl() prepends to root-relative paths.
+  function resolveUrl(raw) {
+    if (!raw) return '';
+    if (/^https?:\/\//.test(raw)) return raw;
+    if (pagefindBase && raw.startsWith(pagefindBase + '/')) {
+      return raw.slice(pagefindBase.length);
+    }
+    if (!raw.startsWith('/')) return '/' + raw;
+    return raw;
   }
 
   // Scolta WASM module for client-side scoring.
@@ -456,7 +472,7 @@
       try {
         const contextItems = topN.map(r => ({
           content: stripHtml(r.data.content || r.data.excerpt || ''),
-          url: ((u) => u.startsWith('/') ? window.location.origin + u : u)(r.data.meta?.url || ''),
+          url: ((u) => u.startsWith('/') ? window.location.origin + u : u)(resolveUrl(r.data.url || '')),
           title: r.data.meta?.title || '',
         }));
         const extractInput = JSON.stringify({
@@ -556,7 +572,7 @@
     const CONFIG = getInstanceConfig();
     return results.map((r, i) => {
       const title = r.data.meta?.title || "Untitled";
-      const _u = r.data.meta?.url || ""; const url = _u.startsWith("/") ? window.location.origin + _u : _u;
+      const _u = resolveUrl(r.data.url || ""); const url = _u.startsWith("/") ? window.location.origin + _u : _u;
       const useFullContent = i < 2;
       const text = useFullContent
         ? stripHtml(r.data.content || r.data.excerpt || "")
@@ -818,7 +834,7 @@
         const contentLocations = computeContentWordLocations(data.content || '', queryTerms);
         return {
           title: data.meta?.title || '',
-          url: data.meta?.url || data.url || '',
+          url: resolveUrl(data.url || ''),
           excerpt: data.excerpt || '',
           date: data.meta?.date || '',
           pagefind_index: i,
@@ -844,7 +860,7 @@
         const scored = JSON.parse(output);
         return scored.map(item => ({
           data: loaded[item.pagefind_index] || loaded.find(d =>
-            (d.meta?.url || d.url) === item.url
+            resolveUrl(d.url || '') === item.url
           ) || loaded[0],
           score: item.score * sourceWeight,
         }));
@@ -946,14 +962,14 @@
     if (scoltaWasm) {
       const original = currentResults.map(r => ({
         title: r.data.meta?.title || '',
-        url: r.data.meta?.url || r.data.url || '',
+        url: resolveUrl(r.data.url || ''),
         score: r.score,
         excerpt: r.data.excerpt || '',
         date: r.data.meta?.date || '',
       }));
       const expanded = newResults.map(r => ({
         title: r.data.meta?.title || '',
-        url: r.data.meta?.url || r.data.url || '',
+        url: resolveUrl(r.data.url || ''),
         score: r.score,
         excerpt: r.data.excerpt || '',
         date: r.data.meta?.date || '',
@@ -976,7 +992,7 @@
         const normalizeUrl = u => (u || '').replace(/\.html$/, '').replace(/\/$/, '').toLowerCase();
         const dataByUrl = new Map();
         for (const r of [...currentResults, ...newResults]) {
-          const rawUrl = r.data.meta?.url || r.data.url || '';
+          const rawUrl = resolveUrl(r.data.url || '');
           for (const key of [rawUrl, normalizeUrl(rawUrl), rawUrl.replace(/^\/+/, ''), normalizeUrl(rawUrl).replace(/^\/+/, '')]) {
             if (key && (!dataByUrl.has(key) || r.score > dataByUrl.get(key).score)) {
               dataByUrl.set(key, r);
@@ -1004,14 +1020,14 @@
     // JS fallback merge
     const urlMap = new Map();
     for (const r of currentResults) {
-      const url = r.data.meta?.url || r.data.url || '';
+      const url = resolveUrl(r.data.url || '');
       const prev = urlMap.get(url);
       if (!prev || r.score > prev.score) {
         urlMap.set(url, r);
       }
     }
     for (const r of newResults) {
-      const url = r.data.meta?.url || r.data.url || '';
+      const url = resolveUrl(r.data.url || '');
       const prev = urlMap.get(url);
       if (!prev || r.score > prev.score) {
         urlMap.set(url, r);
@@ -1239,7 +1255,7 @@
             priorityMap[(pm.url || '').replace(/\/$/, '').toLowerCase()] = pm;
           });
           allScoredResults.forEach(result => {
-            const url = (result.data.meta?.url || result.data.url || '').replace(/\/$/, '').toLowerCase();
+            const url = resolveUrl(result.data.url || '').replace(/\/$/, '').toLowerCase();
             if (priorityMap[url]) {
               result.score = (result.score || 0) + (priorityMap[url].boost || 100);
             }
@@ -1428,7 +1444,7 @@
     for (let i = displayedCount; i < showing; i++) {
       const { data } = filtered[i];
       const title = data.meta?.title || "Untitled";
-      const url = data.meta?.url || data.url || "#";
+      const url = resolveUrl(data.url || '') || "#";
       const site = data.meta?.site || "";
       const date = data.meta?.date || "";
       const excerpt = truncateExcerpt(data.excerpt || "", CONFIG.EXCERPT_LENGTH);
