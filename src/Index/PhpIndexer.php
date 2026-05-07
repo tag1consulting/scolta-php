@@ -26,12 +26,7 @@ class PhpIndexer
     private readonly IndexMerger $merger;
     private readonly StorageDriverInterface $storage;
     private readonly MemoryBudget $budget;
-
-    /** @var array<string, array> Per-page word list cache keyed by content hash. */
-    private array $pageWordCache = [];
-
-    /** @var string[] Content hashes used in this build (for cache pruning). */
-    private array $usedCacheKeys = [];
+    private readonly PageWordCache $cache;
 
     /** Global page offset for sequential page numbering across chunks. */
     private int $currentPageOffset = 0;
@@ -55,8 +50,7 @@ class PhpIndexer
         $stemmer   = new Stemmer($language);
         $this->builder = new InvertedIndexBuilder($tokenizer, $stemmer);
         $this->merger  = new IndexMerger();
-
-        $this->loadPageWordCache();
+        $this->cache   = new PageWordCache($stateDir, $this->storage, chunkSize: $this->budget->chunkSize());
     }
 
     /**
@@ -90,14 +84,11 @@ class PhpIndexer
         $tokenDataList = [];
         foreach ($items as $item) {
             $hash = self::contentHash($item);
-            $this->usedCacheKeys[] = $hash;
-
-            if (!$force && isset($this->pageWordCache[$hash])) {
-                $tokenData = $this->pageWordCache[$hash];
-            } else {
+            $tokenData = (!$force) ? $this->cache->get($hash) : null;
+            if ($tokenData === null) {
                 $tokenData = $this->builder->tokenizeItem($item);
                 if ($tokenData !== null) {
-                    $this->pageWordCache[$hash] = $tokenData;
+                    $this->cache->put($hash, $tokenData);
                 }
             }
 
@@ -149,8 +140,7 @@ class PhpIndexer
             $this->coordinator->release();
             $this->prepared = false;
 
-            $this->prunePageWordCache();
-            $this->savePageWordCache();
+            $this->cache->pruneAndSave();
 
             $elapsed = microtime(true) - $startTime;
 
@@ -263,33 +253,4 @@ class PhpIndexer
         return $count;
     }
 
-    private function loadPageWordCache(): void
-    {
-        $cacheFile = $this->stateDir . '/page-word-cache.php';
-        if ($this->storage->exists($cacheFile)) {
-            $raw  = $this->storage->get($cacheFile);
-            // @ suppresses the PHP warning unserialize() emits on malformed input.
-            $data = @unserialize($raw, ['allowed_classes' => false]);
-            if (is_array($data)) {
-                $this->pageWordCache = $data;
-            }
-        }
-    }
-
-    private function savePageWordCache(): void
-    {
-        $cacheFile = $this->stateDir . '/page-word-cache.php';
-        $this->storage->makeDirectory($this->stateDir);
-        $this->storage->put($cacheFile, serialize($this->pageWordCache));
-    }
-
-    private function prunePageWordCache(): void
-    {
-        if (empty($this->usedCacheKeys)) {
-            return;
-        }
-
-        $usedSet = array_flip($this->usedCacheKeys);
-        $this->pageWordCache = array_intersect_key($this->pageWordCache, $usedSet);
-    }
 }

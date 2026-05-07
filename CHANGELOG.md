@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Fixed
+- **Fixed OOM on large corpora caused by pageWordCache holding all token data in RAM.** The page-word cache previously deserialized the entire cache file (~2+ GB for large sites) into a single PHP array at construction. Fix: replaced the monolithic in-memory cache with a chunked disk-backed architecture. A lightweight manifest (hash → chunk number, ~5 MB for 44k pages) stays in memory; chunk files are loaded on demand one at a time. Peak cache memory drops from O(corpus size) to ~15 MB regardless of site size. Includes automatic migration from the legacy single-file format. Extracts duplicated cache logic from IndexBuildOrchestrator and PhpIndexer into a shared PageWordCache class.
+
 ### Changed
 - **`indexer: auto` now always uses the PHP indexer.** Previously `auto` tried the Pagefind binary first and fell back to PHP. The PHP indexer works on all PHP hosting environments without `exec()` or Node.js, uses less memory, and supports fast incremental re-indexing. Use `indexer: binary` to keep the old binary-first behaviour.
 
