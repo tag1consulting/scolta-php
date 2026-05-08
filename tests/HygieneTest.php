@@ -104,4 +104,30 @@ class HygieneTest extends TestCase
         }
         $this->assertGreaterThan(0, $scanned, 'Expected to scan at least one PHP source file.');
     }
+
+    // -------------------------------------------------------------------
+    // scolta.js URL fix: data.meta?.url must take precedence (issue #40).
+    // -------------------------------------------------------------------
+
+    public function testScoltaJsUsesMetaUrlForDisplayLinks(): void
+    {
+        $js = file_get_contents(__DIR__ . '/../assets/js/scolta.js');
+
+        $this->assertStringContainsString(
+            'data.meta?.url',
+            $js,
+            'scolta.js must prefer data.meta?.url (verbatim from data-pagefind-meta) over the Pagefind-resolved data.url for display links'
+        );
+    }
+
+    public function testScoltaJsMetaUrlTakesPrecedenceOverResolveUrl(): void
+    {
+        $js = file_get_contents(__DIR__ . '/../assets/js/scolta.js');
+
+        $this->assertMatchesRegularExpression(
+            '/data\.meta\?\.url\s*\|\|\s*resolveUrl\(/',
+            $js,
+            'scolta.js must use data.meta?.url || resolveUrl() so the verbatim meta URL takes precedence over Pagefind\'s resolved data.url (prevents path doubling on subdirectory installs)'
+        );
+    }
 }
