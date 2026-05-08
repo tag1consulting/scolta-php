@@ -7,6 +7,12 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ## [Unreleased]
 
 ### Added
+- **Timestamp-based rebuild optimization: skip unchanged entities entirely.** Two new classes enable gatherers to bypass `loadMultiple()` / `WP_Query` for entities whose changed timestamp has not changed since the last indexed build:
+  - `TimestampManifest` — disk-backed manifest (`timestamp-manifest.php` in the state directory) mapping entity key → `{ts, items[{hash, id, url, date, siteName, language, filters}]}`. `put()` stores a new/updated entry, `markSeen()` prevents it from being pruned, and `pruneAndSave()` atomically removes entries for deleted entities and persists the manifest.
+  - `CachedContentReference` — marker object yielded by gatherers for unchanged entities. Carries the pre-computed content hash and all metadata needed to build a chunk entry without re-loading the entity body.
+- **`IndexBuildOrchestrator` now exposes `getTimestampManifest()` and handles `CachedContentReference` in the build loop.** The build loop checks `instanceof CachedContentReference`: on a token-cache hit the reference is added to the chunk and `markSeen()` is called; on a cache miss the entry is silently dropped, causing `pruneAndSave()` to remove it so the entity is treated as changed on the next build. `pruneAndSave()` is now called on both the `PageWordCache` and `TimestampManifest` in all three build-completion paths (deferred merge, successful merge, and the implicit prune that follows). On a 44k-page site with 10 changed pages this reduces rebuild time from minutes to seconds.
+
+### Added
 - **Amazee.ai integration: core PHP library (`Tag1\Scolta\AiProvider\Amazee\`).** Seven new classes supporting the full trial provisioning and account upgrade flows for Amazee.ai's LiteLLM-compatible API:
   - `AmazeeClient` — HTTP client for the Amazee.ai control-plane (provisioning, sign-in, region listing, private key creation, token validation). Uses the existing Guzzle dependency; no new composer requirements.
   - `AmazeeApiException` — thrown on API errors; carries the HTTP status code.
