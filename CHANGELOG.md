@@ -6,6 +6,17 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Added
+- **Amazee.ai integration: core PHP library (`Tag1\Scolta\AiProvider\Amazee\`).** Seven new classes supporting the full trial provisioning and account upgrade flows for Amazee.ai's LiteLLM-compatible API:
+  - `AmazeeClient` — HTTP client for the Amazee.ai control-plane (provisioning, sign-in, region listing, private key creation, token validation). Uses the existing Guzzle dependency; no new composer requirements.
+  - `AmazeeApiException` — thrown on API errors; carries the HTTP status code.
+  - `AmazeeBudgetExceededException` — thrown by `BudgetAwareProviderDecorator` when Amazee.ai rejects a request with "Budget has been exceeded!".
+  - `ConfigStorageInterface` — abstract storage backend implemented by each CMS adapter (Drupal, WordPress, Laravel) to persist LiteLLM credentials.
+  - `ProvisioningResult` / `UpgradeResult` — immutable value objects returned by the provisioning and upgrade flows.
+  - `AmazeeTrialProvisioner` — orchestrates trial provisioning: calls the API then stores credentials.
+  - `AmazeeAccountUpgrader` — orchestrates the three-step upgrade flow: request OTP → sign in → provision private key.
+  - `BudgetAwareProviderDecorator` — wraps `AiClient` and converts Amazee budget-exceeded errors into `AmazeeBudgetExceededException`.
+
 ### Fixed
 - **`IndexBuildOrchestrator::build()` now returns `error: 'memory_abort'` when `MemoryTelemetry` fires.** The catch block detects `RuntimeException` messages containing "exceeds safe threshold" and returns a structured `StatusReport` with `error: 'memory_abort'`, the number of chunks already committed, and the committed page count from the build manifest. Framework adapters can now programmatically distinguish a memory abort from other failures and spawn a fresh `--resume` process automatically.
 - **Memory telemetry now measures actual RSS instead of PHP's allocator-reported memory.** `MemoryTelemetry` reads VmRSS and VmHWM from `/proc/self/status` on Linux, falling back to `memory_get_usage(true)` / `memory_get_peak_usage(true)` when `/proc` is unavailable (macOS, Windows). Also reads cgroup v2/v1 memory limits (`/sys/fs/cgroup/memory.max`, `/sys/fs/cgroup/memory/memory.limit_in_bytes`) to determine the effective ceiling — on containerised/shared hosting the cgroup limit is often lower than `memory_limit`, and either one can SIGKILL the process. The 90% abort threshold and the heap-full guard in `IndexBuildOrchestrator` now use actual RSS against the effective limit. `StatusReport.peakMemoryBytes` now reports the RSS high-water mark (VmHWM) rather than PHP's monotonic `memory_get_peak_usage(true)`.
