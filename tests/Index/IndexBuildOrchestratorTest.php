@@ -193,7 +193,8 @@ class IndexBuildOrchestratorTest extends TestCase
             public function __construct(
                 private readonly FilesystemDriver $inner,
                 private int &$moveCallCount,
-            ) {}
+            ) {
+            }
 
             public function move(string $from, string $to): bool
             {
@@ -201,13 +202,34 @@ class IndexBuildOrchestratorTest extends TestCase
                 return false;
             }
 
-            public function exists(string $path): bool          { return $this->inner->exists($path); }
-            public function get(string $path): string           { return $this->inner->get($path); }
-            public function put(string $path, string $c): bool  { return $this->inner->put($path, $c); }
-            public function delete(string $path): bool          { return $this->inner->delete($path); }
-            public function deleteDirectory(string $path): bool { return $this->inner->deleteDirectory($path); }
-            public function makeDirectory(string $path): bool   { return $this->inner->makeDirectory($path); }
-            public function files(string $dir, string $p = '*'): array { return $this->inner->files($dir, $p); }
+            public function exists(string $path): bool
+            {
+                return $this->inner->exists($path);
+            }
+            public function get(string $path): string
+            {
+                return $this->inner->get($path);
+            }
+            public function put(string $path, string $c): bool
+            {
+                return $this->inner->put($path, $c);
+            }
+            public function delete(string $path): bool
+            {
+                return $this->inner->delete($path);
+            }
+            public function deleteDirectory(string $path): bool
+            {
+                return $this->inner->deleteDirectory($path);
+            }
+            public function makeDirectory(string $path): bool
+            {
+                return $this->inner->makeDirectory($path);
+            }
+            public function files(string $dir, string $p = '*'): array
+            {
+                return $this->inner->files($dir, $p);
+            }
         };
 
         $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir, storage: $failingStorage);
@@ -229,7 +251,8 @@ class IndexBuildOrchestratorTest extends TestCase
             public function __construct(
                 private readonly FilesystemDriver $inner,
                 private readonly string $outputDir,
-            ) {}
+            ) {
+            }
 
             public function move(string $from, string $to): bool
             {
@@ -242,13 +265,34 @@ class IndexBuildOrchestratorTest extends TestCase
                 return $result;
             }
 
-            public function exists(string $path): bool          { return $this->inner->exists($path); }
-            public function get(string $path): string           { return $this->inner->get($path); }
-            public function put(string $path, string $c): bool  { return $this->inner->put($path, $c); }
-            public function delete(string $path): bool          { return $this->inner->delete($path); }
-            public function deleteDirectory(string $path): bool { return $this->inner->deleteDirectory($path); }
-            public function makeDirectory(string $path): bool   { return $this->inner->makeDirectory($path); }
-            public function files(string $dir, string $p = '*'): array { return $this->inner->files($dir, $p); }
+            public function exists(string $path): bool
+            {
+                return $this->inner->exists($path);
+            }
+            public function get(string $path): string
+            {
+                return $this->inner->get($path);
+            }
+            public function put(string $path, string $c): bool
+            {
+                return $this->inner->put($path, $c);
+            }
+            public function delete(string $path): bool
+            {
+                return $this->inner->delete($path);
+            }
+            public function deleteDirectory(string $path): bool
+            {
+                return $this->inner->deleteDirectory($path);
+            }
+            public function makeDirectory(string $path): bool
+            {
+                return $this->inner->makeDirectory($path);
+            }
+            public function files(string $dir, string $p = '*'): array
+            {
+                return $this->inner->files($dir, $p);
+            }
         };
 
         $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir, storage: $deletingStorage);
