@@ -14,6 +14,7 @@ First stable release — all features from 0.3.x promoted to 1.0 API surface.
 ## [Unreleased]
 
 ### Fixed
+- **Tests added for CATEGORY and VARIETY rules in the summarize prompt template, and for `{SITE_NAME}` placeholder presence in all three templates.** Both CMS adapters delegate to `DefaultPrompts::getTemplate()` at runtime; these tests lock in the template contracts so prompt drift is caught immediately if the canonical text is removed or emptied. ([#49](https://github.com/tag1consulting/scolta-php/issues/49))
 - **`scolta.js` result links no longer double the path on subdirectory installs.** Result display URLs now prefer `data.meta?.url` (the verbatim URL stored in `data-pagefind-meta` by the binary indexer) over Pagefind's resolved `data.url`. Pagefind's JS client resolves stored root-relative paths against the pagefind base directory when building `data.url`, which on a subdirectory install (`/drupal/web/`) produces paths like `/drupal/web/sites/default/files/scolta-pagefind/drupal/web/node/42`. Using `data.meta?.url` avoids this resolution entirely; `resolveUrl(data.url)` is kept as the fallback for the PHP indexer path where `data.meta.url` is undefined. ([scolta-drupal#40](https://github.com/tag1consulting/scolta-drupal/issues/40))
 
 ### Added

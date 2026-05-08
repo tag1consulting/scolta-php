@@ -170,4 +170,58 @@ class DefaultPromptsTest extends TestCase
             'summarize template must instruct per-excerpt detail extraction'
         );
     }
+
+    // -------------------------------------------------------------------------
+    // PR fix/prompt-drift-cross-adapter-tests — CATEGORY and VARIETY guardrails
+    // -------------------------------------------------------------------------
+
+    public function testSummarizeTemplateContainsCategoryRule(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
+
+        $this->assertStringContainsString(
+            'CATEGORY',
+            $template,
+            'summarize template must contain a CATEGORY curation rule instructing the model to browse across a category rather than deep-dive on one result'
+        );
+    }
+
+    public function testSummarizeTemplateContainsVarietyRule(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
+
+        $this->assertStringContainsString(
+            'VARIETY',
+            $template,
+            'summarize template must contain a VARIETY curation rule instructing the model to present multiple options rather than a single detailed result'
+        );
+    }
+
+    /**
+     * Both CMS adapter tests delegate to this class.  Verify the templates are
+     * non-empty and contain placeholder markers so adapters can substitute
+     * site-specific values at runtime.
+     *
+     * @dataProvider allTemplateNamesProvider
+     */
+    public function testEachTemplateHasSiteNamePlaceholder(string $name): void
+    {
+        $template = DefaultPrompts::getTemplate($name);
+
+        $this->assertNotEmpty($template, "Template '{$name}' must not be empty");
+        $this->assertStringContainsString(
+            '{SITE_NAME}',
+            $template,
+            "Template '{$name}' must contain a {SITE_NAME} placeholder for per-site customisation"
+        );
+    }
+
+    public static function allTemplateNamesProvider(): array
+    {
+        return [
+            'expand_query' => [DefaultPrompts::EXPAND_QUERY],
+            'summarize'    => [DefaultPrompts::SUMMARIZE],
+            'follow_up'    => [DefaultPrompts::FOLLOW_UP],
+        ];
+    }
 }
