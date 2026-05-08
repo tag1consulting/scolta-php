@@ -6,6 +6,7 @@ namespace Tag1\Scolta\Tests\Http;
 
 use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\Cache\CacheDriverInterface;
+use Tag1\Scolta\Exception\ApiKeyMissingException;
 use Tag1\Scolta\Http\AiEndpointHandler;
 use Tag1\Scolta\Prompt\NullEnricher;
 use Tag1\Scolta\Prompt\PromptEnricherInterface;
@@ -319,6 +320,83 @@ class AiEndpointHandlerTest extends TestCase
         $this->assertEquals(503, $result['status']);
     }
 
+    // ===================================================================
+    // No API key — graceful degradation
+    // ===================================================================
+
+    public function testSummarizeReturns200WithEmptyDataWhenNoApiKey(): void
+    {
+        $ai = new MockAiService('', throwApiKeyMissing: true);
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleSummarize('test query', 'some context');
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals([], $result['data']);
+        $this->assertArrayNotHasKey('status', $result);
+    }
+
+    public function testExpandQueryReturns200WithOriginalQueryWhenNoApiKey(): void
+    {
+        $ai = new MockAiService('', throwApiKeyMissing: true);
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleExpandQuery('my search query');
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(['my search query'], $result['data']);
+        $this->assertArrayNotHasKey('status', $result);
+    }
+
+    public function testFollowUpReturns200WithEmptyResponseWhenNoApiKey(): void
+    {
+        $ai = new MockAiService('', throwApiKeyMissing: true);
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleFollowUp([['role' => 'user', 'content' => 'hello']]);
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals('', $result['data']['response']);
+        $this->assertEquals(0, $result['data']['remaining']);
+        $this->assertArrayNotHasKey('status', $result);
+    }
+
+    public function testSummarizeNoApiKeyDoesNotLog503(): void
+    {
+        $ai = new MockAiService('', throwApiKeyMissing: true);
+        $logger = new SpyLogger();
+        $handler = new AiEndpointHandler(
+            aiService: $ai,
+            cache: new InMemoryCacheDriver(),
+            generation: 1,
+            cacheTtl: 0,
+            maxFollowUps: 3,
+            logger: $logger,
+        );
+
+        $handler->handleSummarize('test', 'context');
+
+        $this->assertEmpty($logger->errors, 'Missing API key should not be logged as an error');
+    }
+
+    public function testExpandQueryNoApiKeyDoesNotLog503(): void
+    {
+        $ai = new MockAiService('', throwApiKeyMissing: true);
+        $logger = new SpyLogger();
+        $handler = new AiEndpointHandler(
+            aiService: $ai,
+            cache: new InMemoryCacheDriver(),
+            generation: 1,
+            cacheTtl: 0,
+            maxFollowUps: 3,
+            logger: $logger,
+        );
+
+        $handler->handleExpandQuery('test query');
+
+        $this->assertEmpty($logger->errors, 'Missing API key should not be logged as an error');
+    }
+
     public function testExpandQueryHandlesEmptyAiResponse(): void
     {
         $ai = new MockAiService('');
@@ -600,6 +678,7 @@ class MockAiService
         private readonly string $response = '',
         private readonly bool $throwOnMessage = false,
         private readonly bool $throwOnConversation = false,
+        private readonly bool $throwApiKeyMissing = false,
     ) {
     }
 
@@ -620,6 +699,9 @@ class MockAiService
 
     public function message(string $systemPrompt, string $userMessage, int $maxTokens): string
     {
+        if ($this->throwApiKeyMissing) {
+            throw new ApiKeyMissingException('Scolta AI API key not configured.');
+        }
         if ($this->throwOnMessage) {
             throw new \RuntimeException('AI service unavailable');
         }
@@ -634,6 +716,9 @@ class MockAiService
 
     public function conversation(string $systemPrompt, array $messages, int $maxTokens): string
     {
+        if ($this->throwApiKeyMissing) {
+            throw new ApiKeyMissingException('Scolta AI API key not configured.');
+        }
         if ($this->throwOnConversation) {
             throw new \RuntimeException('AI service unavailable');
         }
@@ -736,5 +821,21 @@ class PromptCapturingAiService extends MockAiService
     {
         $this->lastSystemPrompt = $systemPrompt;
         return parent::conversation($systemPrompt, $messages, $maxTokens);
+    }
+}
+
+/**
+ * PSR-3 logger spy that records error() calls.
+ */
+class SpyLogger extends \Psr\Log\AbstractLogger
+{
+    /** @var array<string> */
+    public array $errors = [];
+
+    public function log($level, string|\Stringable $message, array $context = []): void
+    {
+        if ($level === \Psr\Log\LogLevel::ERROR) {
+            $this->errors[] = (string) $message;
+        }
     }
 }

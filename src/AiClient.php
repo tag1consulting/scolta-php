@@ -7,6 +7,7 @@ namespace Tag1\Scolta;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
+use Tag1\Scolta\Exception\ApiKeyMissingException;
 
 /**
  * Provider-agnostic AI client for LLM API calls.
@@ -114,7 +115,7 @@ class AiClient
         ?string $model,
     ): string {
         if (empty($this->apiKey)) {
-            throw new \RuntimeException(
+            throw new ApiKeyMissingException(
                 'Scolta AI API key not configured. Set the api_key in your platform\'s Scolta configuration.'
             );
         }

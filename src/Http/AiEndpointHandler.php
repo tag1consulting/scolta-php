@@ -7,6 +7,7 @@ namespace Tag1\Scolta\Http;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Tag1\Scolta\Cache\CacheDriverInterface;
+use Tag1\Scolta\Exception\ApiKeyMissingException;
 use Tag1\Scolta\Prompt\NullEnricher;
 use Tag1\Scolta\Prompt\PromptEnricherInterface;
 
@@ -104,6 +105,8 @@ class AiEndpointHandler
             }
 
             return ['ok' => true, 'data' => $terms];
+        } catch (ApiKeyMissingException $e) {
+            return ['ok' => true, 'data' => [$query]];
         } catch (\Exception $e) {
             $this->logger->error('Scolta query expansion failed', ['exception' => $e]);
 
@@ -166,6 +169,8 @@ class AiEndpointHandler
             }
 
             return ['ok' => true, 'data' => $result];
+        } catch (ApiKeyMissingException $e) {
+            return ['ok' => true, 'data' => []];
         } catch (\Exception $e) {
             $this->logger->error('Scolta summarization failed', ['exception' => $e]);
 
@@ -232,6 +237,8 @@ class AiEndpointHandler
                 'response' => $response,
                 'remaining' => max(0, $remaining),
             ]];
+        } catch (ApiKeyMissingException $e) {
+            return ['ok' => true, 'data' => ['response' => '', 'remaining' => 0]];
         } catch (\Exception $e) {
             $this->logger->error('Scolta follow-up failed', ['exception' => $e]);
 

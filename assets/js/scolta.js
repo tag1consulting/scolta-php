@@ -442,6 +442,7 @@
       return terms;
     } catch (e) {
       if (e.name === 'AbortError') return null;
+      if (e instanceof TypeError) return null;
       console.warn("[scolta:expand] failed:", e);
       return null;
     }
@@ -544,6 +545,10 @@
       }
     } catch (e) {
       if (e.name === 'AbortError') return;
+      if (e instanceof TypeError) {
+        summaryEl.style.display = "none";
+        return;
+      }
       console.warn("[scolta:summarize] failed:", e);
       summaryEl.className = "scolta-ai-summary error";
       summaryEl.innerHTML = `<div class="scolta-ai-summary-label">
@@ -745,6 +750,11 @@
     } catch (e) {
       if (e.name === 'AbortError') {
         // Search was cancelled — follow-up is stale, clean up silently
+        conversationMessages.pop();
+        return;
+      }
+      if (e instanceof TypeError) {
+        turnEl.querySelector(".scolta-ai-followup-answer").textContent = "Follow-up unavailable. Please try again.";
         conversationMessages.pop();
         return;
       }

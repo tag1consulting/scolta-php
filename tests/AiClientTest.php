@@ -11,6 +11,7 @@ use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\AiClient;
+use Tag1\Scolta\Exception\ApiKeyMissingException;
 
 class AiClientTest extends TestCase
 {
@@ -36,6 +37,14 @@ class AiClientTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('API key not configured');
+        $client->message('system', 'hello');
+    }
+
+    public function testThrowsApiKeyMissingExceptionWhenNoApiKey(): void
+    {
+        $client = new AiClient(['api_key' => '']);
+
+        $this->expectException(ApiKeyMissingException::class);
         $client->message('system', 'hello');
     }
 
