@@ -6,7 +6,7 @@ PHP library that indexes content into Pagefind-compatible search indexes, plus t
 
 ## Status
 
-Scolta is in active production use across Drupal, WordPress, and Laravel. The API documented here is stable within the 0.x minor series — no changes without a deprecation notice and a replacement in place. Some capabilities are still maturing toward a 1.0 release; test in staging when upgrading between minor versions. File bugs at the repo issue tracker.
+Scolta 1.0 — the API documented here is stable. Breaking changes follow semantic versioning: no removal or signature change without a major version bump and a deprecation cycle. File bugs at the repo issue tracker.
 
 ## What Is Scolta?
 
@@ -79,7 +79,7 @@ After indexing, the `/var/www/html/pagefind/` directory contains a Pagefind-comp
 ## Installation
 
 ```bash
-composer require tag1/scolta-php
+composer require tag1/scolta-php:^1.0
 ```
 
 **Requirements:** PHP 8.1+, `ext-intl` (Unicode tokenization).
@@ -347,5 +347,5 @@ MIT
 
 - [scolta-core](https://github.com/tag1consulting/scolta-core) — Rust/WASM scoring, ranking, and AI layer that runs in the browser.
 - [scolta-drupal](https://github.com/tag1consulting/scolta-drupal) — Drupal 10/11 Search API backend with Drush commands, admin settings form, and a search block.
-- [scolta-laravel](https://github.com/tag1consulting/scolta-laravel) — Laravel 11/12 package with Artisan commands, a `Searchable` trait for Eloquent models, and a Blade search component.
+- [scolta-laravel](https://github.com/tag1consulting/scolta-laravel) — Laravel 11/12/13 package with Artisan commands, a `Searchable` trait for Eloquent models, and a Blade search component.
 - [scolta-wp](https://github.com/tag1consulting/scolta-wp) — WordPress 6.x plugin with WP-CLI commands, Settings API page, and a `[scolta_search]` shortcode.
