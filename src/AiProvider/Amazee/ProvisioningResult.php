@@ -12,12 +12,17 @@ namespace Tag1\Scolta\AiProvider\Amazee;
  */
 final class ProvisioningResult
 {
+    public const STATUS_PROVISIONED = 'provisioned';
+    public const STATUS_SKIPPED_EXISTING_PROVIDER = 'skipped_existing_provider';
+    public const STATUS_FAILED = 'failed';
+
     public function __construct(
         public readonly bool $success,
         public readonly string $litellmToken,
         public readonly string $litellmApiUrl,
         public readonly string $region,
         public readonly ?string $error = null,
+        public readonly string $status = self::STATUS_PROVISIONED,
     ) {
     }
 
@@ -28,6 +33,7 @@ final class ProvisioningResult
             litellmToken: $litellmToken,
             litellmApiUrl: $litellmApiUrl,
             region: $region,
+            status: self::STATUS_PROVISIONED,
         );
     }
 
@@ -39,6 +45,18 @@ final class ProvisioningResult
             litellmApiUrl: '',
             region: '',
             error: $error,
+            status: self::STATUS_FAILED,
+        );
+    }
+
+    public static function skippedExistingProvider(): self
+    {
+        return new self(
+            success: true,
+            litellmToken: '',
+            litellmApiUrl: '',
+            region: '',
+            status: self::STATUS_SKIPPED_EXISTING_PROVIDER,
         );
     }
 }

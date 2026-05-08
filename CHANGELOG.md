@@ -7,6 +7,7 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ## [Unreleased]
 
 ### Added
+- **`AmazeeTrialProvisioner` accepts an optional `$hasExistingProvider` callable.** When provided and returns true, `provision()` returns `ProvisioningResult::skippedExistingProvider()` without making any API calls. `ProvisioningResult` gains three `STATUS_*` constants (`STATUS_PROVISIONED`, `STATUS_SKIPPED_EXISTING_PROVIDER`, `STATUS_FAILED`) and a `$status` string property (defaulting to `STATUS_PROVISIONED` for backward compatibility).
 - **Timestamp-based rebuild optimization: skip unchanged entities entirely.** Two new classes enable gatherers to bypass `loadMultiple()` / `WP_Query` for entities whose changed timestamp has not changed since the last indexed build:
   - `TimestampManifest` — disk-backed manifest (`timestamp-manifest.php` in the state directory) mapping entity key → `{ts, items[{hash, id, url, date, siteName, language, filters}]}`. `put()` stores a new/updated entry, `markSeen()` prevents it from being pruned, and `pruneAndSave()` atomically removes entries for deleted entities and persists the manifest.
   - `CachedContentReference` — marker object yielded by gatherers for unchanged entities. Carries the pre-computed content hash and all metadata needed to build a chunk entry without re-loading the entity body.
