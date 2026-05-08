@@ -35,6 +35,11 @@
         "validate-release": "php scripts/validate-release.php",
         "check-version-sync": "php scripts/check-version-sync.php"
     },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "1.0.x-dev"
+        }
+    },
     "config": {
         "audit": {
             "ignore": [
