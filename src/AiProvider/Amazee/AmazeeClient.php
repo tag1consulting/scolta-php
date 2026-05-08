@@ -129,6 +129,38 @@ final class AmazeeClient
     }
 
     /**
+     * List available models from the provisioned LiteLLM proxy endpoint.
+     *
+     * Returns the raw model objects from the `data` array of GET /model/info.
+     * Returns an empty array on error so callers degrade gracefully.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getAvailableModels(string $litellmApiUrl, string $litellmToken): array
+    {
+        $url = rtrim($litellmApiUrl, '/') . '/model/info';
+        try {
+            $response = $this->httpClient->request('GET', $url, [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $litellmToken,
+                    'Accept' => 'application/json',
+                ],
+                'timeout' => self::TIMEOUT,
+            ]);
+
+            $statusCode = $response->getStatusCode();
+            if ($statusCode < 200 || $statusCode >= 300) {
+                return [];
+            }
+
+            $body = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+            return is_array($body['data'] ?? null) ? $body['data'] : [];
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
      * Validate a LiteLLM token by calling the /auth/me endpoint on the API URL.
      *
      * @throws AmazeeApiException If the token is invalid or the request fails.
