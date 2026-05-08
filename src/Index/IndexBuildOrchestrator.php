@@ -215,18 +215,35 @@ final class IndexBuildOrchestrator
             } catch (\Throwable) {
             }
 
+            // MemoryTelemetry throws RuntimeException("...exceeds safe threshold...")
+            // when RSS crosses the abort percentage. Return a structured error so
+            // framework adapters can spawn a fresh --resume process rather than
+            // treating this as a hard failure.
+            $isMemoryAbort = $e instanceof \RuntimeException
+                && str_contains($e->getMessage(), 'exceeds safe threshold');
+
+            $committedChunks = 0;
+            $committedPages  = 0;
+            if ($isMemoryAbort) {
+                try {
+                    $committedChunks = count($this->coordinator->chunkFiles());
+                    $committedPages  = $this->coordinator->buildState()->getPagesProcessed();
+                } catch (\Throwable) {
+                }
+            }
+
             return new StatusReport(
                 version: '0.3.0',
                 pagefindVersion: SupportedVersions::getVersionForMetadata(),
                 resolvedIndexer: 'php',
-                pagesProcessed: 0,
-                chunksWritten: 0,
+                pagesProcessed: $committedPages,
+                chunksWritten: $committedChunks,
                 peakMemoryBytes: $telemetry->getPeakRssBytes(),
                 memoryBudgetBytes: $intent->memoryBudget()->totalBudgetBytes(),
                 durationSeconds: round(microtime(true) - $startTime, 3),
                 outputDir: $this->outputDir,
                 success: false,
-                error: $e->getMessage(),
+                error: $isMemoryAbort ? 'memory_abort' : $e->getMessage(),
             );
         }
     }
