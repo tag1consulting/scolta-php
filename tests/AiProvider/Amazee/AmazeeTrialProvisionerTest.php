@@ -13,15 +13,19 @@ use Tag1\Scolta\AiProvider\Amazee\AmazeeApiException;
 use Tag1\Scolta\AiProvider\Amazee\AmazeeClient;
 use Tag1\Scolta\AiProvider\Amazee\AmazeeTrialProvisioner;
 use Tag1\Scolta\AiProvider\Amazee\ConfigStorageInterface;
+use Tag1\Scolta\AiProvider\Amazee\ProvisioningResult;
 
 class AmazeeTrialProvisionerTest extends TestCase
 {
-    private function makeProvisioner(array $responses, ConfigStorageInterface $storage): AmazeeTrialProvisioner
-    {
+    private function makeProvisioner(
+        array $responses,
+        ConfigStorageInterface $storage,
+        ?callable $hasExistingProvider = null,
+    ): AmazeeTrialProvisioner {
         $mock = new MockHandler($responses);
         $httpClient = new Client(['handler' => HandlerStack::create($mock)]);
         $client = new AmazeeClient('https://api.amazee.ai', $httpClient);
-        return new AmazeeTrialProvisioner($client, $storage);
+        return new AmazeeTrialProvisioner($client, $storage, $hasExistingProvider);
     }
 
     public function testProvisionStoresCredentials(): void
@@ -62,5 +66,71 @@ class AmazeeTrialProvisionerTest extends TestCase
 
         $this->expectException(AmazeeApiException::class);
         $provisioner->provision('trial@example.com');
+    }
+
+    public function testProvisionSkipsWhenExistingProviderConfigured(): void
+    {
+        $storage = $this->createMock(ConfigStorageInterface::class);
+        $storage->expects($this->never())->method('store');
+
+        $provisioner = $this->makeProvisioner(
+            [],
+            $storage,
+            fn () => true,
+        );
+
+        $result = $provisioner->provision('trial@example.com');
+
+        $this->assertSame(ProvisioningResult::STATUS_SKIPPED_EXISTING_PROVIDER, $result->status);
+        $this->assertTrue($result->success);
+        $this->assertSame('', $result->litellmToken);
+    }
+
+    public function testProvisionProceedsWhenNoExistingProvider(): void
+    {
+        $storage = $this->createMock(ConfigStorageInterface::class);
+        $storage->expects($this->once())->method('store');
+
+        $provisioner = $this->makeProvisioner(
+            [
+                new Response(200, [], json_encode([
+                    'litellm_token' => 'tok-xyz',
+                    'litellm_api_url' => 'https://trial.amazee.ai',
+                    'region' => 'eu-west',
+                ])),
+                new Response(200, [], json_encode(['user' => 'ok'])),
+            ],
+            $storage,
+            fn () => false,
+        );
+
+        $result = $provisioner->provision('trial@example.com');
+
+        $this->assertSame(ProvisioningResult::STATUS_PROVISIONED, $result->status);
+        $this->assertTrue($result->success);
+    }
+
+    public function testProvisionProceedsWhenNoProviderCheckCallable(): void
+    {
+        $storage = $this->createMock(ConfigStorageInterface::class);
+        $storage->expects($this->once())->method('store');
+
+        $provisioner = $this->makeProvisioner(
+            [
+                new Response(200, [], json_encode([
+                    'litellm_token' => 'tok-abc',
+                    'litellm_api_url' => 'https://trial.amazee.ai',
+                    'region' => 'us-east',
+                ])),
+                new Response(200, [], json_encode(['user' => 'ok'])),
+            ],
+            $storage,
+            null,
+        );
+
+        $result = $provisioner->provision('trial@example.com');
+
+        $this->assertSame(ProvisioningResult::STATUS_PROVISIONED, $result->status);
+        $this->assertTrue($result->success);
     }
 }

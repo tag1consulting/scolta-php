@@ -16,14 +16,24 @@ namespace Tag1\Scolta\AiProvider\Amazee;
  */
 final class AmazeeTrialProvisioner
 {
+    private readonly ?\Closure $hasExistingProvider;
+
     public function __construct(
         private readonly AmazeeClient $client,
         private readonly ConfigStorageInterface $storage,
+        ?callable $hasExistingProvider = null,
     ) {
+        $this->hasExistingProvider = $hasExistingProvider !== null
+            ? \Closure::fromCallable($hasExistingProvider)
+            : null;
     }
 
     /**
      * Provision a free trial account for the given email address.
+     *
+     * If a `$hasExistingProvider` callable was supplied and returns true,
+     * provisioning is skipped and a SKIPPED_EXISTING_PROVIDER result is
+     * returned without making any API calls.
      *
      * On success, credentials are stored via ConfigStorageInterface.
      *
@@ -31,6 +41,10 @@ final class AmazeeTrialProvisioner
      */
     public function provision(string $email): ProvisioningResult
     {
+        if ($this->hasExistingProvider !== null && ($this->hasExistingProvider)()) {
+            return ProvisioningResult::skippedExistingProvider();
+        }
+
         $result = $this->client->provisionTrial($email);
         $this->storage->store($result->litellmToken, $result->litellmApiUrl, $result->region);
         return $result;
