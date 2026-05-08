@@ -8,6 +8,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 First stable release — all features from 0.3.x promoted to 1.0 API surface.
 
+### Fixed
+- **`IndexBuildOrchestrator` now reports failure when the atomic swap or post-build sanity check fails.** Two silent failure modes are closed: (1) `atomicSwap()` now throws `RuntimeException` if any `rename()` call returns false, so a failed filesystem rename can no longer cause a false-success result; (2) after the swap, `verifyOutputHasFragments()` checks that the pagefind output directory contains at least one `.pf_fragment` file when pages were processed — zero fragments after a non-empty build is treated as a hard failure. Both errors surface through the existing try/catch and are returned as `success: false` with a descriptive `error` string. ([scolta-php#46](https://github.com/tag1consulting/scolta-php/issues/46))
+
 ### Changed
 - Added `extra.branch-alias` (`dev-main` → `1.0.x-dev`) so consumers can resolve this package with `^1.0@dev` from a VCS repository.
 

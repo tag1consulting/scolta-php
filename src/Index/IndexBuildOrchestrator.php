@@ -221,7 +221,11 @@ final class IndexBuildOrchestrator
             $telemetry->emit('swap_complete');
 
             $totalPagesProcessed = $this->coordinator->pagesProcessed();
+            $pagesForReport      = $totalPagesProcessed > 0 ? $totalPagesProcessed : $pagesInRun;
             $chunksWritten       = count($chunkFiles);
+
+            $this->verifyOutputHasFragments($pagesForReport);
+
             $this->coordinator->release();
 
             $this->cache->pruneAndSave();
@@ -231,7 +235,7 @@ final class IndexBuildOrchestrator
                 version: '0.3.0',
                 pagefindVersion: SupportedVersions::getVersionForMetadata(),
                 resolvedIndexer: 'php',
-                pagesProcessed: $totalPagesProcessed > 0 ? $totalPagesProcessed : $pagesInRun,
+                pagesProcessed: $pagesForReport,
                 chunksWritten: $chunksWritten,
                 peakMemoryBytes: $telemetry->getPeakRssBytes(),
                 memoryBudgetBytes: $budget->totalBudgetBytes(),
@@ -329,6 +333,10 @@ final class IndexBuildOrchestrator
             $telemetry->emit('swap_complete');
 
             $pagesProcessed = $this->coordinator->pagesProcessed();
+            $chunksFinalized = count($chunkFiles);
+
+            $this->verifyOutputHasFragments($pagesProcessed);
+
             $this->coordinator->release();
 
             return new StatusReport(
@@ -336,7 +344,7 @@ final class IndexBuildOrchestrator
                 pagefindVersion: SupportedVersions::getVersionForMetadata(),
                 resolvedIndexer: 'php',
                 pagesProcessed: $pagesProcessed,
-                chunksWritten: count($chunkFiles),
+                chunksWritten: $chunksFinalized,
                 peakMemoryBytes: $telemetry->getPeakRssBytes(),
                 memoryBudgetBytes: $budget->totalBudgetBytes(),
                 durationSeconds: round(microtime(true) - $startTime, 3),
@@ -376,16 +384,49 @@ final class IndexBuildOrchestrator
             throw new \RuntimeException('Build directory does not exist: ' . $buildDir);
         }
 
-        $this->storage->move($buildDir, $newDir);
-
-        if ($this->storage->exists($finalDir)) {
-            $this->storage->move($finalDir, $oldDir);
+        if (!$this->storage->move($buildDir, $newDir)) {
+            throw new \RuntimeException("Failed to stage build directory: {$buildDir} → {$newDir}");
         }
 
-        $this->storage->move($newDir, $finalDir);
+        if ($this->storage->exists($finalDir)) {
+            if (!$this->storage->move($finalDir, $oldDir)) {
+                throw new \RuntimeException("Failed to retire previous index: {$finalDir} → {$oldDir}");
+            }
+        }
+
+        if (!$this->storage->move($newDir, $finalDir)) {
+            throw new \RuntimeException("Failed to publish new index: {$newDir} → {$finalDir}");
+        }
 
         if ($this->storage->exists($oldDir)) {
             $this->storage->deleteDirectory($oldDir);
+        }
+    }
+
+    /**
+     * Verify the output directory contains at least one fragment file.
+     *
+     * A successful build with pages to index MUST produce fragment files.
+     * Zero fragments with non-zero page count indicates a silent write failure.
+     *
+     * @throws \RuntimeException If pages were indexed but the index is empty.
+     */
+    private function verifyOutputHasFragments(int $pagesProcessed): void
+    {
+        if ($pagesProcessed === 0) {
+            return;
+        }
+
+        $fragmentDir   = $this->outputDir . '/pagefind/fragment';
+        $fragmentCount = is_dir($fragmentDir)
+            ? count(glob($fragmentDir . '/*.pf_fragment') ?: [])
+            : 0;
+
+        if ($fragmentCount === 0) {
+            throw new \RuntimeException(
+                "Build processed {$pagesProcessed} pages but the output index contains zero fragment files. "
+                . 'The write may have failed silently. Check filesystem permissions and available space.'
+            );
         }
     }
 
