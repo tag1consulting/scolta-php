@@ -27,6 +27,7 @@ final class IndexBuildOrchestrator
     private readonly IndexMerger $merger;
     private readonly StorageDriverInterface $storage;
     private readonly PageWordCache $cache;
+    private readonly TimestampManifest $tsManifest;
 
     public function __construct(
         private readonly string $stateDir,
@@ -48,6 +49,16 @@ final class IndexBuildOrchestrator
             $this->storage,
             maxWriteBufferBytes: MemoryBudget::default()->tokenCacheChunkBytes(),
         );
+        $this->tsManifest  = new TimestampManifest($stateDir, $this->storage);
+    }
+
+    /**
+     * Expose the timestamp manifest so gatherers can check changed timestamps
+     * before deciding whether to load entity bodies or yield CachedContentReferences.
+     */
+    public function getTimestampManifest(): TimestampManifest
+    {
+        return $this->tsManifest;
     }
 
     /**
@@ -58,11 +69,11 @@ final class IndexBuildOrchestrator
      * $force = true to bypass cache lookups while still populating the cache
      * (used when --force is passed from a CLI command).
      *
-     * @param BuildIntent               $intent   Mode and memory budget.
-     * @param iterable<ContentItem>     $pages    All content items to index.
-     * @param LoggerInterface           $logger   PSR-3 logger (optional).
-     * @param ProgressReporterInterface $progress Progress callback (optional).
-     * @param bool                      $force    Skip cache lookups (still populates cache).
+     * @param BuildIntent                                  $intent   Mode and memory budget.
+     * @param iterable<ContentItem|CachedContentReference> $pages    Content items or cached references.
+     * @param LoggerInterface                              $logger   PSR-3 logger (optional).
+     * @param ProgressReporterInterface                    $progress Progress callback (optional).
+     * @param bool                                         $force    Skip cache lookups (still populates cache).
      */
     public function build(
         BuildIntent $intent,
@@ -101,26 +112,43 @@ final class IndexBuildOrchestrator
             $pagesInRun  = 0;
 
             foreach ($pages as $page) {
-                $hash = PhpIndexer::contentHash($page);
-                $tokenData = (!$force) ? $this->cache->get($hash) : null;
-                if ($tokenData === null) {
-                    $tokenData = $this->builder->tokenizeItem($page);
+                if ($page instanceof CachedContentReference) {
+                    $tokenData = $this->cache->get($page->contentHash);
                     if ($tokenData !== null) {
-                        $this->cache->put($hash, $tokenData);
+                        $this->tsManifest->markSeen($page->entityKey);
+                        $chunk[] = ['item' => (object) [
+                            'id'       => $page->id,
+                            'url'      => $page->url,
+                            'date'     => $page->date,
+                            'siteName' => $page->siteName,
+                            'language' => $page->language,
+                            'filters'  => $page->filters,
+                        ], 'tokenData' => $tokenData];
                     }
-                }
+                    // On cache miss: skip markSeen → manifest entry is pruned →
+                    // entity is treated as changed on the next build.
+                } else {
+                    $hash = PhpIndexer::contentHash($page);
+                    $tokenData = (!$force) ? $this->cache->get($hash) : null;
+                    if ($tokenData === null) {
+                        $tokenData = $this->builder->tokenizeItem($page);
+                        if ($tokenData !== null) {
+                            $this->cache->put($hash, $tokenData);
+                        }
+                    }
 
-                if ($tokenData !== null) {
-                    // Slim proxy: drop bodyHtml so it's freed as soon as the
-                    // generator advances, not held for the full chunk duration.
-                    $chunk[] = ['item' => (object) [
-                        'id'       => $page->id,
-                        'url'      => $page->url,
-                        'date'     => $page->date,
-                        'siteName' => $page->siteName,
-                        'language' => $page->language,
-                        'filters'  => $page->filters,
-                    ], 'tokenData' => $tokenData];
+                    if ($tokenData !== null) {
+                        // Slim proxy: drop bodyHtml so it's freed as soon as the
+                        // generator advances, not held for the full chunk duration.
+                        $chunk[] = ['item' => (object) [
+                            'id'       => $page->id,
+                            'url'      => $page->url,
+                            'date'     => $page->date,
+                            'siteName' => $page->siteName,
+                            'language' => $page->language,
+                            'filters'  => $page->filters,
+                        ], 'tokenData' => $tokenData];
+                    }
                 }
 
                 if (count($chunk) >= $chunkSize) {
@@ -160,6 +188,7 @@ final class IndexBuildOrchestrator
             $segmentBytes = $telemetry->getCurrentRssBytes();
             if ($limitBytes > 0 && $segmentBytes >= (int) ($limitBytes * 0.75)) {
                 $this->cache->pruneAndSave();
+                $this->tsManifest->pruneAndSave();
                 $this->coordinator->releaseLockOnly();
                 $telemetry->emit('finalize_deferred', ['heap_pct' => round($segmentBytes / $limitBytes * 100, 1)]);
                 $logger->warning('[scolta] RSS at ' . round($segmentBytes / $limitBytes * 100, 1) . '% of memory limit after indexing. Merge deferred — run `drush scolta:finalize` to complete.');
@@ -196,6 +225,7 @@ final class IndexBuildOrchestrator
             $this->coordinator->release();
 
             $this->cache->pruneAndSave();
+            $this->tsManifest->pruneAndSave();
 
             return new StatusReport(
                 version: '0.3.0',
