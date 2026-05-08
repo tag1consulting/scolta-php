@@ -10,6 +10,8 @@ use Tag1\Scolta\Index\BuildIntent;
 use Tag1\Scolta\Index\IndexBuildOrchestrator;
 use Tag1\Scolta\Index\MemoryBudget;
 use Tag1\Scolta\Index\StatusReport;
+use Tag1\Scolta\Storage\FilesystemDriver;
+use Tag1\Scolta\Storage\StorageDriverInterface;
 
 class IndexBuildOrchestratorTest extends TestCase
 {
@@ -181,6 +183,139 @@ class IndexBuildOrchestratorTest extends TestCase
 
         $this->assertTrue($result->success);
         $this->assertGreaterThan(0, $result->pageCount);
+    }
+
+    public function testAtomicSwapFailureReturnsFalse(): void
+    {
+        $real    = new FilesystemDriver();
+        $moveCallCount = 0;
+        $failingStorage = new class ($real, $moveCallCount) implements StorageDriverInterface {
+            public function __construct(
+                private readonly FilesystemDriver $inner,
+                private int &$moveCallCount,
+            ) {
+            }
+
+            public function move(string $from, string $to): bool
+            {
+                $this->moveCallCount++;
+                return false;
+            }
+
+            public function exists(string $path): bool
+            {
+                return $this->inner->exists($path);
+            }
+            public function get(string $path): string
+            {
+                return $this->inner->get($path);
+            }
+            public function put(string $path, string $c): bool
+            {
+                return $this->inner->put($path, $c);
+            }
+            public function delete(string $path): bool
+            {
+                return $this->inner->delete($path);
+            }
+            public function deleteDirectory(string $path): bool
+            {
+                return $this->inner->deleteDirectory($path);
+            }
+            public function makeDirectory(string $path): bool
+            {
+                return $this->inner->makeDirectory($path);
+            }
+            public function files(string $dir, string $p = '*'): array
+            {
+                return $this->inner->files($dir, $p);
+            }
+        };
+
+        $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir, storage: $failingStorage);
+        $items        = $this->makeItems(3);
+        $intent       = BuildIntent::fresh(3, MemoryBudget::conservative());
+
+        $report = $orchestrator->build($intent, $items);
+
+        $this->assertFalse($report->success);
+        $this->assertNotNull($report->error);
+        $this->assertStringContainsString('Failed to stage', $report->error);
+    }
+
+    public function testEmptyFragmentDirectoryReturnsFalse(): void
+    {
+        $real      = new FilesystemDriver();
+        $outputDir = $this->outputDir;
+        $deletingStorage = new class ($real, $outputDir) implements StorageDriverInterface {
+            public function __construct(
+                private readonly FilesystemDriver $inner,
+                private readonly string $outputDir,
+            ) {
+            }
+
+            public function move(string $from, string $to): bool
+            {
+                $result = $this->inner->move($from, $to);
+                if ($result && $to === $this->outputDir . '/pagefind') {
+                    foreach (glob($to . '/fragment/*.pf_fragment') ?: [] as $f) {
+                        unlink($f);
+                    }
+                }
+                return $result;
+            }
+
+            public function exists(string $path): bool
+            {
+                return $this->inner->exists($path);
+            }
+            public function get(string $path): string
+            {
+                return $this->inner->get($path);
+            }
+            public function put(string $path, string $c): bool
+            {
+                return $this->inner->put($path, $c);
+            }
+            public function delete(string $path): bool
+            {
+                return $this->inner->delete($path);
+            }
+            public function deleteDirectory(string $path): bool
+            {
+                return $this->inner->deleteDirectory($path);
+            }
+            public function makeDirectory(string $path): bool
+            {
+                return $this->inner->makeDirectory($path);
+            }
+            public function files(string $dir, string $p = '*'): array
+            {
+                return $this->inner->files($dir, $p);
+            }
+        };
+
+        $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir, storage: $deletingStorage);
+        $items        = $this->makeItems(3);
+        $intent       = BuildIntent::fresh(3, MemoryBudget::conservative());
+
+        $report = $orchestrator->build($intent, $items);
+
+        $this->assertFalse($report->success);
+        $this->assertNotNull($report->error);
+        $this->assertStringContainsString('zero fragment files', $report->error);
+    }
+
+    public function testBuildWithNoItemsSucceeds(): void
+    {
+        $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
+        $intent       = BuildIntent::fresh(0, MemoryBudget::conservative());
+
+        $report = $orchestrator->build($intent, []);
+
+        // Zero items is a degenerate but valid state — not a failure.
+        $this->assertInstanceOf(StatusReport::class, $report);
+        $this->assertSame(0, $report->pagesProcessed);
     }
 
     private function removeDir(string $dir): void
