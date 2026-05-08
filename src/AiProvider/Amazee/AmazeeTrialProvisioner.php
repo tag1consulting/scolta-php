@@ -22,6 +22,7 @@ final class AmazeeTrialProvisioner
         private readonly AmazeeClient $client,
         private readonly ConfigStorageInterface $storage,
         ?callable $hasExistingProvider = null,
+        private readonly ?AmazeeModelResolver $modelResolver = null,
     ) {
         $this->hasExistingProvider = $hasExistingProvider !== null
             ? \Closure::fromCallable($hasExistingProvider)
@@ -35,7 +36,8 @@ final class AmazeeTrialProvisioner
      * provisioning is skipped and a SKIPPED_EXISTING_PROVIDER result is
      * returned without making any API calls.
      *
-     * On success, credentials are stored via ConfigStorageInterface.
+     * On success, credentials are stored via ConfigStorageInterface and
+     * the best available models are resolved from the provisioned endpoint.
      *
      * @throws AmazeeApiException If the API call fails.
      */
@@ -47,6 +49,18 @@ final class AmazeeTrialProvisioner
 
         $result = $this->client->provisionTrial($email);
         $this->storage->store($result->litellmToken, $result->litellmApiUrl, $result->region);
+
+        if ($this->modelResolver !== null) {
+            $models = $this->modelResolver->resolve($result->litellmApiUrl, $result->litellmToken);
+            return ProvisioningResult::success(
+                $result->litellmToken,
+                $result->litellmApiUrl,
+                $result->region,
+                $models['ai_model'],
+                $models['ai_expansion_model'],
+            );
+        }
+
         return $result;
     }
 }

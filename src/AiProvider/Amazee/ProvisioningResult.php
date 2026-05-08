@@ -23,17 +23,26 @@ final class ProvisioningResult
         public readonly string $region,
         public readonly ?string $error = null,
         public readonly string $status = self::STATUS_PROVISIONED,
+        public readonly ?string $aiModel = null,
+        public readonly ?string $aiExpansionModel = null,
     ) {
     }
 
-    public static function success(string $litellmToken, string $litellmApiUrl, string $region): self
-    {
+    public static function success(
+        string $litellmToken,
+        string $litellmApiUrl,
+        string $region,
+        ?string $aiModel = null,
+        ?string $aiExpansionModel = null,
+    ): self {
         return new self(
             success: true,
             litellmToken: $litellmToken,
             litellmApiUrl: $litellmApiUrl,
             region: $region,
             status: self::STATUS_PROVISIONED,
+            aiModel: $aiModel,
+            aiExpansionModel: $aiExpansionModel,
         );
     }
 
