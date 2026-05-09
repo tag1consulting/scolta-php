@@ -47,7 +47,7 @@ final class HealthChecker
         $indexExists = file_exists($this->indexOutputDir . '/pagefind/pagefind.js')
             || file_exists($this->indexOutputDir . '/pagefind.js');
 
-        $aiConfigured = !empty($this->config->aiApiKey);
+        $aiConfigured = trim($this->config->aiApiKey) !== '';
 
         $status = 'ok';
         if (!$indexExists || !$aiConfigured) {

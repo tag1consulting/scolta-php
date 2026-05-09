@@ -101,6 +101,24 @@ class HealthCheckerTest extends TestCase
     }
 
     // -------------------------------------------------------------------
+    // Whitespace-only key is not configured
+    // -------------------------------------------------------------------
+
+    public function testWhitespaceOnlyKeyIsNotConfigured(): void
+    {
+        file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
+
+        foreach (['   ', "\t", " \n ", "\t\n\r "] as $key) {
+            $config = ScoltaConfig::fromArray(['ai_api_key' => $key]);
+            $checker = new HealthChecker($config, $this->tempDir, null, null);
+            $result = $checker->check();
+
+            $this->assertFalse($result['ai_configured'], "Expected ai_configured false for key: " . json_encode($key));
+            $this->assertEquals('degraded', $result['status'], "Expected degraded status for whitespace-only key");
+        }
+    }
+
+    // -------------------------------------------------------------------
     // Both missing — still degraded
     // -------------------------------------------------------------------
 
