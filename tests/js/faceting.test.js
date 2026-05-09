@@ -37,8 +37,17 @@ describe('faceting: source structure', () => {
         expect(scoltaSource).toContain("if (dimension === 'language') return LANGUAGE_NAMES[value] || value;");
     });
 
-    test('TODO comment for auto-detect language from URL', () => {
-        expect(scoltaSource).toContain('TODO: auto-detect active language from URL path');
+    test('currentLanguage config option is documented in module comment', () => {
+        expect(scoltaSource).toContain('currentLanguage');
+    });
+
+    test('defaultLangCode is derived from instanceConfig.currentLanguage', () => {
+        expect(scoltaSource).toContain('instanceConfig.currentLanguage');
+        expect(scoltaSource).toContain('defaultLangCode');
+    });
+
+    test('doSearch applies defaultLangCode when no language in initialFilters', () => {
+        expect(scoltaSource).toContain('effectiveFilters.language && defaultLangCode');
     });
 
     test('activeFilters initialized as plain object not Set', () => {
@@ -94,7 +103,8 @@ describe('faceting: source structure', () => {
 
     test('doSearch accepts initialFilters parameter', () => {
         expect(scoltaSource).toContain('async function doSearch(preserveFilters, initialFilters)');
-        expect(scoltaSource).toContain('activeFilters = initialFilters || {};');
+        // activeFilters is now set via effectiveFilters to allow auto-language injection
+        expect(scoltaSource).toContain('activeFilters = effectiveFilters;');
     });
 
     test('doSearch assigns filterCounts from primarySearch.filters', () => {
@@ -440,5 +450,170 @@ describe('faceting: filter sidebar rendered from search.filters', () => {
         expect(filterContainer.innerHTML).toContain('English');
         expect(filterContainer.innerHTML).toContain('Spanish');
         expect(filterContainer.innerHTML).toContain('French');
+    });
+});
+
+// ===========================================================================
+// Auto-language filter (behavioral tests)
+// ===========================================================================
+
+function createWindowWithConfig(mockPagefind, extraScoltaConfig, htmlLang) {
+    const htmlAttr = htmlLang ? ` lang="${htmlLang}"` : '';
+    const dom = new JSDOM(
+        `<!DOCTYPE html><html${htmlAttr}><body><div id="scolta-search"></div></body></html>`,
+        { url: 'https://example.com', runScripts: 'dangerously' }
+    );
+    const window = dom.window;
+    window.fetch = jest.fn().mockResolvedValue({
+        ok: false, status: 503,
+        json: () => Promise.resolve({}),
+        text: () => Promise.resolve(''),
+    });
+    window.console = { log: jest.fn(), error: jest.fn(), warn: jest.fn() };
+    window.scrollTo = () => {};
+    window.mockPagefind = mockPagefind;
+
+    window.eval(patchedSource);
+    window.scolta = Object.assign({
+        scoring: {},
+        endpoints: { expand: '/e', summarize: '/s', followup: '/f' },
+        pagefindPath: '/pf.js',
+        siteName: 'Test',
+        container: '#scolta-search',
+        allowedLinkDomains: [],
+        disclaimer: '',
+    }, extraScoltaConfig);
+    window.Scolta.init('#scolta-search');
+    return { dom, window };
+}
+
+describe('auto-language filter: currentLanguage config', () => {
+    test('applies language filter from currentLanguage config on fresh search', async () => {
+        const mock = buildMockPagefind([]);
+        const { window } = createWindowWithConfig(mock, { currentLanguage: 'en' });
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'worktrees';
+        await inst.doSearch();
+
+        const calls = mock.search.mock.calls;
+        const searchCall = calls.find(c => c[0] === 'worktrees');
+        expect(searchCall).toBeDefined();
+        expect(searchCall[1]).toHaveProperty('filters');
+        expect(searchCall[1].filters).toEqual({ language: 'en' });
+    });
+
+    test('URL f_language param overrides currentLanguage config', async () => {
+        const mock = buildMockPagefind([]);
+        // URL has f_language=fr but config says currentLanguage: 'en'
+        const dom = new JSDOM(
+            '<!DOCTYPE html><html><body><div id="scolta-search"></div></body></html>',
+            { url: 'https://example.com/?q=worktrees&f_language=fr', runScripts: 'dangerously' }
+        );
+        const win = dom.window;
+        win.fetch = jest.fn().mockResolvedValue({ ok: false, status: 503, json: () => Promise.resolve({}), text: () => Promise.resolve('') });
+        win.console = { log: jest.fn(), error: jest.fn(), warn: jest.fn() };
+        win.scrollTo = () => {};
+        win.mockPagefind = mock;
+        win.eval(patchedSource);
+        win.scolta = {
+            scoring: {},
+            endpoints: { expand: '/e', summarize: '/s', followup: '/f' },
+            pagefindPath: '/pf.js',
+            siteName: 'Test',
+            container: '#scolta-search',
+            allowedLinkDomains: [],
+            disclaimer: '',
+            currentLanguage: 'en',
+        };
+        win.Scolta.init('#scolta-search');
+        // Wait for pagefind init + URL-based auto-search to complete.
+        await new Promise(r => setTimeout(r, 50));
+
+        // The URL had f_language=fr, which takes priority over currentLanguage: 'en'.
+        const calls = mock.search.mock.calls;
+        const autoSearch = calls.find(c => c[0] === 'worktrees');
+        expect(autoSearch).toBeDefined();
+        expect(autoSearch[1]).toHaveProperty('filters');
+        expect(autoSearch[1].filters).toEqual({ language: 'fr' });
+    });
+
+    test('no language filter when currentLanguage is not set and no html lang', async () => {
+        const mock = buildMockPagefind([]);
+        // createWindow() (from above) has no currentLanguage and no lang attr
+        const { window } = createWindowWithConfig(mock, {});
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'worktrees';
+        await inst.doSearch();
+
+        const calls = mock.search.mock.calls;
+        const searchCall = calls.find(c => c[0] === 'worktrees');
+        expect(searchCall).toBeDefined();
+        expect(searchCall[1]).not.toHaveProperty('filters');
+    });
+});
+
+describe('auto-language filter: html lang fallback', () => {
+    test('detects language from html lang attribute when no currentLanguage config', async () => {
+        const mock = buildMockPagefind([]);
+        const { window } = createWindowWithConfig(mock, {}, 'es');
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'worktrees';
+        await inst.doSearch();
+
+        const calls = mock.search.mock.calls;
+        const searchCall = calls.find(c => c[0] === 'worktrees');
+        expect(searchCall).toBeDefined();
+        expect(searchCall[1]).toHaveProperty('filters');
+        expect(searchCall[1].filters).toEqual({ language: 'es' });
+    });
+
+    test('strips region subtag from html lang (en-US → en)', async () => {
+        const mock = buildMockPagefind([]);
+        const { window } = createWindowWithConfig(mock, {}, 'en-US');
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'worktrees';
+        await inst.doSearch();
+
+        const calls = mock.search.mock.calls;
+        const searchCall = calls.find(c => c[0] === 'worktrees');
+        expect(searchCall).toBeDefined();
+        expect(searchCall[1]).toHaveProperty('filters');
+        expect(searchCall[1].filters).toEqual({ language: 'en' });
+    });
+
+    test('currentLanguage config takes precedence over html lang attribute', async () => {
+        const mock = buildMockPagefind([]);
+        const { window } = createWindowWithConfig(mock, { currentLanguage: 'de' }, 'fr');
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'worktrees';
+        await inst.doSearch();
+
+        const calls = mock.search.mock.calls;
+        const searchCall = calls.find(c => c[0] === 'worktrees');
+        expect(searchCall).toBeDefined();
+        expect(searchCall[1]).toHaveProperty('filters');
+        expect(searchCall[1].filters).toEqual({ language: 'de' });
+    });
+});
+
+describe('auto-language filter: user can clear the filter', () => {
+    test('user unchecking language filter removes it for that search', async () => {
+        const filters = { language: { en: 100, es: 50 } };
+        const mock = buildMockPagefind([], filters);
+        const { window } = createWindowWithConfig(mock, { currentLanguage: 'en' });
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'test';
+        await inst.doSearch();
+
+        // The first search should have the auto-filter applied.
+        const initialCall = mock.search.mock.calls.find(c => c[0] === 'test');
+        expect(initialCall[1].filters).toEqual({ language: 'en' });
+
+        // User unchecks "English" — toggleFilter removes it.
+        await inst.toggleFilter('language', 'en');
+        const afterToggle = mock.search.mock.calls.filter(c => c[0] === 'test');
+        const lastCall = afterToggle[afterToggle.length - 1];
+        // After unchecking, no language filter in this search.
+        expect(lastCall[1]).not.toHaveProperty('filters');
     });
 });

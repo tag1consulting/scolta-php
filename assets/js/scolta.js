@@ -17,6 +17,10 @@
  *   container: '#scolta-search'            — CSS selector for the search container
  *   allowedLinkDomains: []                 — Domains allowed in summary links (empty = all)
  *   disclaimer: ''                         — Disclaimer text below AI summary (empty = none)
+ *   currentLanguage: null                  — Optional: 2-letter ISO language code (e.g. 'en', 'es').
+ *                                            When set, search results are pre-filtered to this language.
+ *                                            URL filter params (f_language=...) take precedence.
+ *                                            Falls back to <html lang> detection when omitted.
  *
  * Entry point: Scolta.init(containerSelector)
  *
@@ -195,10 +199,6 @@
     return value;
   }
 
-  // TODO: auto-detect active language from URL path (e.g. /es/ → 'es')
-  // and pre-populate activeFilters.language when the page loads.
-  // This would let language-scoped embeds default to their own language.
-
   // ==========================================================================
   // INSTANCE FACTORY
   // ==========================================================================
@@ -223,6 +223,20 @@
   let searchVersion = 0;
   let usedOrFallback = false;
   let pagefindBase = '';   // Set during initPagefind(); used by resolveUrl().
+
+  // Detect default language filter from instanceConfig.currentLanguage or <html lang>.
+  // Applied on every fresh search unless the URL already specifies f_language.
+  var cfgLang = instanceConfig && typeof instanceConfig.currentLanguage === 'string'
+    ? instanceConfig.currentLanguage.trim() : '';
+  var defaultLangCode = cfgLang
+    ? cfgLang.split('-')[0].toLowerCase()
+    : (function() {
+        if (typeof document === 'undefined' || !document.documentElement) return null;
+        var hl = document.documentElement.lang;
+        if (!hl) return null;
+        var code = hl.split('-')[0].toLowerCase();
+        return code.length === 2 ? code : null;
+      })();
 
   // --- DOM references (set during init) ---
   let els = {};
@@ -1192,7 +1206,11 @@
     conversationMessages = [];
     followUpCount = 0;
     if (!preserveFilters) {
-      activeFilters = initialFilters || {};
+      var effectiveFilters = initialFilters ? Object.assign({}, initialFilters) : {};
+      if (!effectiveFilters.language && defaultLangCode) {
+        effectiveFilters.language = new Set([defaultLangCode]);
+      }
+      activeFilters = effectiveFilters;
     }
 
     // Update URL with search query and active filter state.
