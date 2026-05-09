@@ -233,4 +233,15 @@ describe('scolta.css structure', () => {
         expect(css).toMatch(/\.scolta-layout\.has-filters\s*\{[^}]*grid-template-columns:\s*220px/);
         expect(css).toMatch(/\.scolta-layout\s*\{[^}]*grid-template-columns:\s*1fr/);
     });
+
+    test('results header allows text to wrap on narrow viewports', () => {
+        const css = fs.readFileSync(cssPath, 'utf-8');
+        // .scolta-results-header must have overflow-wrap and word-wrap so long
+        // status messages do not overflow the container on narrow viewports.
+        expect(css).toMatch(/\.scolta-results-header\s*\{[^}]*overflow-wrap:\s*break-word/s);
+        expect(css).toMatch(/\.scolta-results-header\s*\{[^}]*word-wrap:\s*break-word/s);
+        // The first child span must have min-width:0 so the flex item can shrink.
+        expect(css).toMatch(/\.scolta-results-header\s+span:first-child\s*\{[^}]*min-width:\s*0/s);
+        expect(css).toMatch(/\.scolta-results-header\s+span:first-child\s*\{[^}]*overflow-wrap:\s*break-word/s);
+    });
 });
