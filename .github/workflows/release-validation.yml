@@ -211,6 +211,9 @@ jobs:
             $repos[] = ["type" => "vcs", "url" => "https://github.com/tag1consulting/scolta-php.git"];
             $j["repositories"] = array_values($repos);
             $j["require"]["tag1/scolta-php"] = "dev-main@dev";
+            // Allow Drupal core plugins required when installing Drupal as a dependency.
+            $j["config"]["allow-plugins"]["drupal/core-composer-scaffold"] = true;
+            $j["config"]["allow-plugins"]["composer/installers"] = true;
             file_put_contents("composer.json", json_encode($j, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
           '
 
