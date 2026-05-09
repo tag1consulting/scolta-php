@@ -39,9 +39,12 @@ final class AmazeeTrialProvisioner
      * On success, credentials are stored via ConfigStorageInterface and
      * the best available models are resolved from the provisioned endpoint.
      *
+     * @param string $email Optional email for the trial account. Pass an empty
+     *   string (the default) for anonymous provisioning.
+     *
      * @throws AmazeeApiException If the API call fails.
      */
-    public function provision(string $email): ProvisioningResult
+    public function provision(string $email = ''): ProvisioningResult
     {
         if ($this->hasExistingProvider !== null && ($this->hasExistingProvider)()) {
             return ProvisioningResult::skippedExistingProvider();
