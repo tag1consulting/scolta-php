@@ -30,17 +30,16 @@ class AmazeeClientTest extends TestCase
 
     public function testProvisionTrialSuccess(): void
     {
-        $history = [];
         $client = $this->makeClient([
-            // POST /auth/generate-trial-access
+            // POST /auth/generate-trial-access — nested key format (current API).
             new Response(200, [], json_encode([
-                'litellm_token' => 'tok-abc123',
-                'litellm_api_url' => 'https://llm.amazee.ai',
-                'region' => 'us-east',
+                'key' => [
+                    'litellm_token' => 'tok-abc123',
+                    'litellm_api_url' => 'https://llm.amazee.ai',
+                    'region' => 'us-east',
+                ],
             ])),
-            // GET /auth/me (validate)
-            new Response(200, [], json_encode(['user' => 'test@example.com'])),
-        ], $history);
+        ]);
 
         $result = $client->provisionTrial('test@example.com');
 
@@ -49,6 +48,24 @@ class AmazeeClientTest extends TestCase
         $this->assertSame('https://llm.amazee.ai', $result->litellmApiUrl);
         $this->assertSame('us-east', $result->region);
         $this->assertNull($result->error);
+    }
+
+    public function testProvisionTrialSuccessLegacyFlatFormat(): void
+    {
+        $client = $this->makeClient([
+            // Flat top-level format (legacy API, kept for backwards compatibility).
+            new Response(200, [], json_encode([
+                'litellm_token' => 'tok-legacy',
+                'litellm_api_url' => 'https://llm.amazee.ai',
+                'region' => 'eu-west',
+            ])),
+        ]);
+
+        $result = $client->provisionTrial();
+
+        $this->assertTrue($result->success);
+        $this->assertSame('tok-legacy', $result->litellmToken);
+        $this->assertSame('eu-west', $result->region);
     }
 
     public function testProvisionTrialThrowsOnMissingToken(): void
@@ -104,6 +121,17 @@ class AmazeeClientTest extends TestCase
 
         $token = $client->signIn('test@example.com', '999999');
         $this->assertSame('session-tok-abc', $token);
+    }
+
+    public function testSignInParsesNestedTokenObject(): void
+    {
+        $client = $this->makeClient([
+            // New API format: token is nested as {token: {access_token: '...'}}.
+            new Response(200, [], json_encode(['token' => ['access_token' => 'session-tok-nested']])),
+        ]);
+
+        $token = $client->signIn('test@example.com', '123456');
+        $this->assertSame('session-tok-nested', $token);
     }
 
     public function testSignInThrowsOnMissingToken(): void

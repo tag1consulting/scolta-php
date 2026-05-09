@@ -76,14 +76,14 @@ class AutoProvisionerTest extends TestCase
             });
 
         $client = $this->makeClient([
-            // Trial provisioning response.
+            // Trial provisioning response (nested key format).
             new Response(200, [], json_encode([
-                'litellm_token' => 'new-tok',
-                'litellm_api_url' => 'https://trial.amazee.ai',
-                'region' => 'eu-west',
+                'key' => [
+                    'litellm_token' => 'new-tok',
+                    'litellm_api_url' => 'https://trial.amazee.ai',
+                    'region' => 'eu-west',
+                ],
             ])),
-            // Token validation (/auth/me on the LiteLLM endpoint).
-            new Response(200, [], json_encode(['user' => 'ok'])),
             // Model list (/model/info on the LiteLLM endpoint).
             new Response(200, [], json_encode(['data' => []])),
         ]);
@@ -101,11 +101,12 @@ class AutoProvisionerTest extends TestCase
 
         $client = $this->makeClient([
             new Response(200, [], json_encode([
-                'litellm_token' => 'new-tok',
-                'litellm_api_url' => 'https://trial.amazee.ai',
-                'region' => 'us-east',
+                'key' => [
+                    'litellm_token' => 'new-tok',
+                    'litellm_api_url' => 'https://trial.amazee.ai',
+                    'region' => 'us-east',
+                ],
             ])),
-            new Response(200, [], json_encode(['user' => 'ok'])),
             new Response(200, [], json_encode([
                 'data' => [
                     ['model_name' => 'claude-sonnet-4-6'],
@@ -133,11 +134,12 @@ class AutoProvisionerTest extends TestCase
 
         $client = $this->makeClient([
             new Response(200, [], json_encode([
-                'litellm_token' => 'new-tok',
-                'litellm_api_url' => 'https://trial.amazee.ai',
-                'region' => 'us-east',
+                'key' => [
+                    'litellm_token' => 'new-tok',
+                    'litellm_api_url' => 'https://trial.amazee.ai',
+                    'region' => 'us-east',
+                ],
             ])),
-            new Response(200, [], json_encode(['user' => 'ok'])),
             new Response(200, [], json_encode(['data' => []])),
         ]);
 

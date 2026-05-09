@@ -62,9 +62,6 @@ final class AmazeeClient
             );
         }
 
-        // Validate the returned token is usable.
-        $this->validateToken($token, $apiUrl);
-
         return ProvisioningResult::success($token, $apiUrl, $region);
     }
 
