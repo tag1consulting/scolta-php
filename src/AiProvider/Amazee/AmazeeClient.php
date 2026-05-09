@@ -49,18 +49,18 @@ final class AmazeeClient
     {
         $body = $this->post('/auth/generate-trial-access', ['email' => $email]);
 
-        $token = $body['litellm_token'] ?? null;
-        $apiUrl = $body['litellm_api_url'] ?? null;
-        $region = $body['region'] ?? 'default';
+        // Credentials may be nested under a 'key' object (new API format) or
+        // flat at the top level (legacy format).
+        $creds = is_array($body['key'] ?? null) ? $body['key'] : $body;
+        $token = $creds['litellm_token'] ?? null;
+        $apiUrl = $creds['litellm_api_url'] ?? null;
+        $region = $creds['region'] ?? 'default';
 
         if (!is_string($token) || $token === '' || !is_string($apiUrl) || $apiUrl === '') {
             throw new AmazeeApiException(
                 'Amazee.ai trial provisioning response missing litellm_token or litellm_api_url.'
             );
         }
-
-        // Validate the returned token is usable.
-        $this->validateToken($token, $apiUrl);
 
         return ProvisioningResult::success($token, $apiUrl, $region);
     }
@@ -86,7 +86,12 @@ final class AmazeeClient
     {
         $body = $this->post('/auth/sign-in', ['email' => $email, 'code' => $code]);
 
-        $sessionToken = $body['token'] ?? ($body['access_token'] ?? null);
+        // Token may be nested under 'token.access_token' (new API format) or
+        // flat as 'token' or 'access_token' (legacy formats).
+        $tokenField = $body['token'] ?? null;
+        $sessionToken = is_array($tokenField)
+            ? ($tokenField['access_token'] ?? null)
+            : ($tokenField ?? ($body['access_token'] ?? null));
         if (!is_string($sessionToken) || $sessionToken === '') {
             throw new AmazeeApiException('Amazee.ai sign-in response missing session token.');
         }
