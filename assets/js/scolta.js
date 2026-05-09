@@ -68,6 +68,7 @@
       AI_SUMMARY_MAX_CHARS: s.AI_SUMMARY_MAX_CHARS ?? 2000,
       EXPAND_PRIMARY_WEIGHT: s.EXPAND_PRIMARY_WEIGHT ?? 0.7,
       AI_MAX_FOLLOWUPS: s.AI_MAX_FOLLOWUPS ?? 3,
+      AI_LANGUAGES: s.AI_LANGUAGES ?? ['en'],
       LANGUAGE: s.LANGUAGE ?? 'en',
       CUSTOM_STOP_WORDS: s.CUSTOM_STOP_WORDS ?? [],
       RECENCY_STRATEGY: s.RECENCY_STRATEGY ?? 'exponential',
@@ -265,6 +266,7 @@
       AI_SUMMARY_MAX_CHARS: s.AI_SUMMARY_MAX_CHARS ?? 2000,
       EXPAND_PRIMARY_WEIGHT: s.EXPAND_PRIMARY_WEIGHT ?? 0.7,
       AI_MAX_FOLLOWUPS: s.AI_MAX_FOLLOWUPS ?? 3,
+      AI_LANGUAGES: s.AI_LANGUAGES ?? ['en'],
       LANGUAGE: s.LANGUAGE ?? 'en',
       CUSTOM_STOP_WORDS: s.CUSTOM_STOP_WORDS ?? [],
       RECENCY_STRATEGY: s.RECENCY_STRATEGY ?? 'exponential',
@@ -1208,7 +1210,10 @@
     if (!preserveFilters) {
       var effectiveFilters = initialFilters ? Object.assign({}, initialFilters) : {};
       if (!effectiveFilters.language && defaultLangCode) {
-        effectiveFilters.language = new Set([defaultLangCode]);
+        var langs = CONFIG.AI_LANGUAGES || [];
+        if (langs.length > 1 && langs.includes(defaultLangCode)) {
+          effectiveFilters.language = new Set([defaultLangCode]);
+        }
       }
       activeFilters = effectiveFilters;
     }
