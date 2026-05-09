@@ -40,9 +40,12 @@ final class AmazeeClient
      * Calls POST /auth/generate-trial-access and validates the token via
      * GET /auth/me. Returns the LiteLLM credentials on success.
      *
+     * @param string $email Optional email for the trial account. Pass an empty
+     *   string for anonymous provisioning (the API accepts it).
+     *
      * @throws AmazeeApiException On API error or unexpected response shape.
      */
-    public function provisionTrial(string $email): ProvisioningResult
+    public function provisionTrial(string $email = ''): ProvisioningResult
     {
         $body = $this->post('/auth/generate-trial-access', ['email' => $email]);
 
