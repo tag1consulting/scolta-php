@@ -53,7 +53,15 @@ class AiClient
         $this->timeout = (int) ($config['timeout'] ?? 30);
 
         if ($this->provider === 'openai') {
-            $this->baseUrl = $config['base_url'] ?? self::OPENAI_API_URL;
+            $baseUrl = $config['base_url'] ?? self::OPENAI_API_URL;
+            // If only a domain/origin is provided (no path), append the standard
+            // OpenAI chat completions path. This supports LiteLLM and other proxies
+            // that return a base URL without a trailing API path.
+            $path = parse_url($baseUrl, PHP_URL_PATH) ?? '/';
+            if ($path === '' || $path === '/') {
+                $baseUrl = rtrim($baseUrl, '/') . '/v1/chat/completions';
+            }
+            $this->baseUrl = $baseUrl;
         } else {
             $this->baseUrl = $config['base_url'] ?? self::ANTHROPIC_API_URL;
         }
