@@ -113,8 +113,8 @@ class HealthCheckerTest extends TestCase
             $checker = new HealthChecker($config, $this->tempDir, null, null);
             $result = $checker->check();
 
-            $this->assertFalse($result['ai_configured'], "Expected ai_configured false for key: " . json_encode($key));
-            $this->assertEquals('degraded', $result['status'], "Expected degraded status for whitespace-only key");
+            $this->assertFalse($result['ai_configured'], 'Expected ai_configured false for key: ' . json_encode($key));
+            $this->assertEquals('degraded', $result['status'], 'Expected degraded status for whitespace-only key');
         }
     }
 
