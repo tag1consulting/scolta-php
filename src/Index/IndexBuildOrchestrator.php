@@ -84,6 +84,7 @@ final class IndexBuildOrchestrator
     ): StatusReport {
         $logger   = $logger   ?? new NullLogger();
         $progress = $progress ?? new NullProgressReporter();
+        $logger->notice('[scolta] Using PHP indexer.');
         $startTime = microtime(true);
         $telemetry = new MemoryTelemetry($logger, $intent->memoryBudget());
 
