@@ -69,7 +69,7 @@ final class MemoryBudgetSuggestion
 
         return [
             'profile'              => 'conservative',
-            'reason'               => "PHP memory_limit is {$mb}MB. The conservative profile keeps peak RAM under 96MB.",
+            'reason'               => "PHP memory_limit is {$mb}MB. The conservative profile sets Scolta's internal allocation budget to 96 MB. Total process RSS will be higher depending on platform baseline overhead.",
             'detected_limit_bytes' => $bytes,
             'confidence'           => $confidence,
         ];
@@ -120,7 +120,8 @@ final class MemoryBudgetSuggestion
 
         $budgetMb = (int) round($budget / 1_048_576);
         $limitMb  = (int) round($resolvedLimit / 1_048_576);
-        $warning  = "This profile requires approximately {$budgetMb} MB but your PHP memory limit is only {$limitMb} MB."
+        $warning  = "Scolta's internal allocation budget for this profile is approximately {$budgetMb} MB, but your PHP memory limit is only {$limitMb} MB."
+            . ' Total process RSS will be higher (PHP runtime baseline + Scolta budget + I/O overhead).'
             . ' Choose a smaller profile or ask your host to raise memory_limit in php.ini.';
 
         return [
