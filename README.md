@@ -58,7 +58,7 @@ foreach ($fixtures as $file) {
     );
 }
 
-// Run the build using the conservative memory profile (128 MB-safe)
+// Run the build using the conservative memory profile (96 MB internal budget)
 $orchestrator = new IndexBuildOrchestrator(
     stateDir:  '/tmp/scolta-state',
     outputDir: '/var/www/html/pagefind',
@@ -126,7 +126,17 @@ The static-index architecture eliminates the search server. No Solr, no Elastics
 
 ## Memory and Scale
 
-The default memory profile is `conservative`, which targets a peak RSS under 96 MB and works on shared hosting with a 128 MB `memory_limit`. Scolta never silently upgrades to a larger profile. To opt in to a larger profile:
+Memory profiles control Scolta's **internal allocation budget** — the memory Scolta itself adds on top of what the PHP process already uses. Total process RSS is higher: it includes the PHP runtime baseline for your platform plus the Scolta budget plus ~15 MB I/O overhead.
+
+Typical platform baselines (before any indexing work):
+
+| Platform | Baseline RSS |
+|---|---|
+| Laravel CLI | ~60 MB |
+| WordPress | ~80 MB |
+| Drupal | ~130 MB |
+
+The default profile is `conservative` (96 MB internal budget). On WordPress, expect total peak RSS around **175 MB**; on Drupal, around **240 MB**. Scolta never silently upgrades to a larger profile. To opt in to a larger profile:
 
 ```php
 use Tag1\Scolta\Config\MemoryBudget;
@@ -138,8 +148,8 @@ $suggestion = MemoryBudgetSuggestion::suggest();
 // $suggestion->warning is non-empty if the limit is tight
 
 // Or specify directly
-$budget = MemoryBudget::balanced();   // targets ~200 MB peak RSS
-$budget = MemoryBudget::aggressive(); // targets ~384 MB peak RSS
+$budget = MemoryBudget::balanced();   // internal budget: 384 MB
+$budget = MemoryBudget::aggressive(); // internal budget: 1 GB
 
 // Or pass a budget in bytes
 $budget = MemoryBudget::fromBytes(256 * 1024 * 1024);

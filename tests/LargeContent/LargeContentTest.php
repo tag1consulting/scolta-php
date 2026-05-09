@@ -23,7 +23,8 @@ class LargeContentTest extends AbstractLargeContentTestCase
 
     protected function assertPeakUnderBudget(int $actualBytes): void
     {
-        // Conservative budget promises ≤ 96 MB peak RSS.
+        // Conservative profile's internal allocation budget: 96 MB.
+        // This measures the PHP memory delta during the build (not total process RSS).
         $limitMb  = 96;
         $actualMb = $actualBytes / 1_048_576;
         $this->assertLessThanOrEqual(
@@ -34,8 +35,9 @@ class LargeContentTest extends AbstractLargeContentTestCase
     }
 
     /**
-     * 10 000 pages under the conservative 96 MB budget.
+     * 10 000 pages within the conservative 96 MB internal allocation budget.
      *
+     * Measures the PHP memory delta during the build, not total process RSS.
      * This is the standard "small box" scenario used in CI.
      */
     public function testIndex10kPagesConservative(): void
@@ -58,11 +60,12 @@ class LargeContentTest extends AbstractLargeContentTestCase
     }
 
     /**
-     * 50 000 pages under the conservative 96 MB budget.
+     * 50 000 pages within the conservative 96 MB internal allocation budget.
      *
-     * This is the primary memory-safety regression test. Tagged @group large-content
-     * because it takes ~60–120s; run in the dedicated CI job and before every
-     * 0.x minor release.
+     * Measures peakMemoryBytes from the build report (VmHWM in the bare PHP test
+     * process, with no CMS framework overhead). This is the primary memory-safety
+     * regression test. Tagged @group large-content because it takes ~60–120s; run
+     * in the dedicated CI job and before every 0.x minor release.
      */
     public function testIndex50kPagesUnder96MB(): void
     {
@@ -77,7 +80,7 @@ class LargeContentTest extends AbstractLargeContentTestCase
         $this->assertGreaterThanOrEqual(50_000, $report->pagesProcessed);
 
         $peakMb = $report->peakMemoryBytes / 1_048_576;
-        $this->assertLessThanOrEqual(96, $peakMb, "Peak RSS {$peakMb} MB exceeded 96 MB budget");
+        $this->assertLessThanOrEqual(96, $peakMb, "Peak memory {$peakMb} MB exceeded 96 MB internal allocation budget");
 
         $entry = json_decode(
             file_get_contents($this->outputDir . '/pagefind/pagefind-entry.json'),

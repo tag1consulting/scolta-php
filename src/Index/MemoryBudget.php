@@ -7,10 +7,19 @@ namespace Tag1\Scolta\Index;
 /**
  * Configurable memory budget that shapes chunk sizes and flush thresholds.
  *
- * The budget is advisory: it tunes constants for throughput without enforcing
- * a hard cap on peak RSS. The streaming pipeline is already O(1) in corpus
- * size regardless of budget; the budget controls how aggressively memory is
+ * The budget is advisory: it tunes chunk sizes, flush thresholds, and fan-in
+ * limits without enforcing a hard cap on peak RSS. The streaming pipeline is
+ * already O(1) in corpus size; the budget controls how aggressively memory is
  * traded for fewer round trips and larger buffers.
+ *
+ * **Internal budget vs total process RSS.** The values here (totalBudgetBytes,
+ * fragmentFlushBytes, etc.) describe Scolta's own allocation during indexing —
+ * the memory Scolta adds on top of whatever the PHP process already uses.
+ * Total process RSS = PHP runtime baseline + Scolta allocation + I/O overhead.
+ * Typical baselines: Laravel CLI ~60 MB, WordPress ~80 MB, Drupal ~130 MB.
+ * Add the profile's totalBudgetBytes and ~15 MB I/O overhead to estimate total
+ * process RSS. The conservative profile's 96 MB internal budget therefore
+ * results in roughly 170 MB total RSS on WordPress or 240 MB on Drupal.
  *
  * The runtime default is always conservative(). Larger profiles are opt-in
  * only — Scolta never auto-selects a larger profile at runtime.
@@ -31,9 +40,11 @@ final class MemoryBudget
     /**
      * Conservative: safe for shared hosts with PHP memory_limit ≤ 128 MB.
      *
-     * Targets peak RSS ≤ 96 MB for any corpus size. This is the runtime default.
-     * The 4 MB token-cache chunk limit prevents single serialize() allocations
-     * from exhausting memory when pages contain thousands of tokens.
+     * Scolta's internal allocation budget: 96 MB. This is the runtime default.
+     * Total process RSS will be higher — add the PHP runtime baseline for your
+     * platform (Laravel CLI ~60 MB, WordPress ~80 MB, Drupal ~130 MB) plus ~15 MB
+     * I/O overhead. The 4 MB token-cache chunk limit prevents single serialize()
+     * allocations from exhausting memory when pages contain thousands of tokens.
      */
     public static function conservative(): self
     {
