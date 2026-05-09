@@ -300,9 +300,16 @@
     pagefind = await import(pagefindPath);
     await pagefind.init();
 
-    // Record the base so resolveUrl() can strip it back off.
-    // pagefind's fullUrl() prepends this path to every stored root-relative URL.
-    pagefindBase = pagefindPath.replace(/\/pagefind\/pagefind\.js.*$/, '');
+    // Record the path-only base so resolveUrl() can strip it back off.
+    // pagefind's fullUrl() prepends baseUrl to every stored root-relative URL.
+    // pagefind returns root-relative URLs (no domain), so we store only the path
+    // portion by stripping the origin when pagefindPath is absolute.
+    const rawBase = pagefindPath.replace(/\/pagefind\/pagefind\.js.*$/, '');
+    try {
+      pagefindBase = rawBase.startsWith('http') ? new URL(rawBase).pathname : rawBase;
+    } catch (_) {
+      pagefindBase = rawBase;
+    }
 
     // Merge all language instances so multilingual facets appear.
     // pagefind.init() loads only the page language; without merging,
