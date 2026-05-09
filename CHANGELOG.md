@@ -16,6 +16,9 @@ First stable release — all features from 0.3.x promoted to 1.0 API surface.
 
 ## [Unreleased]
 
+### Added
+- **`IndexerResolver` class for explicit indexer selection logging.** Adapters can construct an `IndexerResolver` with a `PagefindBinary` and PSR-3 `LoggerInterface` and call `resolve('php'|'binary'|'auto')` to get the effective backend (`'php'` or `'binary'`) with a `notice`-level log message emitted at selection time. When `'binary'` is configured but no binary is found, the resolver falls back to `'php'` and logs `"[scolta] Falling back to PHP indexer: binary not available."`. When `'auto'` is used, it probes the binary and logs which backend was auto-detected. `IndexBuildOrchestrator::build()` now also emits `"[scolta] Using PHP indexer."` at the start of every PHP-path build. ([#48](https://github.com/tag1consulting/scolta-php/issues/48))
+
 ### Fixed
 - **`Adapter install — Drupal` CI job failed because the release-validation workflow replaced the entire `repositories` array (wiping the `packages.drupal.org/8` Drupal Packagist entry) instead of only swapping the local path repo for the GitHub VCS repo.** The PHP inline script now filters out only the `path`-type scolta-php entry and appends the VCS repo, leaving other repository sources (including the Drupal Packagist) intact.
 - **Search status message text no longer overflows on narrow viewports.** `.scolta-results-header` now carries `overflow-wrap: break-word` and `word-wrap: break-word`, and its first-child `<span>` gains `min-width: 0` so the flex item can shrink below its content size. Long messages (e.g. "— no exact matches found, showing partial matches") wrap correctly at 320 px, 768 px, 1024 px, and 1440 px viewport widths. ([#51](https://github.com/tag1consulting/scolta-php/issues/51))
