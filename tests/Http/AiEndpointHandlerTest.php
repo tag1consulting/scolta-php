@@ -63,7 +63,7 @@ class AiEndpointHandlerTest extends TestCase
     public function testSummarizeRejectsOverMaxContext(): void
     {
         $handler = $this->makeHandler();
-        $result = $handler->handleSummarize('query', str_repeat('x', 50001));
+        $result = $handler->handleSummarize('query', str_repeat('x', 100001));
 
         $this->assertFalse($result['ok']);
         $this->assertEquals(400, $result['status']);
