@@ -6,6 +6,7 @@ namespace Tag1\Scolta\Export;
 
 use Tag1\Scolta\Html\HtmlCleaner;
 use Tag1\Scolta\Html\PagefindHtmlBuilder;
+use Tag1\Scolta\Index\CachedContentReference;
 
 /**
  * Exports content items as minimal HTML files for Pagefind indexing.
@@ -121,8 +122,12 @@ class ContentExporter
      * framework adapters where the input comes from a paginated generator so
      * that peak RSS stays bounded regardless of corpus size.
      *
-     * @param iterable<ContentItem> $items Items to filter (array or generator).
-     * @return \Generator<ContentItem>     Items that pass the minimum length check.
+     * CachedContentReference objects (cache-hit markers for unchanged posts)
+     * pass through without inspection — they carry no bodyHtml and are handled
+     * downstream by IndexBuildOrchestrator.
+     *
+     * @param iterable<ContentItem|CachedContentReference> $items Items to filter (array or generator).
+     * @return \Generator<ContentItem|CachedContentReference>      Items that pass the minimum length check, plus all cached references.
      *
      * @since 0.3.2
      * @stability experimental
@@ -130,6 +135,10 @@ class ContentExporter
     public function filterItems(iterable $items): \Generator
     {
         foreach ($items as $item) {
+            if ($item instanceof CachedContentReference) {
+                yield $item;
+                continue;
+            }
             $cleaned = HtmlCleaner::clean($item->bodyHtml);
             if (mb_strlen($cleaned) >= $this->minContentLength) {
                 yield $item;

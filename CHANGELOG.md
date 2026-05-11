@@ -19,6 +19,9 @@ First stable release — all features from 0.3.x promoted to 1.0 API surface.
 
 ## [Unreleased]
 
+### Fixed
+- **`ContentExporter::filterItems()` no longer crashes on `CachedContentReference` objects during re-index.** When a prior build's timestamp manifest exists, `gather()` yields a mix of `ContentItem` and `CachedContentReference` objects (cache-hit markers for unchanged posts). `filterItems()` previously accessed `$item->bodyHtml` on every item, which is not a property of `CachedContentReference`. Added `instanceof CachedContentReference` type guard to pass cached items through without inspection. Fixes PHP fatal error on WordPress and any other platform on any site with a prior build.
+
 ### Added
 - **`ScoltaConfig::$aiSummaryMaxTokens` (default `1024`) controls the AI token budget for summary responses.** Pass `ai_summary_max_tokens` in config arrays (Drupal, Laravel, WordPress) to override. `AiEndpointHandler` reads the value from `ScoltaConfig` via `AiControllerTrait::createHandler()`.
 
