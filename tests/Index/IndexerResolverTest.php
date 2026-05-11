@@ -116,10 +116,20 @@ class IndexerResolverTest extends TestCase
     }
 
     // -------------------------------------------------------------------
-    // 'auto' mode — binary available
+    // 'auto' mode — always PHP regardless of binary availability
     // -------------------------------------------------------------------
 
-    public function testAutoModeWithAvailableBinaryReturnsBinary(): void
+    public function testAutoModeReturnsPhp(): void
+    {
+        $logger = new IndexerResolverLogger();
+        $resolver = new IndexerResolver(new PagefindBinary(), $logger);
+
+        $result = $resolver->resolve('auto');
+
+        $this->assertSame('php', $result);
+    }
+
+    public function testAutoModeWithAvailableBinaryStillReturnsPhp(): void
     {
         $logger = new IndexerResolverLogger();
         $binary = new PagefindBinary(configuredPath: $this->fakeBinary);
@@ -127,10 +137,10 @@ class IndexerResolverTest extends TestCase
 
         $result = $resolver->resolve('auto');
 
-        $this->assertSame('binary', $result);
+        $this->assertSame('php', $result);
     }
 
-    public function testAutoModeWithAvailableBinaryLogsBinaryIndexer(): void
+    public function testAutoModeLogsUsingPhpIndexer(): void
     {
         $logger = new IndexerResolverLogger();
         $binary = new PagefindBinary(configuredPath: $this->fakeBinary);
@@ -140,15 +150,10 @@ class IndexerResolverTest extends TestCase
 
         $this->assertCount(1, $logger->records);
         $this->assertSame('notice', $logger->records[0]['level']);
-        $this->assertStringContainsString('Using binary indexer', $logger->records[0]['message']);
-        $this->assertStringContainsString('auto-detected', $logger->records[0]['message']);
+        $this->assertStringContainsString('Using PHP indexer', $logger->records[0]['message']);
     }
 
-    // -------------------------------------------------------------------
-    // 'auto' mode — binary not available → fallback
-    // -------------------------------------------------------------------
-
-    public function testAutoModeWithoutBinaryFallsBackToPhp(): void
+    public function testAutoModeWithoutBinaryReturnsPhp(): void
     {
         $logger = new IndexerResolverLogger();
         $resolver = new IndexerResolver(new UnavailablePagefindBinary(), $logger);
@@ -156,18 +161,6 @@ class IndexerResolverTest extends TestCase
         $result = $resolver->resolve('auto');
 
         $this->assertSame('php', $result);
-    }
-
-    public function testAutoModeWithoutBinaryLogsPhpIndexer(): void
-    {
-        $logger = new IndexerResolverLogger();
-        $resolver = new IndexerResolver(new UnavailablePagefindBinary(), $logger);
-
-        $resolver->resolve('auto');
-
-        $this->assertCount(1, $logger->records);
-        $this->assertSame('notice', $logger->records[0]['level']);
-        $this->assertStringContainsString('Using PHP indexer', $logger->records[0]['message']);
     }
 
     // -------------------------------------------------------------------

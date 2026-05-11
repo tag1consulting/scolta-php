@@ -10,9 +10,13 @@ use Tag1\Scolta\Binary\PagefindBinary;
 /**
  * Resolves which indexer backend to use and emits notice-level log messages.
  *
- * Encapsulates auto-detection and fallback logic so every adapter emits
- * the same structured messages. Adapters call resolve() and act on the
- * returned string ('php' or 'binary'). All logging is handled here.
+ * Encapsulates indexer selection logic so every adapter emits the same
+ * structured messages. Adapters call resolve() and act on the returned
+ * string ('php' or 'binary'). All logging is handled here.
+ *
+ * Design rule: 'auto' always means PHP. Binary pipeline requires explicit
+ * 'indexer: binary' configuration. If binary is unavailable when 'binary'
+ * is configured, falls back to PHP with a log notice.
  *
  * Log messages:
  *   - [scolta] Using PHP indexer.
@@ -54,16 +58,9 @@ final class IndexerResolver
             return 'php';
         }
 
-        // 'auto' (or any unrecognised value): probe binary, fall back to PHP.
-        $path = $this->binary->resolve();
-        if ($path !== null) {
-            $this->logger->notice(
-                '[scolta] Using binary indexer (auto-detected): {binary}.',
-                ['binary' => $path],
-            );
-            return 'binary';
-        }
-        $this->logger->notice('[scolta] Using PHP indexer (auto: binary not available).');
+        // 'auto' (or any unrecognised value): always PHP.
+        // Binary pipeline requires explicit 'indexer: binary' configuration.
+        $this->logger->notice('[scolta] Using PHP indexer.');
         return 'php';
     }
 }

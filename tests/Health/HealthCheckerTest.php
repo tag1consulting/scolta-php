@@ -157,6 +157,45 @@ class HealthCheckerTest extends TestCase
     }
 
     // -------------------------------------------------------------------
+    // indexer_active reflects config, not binary availability
+    // -------------------------------------------------------------------
+
+    public function testIndexerActiveIsPhpWhenConfigIsAuto(): void
+    {
+        $config = ScoltaConfig::fromArray(['ai_api_key' => 'sk-test', 'indexer' => 'auto']);
+        $checker = new HealthChecker($config, $this->tempDir, null, null);
+
+        $result = $checker->check();
+
+        $this->assertSame('php', $result['indexer_active']);
+    }
+
+    public function testIndexerActiveIsPhpWhenConfigIsPhp(): void
+    {
+        $config = ScoltaConfig::fromArray(['ai_api_key' => 'sk-test', 'indexer' => 'php']);
+        $checker = new HealthChecker($config, $this->tempDir, null, null);
+
+        $result = $checker->check();
+
+        $this->assertSame('php', $result['indexer_active']);
+    }
+
+    public function testIndexerActiveIsBinaryWhenConfigIsBinaryAndBinaryAvailable(): void
+    {
+        // Create a fake binary so PagefindBinary reports available.
+        $tempBin = $this->tempDir . '/pagefind';
+        file_put_contents($tempBin, "#!/bin/sh\necho 'pagefind 1.5.0'");
+        chmod($tempBin, 0755);
+
+        $config = ScoltaConfig::fromArray(['ai_api_key' => 'sk-test', 'indexer' => 'binary']);
+        $checker = new HealthChecker($config, $this->tempDir, $tempBin, null);
+
+        $result = $checker->check();
+
+        $this->assertSame('binary', $result['indexer_active']);
+    }
+
+    // -------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------
 
