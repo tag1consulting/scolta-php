@@ -31,16 +31,17 @@ use Tag1\Scolta\Prompt\PromptEnricherInterface;
 class AiEndpointHandler
 {
     /**
-     * @param object                    $aiService       AI service (duck-typed).
-     * @param CacheDriverInterface      $cache           Cache driver.
-     * @param int                       $generation      Generation counter for cache invalidation.
-     * @param int                       $cacheTtl        Cache TTL in seconds (0 = disabled).
-     * @param int                       $maxFollowUps    Maximum follow-up exchanges allowed.
-     * @param PromptEnricherInterface   $promptEnricher  Prompt enricher for site-specific context injection.
-     * @param array                     $aiLanguages     Supported languages for multilingual responses.
-     * @param LoggerInterface           $logger          PSR-3 logger (defaults to NullLogger).
-     * @param bool                      $aiExpandQuery   Whether the expand-query feature is enabled.
-     * @param bool                      $aiSummarize     Whether the summarize feature is enabled.
+     * @param object                    $aiService           AI service (duck-typed).
+     * @param CacheDriverInterface      $cache               Cache driver.
+     * @param int                       $generation          Generation counter for cache invalidation.
+     * @param int                       $cacheTtl            Cache TTL in seconds (0 = disabled).
+     * @param int                       $maxFollowUps        Maximum follow-up exchanges allowed.
+     * @param PromptEnricherInterface   $promptEnricher      Prompt enricher for site-specific context injection.
+     * @param array                     $aiLanguages         Supported languages for multilingual responses.
+     * @param LoggerInterface           $logger              PSR-3 logger (defaults to NullLogger).
+     * @param bool                      $aiExpandQuery       Whether the expand-query feature is enabled.
+     * @param bool                      $aiSummarize         Whether the summarize feature is enabled.
+     * @param int                       $aiSummaryMaxTokens  Max tokens for AI summary responses.
      */
     public function __construct(
         private readonly object $aiService,
@@ -53,6 +54,7 @@ class AiEndpointHandler
         private readonly LoggerInterface $logger = new NullLogger(),
         private readonly bool $aiExpandQuery = true,
         private readonly bool $aiSummarize = true,
+        private readonly int $aiSummaryMaxTokens = 1024,
     ) {
     }
 
@@ -160,7 +162,7 @@ class AiEndpointHandler
             $summary = $this->aiService->message(
                 $systemPrompt,
                 $userMessage,
-                512,
+                $this->aiSummaryMaxTokens,
             );
 
             $result = ['summary' => $summary];

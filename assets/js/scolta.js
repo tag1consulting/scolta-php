@@ -610,8 +610,33 @@
     }).join("\n\n");
   }
 
+  // Repair markdown truncated by the AI hitting max_tokens mid-output.
+  // Mirrors PHP MarkdownRenderer::cleanBrokenLinks() logic.
+  function cleanBrokenMarkdown(text) {
+    if (!text) return text;
+
+    // Fix unclosed markdown links: [text](url  or  [text](  or  [text
+    text = text.replace(/\[([^\]]+)\]\([^)]*$/g, '**$1**');
+    text = text.replace(/\[([^\]]+)$/g, '**$1**');
+
+    // Close unclosed bold/italic at end of string
+    const boldCount = (text.match(/\*\*/g) || []).length;
+    if (boldCount % 2 !== 0) text += '**';
+
+    const italicMatches = text.match(/(?<!\*)\*(?!\*)/g) || [];
+    if (italicMatches.length % 2 !== 0) text += '*';
+
+    // Close unclosed backtick
+    const backtickCount = (text.match(/`/g) || []).length;
+    if (backtickCount % 2 !== 0) text += '`';
+
+    return text;
+  }
+
   // Convert lightweight markdown from Claude's summary into safe HTML.
   function formatSummary(text) {
+    if (!text) return '';
+    text = cleanBrokenMarkdown(text);
     const escaped = escapeHtml(text);
     const lines = escaped.split('\n');
     let html = '';

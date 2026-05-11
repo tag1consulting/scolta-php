@@ -80,6 +80,7 @@ class ScoltaConfig
     public bool $aiSummarize = true;
     public int $aiSummaryTopN = 10;
     public int $aiSummaryMaxChars = 4000;
+    public int $aiSummaryMaxTokens = 1024;
 
     // -- Multilingual --
     public array $aiLanguages = ['en'];

@@ -86,6 +86,27 @@ describe('scolta.js structure', () => {
         expect(jsSource).toContain('function formatSummary(');
     });
 
+    test('contains cleanBrokenMarkdown function', () => {
+        expect(jsSource).toContain('function cleanBrokenMarkdown(');
+    });
+
+    test('cleanBrokenMarkdown handles unclosed link with URL', () => {
+        expect(jsSource).toContain("text.replace(/\\[([^\\]]+)\\]\\([^)]*$/g, '**$1**')");
+    });
+
+    test('cleanBrokenMarkdown handles unclosed bracket', () => {
+        expect(jsSource).toContain("text.replace(/\\[([^\\]]+)$/g, '**$1**')");
+    });
+
+    test('cleanBrokenMarkdown called at top of formatSummary', () => {
+        // cleanBrokenMarkdown must run before escapeHtml — find its call inside formatSummary
+        const fmtIdx = jsSource.indexOf('function formatSummary(');
+        const cleanIdx = jsSource.indexOf('cleanBrokenMarkdown(text)', fmtIdx);
+        const escapeIdx = jsSource.indexOf('escapeHtml(text)', fmtIdx);
+        expect(cleanIdx).toBeGreaterThan(fmtIdx);
+        expect(cleanIdx).toBeLessThan(escapeIdx);
+    });
+
     test('uses instance config instead of global', () => {
         // Verify the factory pattern uses instance-scoped config
         expect(jsSource).toContain('function getInstanceConfig()');
