@@ -133,7 +133,8 @@ class AiEndpointHandler
         if ($query === '' || strlen($query) > 500) {
             return ['ok' => false, 'status' => 400, 'error' => 'Invalid query'];
         }
-        if ($context === '' || strlen($context) > 50000) {
+        // Client truncates to 49,000; this is a safety net.
+        if ($context === '' || strlen($context) > 100000) {
             return ['ok' => false, 'status' => 400, 'error' => 'Invalid context'];
         }
 
