@@ -54,11 +54,11 @@ final class HealthChecker
             $status = 'degraded';
         }
 
-        $indexerActive = $binaryStatus['available'] ? 'binary' : 'php';
-        $upgradeMessage = $binaryStatus['available']
-            ? null
-            : 'Pagefind binary not found. Using PHP indexer (slower, 14 Snowball languages vs 33+). '
-              . 'For faster indexing: npm install -g pagefind';
+        $configuredIndexer = $this->config->indexer ?? 'auto';
+        $indexerActive = ($configuredIndexer === 'binary' && $binaryStatus['available']) ? 'binary' : 'php';
+        $upgradeMessage = ($configuredIndexer === 'binary' && !$binaryStatus['available'])
+            ? 'Pagefind binary not found. Set indexer to "php" or install Pagefind: npm install -g pagefind'
+            : null;
 
         return [
             'status' => $status,
@@ -68,7 +68,7 @@ final class HealthChecker
             'wasm_available' => false,
             'index_exists' => $indexExists,
             'indexer_active' => $indexerActive,
-            'indexer_upgrade_available' => !$binaryStatus['available'],
+            'indexer_upgrade_available' => ($configuredIndexer === 'binary' && !$binaryStatus['available']),
             'indexer_upgrade_message' => $upgradeMessage,
             'pagefind' => [
                 'available' => $binaryStatus['available'],
