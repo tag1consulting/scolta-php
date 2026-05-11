@@ -74,6 +74,7 @@ trait AiControllerTrait
             aiLanguages: $config->aiLanguages,
             aiExpandQuery: $config->aiExpandQuery,
             aiSummarize: $config->aiSummarize,
+            aiSummaryMaxTokens: $config->aiSummaryMaxTokens,
         );
     }
 }

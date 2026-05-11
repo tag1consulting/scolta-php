@@ -107,6 +107,7 @@ factor before being added to the final score; the title boost is unaffected.
 | `aiSummarize` | bool | `true` | Enable AI result summarization |
 | `aiSummaryTopN` | int | `10` | Number of top results sent to AI for summarization |
 | `aiSummaryMaxChars` | int | `4000` | Maximum characters of content sent to AI for summarization |
+| `aiSummaryMaxTokens` | int | `1024` | Maximum tokens the AI may use for a summary response |
 
 ### Multilingual
 
@@ -222,6 +223,7 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 | `aiSummarize` | `ai_summarize` | `ai_summarize` / `SCOLTA_AI_SUMMARIZE` | `ai_summarize` |
 | `aiSummaryTopN` | `ai_summary_top_n` | `ai_summary_top_n` | `ai_summary_top_n` |
 | `aiSummaryMaxChars` | `ai_summary_max_chars` | `ai_summary_max_chars` | `ai_summary_max_chars` |
+| `aiSummaryMaxTokens` | `ai_summary_max_tokens` | `ai_summary_max_tokens` | `ai_summary_max_tokens` |
 
 ### Multilingual Keys
 

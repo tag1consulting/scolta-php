@@ -20,6 +20,16 @@ First stable release — all features from 0.3.x promoted to 1.0 API surface.
 ## [Unreleased]
 
 ### Added
+- **`ScoltaConfig::$aiSummaryMaxTokens` (default `1024`) controls the AI token budget for summary responses.** Pass `ai_summary_max_tokens` in config arrays (Drupal, Laravel, WordPress) to override. `AiEndpointHandler` reads the value from `ScoltaConfig` via `AiControllerTrait::createHandler()`.
+
+- **`scolta.js.sha256` checksum file** for cross-repo sync verification. scolta-drupal and scolta-wp CI verify their committed copies match this checksum so drift fails CI automatically.
+
+### Fixed
+- **AI summary `max_tokens` raised from `512` to `1024`.** The previous limit caused the AI to truncate mid-markdown on multi-result summaries — the last result was particularly vulnerable. The new default halves truncation frequency. The value is now configurable via `ScoltaConfig::$aiSummaryMaxTokens`.
+
+- **`cleanBrokenMarkdown()` added to `scolta.js` before `formatSummary()` renders markdown to HTML.** Mirrors the existing PHP `MarkdownRenderer::cleanBrokenLinks()` salvage logic: unclosed markdown links become bold text, unclosed bold/italic/backtick delimiters are closed. Prevents truncated AI output from producing broken HTML in the browser.
+
+### Added
 - **`AutoProvisioner::ensureAiAvailable()` provisions a free Amazee.ai trial on first use.** CMS install hooks and lazy-init paths call this static method with a `ConfigStorageInterface` and an optional `$hasExplicitApiKey` flag. It is idempotent: it skips provisioning when an explicit API key is already configured, or when credentials are already stored. On success, credentials are persisted via the storage adapter and an optional `$onModelsResolved` callback is called so the CMS can save the resolved model names in its own config system. Provisioning failures are caught internally and returned as `false` so the install path degrades gracefully. `AmazeeClient::provisionTrial()` and `AmazeeTrialProvisioner::provision()` now accept an optional `$email` parameter (defaulting to `''`) for anonymous provisioning.
 
 - **`scolta.js` auto-filters search results by the current page language.** A new optional `currentLanguage` config key in `window.scolta` accepts a 2-letter ISO language code. When set, every fresh search is pre-filtered to that language; users can uncheck the language facet in the sidebar to search all languages. Falls back to the `<html lang>` attribute when `currentLanguage` is not provided. URL filter params (`f_language=...`) take precedence over both — a shared or bookmarked URL always wins. CMS adapters pass `currentLanguage` at render time so results are automatically scoped to the page's content language. The auto-filter is guarded by `ai_languages`: it only activates when the detected language is in the configured list **and** the list has more than one entry, so monolingual sites are unaffected and a detected language without indexed content never produces empty results.

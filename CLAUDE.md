@@ -64,6 +64,15 @@ The `version` field in `composer.json` is always either a tagged release (`0.2.0
 - PHP classes are thin wrappers — don't reimplement algorithms that belong in scolta-core.
 - DTOs (ContentItem, AiResponse, TrackerRecord) are immutable readonly classes.
 
+## scolta.js Canonical Source Rule
+
+`assets/js/scolta.js` in this repo is the **single canonical source** for the browser-side JavaScript. scolta-drupal and scolta-wp commit copies (for non-Composer installation paths), but those copies MUST be byte-identical to this file.
+
+- **Never edit scolta.js in scolta-drupal or scolta-wp directly.** All changes go here first, then copies are updated.
+- `assets/js/scolta.js.sha256` contains the checksum of the canonical file. Update it whenever scolta.js changes: `sha256sum assets/js/scolta.js | awk '{print $1}' > assets/js/scolta.js.sha256`
+- After updating scolta.js, copy it to `packages/scolta-drupal/js/scolta.js` and `packages/scolta-wp/assets/js/scolta.js`, then open PRs in those repos.
+- Drupal and WP CI will fail if their copy doesn't match the checksum from scolta-php.
+
 ## Documentation Rules
 
 Documentation follows code. When a PR changes behavior, the same PR must update the relevant docs.
