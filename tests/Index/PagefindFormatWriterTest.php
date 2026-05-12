@@ -316,7 +316,7 @@ class PagefindFormatWriterTest extends TestCase
             $this->assertCount(2, $entry, "language tuple {$j} must have 2 elements");
             $this->assertIsString($entry[0], "language entry {$j} value must be a string");
             $this->assertIsArray($entry[1], "language entry {$j} pages must be an array");
-            $this->assertCount(1, $entry[1], "each language value maps to exactly 1 page");
+            $this->assertCount(1, $entry[1], 'each language value maps to exactly 1 page');
         }
     }
 
