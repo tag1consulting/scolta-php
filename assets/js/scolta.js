@@ -1680,7 +1680,7 @@
               if (filterVals.length > 0) restoredFilters[filterDim] = new Set(filterVals);
             }
           }
-          if (CONFIG.AUTO_LANGUAGE_FILTER && defaultLangCode && restoredFilters.language) {
+          if (getInstanceConfig().AUTO_LANGUAGE_FILTER && defaultLangCode && restoredFilters.language) {
             if (!restoredFilters.language.has(defaultLangCode)) {
               restoredFilters.language = new Set([defaultLangCode]);
             }
@@ -1713,7 +1713,7 @@
               if (filterVals.length > 0) initialFilters[filterDim] = new Set(filterVals);
             }
           }
-          if (CONFIG.AUTO_LANGUAGE_FILTER && defaultLangCode && initialFilters.language) {
+          if (getInstanceConfig().AUTO_LANGUAGE_FILTER && defaultLangCode && initialFilters.language) {
             if (!initialFilters.language.has(defaultLangCode)) {
               initialFilters.language = new Set([defaultLangCode]);
             }
