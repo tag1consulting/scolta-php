@@ -229,7 +229,7 @@ class ByteParityTest extends TestCase
                     $this->assertIsString($valueList[$j], "Value name at index {$j} must be a string: {$basename}");
 
                     $pageNums = $valueList[$j + 1];
-                    $this->assertIsArray($pageNums, "Page nums at index " . ($j + 1) . " must be an array: {$basename}");
+                    $this->assertIsArray($pageNums, 'Page nums at index ' . ($j + 1) . " must be an array: {$basename}");
 
                     foreach ($pageNums as $pn) {
                         $this->assertIsInt($pn, "Page num must be int: {$basename}");
