@@ -7,6 +7,7 @@ namespace Tag1\Scolta\Tests\Index;
 use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\Index\CborEncoder;
 use Tag1\Scolta\Index\PagefindFormatWriter;
+use Tag1\Scolta\Tests\Support\CborDecoder;
 
 class PagefindFormatWriterTest extends TestCase
 {
@@ -240,6 +241,81 @@ class PagefindFormatWriterTest extends TestCase
 
         // 500 pages should produce exactly 500 unique fragment files.
         $this->assertCount(500, $fragmentFiles, 'Hash collision detected: fewer fragment files than pages');
+    }
+
+    public function testFilterIndexIsFlatAlternatingStructure(): void
+    {
+        $pages = [
+            1 => [
+                'url' => '/en/page-1',
+                'title' => 'English Page',
+                'content' => 'Content in English.',
+                'wordCount' => 10,
+                'date' => '2026-01-01',
+                'filters' => ['site' => 'TestSite', 'language' => 'en'],
+                'meta' => ['title' => 'English Page'],
+                'hash' => hash('sha256', 'en-1'),
+            ],
+            2 => [
+                'url' => '/fr/page-1',
+                'title' => 'French Page',
+                'content' => 'Contenu en français.',
+                'wordCount' => 10,
+                'date' => '2026-01-01',
+                'filters' => ['site' => 'TestSite', 'language' => 'fr'],
+                'meta' => ['title' => 'French Page'],
+                'hash' => hash('sha256', 'fr-1'),
+            ],
+            3 => [
+                'url' => '/de/page-1',
+                'title' => 'German Page',
+                'content' => 'Inhalt auf Deutsch.',
+                'wordCount' => 10,
+                'date' => '2026-01-01',
+                'filters' => ['site' => 'TestSite', 'language' => 'de'],
+                'meta' => ['title' => 'German Page'],
+                'hash' => hash('sha256', 'de-1'),
+            ],
+        ];
+
+        $this->writer->write([], $pages, $this->tmpDir);
+
+        $filterFiles = glob($this->tmpDir . '/.scolta-building/filter/*.pf_filter');
+        $this->assertCount(1, $filterFiles, 'Expected exactly one filter file');
+
+        $decoded = CborDecoder::decodePfFile($filterFiles[0]);
+
+        // 2 filter dimensions (site, language) × 2 = 4 flat elements.
+        $this->assertIsArray($decoded);
+        $this->assertCount(4, $decoded, 'Flat alternating array must have 2×dimensions elements');
+
+        // Even indices are filter names (strings), odd indices are value arrays.
+        $this->assertIsString($decoded[0], 'Element 0 must be filter name string');
+        $this->assertIsArray($decoded[1], 'Element 1 must be values array');
+        $this->assertIsString($decoded[2], 'Element 2 must be filter name string');
+        $this->assertIsArray($decoded[3], 'Element 3 must be values array');
+
+        // Collect decoded dimensions by name.
+        $dimensions = [];
+        for ($i = 0; $i + 1 < count($decoded); $i += 2) {
+            $dimensions[$decoded[$i]] = $decoded[$i + 1];
+        }
+
+        $this->assertArrayHasKey('site', $dimensions);
+        $this->assertArrayHasKey('language', $dimensions);
+
+        // site has 1 value ("TestSite") mapped to all 3 pages.
+        $this->assertCount(1, $dimensions['site']);
+        $siteEntry = $dimensions['site'][0];
+        $this->assertSame('TestSite', $siteEntry[0]);
+        $this->assertCount(3, $siteEntry[1]);
+
+        // language has 3 values (en, fr, de), each with 1 page.
+        $this->assertCount(3, $dimensions['language']);
+
+        // Verify the structure is NOT the old nested format: [[name, values], [name, values]].
+        $this->assertIsString($decoded[0], 'Top-level element 0 must be a string, not an array (old nested format)');
+        $this->assertIsString($decoded[2], 'Top-level element 2 must be a string, not an array (old nested format)');
     }
 
     public function testFilterFileReferencedInMetadata(): void

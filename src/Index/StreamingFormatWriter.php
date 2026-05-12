@@ -281,7 +281,7 @@ class StreamingFormatWriter
             return null;
         }
 
-        $filterItems = [];
+        $flat = [];
         foreach ($this->filterData as $filterName => $values) {
             $valueItems = [];
             foreach ($values as $value => $pageNums) {
@@ -292,13 +292,11 @@ class StreamingFormatWriter
                     ),
                 ]);
             }
-            $filterItems[] = $this->cbor->encodeArray([
-                $this->cbor->encodeString($filterName),
-                $this->cbor->encodeArray($valueItems),
-            ]);
+            $flat[] = $this->cbor->encodeString($filterName);
+            $flat[] = $this->cbor->encodeArray($valueItems);
         }
 
-        return $this->cbor->encodeArray($filterItems);
+        return $this->cbor->encodeArray($flat);
     }
 
     /**
