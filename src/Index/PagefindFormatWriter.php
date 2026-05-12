@@ -110,29 +110,29 @@ class PagefindFormatWriter
             ];
         }
 
-        // Write filter index.
-        $filterData = $this->buildFilterIndex($pages);
-        $filterHash = null;
-        if ($filterData !== null) {
+        // Write filter index — one file per dimension, Pagefind native format.
+        $filterDataMap = $this->buildFilterIndex($pages);
+        $filterHashes = [];
+        if (!empty($filterDataMap)) {
             $this->ensureDir($buildDir . '/filter');
-            $filterHash = 'en_' . substr(hash('sha256', $filterData), 0, 10);
-            $compressed = gzencode(self::DELIMITER . $filterData, 9);
-            $filterPath = $buildDir . "/filter/{$filterHash}.pf_filter";
-            if (file_put_contents($filterPath, $compressed) === false) {
-                throw new \RuntimeException("Failed to write file: {$filterPath}");
+            foreach ($filterDataMap as $filterName => $filterData) {
+                $hash = 'en_' . substr(hash('sha256', $filterData), 0, 10);
+                $compressed = gzencode(self::DELIMITER . $filterData, 9);
+                $filterPath = $buildDir . "/filter/{$hash}.pf_filter";
+                if (file_put_contents($filterPath, $compressed) === false) {
+                    throw new \RuntimeException("Failed to write file: {$filterPath}");
+                }
+                $filterHashes[$filterName] = $hash;
             }
         }
 
         // Collect meta fields dynamically from page data.
         $metaFields = $this->collectMetaFields($pages);
 
-        // Collect filter names for metadata reference.
-        $filterNames = $this->collectFilterNames($pages);
-
         // Write metadata file (gzipped CBOR).
         // The hash in the filename must match the hash in entry.json so
         // pagefind.js can locate the file: pagefind.{hash}.pf_meta
-        $metaCbor = $this->buildMetadata($pages, $indexChunkMeta, $filterNames, $filterHash, $metaFields);
+        $metaCbor = $this->buildMetadata($pages, $indexChunkMeta, $filterHashes, $metaFields);
         $metaHash = 'en_' . substr(hash('sha256', $metaCbor), 0, 10);
         $compressed = gzencode(self::DELIMITER . $metaCbor, 9);
         $metaPath = $buildDir . "/pagefind.{$metaHash}.pf_meta";
@@ -268,17 +268,15 @@ class PagefindFormatWriter
      *
      * MetaIndex → [version, pages, index_chunks, filters, sorts, meta_fields]
      *
-     * @param array       $pages        Page data.
-     * @param array       $indexChunks  Index chunk references.
-     * @param string[]    $filterNames  Filter names found in pages.
-     * @param string|null $filterHash   Hash of the filter file, if created.
-     * @param string[]    $metaFields   Meta field names.
+     * @param array            $pages        Page data.
+     * @param array            $indexChunks  Index chunk references.
+     * @param array<string,string> $filterHashes Map of filterName → file hash for each dimension.
+     * @param string[]         $metaFields   Meta field names.
      */
     private function buildMetadata(
         array $pages,
         array $indexChunks,
-        array $filterNames,
-        ?string $filterHash,
+        array $filterHashes,
         array $metaFields,
     ): string {
         // Pages array: [page_hash, word_count] for each page.
@@ -302,15 +300,13 @@ class PagefindFormatWriter
             ]);
         }
 
-        // Filters: [filter_name, file_hash] for each filter.
+        // Filters: [filter_name, file_hash] for each dimension, one entry per file.
         $filterItems = [];
-        if ($filterHash !== null) {
-            foreach ($filterNames as $filterName) {
-                $filterItems[] = $this->cbor->encodeArray([
-                    $this->cbor->encodeString($filterName),
-                    $this->cbor->encodeString($filterHash),
-                ]);
-            }
+        foreach ($filterHashes as $filterName => $hash) {
+            $filterItems[] = $this->cbor->encodeArray([
+                $this->cbor->encodeString($filterName),
+                $this->cbor->encodeString($hash),
+            ]);
         }
 
         // Meta fields.
@@ -330,9 +326,14 @@ class PagefindFormatWriter
     }
 
     /**
-     * Build filter index CBOR.
+     * Build filter index CBOR — one file per dimension, matching Pagefind CLI output.
+     *
+     * Pagefind native format per file: [filter_name, [[value, [pages]], ...]]
+     * One file per filter dimension, each with its own hash.
+     *
+     * @return array<string, string> Map of filterName → CBOR bytes.
      */
-    private function buildFilterIndex(array $pages): ?string
+    private function buildFilterIndex(array $pages): array
     {
         $filters = [];
         foreach ($pages as $pageNum => $page) {
@@ -347,25 +348,24 @@ class PagefindFormatWriter
             }
         }
 
-        if (count($filters) === 0) {
-            return null;
-        }
-
-        $flat = [];
+        $result = [];
         foreach ($filters as $filterName => $values) {
-            $valueFlat = [];
+            $valueTuples = [];
             foreach ($values as $value => $pageNums) {
-                // Flat: push value name and page list as separate consecutive elements
-                $valueFlat[] = $this->cbor->encodeString((string) $value);
-                $valueFlat[] = $this->cbor->encodeArray(
-                    array_map(fn (int $p) => $this->cbor->encodeUint($p), $pageNums)
-                );
+                $valueTuples[] = $this->cbor->encodeArray([
+                    $this->cbor->encodeString((string) $value),
+                    $this->cbor->encodeArray(
+                        array_map(fn (int $p) => $this->cbor->encodeUint($p), $pageNums)
+                    ),
+                ]);
             }
-            $flat[] = $this->cbor->encodeString($filterName);
-            $flat[] = $this->cbor->encodeArray($valueFlat);
+            $result[$filterName] = $this->cbor->encodeArray([
+                $this->cbor->encodeString($filterName),
+                $this->cbor->encodeArray($valueTuples),
+            ]);
         }
 
-        return $this->cbor->encodeArray($flat);
+        return $result;
     }
 
     /**
@@ -391,23 +391,6 @@ class PagefindFormatWriter
         }
 
         return array_keys($fields);
-    }
-
-    /**
-     * Collect unique filter names from all pages.
-     *
-     * @return string[]
-     */
-    private function collectFilterNames(array $pages): array
-    {
-        $names = [];
-        foreach ($pages as $page) {
-            foreach (array_keys($page['filters'] ?? []) as $name) {
-                $names[$name] = true;
-            }
-        }
-
-        return array_keys($names);
     }
 
     /**

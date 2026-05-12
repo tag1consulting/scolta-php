@@ -183,11 +183,9 @@ class ByteParityTest extends TestCase
     }
 
     /**
-     * Filter index files have the expected structure when present.
+     * Filter index files have the expected Pagefind-native structure when present.
      *
-     * If no filter files are produced by this corpus, the test is skipped.
-     * Filter structure: flat alternating [name_str, [[value_str, [page_num_int, ...]]], name_str, [...], ...]
-     * Element count = 2 × number of filter dimensions.
+     * Pagefind native: one file per dimension, each file is [filter_name, [[value, [pages]], ...]]
      */
     public function testFilterIndexStructure(): void
     {
@@ -211,35 +209,34 @@ class ByteParityTest extends TestCase
             $this->assertIsArray($decoded, "Filter file must decode to array: {$basename}");
             $this->assertNotEmpty($decoded, "Filter file must not be empty: {$basename}");
 
-            // Top-level: flat alternating [name, values, name, values, ...]
-            // Element count must be even (2 × number of filter dimensions).
-            $this->assertSame(0, count($decoded) % 2, "Filter array must have even element count: {$basename}");
+            // Pagefind native: exactly 2 elements — [filter_name, [[value, [pages]], ...]]
+            $this->assertCount(2, $decoded, "Filter file must have exactly 2 top-level elements: {$basename}");
 
-            for ($i = 0; $i < count($decoded); $i += 2) {
-                $filterName = $decoded[$i];
-                $valueList = $decoded[$i + 1];
+            $filterName = $decoded[0];
+            $valueList = $decoded[1];
 
-                $this->assertIsString($filterName, "Filter name at index {$i} must be a string: {$basename}");
-                $this->assertNotEmpty($filterName, "Filter name at index {$i} must not be empty: {$basename}");
-                $this->assertIsArray($valueList, 'Filter value list at index ' . ($i + 1) . " must be an array: {$basename}");
+            $this->assertIsString($filterName, "Element 0 must be the filter dimension name: {$basename}");
+            $this->assertNotEmpty($filterName, "Filter dimension name must not be empty: {$basename}");
+            $this->assertIsArray($valueList, "Element 1 must be the values array: {$basename}");
+            $this->assertNotEmpty($valueList, "Values array must not be empty: {$basename}");
 
-                // Inner values: flat alternating [valueName, [pages], valueName, [pages], ...]
-                $this->assertSame(0, count($valueList) % 2, "Value list must have even element count (flat alternating): {$basename}");
-                for ($j = 0; $j < count($valueList); $j += 2) {
-                    $this->assertIsString($valueList[$j], "Value name at index {$j} must be a string: {$basename}");
+            // Inner values: array of [value_name, [pages]] tuples
+            foreach ($valueList as $j => $entry) {
+                $this->assertIsArray($entry, "Value entry {$j} must be a [value, pages] tuple: {$basename}");
+                $this->assertCount(2, $entry, "Value tuple {$j} must have exactly 2 elements: {$basename}");
+                $this->assertIsString($entry[0], "Value name at entry {$j} must be a string: {$basename}");
 
-                    $pageNums = $valueList[$j + 1];
-                    $this->assertIsArray($pageNums, 'Page nums at index ' . ($j + 1) . " must be an array: {$basename}");
+                $pageNums = $entry[1];
+                $this->assertIsArray($pageNums, "Pages at entry {$j} must be an array: {$basename}");
 
-                    foreach ($pageNums as $pn) {
-                        $this->assertIsInt($pn, "Page num must be int: {$basename}");
-                        $this->assertGreaterThanOrEqual(0, $pn, "Page num must be ≥ 0: {$basename}");
-                        $this->assertLessThan(
-                            $pageCount,
-                            $pn,
-                            "Page num {$pn} out of range (0..{$pageCount}): {$basename}"
-                        );
-                    }
+                foreach ($pageNums as $pn) {
+                    $this->assertIsInt($pn, "Page num must be int: {$basename}");
+                    $this->assertGreaterThanOrEqual(0, $pn, "Page num must be ≥ 0: {$basename}");
+                    $this->assertLessThan(
+                        $pageCount,
+                        $pn,
+                        "Page num {$pn} out of range (0..{$pageCount}): {$basename}"
+                    );
                 }
             }
         }
@@ -273,20 +270,26 @@ class ByteParityTest extends TestCase
                 $compressedSize = strlen($compressed);
                 $uncompressedSize = strlen($uncompressed);
 
-                // Must have reduced size.
-                $this->assertLessThan(
-                    $uncompressedSize,
-                    $compressedSize,
-                    "Compressed size ({$compressedSize}) must be less than uncompressed ({$uncompressedSize}) for: " . basename($file)
-                );
-
                 $ratio = $uncompressedSize > 0 ? $compressedSize / $uncompressedSize : 1.0;
 
-                $this->assertLessThan(
-                    0.99,
-                    $ratio,
-                    sprintf('Compression ratio %.3f ≥ 0.99 for %s (must achieve at least 1%%)', $ratio, basename($file))
-                );
+                // Very small filter files (< 100 bytes uncompressed) may not compress
+                // below their original size — gzip overhead exceeds payload savings.
+                // This is also true of the Pagefind CLI reference files.
+                $skipSizeCheck = $type === 'pf_filter' && $uncompressedSize < 100;
+
+                if (!$skipSizeCheck) {
+                    $this->assertLessThan(
+                        $uncompressedSize,
+                        $compressedSize,
+                        "Compressed size ({$compressedSize}) must be less than uncompressed ({$uncompressedSize}) for: " . basename($file)
+                    );
+
+                    $this->assertLessThan(
+                        0.99,
+                        $ratio,
+                        sprintf('Compression ratio %.3f ≥ 0.99 for %s (must achieve at least 1%%)', $ratio, basename($file))
+                    );
+                }
 
                 // For index and meta files, expect stronger compression (≥ 15%).
                 if ($type === 'pf_index' || $type === 'pf_meta') {
