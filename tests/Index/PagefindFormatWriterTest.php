@@ -243,7 +243,7 @@ class PagefindFormatWriterTest extends TestCase
         $this->assertCount(500, $fragmentFiles, 'Hash collision detected: fewer fragment files than pages');
     }
 
-    public function testFilterIndexIsFlatAlternatingStructure(): void
+    public function testFilterIndexMatchesPagefindReferenceStructure(): void
     {
         $pages = [
             1 => [
@@ -280,56 +280,44 @@ class PagefindFormatWriterTest extends TestCase
 
         $this->writer->write([], $pages, $this->tmpDir);
 
+        // Pagefind native: one file per dimension (2 dimensions = 2 files).
         $filterFiles = glob($this->tmpDir . '/.scolta-building/filter/*.pf_filter');
-        $this->assertCount(1, $filterFiles, 'Expected exactly one filter file');
+        $this->assertCount(2, $filterFiles, 'Expected one filter file per dimension');
 
-        $decoded = CborDecoder::decodePfFile($filterFiles[0]);
-
-        // 2 filter dimensions (site, language) × 2 = 4 flat elements.
-        $this->assertIsArray($decoded);
-        $this->assertCount(4, $decoded, 'Flat alternating array must have 2×dimensions elements');
-
-        // Even indices are filter names (strings), odd indices are value arrays.
-        $this->assertIsString($decoded[0], 'Element 0 must be filter name string');
-        $this->assertIsArray($decoded[1], 'Element 1 must be values array');
-        $this->assertIsString($decoded[2], 'Element 2 must be filter name string');
-        $this->assertIsArray($decoded[3], 'Element 3 must be values array');
-
-        // Collect decoded dimensions by name.
+        // Index files by dimension name.
         $dimensions = [];
-        for ($i = 0; $i + 1 < count($decoded); $i += 2) {
-            $dimensions[$decoded[$i]] = $decoded[$i + 1];
+        foreach ($filterFiles as $file) {
+            $decoded = CborDecoder::decodePfFile($file);
+            $this->assertIsArray($decoded);
+            // Pagefind native: [filter_name, [[value, [pages]], ...]] — exactly 2 elements.
+            $this->assertCount(2, $decoded, 'Each filter file must have exactly 2 top-level elements');
+            $this->assertIsString($decoded[0], 'Element 0 must be the filter dimension name');
+            $this->assertIsArray($decoded[1], 'Element 1 must be the values array');
+            $dimensions[$decoded[0]] = $decoded[1];
         }
 
-        $this->assertArrayHasKey('site', $dimensions);
-        $this->assertArrayHasKey('language', $dimensions);
+        $this->assertArrayHasKey('site', $dimensions, 'site dimension must exist');
+        $this->assertArrayHasKey('language', $dimensions, 'language dimension must exist');
 
-        // site: flat alternating [valueName, [pages], ...].
-        // 1 value × 2 = 2 elements.
+        // site: 1 value (TestSite) → [[TestSite, [1, 2, 3]]].
         $siteValues = $dimensions['site'];
-        $this->assertCount(2, $siteValues, 'site: 1 value × 2 flat elements');
-        $this->assertIsString($siteValues[0], 'site value[0] must be string');
-        $this->assertSame('TestSite', $siteValues[0]);
-        $this->assertIsArray($siteValues[1], 'site value[1] must be page array');
-        $this->assertCount(3, $siteValues[1], 'TestSite maps to all 3 pages');
+        $this->assertCount(1, $siteValues, 'site has 1 value');
+        $this->assertIsArray($siteValues[0], 'site entry must be a [value, pages] tuple');
+        $this->assertCount(2, $siteValues[0], 'site tuple must have 2 elements');
+        $this->assertSame('TestSite', $siteValues[0][0]);
+        $this->assertIsArray($siteValues[0][1], 'site pages must be an array');
+        $this->assertCount(3, $siteValues[0][1], 'TestSite maps to all 3 pages');
 
-        // language: flat alternating [valueName, [pages], ...].
-        // 3 values × 2 = 6 elements.
+        // language: 3 values (en, fr, de), each with 1 page.
         $langValues = $dimensions['language'];
-        $this->assertCount(6, $langValues, 'language: 3 values × 2 flat elements');
-
-        // Verify alternating types: string, array, string, array, string, array.
-        for ($j = 0; $j < count($langValues); $j += 2) {
-            $this->assertIsString($langValues[$j], "language element $j must be string");
-            $this->assertIsArray($langValues[$j + 1], 'language element ' . ($j + 1) . ' must be page array');
+        $this->assertCount(3, $langValues, 'language has 3 values');
+        foreach ($langValues as $j => $entry) {
+            $this->assertIsArray($entry, "language entry {$j} must be a [value, pages] tuple");
+            $this->assertCount(2, $entry, "language tuple {$j} must have 2 elements");
+            $this->assertIsString($entry[0], "language entry {$j} value must be a string");
+            $this->assertIsArray($entry[1], "language entry {$j} pages must be an array");
+            $this->assertCount(1, $entry[1], 'each language value maps to exactly 1 page');
         }
-
-        // Verify NOT the old nested format: [[name, pages], ...].
-        $this->assertIsString($langValues[0], 'Inner element 0 must be a string, not an array (old nested format)');
-
-        // Verify the structure is NOT the old nested format: [[name, values], [name, values]].
-        $this->assertIsString($decoded[0], 'Top-level element 0 must be a string, not an array (old nested format)');
-        $this->assertIsString($decoded[2], 'Top-level element 2 must be a string, not an array (old nested format)');
     }
 
     public function testFilterFileReferencedInMetadata(): void

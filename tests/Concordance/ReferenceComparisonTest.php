@@ -861,23 +861,13 @@ class ReferenceComparisonTest extends TestCase
                 continue;
             }
 
-            // Handle two formats:
-            // Pagefind native: [filter_name, [[value, [pages]], ...]] — 2 elements, one filter per file
-            // PHP indexer (flat alternating): [name, values, name, values, ...] — 2×N elements
-            if (isset($decoded[0]) && is_string($decoded[0])) {
-                // Flat alternating: iterate pairs (name at even index, values at odd index).
-                for ($i = 0; $i + 1 < count($decoded); $i += 2) {
-                    $filterName = $decoded[$i];
-                    if (!is_string($filterName)) {
-                        continue;
-                    }
-                    $filters[$filterName] = [];
-                    $valueList = $decoded[$i + 1] ?? [];
-                    // Flat alternating: [valueName, [pages], valueName, [pages], ...]
-                    for ($j = 0; $j + 1 < count($valueList); $j += 2) {
-                        if (is_string($valueList[$j]) && is_array($valueList[$j + 1])) {
-                            $filters[$filterName][$valueList[$j]] = array_map('intval', $valueList[$j + 1]);
-                        }
+            // Pagefind native: [filter_name, [[value, [pages]], ...]] — 2 elements, one filter per file.
+            if (count($decoded) === 2 && is_string($decoded[0]) && is_array($decoded[1])) {
+                $filterName = $decoded[0];
+                $filters[$filterName] = [];
+                foreach ($decoded[1] as $entry) {
+                    if (is_array($entry) && count($entry) === 2 && is_string($entry[0]) && is_array($entry[1])) {
+                        $filters[$filterName][$entry[0]] = array_map('intval', $entry[1]);
                     }
                 }
             }

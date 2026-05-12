@@ -189,24 +189,26 @@ class StreamingFormatWriter
         // Flush any remaining terms.
         $this->flushIndexChunk();
 
-        // Write filter index.
-        $filterData = $this->buildFilterIndex();
-        $filterHash = null;
-        if ($filterData !== null) {
+        // Write filter index — one file per dimension, Pagefind native format.
+        $filterDataMap = $this->buildFilterIndex();
+        $filterHashes  = [];
+        if (!empty($filterDataMap)) {
             $this->ensureDir($this->buildDir . '/filter');
-            $filterHash = 'en_' . substr(hash('sha256', $filterData), 0, 10);
-            $compressed = gzencode(self::DELIMITER . $filterData, 9);
-            $filterPath = $this->buildDir . "/filter/{$filterHash}.pf_filter";
-            if (file_put_contents($filterPath, $compressed) === false) {
-                throw new \RuntimeException("Failed to write file: {$filterPath}");
+            foreach ($filterDataMap as $filterName => $filterData) {
+                $hash       = 'en_' . substr(hash('sha256', $filterData), 0, 10);
+                $compressed = gzencode(self::DELIMITER . $filterData, 9);
+                $filterPath = $this->buildDir . "/filter/{$hash}.pf_filter";
+                if (file_put_contents($filterPath, $compressed) === false) {
+                    throw new \RuntimeException("Failed to write file: {$filterPath}");
+                }
+                $filterHashes[$filterName] = $hash;
             }
         }
 
-        $filterNames = array_keys($this->filterData);
-        $metaFields  = array_keys($this->collectedMetaFields);
+        $metaFields = array_keys($this->collectedMetaFields);
 
         // Write pf_meta.
-        $metaCbor   = $this->buildMetadata($filterNames, $filterHash, $metaFields);
+        $metaCbor = $this->buildMetadata($filterHashes, $metaFields);
         $metaHash   = 'en_' . substr(hash('sha256', $metaCbor), 0, 10);
         $compressed = gzencode(self::DELIMITER . $metaCbor, 9);
         $metaPath   = $this->buildDir . "/pagefind.{$metaHash}.pf_meta";
@@ -273,41 +275,40 @@ class StreamingFormatWriter
     }
 
     /**
-     * Build the filter index CBOR, or null if no filters were seen.
+     * Build the filter index CBOR — one file per dimension, Pagefind native format.
+     *
+     * @return array<string, string> Map of filterName → CBOR bytes.
      */
-    private function buildFilterIndex(): ?string
+    private function buildFilterIndex(): array
     {
-        if (empty($this->filterData)) {
-            return null;
-        }
-
-        $flat = [];
+        $result = [];
         foreach ($this->filterData as $filterName => $values) {
-            $valueFlat = [];
+            $valueTuples = [];
             foreach ($values as $value => $pageNums) {
-                // Flat: push value name and page list as separate consecutive elements
-                $valueFlat[] = $this->cbor->encodeString((string) $value);
-                $valueFlat[] = $this->cbor->encodeArray(
-                    array_map(fn (int $p) => $this->cbor->encodeUint($p), $pageNums)
-                );
+                $valueTuples[] = $this->cbor->encodeArray([
+                    $this->cbor->encodeString((string) $value),
+                    $this->cbor->encodeArray(
+                        array_map(fn (int $p) => $this->cbor->encodeUint($p), $pageNums)
+                    ),
+                ]);
             }
-            $flat[] = $this->cbor->encodeString($filterName);
-            $flat[] = $this->cbor->encodeArray($valueFlat);
+            $result[$filterName] = $this->cbor->encodeArray([
+                $this->cbor->encodeString($filterName),
+                $this->cbor->encodeArray($valueTuples),
+            ]);
         }
 
-        return $this->cbor->encodeArray($flat);
+        return $result;
     }
 
     /**
      * Build the pf_meta CBOR structure.
      *
-     * @param string[]    $filterNames Filter names in the index.
-     * @param string|null $filterHash  Hash of the pf_filter file, if any.
-     * @param string[]    $metaFields  Meta field names (e.g. ['title', 'date']).
+     * @param array<string,string> $filterHashes Map of filterName → file hash for each dimension.
+     * @param string[]             $metaFields   Meta field names (e.g. ['title', 'date']).
      */
     private function buildMetadata(
-        array $filterNames,
-        ?string $filterHash,
+        array $filterHashes,
         array $metaFields,
     ): string {
         $pageItems = [];
@@ -328,13 +329,11 @@ class StreamingFormatWriter
         }
 
         $filterItems = [];
-        if ($filterHash !== null) {
-            foreach ($filterNames as $filterName) {
-                $filterItems[] = $this->cbor->encodeArray([
-                    $this->cbor->encodeString($filterName),
-                    $this->cbor->encodeString($filterHash),
-                ]);
-            }
+        foreach ($filterHashes as $filterName => $hash) {
+            $filterItems[] = $this->cbor->encodeArray([
+                $this->cbor->encodeString($filterName),
+                $this->cbor->encodeString($hash),
+            ]);
         }
 
         $metaFieldItems = [];
