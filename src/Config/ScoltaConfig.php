@@ -80,10 +80,11 @@ class ScoltaConfig
     public bool $aiSummarize = true;
     public int $aiSummaryTopN = 10;
     public int $aiSummaryMaxChars = 4000;
-    public int $aiSummaryMaxTokens = 1024;
+    public int $aiSummaryMaxTokens = 512;
 
     // -- Multilingual --
     public array $aiLanguages = ['en'];
+    public bool $autoLanguageFilter = false;
 
     // -- Prompt overrides (empty = use DefaultPrompts) --
     public string $promptExpandQuery = '';
@@ -274,6 +275,7 @@ class ScoltaConfig
             'EXPAND_PRIMARY_WEIGHT' => $this->expandPrimaryWeight,
             'AI_MAX_FOLLOWUPS' => $this->maxFollowUps,
             'AI_LANGUAGES' => $this->aiLanguages,
+            'AUTO_LANGUAGE_FILTER' => $this->autoLanguageFilter,
             'LANGUAGE' => $this->language,
             'CUSTOM_STOP_WORDS' => $this->customStopWords,
             'RECENCY_STRATEGY' => $this->recencyStrategy,

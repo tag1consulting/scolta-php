@@ -7,6 +7,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ## [Unreleased]
 
 ### Fixed
+- **`ScoltaConfig::$aiSummaryMaxTokens` default restored to `512`.** The default was silently raised from `512` to `1024` during the rc1 refactor. Sites that do not explicitly configure this value now receive the intended shorter summaries, matching the pre-rc1 behavior.
+- **`ScoltaConfig::$autoLanguageFilter` added (default `false`).** On multi-language sites, AND searches no longer automatically apply a language filter to narrow results. The previous implicit behaviour triggered OR fallback more often, inflating result counts with low-weight matches. Set `auto_language_filter: true` to restore the opt-in narrowing if needed.
+- **`scolta.js` filter sidebar counts restored from `computeFilterCounts(allScoredResults)`.** The rc1 regression used Pagefind's aggregate `primarySearch.filters`, which reports index-wide counts rather than the counts for displayed results. Filter facet numbers now reflect what is actually shown on the page.
 - **`auto` indexer now always means PHP on all code paths.** `HealthChecker::check()` now reads the configured `indexer` setting instead of probing binary availability when reporting `indexer_active` — it previously reported `binary` whenever the Pagefind binary was present on disk, even when the setting was `auto` or `php`. `IndexerResolver::resolve()` likewise returns `php` for `auto` without probing the binary. The binary pipeline requires explicit `indexer: binary` configuration.
 
 ## [1.0.0-rc1] - 2026-05-11
