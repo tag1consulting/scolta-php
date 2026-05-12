@@ -1680,6 +1680,11 @@
               if (filterVals.length > 0) restoredFilters[filterDim] = new Set(filterVals);
             }
           }
+          if (getInstanceConfig().AUTO_LANGUAGE_FILTER && defaultLangCode && restoredFilters.language) {
+            if (!restoredFilters.language.has(defaultLangCode)) {
+              restoredFilters.language = new Set([defaultLangCode]);
+            }
+          }
           doSearch(false, Object.keys(restoredFilters).length > 0 ? restoredFilters : null);
         } else {
           clearSearch();
@@ -1706,6 +1711,11 @@
               var filterDim = key.slice(2);
               var filterVals = val.split(',').filter(Boolean);
               if (filterVals.length > 0) initialFilters[filterDim] = new Set(filterVals);
+            }
+          }
+          if (getInstanceConfig().AUTO_LANGUAGE_FILTER && defaultLangCode && initialFilters.language) {
+            if (!initialFilters.language.has(defaultLangCode)) {
+              initialFilters.language = new Set([defaultLangCode]);
             }
           }
           doSearch(false, Object.keys(initialFilters).length > 0 ? initialFilters : null);
