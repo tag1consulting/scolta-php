@@ -57,6 +57,11 @@ describe('faceting: source structure', () => {
         expect(scoltaSource).toContain("AI_LANGUAGES: s.AI_LANGUAGES ?? ['en']");
     });
 
+    test('doSearch guards auto-filter against AUTO_LANGUAGE_FILTER flag', () => {
+        // Auto-filter is opt-in; it only activates when CONFIG.AUTO_LANGUAGE_FILTER is truthy.
+        expect(scoltaSource).toContain('CONFIG.AUTO_LANGUAGE_FILTER');
+    });
+
     test('doSearch skips auto-filter when AI_LANGUAGES has only one entry', () => {
         // The guard condition `langs.length > 1` ensures monolingual sites
         // (ai_languages: [en]) never pre-filter — renderFilters wouldn't show
@@ -127,8 +132,8 @@ describe('faceting: source structure', () => {
         expect(scoltaSource).toContain('activeFilters = effectiveFilters;');
     });
 
-    test('doSearch assigns filterCounts from primarySearch.filters', () => {
-        expect(scoltaSource).toContain('filterCounts = primarySearch.filters || {};');
+    test('doSearch assigns filterCounts from computeFilterCounts(allScoredResults)', () => {
+        expect(scoltaSource).toContain('filterCounts = computeFilterCounts(allScoredResults);');
     });
 
     test('initPagefind merges all non-primary language instances via absolute URL', () => {
@@ -290,10 +295,14 @@ function buildMockPagefind(resultsList, searchFilters) {
     };
 }
 
-function makeResult(filterObj) {
+function makeResult(filterObj, overrides) {
     return {
         data: () => Promise.resolve({
-            meta: { title: 'Test Page', url: '/test', site: filterObj.site || 'Site A' },
+            meta: {
+                title: (overrides && overrides.title) || 'Test Page',
+                url: (overrides && overrides.url) || '/test',
+                site: filterObj.site || 'Site A',
+            },
             filters: filterObj,
             excerpt: 'Test excerpt',
             content: 'Test content',
@@ -407,10 +416,13 @@ describe('faceting: URL encoding round-trip', () => {
     });
 });
 
-describe('faceting: filter sidebar rendered from search.filters', () => {
-    test('renders language facets from search response filters', async () => {
-        const filters = { language: { en: 100, es: 50, fr: 30 } };
-        const mock = buildMockPagefind([], filters);
+describe('faceting: filter sidebar rendered from scored results', () => {
+    test('renders language facets from scored result filters', async () => {
+        const mock = buildMockPagefind([
+            makeResult({ language: 'en' }, { title: 'English Article', url: '/en/article' }),
+            makeResult({ language: 'es' }, { title: 'Spanish Article', url: '/es/article' }),
+            makeResult({ language: 'fr' }, { title: 'French Article', url: '/fr/article' }),
+        ]);
         const { window } = createWindow(mock);
         const inst = window.Scolta.defaultInstance;
         window.document.querySelector('#scolta-query').value = 'test';
@@ -422,9 +434,10 @@ describe('faceting: filter sidebar rendered from search.filters', () => {
         expect(filterContainer.innerHTML).toContain('French');
     });
 
-    test('hides filter sidebar when search.filters has only one value per dimension', async () => {
-        const filters = { language: { en: 100 } };
-        const mock = buildMockPagefind([], filters);
+    test('hides filter sidebar when scored results have only one value per dimension', async () => {
+        const mock = buildMockPagefind([
+            makeResult({ language: 'en' }),
+        ]);
         const { window } = createWindow(mock);
         const inst = window.Scolta.defaultInstance;
         window.document.querySelector('#scolta-query').value = 'test';
@@ -434,12 +447,11 @@ describe('faceting: filter sidebar rendered from search.filters', () => {
         expect(filterContainer.innerHTML).toBe('');
     });
 
-    test('renders multiple dimensions from search.filters', async () => {
-        const filters = {
-            language: { en: 100, es: 50 },
-            content_type: { article: 80, page: 70 },
-        };
-        const mock = buildMockPagefind([], filters);
+    test('renders multiple dimensions from scored result filters', async () => {
+        const mock = buildMockPagefind([
+            makeResult({ language: 'en', content_type: 'article' }, { title: 'English Article', url: '/en/art' }),
+            makeResult({ language: 'es', content_type: 'page' }, { title: 'Spanish Page', url: '/es/page' }),
+        ]);
         const { window } = createWindow(mock);
         const inst = window.Scolta.defaultInstance;
         window.document.querySelector('#scolta-query').value = 'test';
@@ -455,8 +467,11 @@ describe('faceting: filter sidebar rendered from search.filters', () => {
     });
 
     test('preserves filter counts when toggling a filter', async () => {
-        const filters = { language: { en: 100, es: 50, fr: 30 } };
-        const mock = buildMockPagefind([], filters);
+        const mock = buildMockPagefind([
+            makeResult({ language: 'en' }, { title: 'English Doc', url: '/en/doc' }),
+            makeResult({ language: 'es' }, { title: 'Spanish Doc', url: '/es/doc' }),
+            makeResult({ language: 'fr' }, { title: 'French Doc', url: '/fr/doc' }),
+        ]);
         const { window } = createWindow(mock);
         const inst = window.Scolta.defaultInstance;
         window.document.querySelector('#scolta-query').value = 'test';
@@ -512,7 +527,7 @@ describe('auto-language filter: currentLanguage config', () => {
         const mock = buildMockPagefind([]);
         const { window } = createWindowWithConfig(mock, {
             currentLanguage: 'en',
-            scoring: { AI_LANGUAGES: ['en', 'es'] },
+            scoring: { AI_LANGUAGES: ['en', 'es'], AUTO_LANGUAGE_FILTER: true },
         });
         const inst = window.Scolta.defaultInstance;
         window.document.querySelector('#scolta-query').value = 'worktrees';
@@ -578,7 +593,7 @@ describe('auto-language filter: currentLanguage config', () => {
 describe('auto-language filter: html lang fallback', () => {
     test('detects language from html lang attribute when no currentLanguage config', async () => {
         const mock = buildMockPagefind([]);
-        const { window } = createWindowWithConfig(mock, { scoring: { AI_LANGUAGES: ['en', 'es'] } }, 'es');
+        const { window } = createWindowWithConfig(mock, { scoring: { AI_LANGUAGES: ['en', 'es'], AUTO_LANGUAGE_FILTER: true } }, 'es');
         const inst = window.Scolta.defaultInstance;
         window.document.querySelector('#scolta-query').value = 'worktrees';
         await inst.doSearch();
@@ -592,7 +607,7 @@ describe('auto-language filter: html lang fallback', () => {
 
     test('strips region subtag from html lang (en-US → en)', async () => {
         const mock = buildMockPagefind([]);
-        const { window } = createWindowWithConfig(mock, { scoring: { AI_LANGUAGES: ['en', 'es'] } }, 'en-US');
+        const { window } = createWindowWithConfig(mock, { scoring: { AI_LANGUAGES: ['en', 'es'], AUTO_LANGUAGE_FILTER: true } }, 'en-US');
         const inst = window.Scolta.defaultInstance;
         window.document.querySelector('#scolta-query').value = 'worktrees';
         await inst.doSearch();
@@ -608,7 +623,7 @@ describe('auto-language filter: html lang fallback', () => {
         const mock = buildMockPagefind([]);
         const { window } = createWindowWithConfig(mock, {
             currentLanguage: 'de',
-            scoring: { AI_LANGUAGES: ['de', 'fr'] },
+            scoring: { AI_LANGUAGES: ['de', 'fr'], AUTO_LANGUAGE_FILTER: true },
         }, 'fr');
         const inst = window.Scolta.defaultInstance;
         window.document.querySelector('#scolta-query').value = 'worktrees';
@@ -628,13 +643,13 @@ describe('auto-language filter: user can clear the filter', () => {
         const mock = buildMockPagefind([], filters);
         const { window } = createWindowWithConfig(mock, {
             currentLanguage: 'en',
-            scoring: { AI_LANGUAGES: ['en', 'es'] },
+            scoring: { AI_LANGUAGES: ['en', 'es'], AUTO_LANGUAGE_FILTER: true },
         });
         const inst = window.Scolta.defaultInstance;
         window.document.querySelector('#scolta-query').value = 'test';
         await inst.doSearch();
 
-        // The first search should have the auto-filter applied.
+        // The first search should have the auto-filter applied (AUTO_LANGUAGE_FILTER: true).
         const initialCall = mock.search.mock.calls.find(c => c[0] === 'test');
         expect(initialCall[1].filters).toEqual({ language: 'en' });
 
