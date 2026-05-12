@@ -304,14 +304,28 @@ class PagefindFormatWriterTest extends TestCase
         $this->assertArrayHasKey('site', $dimensions);
         $this->assertArrayHasKey('language', $dimensions);
 
-        // site has 1 value ("TestSite") mapped to all 3 pages.
-        $this->assertCount(1, $dimensions['site']);
-        $siteEntry = $dimensions['site'][0];
-        $this->assertSame('TestSite', $siteEntry[0]);
-        $this->assertCount(3, $siteEntry[1]);
+        // site: flat alternating [valueName, [pages], ...].
+        // 1 value × 2 = 2 elements.
+        $siteValues = $dimensions['site'];
+        $this->assertCount(2, $siteValues, 'site: 1 value × 2 flat elements');
+        $this->assertIsString($siteValues[0], 'site value[0] must be string');
+        $this->assertSame('TestSite', $siteValues[0]);
+        $this->assertIsArray($siteValues[1], 'site value[1] must be page array');
+        $this->assertCount(3, $siteValues[1], 'TestSite maps to all 3 pages');
 
-        // language has 3 values (en, fr, de), each with 1 page.
-        $this->assertCount(3, $dimensions['language']);
+        // language: flat alternating [valueName, [pages], ...].
+        // 3 values × 2 = 6 elements.
+        $langValues = $dimensions['language'];
+        $this->assertCount(6, $langValues, 'language: 3 values × 2 flat elements');
+
+        // Verify alternating types: string, array, string, array, string, array.
+        for ($j = 0; $j < count($langValues); $j += 2) {
+            $this->assertIsString($langValues[$j], "language element $j must be string");
+            $this->assertIsArray($langValues[$j + 1], 'language element ' . ($j + 1) . ' must be page array');
+        }
+
+        // Verify NOT the old nested format: [[name, pages], ...].
+        $this->assertIsString($langValues[0], 'Inner element 0 must be a string, not an array (old nested format)');
 
         // Verify the structure is NOT the old nested format: [[name, values], [name, values]].
         $this->assertIsString($decoded[0], 'Top-level element 0 must be a string, not an array (old nested format)');

@@ -353,17 +353,16 @@ class PagefindFormatWriter
 
         $flat = [];
         foreach ($filters as $filterName => $values) {
-            $valueItems = [];
+            $valueFlat = [];
             foreach ($values as $value => $pageNums) {
-                $valueItems[] = $this->cbor->encodeArray([
-                    $this->cbor->encodeString((string) $value),
-                    $this->cbor->encodeArray(
-                        array_map(fn (int $p) => $this->cbor->encodeUint($p), $pageNums)
-                    ),
-                ]);
+                // Flat: push value name and page list as separate consecutive elements
+                $valueFlat[] = $this->cbor->encodeString((string) $value);
+                $valueFlat[] = $this->cbor->encodeArray(
+                    array_map(fn (int $p) => $this->cbor->encodeUint($p), $pageNums)
+                );
             }
             $flat[] = $this->cbor->encodeString($filterName);
-            $flat[] = $this->cbor->encodeArray($valueItems);
+            $flat[] = $this->cbor->encodeArray($valueFlat);
         }
 
         return $this->cbor->encodeArray($flat);
