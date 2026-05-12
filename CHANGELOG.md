@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Added
+- **`update-js-checksum` composer script.** Regenerates `assets/js/scolta.js.sha256` after editing the canonical JS file: `composer run update-js-checksum`.
+
 ### Fixed
 - **`ScoltaConfig::$aiSummaryMaxTokens` default restored to `512`.** The default was silently raised from `512` to `1024` during the rc1 refactor. Sites that do not explicitly configure this value now receive the intended shorter summaries, matching the pre-rc1 behavior.
 - **`ScoltaConfig::$autoLanguageFilter` added (default `false`).** On multi-language sites, AND searches no longer automatically apply a language filter to narrow results. The previous implicit behaviour triggered OR fallback more often, inflating result counts with low-weight matches. Set `auto_language_filter: true` to restore the opt-in narrowing if needed.
