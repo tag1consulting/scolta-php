@@ -872,9 +872,11 @@ class ReferenceComparisonTest extends TestCase
                         continue;
                     }
                     $filters[$filterName] = [];
-                    foreach ($decoded[$i + 1] ?? [] as $valueEntry) {
-                        if (is_array($valueEntry) && count($valueEntry) >= 2) {
-                            $filters[$filterName][$valueEntry[0]] = array_map('intval', $valueEntry[1] ?? []);
+                    $valueList = $decoded[$i + 1] ?? [];
+                    // Flat alternating: [valueName, [pages], valueName, [pages], ...]
+                    for ($j = 0; $j + 1 < count($valueList); $j += 2) {
+                        if (is_string($valueList[$j]) && is_array($valueList[$j + 1])) {
+                            $filters[$filterName][$valueList[$j]] = array_map('intval', $valueList[$j + 1]);
                         }
                     }
                 }

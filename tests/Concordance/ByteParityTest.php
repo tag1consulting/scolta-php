@@ -223,13 +223,13 @@ class ByteParityTest extends TestCase
                 $this->assertNotEmpty($filterName, "Filter name at index {$i} must not be empty: {$basename}");
                 $this->assertIsArray($valueList, 'Filter value list at index ' . ($i + 1) . " must be an array: {$basename}");
 
-                foreach ($valueList as $valueEntry) {
-                    $this->assertIsArray($valueEntry, "Each value entry must be an array: {$basename}");
-                    $this->assertCount(2, $valueEntry, "Each value entry must have 2 elements: {$basename}");
-                    $this->assertIsString($valueEntry[0], "Filter value must be a string: {$basename}");
+                // Inner values: flat alternating [valueName, [pages], valueName, [pages], ...]
+                $this->assertSame(0, count($valueList) % 2, "Value list must have even element count (flat alternating): {$basename}");
+                for ($j = 0; $j < count($valueList); $j += 2) {
+                    $this->assertIsString($valueList[$j], "Value name at index {$j} must be a string: {$basename}");
 
-                    $pageNums = $valueEntry[1];
-                    $this->assertIsArray($pageNums, "Page nums list must be an array: {$basename}");
+                    $pageNums = $valueList[$j + 1];
+                    $this->assertIsArray($pageNums, 'Page nums at index ' . ($j + 1) . " must be an array: {$basename}");
 
                     foreach ($pageNums as $pn) {
                         $this->assertIsInt($pn, "Page num must be int: {$basename}");
