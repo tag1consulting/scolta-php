@@ -221,7 +221,7 @@ class ByteParityTest extends TestCase
 
                 $this->assertIsString($filterName, "Filter name at index {$i} must be a string: {$basename}");
                 $this->assertNotEmpty($filterName, "Filter name at index {$i} must not be empty: {$basename}");
-                $this->assertIsArray($valueList, "Filter value list at index " . ($i + 1) . " must be an array: {$basename}");
+                $this->assertIsArray($valueList, 'Filter value list at index ' . ($i + 1) . " must be an array: {$basename}");
 
                 foreach ($valueList as $valueEntry) {
                     $this->assertIsArray($valueEntry, "Each value entry must be an array: {$basename}");
