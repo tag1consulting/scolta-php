@@ -6,6 +6,10 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+_No changes yet._
+
+## [1.0.0-rc2] - 2026-05-12
+
 ### Added
 - **`update-js-checksum` composer script.** Regenerates `assets/js/scolta.js.sha256` after editing the canonical JS file: `composer run update-js-checksum`.
 
