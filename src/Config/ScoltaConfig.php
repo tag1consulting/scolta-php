@@ -212,6 +212,17 @@ class ScoltaConfig
             // Convert snake_case keys to camelCase property names.
             $property = lcfirst(str_replace('_', '', ucwords($key, '_')));
             if (property_exists($config, $property)) {
+                // Cast to the declared property type before assignment.
+                // CMS config layers (e.g. Drupal drush config:set) store all
+                // values as strings; PHP 8 typed properties throw TypeError
+                // on direct assignment of "1" to a bool-typed property.
+                $type = (new \ReflectionProperty($config, $property))->getType()?->getName();
+                $value = match ($type) {
+                    'bool'  => (bool) $value,
+                    'int'   => (int) $value,
+                    'float' => (float) $value,
+                    default => $value,
+                };
                 $config->$property = $value;
             }
         }
