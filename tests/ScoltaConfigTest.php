@@ -42,6 +42,8 @@ class ScoltaConfigTest extends TestCase
         $this->assertTrue($config->aiSummarize);
         $this->assertEquals(10, $config->aiSummaryTopN);
         $this->assertEquals(4000, $config->aiSummaryMaxChars);
+        $this->assertSame(512, $config->aiSummaryMaxTokens);
+        $this->assertFalse($config->autoLanguageFilter);
         $this->assertEquals('', $config->promptExpandQuery);
         $this->assertEquals('', $config->promptSummarize);
         $this->assertEquals('', $config->promptFollowUp);
@@ -283,14 +285,14 @@ class ScoltaConfigTest extends TestCase
             'PHRASE_NEAR_WINDOW', 'PHRASE_WINDOW', 'EXCERPT_LENGTH', 'RESULTS_PER_PAGE',
             'MAX_PAGEFIND_RESULTS', 'AI_EXPAND_QUERY', 'AI_SUMMARIZE', 'AI_SUMMARY_TOP_N',
             'AI_SUMMARY_MAX_CHARS', 'EXPAND_PRIMARY_WEIGHT', 'AI_MAX_FOLLOWUPS',
-            'AI_LANGUAGES', 'LANGUAGE', 'CUSTOM_STOP_WORDS', 'RECENCY_STRATEGY', 'RECENCY_CURVE',
+            'AI_LANGUAGES', 'AUTO_LANGUAGE_FILTER', 'LANGUAGE', 'CUSTOM_STOP_WORDS', 'RECENCY_STRATEGY', 'RECENCY_CURVE',
         ];
 
         foreach ($expected as $key) {
             $this->assertArrayHasKey($key, $js, "Missing key: {$key}");
         }
 
-        $this->assertCount(25, $js, 'Expected exactly 25 keys in toJsScoringConfig()');
+        $this->assertCount(26, $js, 'Expected exactly 26 keys in toJsScoringConfig()');
     }
 
     public function testToJsScoringConfigValuesMatchConfig(): void

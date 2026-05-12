@@ -107,13 +107,14 @@ factor before being added to the final score; the title boost is unaffected.
 | `aiSummarize` | bool | `true` | Enable AI result summarization |
 | `aiSummaryTopN` | int | `10` | Number of top results sent to AI for summarization |
 | `aiSummaryMaxChars` | int | `4000` | Maximum characters of content sent to AI for summarization |
-| `aiSummaryMaxTokens` | int | `1024` | Maximum tokens the AI may use for a summary response |
+| `aiSummaryMaxTokens` | int | `512` | Maximum tokens the AI may use for a summary response |
 
 ### Multilingual
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `aiLanguages` | array | `['en']` | Supported languages for AI responses. When multiple languages are configured, AI prompts include an instruction to respond in the same language as the user's query if it matches a supported language, otherwise fall back to the primary (first) language. Single-language configs do not add any instruction. |
+| `autoLanguageFilter` | bool | `false` | When true, AND searches on multi-language sites automatically apply a language filter matching the user's detected language, narrowing results to that language. Leave false (the default) unless you need strict per-language separation. |
 
 ### Prompts
 
@@ -230,6 +231,7 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 | ScoltaConfig Property | Drupal | Laravel | WordPress |
 |----------------------|--------|---------|-----------|
 | `aiLanguages` | `ai_languages` | `ai_languages` / `SCOLTA_AI_LANGUAGES` | `ai_languages` |
+| `autoLanguageFilter` | `auto_language_filter` | `auto_language_filter` / `SCOLTA_AUTO_LANGUAGE_FILTER` | `auto_language_filter` |
 
 ### Prompt Keys
 
