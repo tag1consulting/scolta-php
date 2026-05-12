@@ -862,26 +862,20 @@ class ReferenceComparisonTest extends TestCase
             }
 
             // Handle two formats:
-            // Pagefind: [filter_name, [[value, [pages]], ...]]
-            // PHP indexer: [[filter_name, [[value, [pages]], ...]], ...]
-            $entries = [];
+            // Pagefind native: [filter_name, [[value, [pages]], ...]] — 2 elements, one filter per file
+            // PHP indexer (flat alternating): [name, values, name, values, ...] — 2×N elements
             if (isset($decoded[0]) && is_string($decoded[0])) {
-                // Pagefind format: single filter per file.
-                $entries = [$decoded];
-            } elseif (isset($decoded[0]) && is_array($decoded[0])) {
-                // PHP format: array of [name, values] entries.
-                $entries = $decoded;
-            }
-
-            foreach ($entries as $entry) {
-                if (!is_array($entry) || count($entry) < 2 || !is_string($entry[0])) {
-                    continue;
-                }
-                $filterName = $entry[0];
-                $filters[$filterName] = [];
-                foreach ($entry[1] ?? [] as $valueEntry) {
-                    if (is_array($valueEntry) && count($valueEntry) >= 2) {
-                        $filters[$filterName][$valueEntry[0]] = array_map('intval', $valueEntry[1] ?? []);
+                // Flat alternating: iterate pairs (name at even index, values at odd index).
+                for ($i = 0; $i + 1 < count($decoded); $i += 2) {
+                    $filterName = $decoded[$i];
+                    if (!is_string($filterName)) {
+                        continue;
+                    }
+                    $filters[$filterName] = [];
+                    foreach ($decoded[$i + 1] ?? [] as $valueEntry) {
+                        if (is_array($valueEntry) && count($valueEntry) >= 2) {
+                            $filters[$filterName][$valueEntry[0]] = array_map('intval', $valueEntry[1] ?? []);
+                        }
                     }
                 }
             }

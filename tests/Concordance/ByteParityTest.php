@@ -186,7 +186,8 @@ class ByteParityTest extends TestCase
      * Filter index files have the expected structure when present.
      *
      * If no filter files are produced by this corpus, the test is skipped.
-     * Filter structure: [[filter_name_str, [[value_str, [page_num_int, ...]]]]]
+     * Filter structure: flat alternating [name_str, [[value_str, [page_num_int, ...]]], name_str, [...], ...]
+     * Element count = 2 × number of filter dimensions.
      */
     public function testFilterIndexStructure(): void
     {
@@ -210,15 +211,17 @@ class ByteParityTest extends TestCase
             $this->assertIsArray($decoded, "Filter file must decode to array: {$basename}");
             $this->assertNotEmpty($decoded, "Filter file must not be empty: {$basename}");
 
-            // Top-level: array of [filter_name, [[value, [page_nums...]]]]
-            foreach ($decoded as $filterEntry) {
-                $this->assertIsArray($filterEntry, "Each filter entry must be an array: {$basename}");
-                $this->assertCount(2, $filterEntry, "Each filter entry must have 2 elements: {$basename}");
-                $this->assertIsString($filterEntry[0], "Filter name must be a string: {$basename}");
-                $this->assertNotEmpty($filterEntry[0], "Filter name must not be empty: {$basename}");
+            // Top-level: flat alternating [name, values, name, values, ...]
+            // Element count must be even (2 × number of filter dimensions).
+            $this->assertSame(0, count($decoded) % 2, "Filter array must have even element count: {$basename}");
 
-                $valueList = $filterEntry[1];
-                $this->assertIsArray($valueList, "Filter value list must be an array: {$basename}");
+            for ($i = 0; $i < count($decoded); $i += 2) {
+                $filterName = $decoded[$i];
+                $valueList = $decoded[$i + 1];
+
+                $this->assertIsString($filterName, "Filter name at index {$i} must be a string: {$basename}");
+                $this->assertNotEmpty($filterName, "Filter name at index {$i} must not be empty: {$basename}");
+                $this->assertIsArray($valueList, 'Filter value list at index ' . ($i + 1) . " must be an array: {$basename}");
 
                 foreach ($valueList as $valueEntry) {
                     $this->assertIsArray($valueEntry, "Each value entry must be an array: {$basename}");
