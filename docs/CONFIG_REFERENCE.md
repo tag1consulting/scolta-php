@@ -2,6 +2,8 @@
 
 All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Platform adapters map their native config systems into this object. The `fromArray()` factory accepts snake_case keys and converts them to camelCase properties automatically.
 
+`fromArray()` coerces incoming values to the declared PHP type of each property before assignment. This means CMS config layers that store all values as strings — for example, Drupal's `drush config:set` or WP-CLI's `wp option update` — are handled safely: `"1"` is cast to `true` for `bool` properties, `"42"` to `42` for `int`, and `"3.14"` to `3.14` for `float`. String and array properties pass through unchanged.
+
 ## Configuration Properties
 
 ### AI Provider

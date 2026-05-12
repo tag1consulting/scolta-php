@@ -160,6 +160,39 @@ class ScoltaConfigTest extends TestCase
         // Should not throw, unknown keys are silently ignored.
     }
 
+    public function testFromArrayCoercesStringsToDeclaredTypes(): void
+    {
+        // CMS config layers (e.g. Drupal drush config:set) store all values as
+        // strings. fromArray() must cast them to the declared property type or
+        // PHP 8 throws TypeError on assignment to a typed property.
+        $config = ScoltaConfig::fromArray([
+            'ai_expand_query'       => '1',    // bool — string "1" → true
+            'auto_language_filter'  => '0',    // bool — string "0" → false
+            'max_follow_ups'        => '5',    // int
+            'ai_summary_max_tokens' => '256',  // int
+            'title_match_boost'     => '2.5',  // float
+            'expand_primary_weight' => '0.9',  // float
+        ]);
+
+        $this->assertIsBool($config->aiExpandQuery);
+        $this->assertTrue($config->aiExpandQuery);
+
+        $this->assertIsBool($config->autoLanguageFilter);
+        $this->assertFalse($config->autoLanguageFilter);
+
+        $this->assertIsInt($config->maxFollowUps);
+        $this->assertSame(5, $config->maxFollowUps);
+
+        $this->assertIsInt($config->aiSummaryMaxTokens);
+        $this->assertSame(256, $config->aiSummaryMaxTokens);
+
+        $this->assertIsFloat($config->titleMatchBoost);
+        $this->assertSame(2.5, $config->titleMatchBoost);
+
+        $this->assertIsFloat($config->expandPrimaryWeight);
+        $this->assertSame(0.9, $config->expandPrimaryWeight);
+    }
+
     public function testFromArrayEmptyArray(): void
     {
         $config = ScoltaConfig::fromArray([]);
