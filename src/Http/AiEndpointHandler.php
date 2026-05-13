@@ -31,17 +31,18 @@ use Tag1\Scolta\Prompt\PromptEnricherInterface;
 class AiEndpointHandler
 {
     /**
-     * @param object                    $aiService           AI service (duck-typed).
-     * @param CacheDriverInterface      $cache               Cache driver.
-     * @param int                       $generation          Generation counter for cache invalidation.
-     * @param int                       $cacheTtl            Cache TTL in seconds (0 = disabled).
-     * @param int                       $maxFollowUps        Maximum follow-up exchanges allowed.
-     * @param PromptEnricherInterface   $promptEnricher      Prompt enricher for site-specific context injection.
-     * @param array                     $aiLanguages         Supported languages for multilingual responses.
-     * @param LoggerInterface           $logger              PSR-3 logger (defaults to NullLogger).
-     * @param bool                      $aiExpandQuery       Whether the expand-query feature is enabled.
-     * @param bool                      $aiSummarize         Whether the summarize feature is enabled.
-     * @param int                       $aiSummaryMaxTokens  Max tokens for AI summary responses.
+     * @param object                    $aiService            AI service (duck-typed).
+     * @param CacheDriverInterface      $cache                Cache driver.
+     * @param int                       $generation           Generation counter for cache invalidation.
+     * @param int                       $cacheTtl             Cache TTL in seconds (0 = disabled).
+     * @param int                       $maxFollowUps         Maximum follow-up exchanges allowed.
+     * @param PromptEnricherInterface   $promptEnricher       Prompt enricher for site-specific context injection.
+     * @param array                     $aiLanguages          Supported languages for multilingual responses.
+     * @param LoggerInterface           $logger               PSR-3 logger (defaults to NullLogger).
+     * @param bool                      $aiExpandQuery        Whether the expand-query feature is enabled.
+     * @param bool                      $aiSummarize          Whether the summarize feature is enabled.
+     * @param int                       $aiSummaryMaxTokens   Max tokens for AI summary responses.
+     * @param float                     $expandPrimaryWeight  Weight of original results vs expansion results (0–1).
      */
     public function __construct(
         private readonly object $aiService,
@@ -55,6 +56,7 @@ class AiEndpointHandler
         private readonly bool $aiExpandQuery = true,
         private readonly bool $aiSummarize = true,
         private readonly int $aiSummaryMaxTokens = 1024,
+        private readonly float $expandPrimaryWeight = 0.5,
     ) {
     }
 
@@ -102,13 +104,18 @@ class AiEndpointHandler
 
             $terms = $this->parseExpansionResponse($response, $query);
 
+            $payload = [
+                'terms'                => $terms,
+                'expand_primary_weight' => $this->expandPrimaryWeight,
+            ];
+
             if ($this->cacheTtl > 0) {
-                $this->cache->set($cacheKey, $terms, $this->cacheTtl);
+                $this->cache->set($cacheKey, $payload, $this->cacheTtl);
             }
 
-            return ['ok' => true, 'data' => $terms];
+            return ['ok' => true, 'data' => $payload];
         } catch (ApiKeyMissingException $e) {
-            return ['ok' => true, 'data' => [$query]];
+            return ['ok' => true, 'data' => ['terms' => [$query], 'expand_primary_weight' => $this->expandPrimaryWeight]];
         } catch (\Exception $e) {
             $this->logger->error('Scolta query expansion failed', ['exception' => $e]);
 
