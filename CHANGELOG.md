@@ -6,6 +6,10 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+_No changes yet._
+
+## [1.0.0-rc3] - 2026-05-13
+
 ### Fixed
 
 - **`expand_primary_weight` now correctly weights original vs. expansion results.** The config key existed in `ScoltaConfig` and was exported to the browser as `EXPAND_PRIMARY_WEIGHT`, but the JS merge step applied the value to expanded results instead of original results — the opposite of what the config name and docs describe. `scolta.js` now passes `expand_primary_weight` as the weight for the original result set and `1 − expand_primary_weight` for the expansion set in `merge_results()`. Per-term expansion weights likewise start at `1 − expand_primary_weight` instead of `expand_primary_weight`. `AiEndpointHandler` now accepts `expandPrimaryWeight` as a constructor parameter and includes it in the expand-query response payload alongside the terms array. Fixes [#86](https://github.com/tag1consulting/scolta-php/issues/86).
