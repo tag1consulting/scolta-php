@@ -132,15 +132,15 @@ class AiEndpointHandlerTest extends TestCase
         $cache = new InMemoryCacheDriver();
         $ai = new MockAiService('should not be called');
 
-        // Pre-populate cache.
+        // Pre-populate cache with new payload format.
         $handler = $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600);
         $cacheKey = $handler->cacheKey('expand', 'test query');
-        $cache->set($cacheKey, ['cached term'], 3600);
+        $cache->set($cacheKey, ['terms' => ['cached term'], 'expand_primary_weight' => 0.5], 3600);
 
         $result = $handler->handleExpandQuery('test query');
 
         $this->assertTrue($result['ok']);
-        $this->assertEquals(['cached term'], $result['data']);
+        $this->assertEquals(['cached term'], $result['data']['terms']);
         $this->assertEquals(0, $ai->callCount, 'AI service should not have been called');
     }
 
@@ -344,7 +344,8 @@ class AiEndpointHandlerTest extends TestCase
         $result = $handler->handleExpandQuery('my search query');
 
         $this->assertTrue($result['ok']);
-        $this->assertEquals(['my search query'], $result['data']);
+        $this->assertEquals(['my search query'], $result['data']['terms']);
+        $this->assertArrayHasKey('expand_primary_weight', $result['data']);
         $this->assertArrayNotHasKey('status', $result);
     }
 
@@ -406,7 +407,26 @@ class AiEndpointHandlerTest extends TestCase
 
         // Empty response should fallback to original query.
         $this->assertTrue($result['ok']);
-        $this->assertEquals(['test query'], $result['data']);
+        $this->assertEquals(['test query'], $result['data']['terms']);
+    }
+
+    public function testExpandQueryResponseIncludesExpandPrimaryWeight(): void
+    {
+        $ai = new MockAiService('["term1", "term2"]');
+        $handler = new AiEndpointHandler(
+            aiService: $ai,
+            cache: new InMemoryCacheDriver(),
+            generation: 1,
+            cacheTtl: 0,
+            maxFollowUps: 3,
+            expandPrimaryWeight: 0.8,
+        );
+
+        $result = $handler->handleExpandQuery('test query');
+
+        $this->assertTrue($result['ok']);
+        $this->assertIsArray($result['data']['terms']);
+        $this->assertSame(0.8, $result['data']['expand_primary_weight']);
     }
 
     // ===================================================================

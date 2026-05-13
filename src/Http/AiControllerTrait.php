@@ -75,6 +75,7 @@ trait AiControllerTrait
             aiExpandQuery: $config->aiExpandQuery,
             aiSummarize: $config->aiSummarize,
             aiSummaryMaxTokens: $config->aiSummaryMaxTokens,
+            expandPrimaryWeight: $config->expandPrimaryWeight,
         );
     }
 }
