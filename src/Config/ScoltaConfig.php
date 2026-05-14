@@ -95,6 +95,10 @@ class ScoltaConfig
     /** @var string 'auto' (PHP indexer) | 'php' | 'binary' */
     public string $indexer = 'auto';
 
+    // -- Content --
+    /** @var string[] Field names CMS adapters should extract as sortable attributes (data-pagefind-sort). */
+    public array $sortableFields = [];
+
     // -- Scoring preset --
     /** @var string Named preset to apply before explicit overrides (empty = no preset). */
     public string $preset = '';

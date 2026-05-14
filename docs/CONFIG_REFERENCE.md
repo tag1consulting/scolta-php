@@ -132,6 +132,12 @@ factor before being added to the final score; the title boost is unaffected.
 |----------|------|---------|-------------|
 | `indexer` | string | `'auto'` | Indexing backend used by CLI build commands. `auto` and `php` both use the pure-PHP indexer (no binary or Node.js required). `binary` explicitly uses the Pagefind CLI binary and fails if it is not found. |
 
+### Content
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `sortableFields` | array | `[]` | Field names CMS adapters should extract as sortable attributes (`data-pagefind-sort`). CMS adapters read this list to determine which `ContentItem::$sortable` entries to populate. Empty by default — no sort attributes are emitted. |
+
 ### Scoring Presets
 
 | Property | Type | Default | Description |
@@ -248,6 +254,12 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 | ScoltaConfig Property | Drupal | Laravel | WordPress |
 |----------------------|--------|---------|-----------|
 | `indexer` | `indexer` | `indexer` / `SCOLTA_INDEXER` | `indexer` |
+
+### Content Keys
+
+| ScoltaConfig Property | Drupal | Laravel | WordPress |
+|----------------------|--------|---------|-----------|
+| `sortableFields` | `sortable_fields` | `sortable_fields` | `sortable_fields` |
 
 ## Methods
 

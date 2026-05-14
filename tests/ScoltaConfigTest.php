@@ -213,6 +213,18 @@ class ScoltaConfigTest extends TestCase
         $this->assertSame('binary', $config->indexer);
     }
 
+    public function testSortableFieldsDefaultsToEmpty(): void
+    {
+        $config = new ScoltaConfig();
+        $this->assertSame([], $config->sortableFields);
+    }
+
+    public function testFromArrayMapsSortableFields(): void
+    {
+        $config = ScoltaConfig::fromArray(['sortable_fields' => ['price', 'rating', 'published']]);
+        $this->assertSame(['price', 'rating', 'published'], $config->sortableFields);
+    }
+
     // -------------------------------------------------------------------
     // toAiClientConfig
     // -------------------------------------------------------------------

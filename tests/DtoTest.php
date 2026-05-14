@@ -110,6 +110,60 @@ class DtoTest extends TestCase
         $this->assertEquals(['base_topic' => 'Cardiology'], $item->filters);
     }
 
+    public function testContentItemMetadataDefaults(): void
+    {
+        $item = new ContentItem(
+            id: '1',
+            title: 'T',
+            bodyHtml: 'B',
+            url: 'https://x.com',
+            date: '2024-01-01',
+        );
+
+        $this->assertEquals([], $item->metadata);
+    }
+
+    public function testContentItemMetadataPassthrough(): void
+    {
+        $item = new ContentItem(
+            id: '1',
+            title: 'T',
+            bodyHtml: 'B',
+            url: 'https://x.com',
+            date: '2024-01-01',
+            metadata: ['price' => '29.99', 'rating' => '4.5'],
+        );
+
+        $this->assertEquals(['price' => '29.99', 'rating' => '4.5'], $item->metadata);
+    }
+
+    public function testContentItemSortableDefaults(): void
+    {
+        $item = new ContentItem(
+            id: '1',
+            title: 'T',
+            bodyHtml: 'B',
+            url: 'https://x.com',
+            date: '2024-01-01',
+        );
+
+        $this->assertEquals([], $item->sortable);
+    }
+
+    public function testContentItemSortablePassthrough(): void
+    {
+        $item = new ContentItem(
+            id: '1',
+            title: 'T',
+            bodyHtml: 'B',
+            url: 'https://x.com',
+            date: '2024-01-01',
+            sortable: ['price' => '29.99'],
+        );
+
+        $this->assertEquals(['price' => '29.99'], $item->sortable);
+    }
+
     // -------------------------------------------------------------------
     // TrackerRecord
     // -------------------------------------------------------------------
