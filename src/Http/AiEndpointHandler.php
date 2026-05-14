@@ -405,16 +405,18 @@ class AiEndpointHandler
 
         $prompt .= "\n\nSORT INTENT (optional):\n"
             . "Available sortable fields: {$fieldList}\n\n"
-            . "If this query implies sorting as the user's PRIMARY goal (e.g., 'most expensive', 'newest', 'cheapest'), "
-            . "add a \"sort\" key to your response: {\"terms\": [...], \"sort\": {\"field\": \"price\", \"direction\": \"desc\"}}\n"
+            . "Only add a \"sort\" key when sorting results is the query's PRIMARY purpose — the user explicitly wants results ranked by a specific field.\n"
+            . "Format: {\"terms\": [...], \"sort\": {\"field\": \"price\", \"direction\": \"desc\"}}\n\n"
             . "Rules:\n"
-            . "- field must be one of the available sortable fields above\n"
+            . "- field MUST be one of the available sortable fields listed above — no other values are permitted\n"
             . "- direction must be \"asc\" or \"desc\"\n"
-            . "- Only classify sort intent for short, direct queries where sorting IS the primary goal\n"
-            . "- Do NOT classify sort intent for research questions, conversational queries, or natural-language questions that merely contain sort words\n"
-            . "  (e.g., 'the latest research on...', 'most common git commands', 'best practices for...', 'cheapest way to comply with...' must NOT trigger sort)\n"
-            . "- When sort is detected, exclude the sort signal words (most, cheapest, newest, highest, lowest, etc.) from the expanded terms\n"
-            . '- When in doubt, omit the "sort" key entirely';
+            . "- The sort signal must map DIRECTLY to a specific field's semantics: 'most expensive' → price (desc), 'newest' → date (desc), 'cheapest' → price (asc). If there is no clear, direct semantic match to an available field, do NOT add sort.\n"
+            . "- SUPERLATIVES AS QUALIFIERS: superlatives like 'most popular', 'best known', 'most common', 'top rated', 'well known' describe what TYPE of item the user wants to discover — they are NOT sort intent. 'Most popular crystals' means 'find well-known crystals' (a discovery query), NOT 'sort crystals by a popularity field'. Do not classify these as sort intent even if a vaguely related field exists.\n"
+            . "- Only classify sort intent for short (2–4 word) queries where the sort word IS the primary goal, not a qualifier.\n"
+            . "- Do NOT classify sort intent for research questions, conversational queries, or any query where the sort-like word is a modifier rather than the main goal.\n"
+            . "  Counter-examples (must NOT trigger sort): 'most popular crystals', 'the latest research on...', 'most common git commands', 'best practices for...', 'cheapest way to comply with...', 'first aid for...'\n"
+            . "- Prefer false negatives over false positives: a missed sort hint is far less harmful than an incorrect result reorder. When uncertain, ALWAYS omit the \"sort\" key.\n"
+            . '- When sort is detected, exclude the sort signal words (most, cheapest, newest, highest, lowest, etc.) from the expanded terms';
 
         return $prompt;
     }

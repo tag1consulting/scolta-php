@@ -55,4 +55,37 @@ class ContentItem
         }
         $this->url = $url;
     }
+
+    /**
+     * Create a copy of this ContentItem with specific fields overridden.
+     *
+     * Use this instead of constructing a new ContentItem from scratch when modifying
+     * an existing item — direct construction silently drops any fields you forget to
+     * pass (including metadata and sortable). cloneWith() carries all fields forward
+     * and only replaces what is explicitly provided.
+     *
+     * Example (WordPress mu-plugin enriching body HTML):
+     *   $item = $item->cloneWith(['bodyHtml' => $enrichedHtml]);
+     *
+     * @param array<string, mixed> $overrides Field values to override (keyed by property name).
+     * @return self A new ContentItem with all fields from this item except those overridden.
+     *
+     * @since 1.1.0
+     * @stability experimental
+     */
+    public function cloneWith(array $overrides = []): self
+    {
+        return new self(
+            id: $overrides['id'] ?? $this->id,
+            title: $overrides['title'] ?? $this->title,
+            bodyHtml: $overrides['bodyHtml'] ?? $this->bodyHtml,
+            url: $overrides['url'] ?? $this->url,
+            date: $overrides['date'] ?? $this->date,
+            siteName: $overrides['siteName'] ?? $this->siteName,
+            language: $overrides['language'] ?? $this->language,
+            filters: $overrides['filters'] ?? $this->filters,
+            metadata: $overrides['metadata'] ?? $this->metadata,
+            sortable: $overrides['sortable'] ?? $this->sortable,
+        );
+    }
 }

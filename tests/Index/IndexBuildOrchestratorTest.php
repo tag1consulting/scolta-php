@@ -318,6 +318,109 @@ class IndexBuildOrchestratorTest extends TestCase
         $this->assertSame(0, $report->pagesProcessed);
     }
 
+    // -------------------------------------------------------------------
+    // atomicSwap: output_dir /pagefind suffix normalization
+    // -------------------------------------------------------------------
+
+    public function testOutputDirWithoutPagofindSuffixWorksNormally(): void
+    {
+        // Standard case: output_dir = /some/path (no /pagefind suffix).
+        // Index should land at /some/path/pagefind — unchanged behavior.
+        $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
+        $items        = $this->makeItems(2);
+        $intent       = BuildIntent::fresh(2, MemoryBudget::conservative());
+
+        $report = $orchestrator->build($intent, $items);
+
+        $this->assertTrue($report->success);
+        $this->assertDirectoryExists($this->outputDir . '/pagefind');
+        $this->assertDirectoryDoesNotExist($this->outputDir . '/pagefind/pagefind');
+    }
+
+    public function testOutputDirWithPagofindSuffixDoesNotDoubleNest(): void
+    {
+        // Bug case: output_dir = /some/path/pagefind.
+        // Without the fix the index would land at /some/path/pagefind/pagefind.
+        // With the fix the index lands at /some/path/pagefind (the configured path).
+        $outputDirWithSuffix = $this->outputDir . '/pagefind';
+        mkdir($outputDirWithSuffix, 0755, true);
+
+        $orchestrator = new IndexBuildOrchestrator($this->stateDir, $outputDirWithSuffix);
+        $items        = $this->makeItems(2);
+        $intent       = BuildIntent::fresh(2, MemoryBudget::conservative());
+
+        $report = $orchestrator->build($intent, $items);
+
+        $this->assertTrue($report->success, $report->error ?? 'No error');
+        // Index must be AT the configured path, not one level deeper.
+        $this->assertDirectoryExists($outputDirWithSuffix);
+        $this->assertFileExists($outputDirWithSuffix . '/pagefind-entry.json');
+        // The double-nested directory must NOT exist.
+        $this->assertDirectoryDoesNotExist($outputDirWithSuffix . '/pagefind');
+    }
+
+    public function testOutputDirWithTrailingSlashAndPagofindDoesNotDoubleNest(): void
+    {
+        // Trailing-slash variant: output_dir = /some/path/pagefind/
+        $outputDirWithSuffix = $this->outputDir . '/pagefind';
+        mkdir($outputDirWithSuffix, 0755, true);
+
+        $orchestrator = new IndexBuildOrchestrator($this->stateDir, $outputDirWithSuffix . '/');
+        $items        = $this->makeItems(2);
+        $intent       = BuildIntent::fresh(2, MemoryBudget::conservative());
+
+        $report = $orchestrator->build($intent, $items);
+
+        $this->assertTrue($report->success, $report->error ?? 'No error');
+        $this->assertFileExists($outputDirWithSuffix . '/pagefind-entry.json');
+        $this->assertDirectoryDoesNotExist($outputDirWithSuffix . '/pagefind');
+    }
+
+    public function testOutputDirNormalizationLogsWarning(): void
+    {
+        $outputDirWithSuffix = $this->outputDir . '/pagefind';
+        mkdir($outputDirWithSuffix, 0755, true);
+
+        $logger       = new class () extends \Psr\Log\AbstractLogger {
+            public array $warnings = [];
+            public function log($level, string|\Stringable $message, array $context = []): void
+            {
+                if ($level === \Psr\Log\LogLevel::WARNING) {
+                    $this->warnings[] = (string) $message;
+                }
+            }
+        };
+        $orchestrator = new IndexBuildOrchestrator($this->stateDir, $outputDirWithSuffix);
+        $items        = $this->makeItems(1);
+        $intent       = BuildIntent::fresh(1, MemoryBudget::conservative());
+
+        $orchestrator->build($intent, $items, $logger);
+
+        $this->assertNotEmpty($logger->warnings, 'A warning must be logged when output_dir ends with /pagefind');
+        $this->assertStringContainsString("'/pagefind'", $logger->warnings[0]);
+    }
+
+    public function testOutputDirWithoutSuffixLogsNoWarning(): void
+    {
+        $logger = new class () extends \Psr\Log\AbstractLogger {
+            public array $warnings = [];
+            public function log($level, string|\Stringable $message, array $context = []): void
+            {
+                if ($level === \Psr\Log\LogLevel::WARNING) {
+                    $this->warnings[] = (string) $message;
+                }
+            }
+        };
+        $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
+        $items        = $this->makeItems(1);
+        $intent       = BuildIntent::fresh(1, MemoryBudget::conservative());
+
+        $orchestrator->build($intent, $items, $logger);
+
+        $pagefindWarnings = array_filter($logger->warnings, fn ($w) => str_contains($w, "'/pagefind'"));
+        $this->assertEmpty($pagefindWarnings, 'No /pagefind normalization warning expected for a correct output_dir');
+    }
+
     private function removeDir(string $dir): void
     {
         if (!is_dir($dir)) {

@@ -28,14 +28,30 @@ final class IndexBuildOrchestrator
     private readonly StorageDriverInterface $storage;
     private readonly PageWordCache $cache;
     private readonly TimestampManifest $tsManifest;
+    private readonly string $outputDir;
+    /** Warning message emitted when output_dir was already suffixed with /pagefind. */
+    private readonly ?string $outputDirNormalizationWarning;
 
     public function __construct(
         private readonly string $stateDir,
-        private readonly string $outputDir,
+        string $outputDir,
         private readonly ?string $hmacSecret = null,
         private readonly string $language = 'en',
         ?StorageDriverInterface $storage = null,
     ) {
+        // Strip a trailing /pagefind suffix if already present. atomicSwap()
+        // always appends /pagefind internally, so a doubly-suffixed path would
+        // write the index one directory deeper than the browser expects.
+        $normalized = rtrim($outputDir, '/');
+        if (str_ends_with($normalized, '/pagefind')) {
+            $normalized = substr($normalized, 0, -strlen('/pagefind'));
+            $this->outputDirNormalizationWarning = "[scolta] output_dir already ends with '/pagefind'."
+                . " The '/pagefind' suffix is appended automatically — set output_dir to the parent directory to silence this warning.";
+        } else {
+            $this->outputDirNormalizationWarning = null;
+        }
+        $this->outputDir = $normalized;
+
         $this->coordinator = new BuildCoordinator($stateDir, $hmacSecret);
         // TODO: Per-document language stemming. Currently the entire index uses
         // one language's stemming rules. Multilingual content is indexed and
@@ -84,6 +100,9 @@ final class IndexBuildOrchestrator
     ): StatusReport {
         $logger   = $logger   ?? new NullLogger();
         $progress = $progress ?? new NullProgressReporter();
+        if ($this->outputDirNormalizationWarning !== null) {
+            $logger->warning($this->outputDirNormalizationWarning);
+        }
         $logger->notice('[scolta] Using PHP indexer.');
         $startTime = microtime(true);
         $telemetry = new MemoryTelemetry($logger, $intent->memoryBudget());
@@ -303,6 +322,9 @@ final class IndexBuildOrchestrator
         ?LoggerInterface $logger = null,
     ): StatusReport {
         $logger    = $logger ?? new NullLogger();
+        if ($this->outputDirNormalizationWarning !== null) {
+            $logger->warning($this->outputDirNormalizationWarning);
+        }
         $telemetry = new MemoryTelemetry($logger, $budget);
         $startTime = microtime(true);
 
