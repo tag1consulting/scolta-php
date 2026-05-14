@@ -43,6 +43,7 @@ class AiEndpointHandler
      * @param bool                      $aiSummarize          Whether the summarize feature is enabled.
      * @param int                       $aiSummaryMaxTokens   Max tokens for AI summary responses.
      * @param float                     $expandPrimaryWeight  Weight of original results vs expansion results (0–1).
+     * @param array                     $sortableFields       Metadata field names available for sort-intent detection.
      */
     public function __construct(
         private readonly object $aiService,
@@ -57,6 +58,7 @@ class AiEndpointHandler
         private readonly bool $aiSummarize = true,
         private readonly int $aiSummaryMaxTokens = 1024,
         private readonly float $expandPrimaryWeight = 0.5,
+        private readonly array $sortableFields = [],
     ) {
     }
 
@@ -94,6 +96,7 @@ class AiEndpointHandler
                 ['query' => $query],
             );
             $systemPrompt = $this->appendLanguageInstruction($systemPrompt, 'expand_query');
+            $systemPrompt = $this->appendSortableFieldsInstruction($systemPrompt);
 
             $response = $this->aiService->messageForOperation(
                 'expand_query',
@@ -102,12 +105,16 @@ class AiEndpointHandler
                 512,
             );
 
-            $terms = $this->parseExpansionResponse($response, $query);
+            $parsed = $this->parseExpansionResult($response, $query);
 
             $payload = [
-                'terms'                => $terms,
+                'terms'                => $parsed['terms'],
                 'expand_primary_weight' => $this->expandPrimaryWeight,
             ];
+
+            if ($parsed['sort_hint'] !== null) {
+                $payload['sort_hint'] = $parsed['sort_hint'];
+            }
 
             if ($this->cacheTtl > 0) {
                 $this->cache->set($cacheKey, $payload, $this->cacheTtl);
@@ -297,23 +304,119 @@ class AiEndpointHandler
     /**
      * Parse an AI expansion response, stripping markdown fences.
      *
+     * Handles both the current object format {"terms": [...]} and the legacy
+     * array format [...] so cached responses and custom prompts continue to work.
+     *
      * @param string $response      Raw AI response text.
      * @param string $originalQuery The original query (used as fallback).
      * @return array The parsed list of search terms.
      */
     public function parseExpansionResponse(string $response, string $originalQuery): array
     {
+        return $this->parseExpansionResult($response, $originalQuery)['terms'];
+    }
+
+    /**
+     * Parse an AI expansion response and extract both terms and an optional sort hint.
+     *
+     * Returns ['terms' => string[], 'sort_hint' => array{field: string, direction: string}|null].
+     * Parses defensively: malformed or absent sort_hint is silently ignored.
+     *
+     * @param string $response      Raw AI response text.
+     * @param string $originalQuery The original query (used as fallback for terms).
+     * @return array{terms: array, sort_hint: array{field: string, direction: string}|null}
+     */
+    protected function parseExpansionResult(string $response, string $originalQuery): array
+    {
         $cleaned = trim($response);
         $cleaned = preg_replace('/^```(?:json)?\s*/i', '', $cleaned);
         $cleaned = preg_replace('/\s*```$/', '', $cleaned);
         $cleaned = trim($cleaned);
 
-        $terms = json_decode($cleaned, true);
-        if (!is_array($terms) || count($terms) < 2) {
-            $terms = [$originalQuery];
+        $decoded = json_decode($cleaned, true);
+
+        // New object format: {"terms": [...], "sort": {...}}
+        if (is_array($decoded) && isset($decoded['terms']) && is_array($decoded['terms'])) {
+            $terms = count($decoded['terms']) >= 2 ? $decoded['terms'] : [$originalQuery];
+            $sortHint = $this->extractSortHint($decoded['sort'] ?? null);
+
+            return ['terms' => $terms, 'sort_hint' => $sortHint];
         }
 
-        return $terms;
+        // Legacy array format: ["term1", "term2", ...]
+        if (is_array($decoded) && count($decoded) >= 2) {
+            return ['terms' => $decoded, 'sort_hint' => null];
+        }
+
+        return ['terms' => [$originalQuery], 'sort_hint' => null];
+    }
+
+    /**
+     * Validate and normalise a raw sort hint from the LLM response.
+     *
+     * Returns null when the hint is absent, malformed, or references an
+     * invalid direction — so a bad LLM response never breaks expansion.
+     *
+     * @param mixed $raw The raw "sort" value from the decoded JSON.
+     * @return array{field: string, direction: string}|null
+     */
+    private function extractSortHint(mixed $raw): ?array
+    {
+        if (!is_array($raw)) {
+            return null;
+        }
+
+        $field = $raw['field'] ?? null;
+        $direction = $raw['direction'] ?? null;
+
+        if (!is_string($field) || $field === '') {
+            return null;
+        }
+
+        if (!in_array($direction, ['asc', 'desc'], true)) {
+            return null;
+        }
+
+        // Only honour a sort hint when sortable fields are configured and the
+        // suggested field is in that list. No configured fields → no sort hints.
+        if (empty($this->sortableFields) || !in_array($field, $this->sortableFields, true)) {
+            return null;
+        }
+
+        return ['field' => $field, 'direction' => $direction];
+    }
+
+    /**
+     * Append sort-intent instructions to the expansion prompt when sortable fields are configured.
+     *
+     * When no sortable fields are configured the prompt is returned unchanged,
+     * so sites that have not opted into sortable metadata see zero behaviour change.
+     *
+     * @param string $prompt The resolved, enriched system prompt.
+     * @return string The prompt with sort-intent instructions appended (when applicable).
+     */
+    private function appendSortableFieldsInstruction(string $prompt): string
+    {
+        if (empty($this->sortableFields)) {
+            return $prompt;
+        }
+
+        $fieldList = implode(', ', $this->sortableFields);
+
+        $prompt .= "\n\nSORT INTENT (optional):\n"
+            . "Available sortable fields: {$fieldList}\n\n"
+            . "If this query implies sorting as the user's PRIMARY goal (e.g., 'most expensive', 'newest', 'cheapest'), "
+            . "add a \"sort\" key to your response: {\"terms\": [...], \"sort\": {\"field\": \"price\", \"direction\": \"desc\"}}\n"
+            . "Rules:\n"
+            . "- field must be one of the available sortable fields above\n"
+            . "- direction must be \"asc\" or \"desc\"\n"
+            . "- Only classify sort intent for short, direct queries where sorting IS the primary goal\n"
+            . "- Do NOT classify sort intent for research questions, conversational queries, or natural-language questions that merely contain sort words\n"
+            . "  (e.g., 'the latest research on...', 'most common git commands', 'best practices for...', 'cheapest way to comply with...' must NOT trigger sort)\n"
+            . "- When sort is detected, exclude the sort signal words (most, cheapest, newest, highest, lowest, etc.) from the expanded terms\n"
+            . "- When in doubt, omit the \"sort\" key entirely";
+
+        return $prompt;
     }
 
     /**
