@@ -414,7 +414,7 @@ class AiEndpointHandler
             . "- Do NOT classify sort intent for research questions, conversational queries, or natural-language questions that merely contain sort words\n"
             . "  (e.g., 'the latest research on...', 'most common git commands', 'best practices for...', 'cheapest way to comply with...' must NOT trigger sort)\n"
             . "- When sort is detected, exclude the sort signal words (most, cheapest, newest, highest, lowest, etc.) from the expanded terms\n"
-            . "- When in doubt, omit the \"sort\" key entirely";
+            . '- When in doubt, omit the "sort" key entirely';
 
         return $prompt;
     }
