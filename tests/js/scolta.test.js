@@ -219,6 +219,47 @@ describe('scolta.js structure', () => {
         expect(jsSource).toContain('priority_pages');
         expect(jsSource).toContain('Priority page matching failed');
     });
+
+    test('sort override state variables are declared', () => {
+        expect(jsSource).toContain('currentSortOverride');
+        expect(jsSource).toContain('preOverrideResults');
+    });
+
+    test('applySortOverride function exists', () => {
+        expect(jsSource).toContain('function applySortOverride(');
+    });
+
+    test('renderSortIndicator function exists', () => {
+        expect(jsSource).toContain('function renderSortIndicator(');
+    });
+
+    test('dismissSortOverride function exists', () => {
+        expect(jsSource).toContain('function dismissSortOverride(');
+    });
+
+    test('sort indicator element in HTML template', () => {
+        expect(jsSource).toContain('id="scolta-sort-indicator"');
+    });
+
+    test('sort dismiss uses event delegation attribute', () => {
+        expect(jsSource).toContain('data-scolta-sort-dismiss');
+    });
+
+    test('sort indicator is hidden on clearSearch', () => {
+        const clearBody = jsSource.match(/function clearSearch[\s\S]*?queryInput\.focus/);
+        expect(clearBody).not.toBeNull();
+        expect(clearBody[0]).toContain('sortIndicator');
+        expect(clearBody[0]).toContain('currentSortOverride = null');
+    });
+
+    test('expandQuery parses sort_hint from API response', () => {
+        expect(jsSource).toContain('data.sort_hint');
+        expect(jsSource).toContain("sort_hint: null");
+    });
+
+    test('sort_hint field absent from all results falls back silently', () => {
+        expect(jsSource).toContain('absent from all results, using relevance sort');
+    });
 });
 
 describe('scolta.css structure', () => {

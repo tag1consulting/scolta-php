@@ -331,6 +331,138 @@ describe('scolta.js behavioral tests', () => {
 });
 
 // =============================================================================
+// Sort override behavioral tests
+// =============================================================================
+
+// Patch source to expose applySortOverride and related state for direct testing.
+const sortOverrideExposedSource = patchedSource.replace(
+    '// SHARED SEARCH HELPERS',
+    '// SHARED SEARCH HELPERS\n  window.__applySortOverride = applySortOverride;\n  window.__getState = function() { return { currentSortOverride, preOverrideResults, allScoredResults }; };\n  window.__setState = function(s) { if (s.allScoredResults !== undefined) allScoredResults = s.allScoredResults; if (s.currentSortOverride !== undefined) currentSortOverride = s.currentSortOverride; };'
+);
+
+function createWindowForSort() {
+    const dom = new JSDOM(
+        '<!DOCTYPE html><html><body><div id="scolta-search"></div></body></html>',
+        { url: 'https://example.com', runScripts: 'dangerously' }
+    );
+    const win = dom.window;
+    win.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ terms: ['stone', 'gem'], sort_hint: { field: 'price', direction: 'desc' } }),
+        text: () => Promise.resolve(''),
+        status: 200,
+    });
+    win.console = { log: jest.fn(), error: jest.fn(), warn: jest.fn() };
+    win.scrollTo = () => {};
+    win.eval(sortOverrideExposedSource);
+    win.scolta = {
+        scoring: {},
+        endpoints: { expand: '/e', summarize: '/s', followup: '/f' },
+        pagefindPath: '/pf.js',
+        siteName: 'Test',
+        container: '#scolta-search',
+        allowedLinkDomains: [],
+        disclaimer: '',
+    };
+    win.Scolta.init('#scolta-search');
+    return win;
+}
+
+function makeResultWithMeta(url, score, meta = {}) {
+    return {
+        score,
+        data: { url, excerpt: '', meta: { url, ...meta } },
+    };
+}
+
+describe('sort override behavioral tests', () => {
+
+    test('sort indicator element exists after init', () => {
+        const win = createWindowForSort();
+        const el = win.document.querySelector('#scolta-sort-indicator');
+        expect(el).not.toBeNull();
+    });
+
+    test('sort indicator is hidden initially', () => {
+        const win = createWindowForSort();
+        const el = win.document.querySelector('#scolta-sort-indicator');
+        expect(el.style.display).toBe('none');
+    });
+
+    test('applySortOverride sorts by numeric meta field descending', () => {
+        const win = createWindowForSort();
+        win.__setState({
+            allScoredResults: [
+                makeResultWithMeta('/a', 0.9, { price: '10' }),
+                makeResultWithMeta('/b', 0.8, { price: '99' }),
+                makeResultWithMeta('/c', 0.7, { price: '45' }),
+            ],
+        });
+        const applied = win.__applySortOverride({ field: 'price', direction: 'desc' });
+        expect(applied).toBe(true);
+        const state = win.__getState();
+        const prices = state.allScoredResults.map(r => r.data.meta.price);
+        expect(prices).toEqual(['99', '45', '10']);
+    });
+
+    test('applySortOverride sorts by numeric meta field ascending', () => {
+        const win = createWindowForSort();
+        win.__setState({
+            allScoredResults: [
+                makeResultWithMeta('/a', 0.9, { price: '10' }),
+                makeResultWithMeta('/b', 0.8, { price: '99' }),
+                makeResultWithMeta('/c', 0.7, { price: '45' }),
+            ],
+        });
+        const applied = win.__applySortOverride({ field: 'price', direction: 'asc' });
+        expect(applied).toBe(true);
+        const state = win.__getState();
+        const prices = state.allScoredResults.map(r => r.data.meta.price);
+        expect(prices).toEqual(['10', '45', '99']);
+    });
+
+    test('applySortOverride returns false when field absent from all results', () => {
+        const win = createWindowForSort();
+        win.__setState({
+            allScoredResults: [
+                makeResultWithMeta('/a', 0.9, { title: 'No price here' }),
+                makeResultWithMeta('/b', 0.8, { title: 'Also no price' }),
+            ],
+        });
+        const applied = win.__applySortOverride({ field: 'price', direction: 'desc' });
+        expect(applied).toBe(false);
+    });
+
+    test('applySortOverride filters out results missing the sort field', () => {
+        const win = createWindowForSort();
+        win.__setState({
+            allScoredResults: [
+                makeResultWithMeta('/a', 0.9, { price: '50' }),
+                makeResultWithMeta('/b', 0.8, { title: 'No price' }),
+                makeResultWithMeta('/c', 0.7, { price: '20' }),
+            ],
+        });
+        win.__applySortOverride({ field: 'price', direction: 'desc' });
+        const state = win.__getState();
+        expect(state.allScoredResults.length).toBe(2);
+        expect(state.allScoredResults.every(r => r.data.meta.price !== undefined)).toBe(true);
+    });
+
+    test('applySortOverride saves snapshot in preOverrideResults', () => {
+        const win = createWindowForSort();
+        const origResults = [
+            makeResultWithMeta('/a', 0.9, { price: '50' }),
+            makeResultWithMeta('/b', 0.8, { price: '20' }),
+        ];
+        win.__setState({ allScoredResults: [...origResults] });
+        win.__applySortOverride({ field: 'price', direction: 'desc' });
+        const state = win.__getState();
+        expect(state.preOverrideResults).not.toBeNull();
+        expect(state.preOverrideResults.length).toBe(2);
+    });
+});
+
+// =============================================================================
 // mergeResults behavioral tests (JS fallback — no WASM in test environment)
 //
 // Gap 4a: the existing string-match test only confirmed the source contains
