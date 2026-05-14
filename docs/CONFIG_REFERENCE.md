@@ -136,7 +136,7 @@ factor before being added to the final score; the title boost is unaffected.
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `sortableFields` | array | `[]` | Field names CMS adapters should extract as sortable attributes (`data-pagefind-sort`). CMS adapters read this list to determine which `ContentItem::$sortable` entries to populate. Empty by default — no sort attributes are emitted. |
+| `sortableFields` | array | `[]` | Field names CMS adapters should extract as sortable attributes (`data-pagefind-sort`). CMS adapters read this list to determine which `ContentItem::$sortable` entries to populate. Empty by default — no sort attributes are emitted. When non-empty, these field names are also passed to the AI expansion prompt so the LLM can return a `sort_hint` alongside expanded terms when a query implies a sort intent (e.g., "most expensive stone" → `sort_hint: {field: "price", direction: "desc"}`). |
 
 ### Scoring Presets
 

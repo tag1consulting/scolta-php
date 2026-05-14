@@ -254,6 +254,18 @@ class AiEndpointHandlerTest extends TestCase
         $this->assertEquals(['alpha', 'beta', 'gamma'], $result);
     }
 
+    public function testParseExpansionHandlesObjectFormat(): void
+    {
+        $handler = $this->makeHandler();
+
+        $result = $handler->parseExpansionResponse(
+            '{"terms": ["alpha", "beta", "gamma"]}',
+            'original'
+        );
+
+        $this->assertEquals(['alpha', 'beta', 'gamma'], $result);
+    }
+
     public function testParseExpansionFallsBackOnInvalidJson(): void
     {
         $handler = $this->makeHandler();
@@ -277,6 +289,148 @@ class AiEndpointHandlerTest extends TestCase
         );
 
         $this->assertEquals(['original'], $result);
+    }
+
+    // ===================================================================
+    // Sort hint — parsing
+    // ===================================================================
+
+    public function testSortHintParsedFromObjectFormat(): void
+    {
+        $ai = new MockAiService('{"terms": ["gem", "gemstone", "rock"], "sort": {"field": "price", "direction": "desc"}}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price', 'date']);
+
+        $result = $handler->handleExpandQuery('most expensive stone');
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(['field' => 'price', 'direction' => 'desc'], $result['data']['sort_hint']);
+    }
+
+    public function testSortHintAbsentWhenLlmOmitsIt(): void
+    {
+        $ai = new MockAiService('{"terms": ["gem", "gemstone", "mineral"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $result = $handler->handleExpandQuery('blue stones');
+
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('sort_hint', $result['data']);
+    }
+
+    public function testSortHintAbsentWhenNoSortableFieldsConfigured(): void
+    {
+        // Even if LLM hallucinated a sort hint, with no sortable fields it should be ignored.
+        $ai = new MockAiService('{"terms": ["gem", "rock", "mineral"], "sort": {"field": "price", "direction": "desc"}}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: []);
+
+        $result = $handler->handleExpandQuery('most expensive stone');
+
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('sort_hint', $result['data']);
+    }
+
+    public function testSortHintIgnoredWhenFieldNotInSortableList(): void
+    {
+        $ai = new MockAiService('{"terms": ["gem", "rock"], "sort": {"field": "unknown_field", "direction": "desc"}}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price', 'date']);
+
+        $result = $handler->handleExpandQuery('most expensive stone');
+
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('sort_hint', $result['data']);
+    }
+
+    public function testSortHintIgnoredWhenDirectionInvalid(): void
+    {
+        $ai = new MockAiService('{"terms": ["gem", "rock"], "sort": {"field": "price", "direction": "invalid"}}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $result = $handler->handleExpandQuery('most expensive stone');
+
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('sort_hint', $result['data']);
+    }
+
+    public function testSortHintIgnoredWhenSortIsNotAnArray(): void
+    {
+        $ai = new MockAiService('{"terms": ["gem", "rock"], "sort": "price:desc"}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $result = $handler->handleExpandQuery('most expensive stone');
+
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('sort_hint', $result['data']);
+    }
+
+    public function testSortHintAscDirectionAllowed(): void
+    {
+        $ai = new MockAiService('{"terms": ["affordable", "budget"], "sort": {"field": "price", "direction": "asc"}}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $result = $handler->handleExpandQuery('cheapest stone');
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(['field' => 'price', 'direction' => 'asc'], $result['data']['sort_hint']);
+    }
+
+    public function testLegacyArrayResponseStillWorksWithSortableFields(): void
+    {
+        // Custom prompt or cached response may still return a JSON array — must parse without error.
+        $ai = new MockAiService('["gem", "gemstone", "mineral"]');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $result = $handler->handleExpandQuery('blue stones');
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(['gem', 'gemstone', 'mineral'], $result['data']['terms']);
+        $this->assertArrayNotHasKey('sort_hint', $result['data']);
+    }
+
+    // ===================================================================
+    // Sort hint — sortable fields in prompt
+    // ===================================================================
+
+    public function testSortableFieldsAppendedToPromptWhenConfigured(): void
+    {
+        $ai = new PromptCapturingAiService('{"terms": ["gem", "rock", "mineral"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price', 'date', 'rating']);
+
+        $handler->handleExpandQuery('test query');
+
+        $this->assertStringContainsString('price, date, rating', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('SORT INTENT', $ai->lastSystemPrompt);
+    }
+
+    public function testSortableFieldsNotAppendedWhenEmpty(): void
+    {
+        $ai = new PromptCapturingAiService('{"terms": ["gem", "rock", "mineral"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: []);
+
+        $handler->handleExpandQuery('test query');
+
+        $this->assertStringNotContainsString('SORT INTENT', $ai->lastSystemPrompt);
+        $this->assertStringNotContainsString('sortable', $ai->lastSystemPrompt);
+    }
+
+    // ===================================================================
+    // Sort hint — cache round-trip
+    // ===================================================================
+
+    public function testSortHintSurvivesCacheRoundTrip(): void
+    {
+        $cache = new InMemoryCacheDriver();
+        $ai = new MockAiService('{"terms": ["gem", "rock"], "sort": {"field": "price", "direction": "desc"}}');
+        $handler = $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600, sortableFields: ['price']);
+
+        // First call — populates cache.
+        $result1 = $handler->handleExpandQuery('most expensive stone');
+
+        // Second call — served from cache via a fresh handler (same cache).
+        $handler2 = $this->makeHandler(aiService: new MockAiService('should not be called'), cache: $cache, cacheTtl: 3600, sortableFields: ['price']);
+        $result2 = $handler2->handleExpandQuery('most expensive stone');
+
+        $this->assertEquals($result1['data'], $result2['data']);
+        $this->assertEquals(['field' => 'price', 'direction' => 'desc'], $result2['data']['sort_hint']);
     }
 
     // ===================================================================
@@ -668,6 +822,7 @@ class AiEndpointHandlerTest extends TestCase
         array $aiLanguages = ['en'],
         bool $aiExpandQuery = true,
         bool $aiSummarize = true,
+        array $sortableFields = [],
     ): AiEndpointHandler {
         return new AiEndpointHandler(
             aiService: $aiService ?? new MockAiService('["term1", "term2"]'),
@@ -679,6 +834,7 @@ class AiEndpointHandlerTest extends TestCase
             aiLanguages: $aiLanguages,
             aiExpandQuery: $aiExpandQuery,
             aiSummarize: $aiSummarize,
+            sortableFields: $sortableFields,
         );
     }
 }

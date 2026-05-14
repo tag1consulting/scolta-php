@@ -27,7 +27,7 @@ class DefaultPrompts
     private const TEMPLATES = [
         'expand_query' => 'You expand search queries for {SITE_NAME} {SITE_DESCRIPTION}.
 
-Return a JSON array of 2-4 alternative search terms. Do NOT include the original query — only return different phrasings that would find additional relevant content.
+Return a JSON object with a "terms" key containing 2-4 alternative search terms. Do NOT include the original query — only return different phrasings that would find additional relevant content.
 
 IMPORTANT RULES:
 1. Extract the KEY TOPIC from the query — ignore question words (what, who, how, why, where, when, is, are, etc.)
@@ -37,18 +37,18 @@ IMPORTANT RULES:
 5. For PERSON QUERIES: only return name variations — NOT job titles, roles, or descriptions. Keep terms SHORT.
 6. Include alternate terminology (technical + lay terms) where applicable.
 7. Include relevant category or department names when applicable.
-8. Return ONLY the JSON array. No explanation, no markdown, no wrapping.
+8. Return ONLY the JSON object. No explanation, no markdown, no wrapping.
 9. For AMBIGUOUS queries, favor the most literal and benign interpretation.
 10. NEVER escalate the tone beyond what the user expressed.
 11. For queries with AUDIENCE QUALIFIERS (kid-friendly, beginner, professional, etc.): focus expanded terms on the TOPIC, not the audience. "Kid friendly desserts" → expand "desserts" into ["easy baking recipes", "simple sweets", "no-bake treats"], NOT "children" or "family". The audience qualifier should stay implicit in the phrasing, not become a standalone search term.
 12. For CONSTRAINT QUERIES ("without X," "X-free," "no X," "can\'t have X," "vegetarian," "gluten-free," "dairy-free," etc.): preserve the constraint in your expansions. "Without eggs" → ["egg-free baking", "vegan baking recipes", "eggless recipes"]. Do NOT drop the constraint and expand only the general topic.
 
 Examples:
-- "customer support" → ["help desk", "customer service", "support center", "contact us"]
-- "product pricing" → ["cost", "pricing plans", "rates", "subscription tiers"]
-- "who is Jane Smith" → ["Jane Smith", "Smith"]
-- "recipes without eggs" → ["egg-free baking", "vegan baking", "eggless recipes"]
-- "gluten-free desserts" → ["gluten-free baking", "celiac safe sweets", "wheat-free pastry"]',
+- "customer support" → {"terms": ["help desk", "customer service", "support center", "contact us"]}
+- "product pricing" → {"terms": ["cost", "pricing plans", "rates", "subscription tiers"]}
+- "who is Jane Smith" → {"terms": ["Jane Smith", "Smith"]}
+- "recipes without eggs" → {"terms": ["egg-free baking", "vegan baking", "eggless recipes"]}
+- "gluten-free desserts" → {"terms": ["gluten-free baking", "celiac safe sweets", "wheat-free pastry"]}',
 
         'summarize' => 'You are a search assistant for the {SITE_NAME} {SITE_DESCRIPTION}. You behave like a knowledgeable expert who has reviewed the search results and curates the best answers — not a narrator reading results back to the user.
 
