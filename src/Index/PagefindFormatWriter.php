@@ -320,7 +320,7 @@ class PagefindFormatWriter
             $this->cbor->encodeArray($pageItems),
             $this->cbor->encodeArray($chunkItems),
             $this->cbor->encodeArray($filterItems),
-            $this->cbor->encodeArray([]),  // sorts (not used by Scolta)
+            $this->buildSortsArray($pages),
             $this->cbor->encodeArray($metaFieldItems),
         ]);
     }
@@ -366,6 +366,58 @@ class PagefindFormatWriter
         }
 
         return $result;
+    }
+
+    /**
+     * Build CBOR sorts array for pf_meta position [4].
+     *
+     * For each sort field, produces a pre-sorted array of page indices ordered
+     * by that field's value. Numeric values are sorted numerically; non-numeric
+     * values are sorted lexicographically. Pages that lack a value for a given
+     * sort field are excluded from that field's sorted index.
+     *
+     * Returns an empty CBOR array when no pages have sortable field values,
+     * preserving backward compatibility with sites that have no sort fields.
+     */
+    private function buildSortsArray(array $pages): string
+    {
+        $sortFields = [];
+        foreach ($pages as $pageNum => $page) {
+            foreach ($page['sortable'] ?? [] as $field => $value) {
+                $sortFields[$field][$pageNum] = (string) $value;
+            }
+        }
+
+        if (empty($sortFields)) {
+            return $this->cbor->encodeArray([]);
+        }
+
+        $sortItems = [];
+        foreach ($sortFields as $field => $pageValues) {
+            $allNumeric = array_reduce(
+                $pageValues,
+                fn (bool $carry, string $v) => $carry && is_numeric($v),
+                true,
+            );
+
+            if ($allNumeric) {
+                asort($pageValues, SORT_NUMERIC);
+            } else {
+                asort($pageValues, SORT_STRING);
+            }
+
+            $sortedPageIndices = array_map(
+                fn (int $p) => $this->cbor->encodeUint($p),
+                array_keys($pageValues),
+            );
+
+            $sortItems[] = $this->cbor->encodeArray([
+                $this->cbor->encodeString($field),
+                $this->cbor->encodeArray($sortedPageIndices),
+            ]);
+        }
+
+        return $this->cbor->encodeArray($sortItems);
     }
 
     /**

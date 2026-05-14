@@ -151,6 +151,7 @@ class InvertedIndexBuilder
         $pageNum = $pageOffset;
 
         foreach ($tokenDataList as ['item' => $item, 'tokenData' => $tokenData]) {
+            $itemSortable = $item->sortable ?? [];
             $pages[$pageNum] = [
                 'id'        => $item->id,
                 'url'       => $item->url,
@@ -166,7 +167,8 @@ class InvertedIndexBuilder
                 'meta'      => array_filter([
                     'title' => $tokenData['cleanTitle'],
                     'date'  => $item->date,
-                ]),
+                ] + $itemSortable),
+                'sortable'  => $itemSortable,
                 'hash'      => hash('sha256', $tokenData['content']),
             ];
 
