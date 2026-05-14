@@ -23,6 +23,8 @@ class PagefindHtmlBuilder
         string $siteName = '',
         string $language = 'en',
         array $filters = [],
+        array $metadata = [],
+        array $sortable = [],
     ): string {
         $escapedTitle = htmlspecialchars($title, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $escapedBody = htmlspecialchars($body, ENT_QUOTES | ENT_HTML5, 'UTF-8');
@@ -50,6 +52,20 @@ class PagefindHtmlBuilder
             $extraFilters .= sprintf('<span data-pagefind-filter="%s:%s" hidden></span>' . "\n", $escapedKey, $escapedValue);
         }
 
+        $extraMeta = '';
+        foreach ($metadata as $key => $value) {
+            $escapedKey = htmlspecialchars((string) $key, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $escapedValue = htmlspecialchars((string) $value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $extraMeta .= sprintf('<p data-pagefind-meta="%s:%s" hidden></p>' . "\n", $escapedKey, $escapedValue);
+        }
+
+        $sortAttrs = '';
+        foreach ($sortable as $key => $value) {
+            $escapedKey = htmlspecialchars((string) $key, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $escapedValue = htmlspecialchars((string) $value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $sortAttrs .= sprintf('<p data-pagefind-sort="%s:%s" hidden></p>' . "\n", $escapedKey, $escapedValue);
+        }
+
         return sprintf(
             '<!DOCTYPE html>
 <html lang="%s">
@@ -60,7 +76,7 @@ class PagefindHtmlBuilder
 <body data-pagefind-body id="%s"%s>
 <h1>%s</h1>
 <p data-pagefind-meta="url:%s" hidden></p>
-%s%s%s%s
+%s%s%s%s%s%s
 </body>
 </html>',
             $escapedLang,
@@ -72,6 +88,8 @@ class PagefindHtmlBuilder
             $dateMeta,
             $langFilter,
             $extraFilters,
+            $extraMeta,
+            $sortAttrs,
             $escapedBody
         );
     }

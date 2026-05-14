@@ -36,6 +36,13 @@ class ContentItem
          *  e.g. ['base_topic' => 'Cardiology']. Values pass directly into
          *  data-pagefind-filter — they bypass HtmlCleaner so HTML is not stripped. */
         public readonly array $filters = [],
+        /** Key-value metadata pairs emitted as data-pagefind-meta attributes.
+         *  Use for typed fields (numeric, date) that support faceting or display.
+         *  e.g. ['price' => '29.99', 'published' => '2024-06-15']. */
+        public readonly array $metadata = [],
+        /** Key-value pairs emitted as both data-pagefind-meta and data-pagefind-sort.
+         *  e.g. ['price' => '29.99', 'rating' => '4.5']. */
+        public readonly array $sortable = [],
     ) {
         // Strip scheme and host so the baked-in URL works on any domain.
         // An index built on DDEV (https://myapp.ddev.site/path) must serve

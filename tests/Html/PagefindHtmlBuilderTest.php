@@ -172,4 +172,99 @@ class PagefindHtmlBuilderTest extends TestCase
         // Only site (absent) and language filters — no extra spans.
         $this->assertSame(1, substr_count($html, 'data-pagefind-filter='));
     }
+
+    public function testMetadataEmitted(): void
+    {
+        $html = PagefindHtmlBuilder::build(
+            id: 'doc-10',
+            title: 'Test',
+            body: 'Body',
+            url: 'https://example.com',
+            metadata: ['price' => '29.99', 'rating' => '4.5'],
+        );
+
+        $this->assertStringContainsString('data-pagefind-meta="price:29.99"', $html);
+        $this->assertStringContainsString('data-pagefind-meta="rating:4.5"', $html);
+    }
+
+    public function testMetadataValuesAreEscaped(): void
+    {
+        $html = PagefindHtmlBuilder::build(
+            id: 'doc-11',
+            title: 'Test',
+            body: 'Body',
+            url: 'https://example.com',
+            metadata: ['note' => 'Tom & Jerry <b>'],
+        );
+
+        $this->assertStringContainsString('data-pagefind-meta="note:Tom &amp; Jerry &lt;b&gt;"', $html);
+    }
+
+    public function testEmptyMetadataProducesNoExtraElements(): void
+    {
+        $html = PagefindHtmlBuilder::build(
+            id: 'doc-12',
+            title: 'Test',
+            body: 'Body',
+            url: 'https://example.com',
+            date: '2024-01-01',
+        );
+
+        // Only the built-in url and date meta — no extras.
+        $this->assertSame(2, substr_count($html, 'data-pagefind-meta='));
+    }
+
+    public function testSortableEmitted(): void
+    {
+        $html = PagefindHtmlBuilder::build(
+            id: 'doc-13',
+            title: 'Test',
+            body: 'Body',
+            url: 'https://example.com',
+            sortable: ['price' => '29.99', 'rating' => '4.5'],
+        );
+
+        $this->assertStringContainsString('data-pagefind-sort="price:29.99"', $html);
+        $this->assertStringContainsString('data-pagefind-sort="rating:4.5"', $html);
+    }
+
+    public function testSortableValuesAreEscaped(): void
+    {
+        $html = PagefindHtmlBuilder::build(
+            id: 'doc-14',
+            title: 'Test',
+            body: 'Body',
+            url: 'https://example.com',
+            sortable: ['field' => 'a & b'],
+        );
+
+        $this->assertStringContainsString('data-pagefind-sort="field:a &amp; b"', $html);
+    }
+
+    public function testEmptySortableProducesNoSortAttributes(): void
+    {
+        $html = PagefindHtmlBuilder::build(
+            id: 'doc-15',
+            title: 'Test',
+            body: 'Body',
+            url: 'https://example.com',
+        );
+
+        $this->assertStringNotContainsString('data-pagefind-sort=', $html);
+    }
+
+    public function testMetadataAndSortableCanCoexist(): void
+    {
+        $html = PagefindHtmlBuilder::build(
+            id: 'doc-16',
+            title: 'Test',
+            body: 'Body',
+            url: 'https://example.com',
+            metadata: ['published' => '2024-06-15'],
+            sortable: ['price' => '9.99'],
+        );
+
+        $this->assertStringContainsString('data-pagefind-meta="published:2024-06-15"', $html);
+        $this->assertStringContainsString('data-pagefind-sort="price:9.99"', $html);
+    }
 }

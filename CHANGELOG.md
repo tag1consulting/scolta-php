@@ -6,7 +6,10 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
-_No changes yet._
+### Added
+- **`ContentItem` now supports `metadata` and `sortable` fields.** `ContentItem` accepts two new optional arrays: `metadata` (key-value pairs emitted as `data-pagefind-meta` attributes) and `sortable` (key-value pairs emitted as `data-pagefind-sort` attributes). Both default to `[]` so existing adapters are unaffected. ([#92](https://github.com/tag1consulting/scolta-php/issues/92))
+- **`PagefindHtmlBuilder::build()` emits `data-pagefind-meta` and `data-pagefind-sort` attributes.** Accepts new `metadata` and `sortable` array parameters; values are HTML-escaped and written as hidden `<p>` elements in the generated document. ([#92](https://github.com/tag1consulting/scolta-php/issues/92))
+- **`ScoltaConfig::$sortableFields` added (default `[]`).** CMS adapters read this list to determine which fields to extract into `ContentItem::$sortable`. Empty by default — no sort attributes are emitted unless the site explicitly configures this. ([#92](https://github.com/tag1consulting/scolta-php/issues/92))
 
 ## [1.0.0-rc3] - 2026-05-13
 
