@@ -148,6 +148,7 @@ final class IndexBuildOrchestrator
                             'siteName' => $page->siteName,
                             'language' => $page->language,
                             'filters'  => $page->filters,
+                            'sortable' => $page->sortable,
                         ], 'tokenData' => $tokenData];
                     }
                 }
