@@ -50,6 +50,9 @@ class StreamingFormatWriter
     /** Meta field names seen across all pages. */
     private array $collectedMetaFields = ['title' => true];
 
+    /** pageNum → [field => value] — accumulated for building pf_meta sorts. */
+    private array $sortableData = [];
+
     // ── Current open index-chunk state ─────────────────────────────────────
 
     /** CBOR-encoded word entries for the chunk being accumulated. */
@@ -96,6 +99,7 @@ class StreamingFormatWriter
 
         $this->pageMeta             = [];
         $this->filterData           = [];
+        $this->sortableData         = [];
         $this->collectedMetaFields  = ['title' => true];
         $this->currentChunkItems    = [];
         $this->currentChunkWords    = [];
@@ -143,6 +147,11 @@ class StreamingFormatWriter
         // Accumulate filter data (typically one 'site' key per page).
         foreach ($pageData['filters'] ?? [] as $filterName => $filterValue) {
             $this->filterData[$filterName][$filterValue][] = $pageNum;
+        }
+
+        // Accumulate sortable values for pf_meta sorts (position [4]).
+        if (!empty($pageData['sortable'])) {
+            $this->sortableData[$pageNum] = $pageData['sortable'];
         }
 
         // Track meta field names so pf_meta has the correct field list.
@@ -346,9 +355,58 @@ class StreamingFormatWriter
             $this->cbor->encodeArray($pageItems),
             $this->cbor->encodeArray($chunkItems),
             $this->cbor->encodeArray($filterItems),
-            $this->cbor->encodeArray([]),       // sorts (unused by Scolta)
+            $this->buildSortsArray(),
             $this->cbor->encodeArray($metaFieldItems),
         ]);
+    }
+
+    /**
+     * Build CBOR sorts array for pf_meta position [4].
+     *
+     * For each sort field, produces a pre-sorted array of page indices ordered
+     * by that field's value. Numeric values are sorted numerically; non-numeric
+     * values are sorted lexicographically. Pages missing a value for a given
+     * sort field are excluded from that field's sorted index.
+     */
+    private function buildSortsArray(): string
+    {
+        $sortFields = [];
+        foreach ($this->sortableData as $pageNum => $fields) {
+            foreach ($fields as $field => $value) {
+                $sortFields[$field][$pageNum] = (string) $value;
+            }
+        }
+
+        if (empty($sortFields)) {
+            return $this->cbor->encodeArray([]);
+        }
+
+        $sortItems = [];
+        foreach ($sortFields as $field => $pageValues) {
+            $allNumeric = array_reduce(
+                $pageValues,
+                fn (bool $carry, string $v) => $carry && is_numeric($v),
+                true,
+            );
+
+            if ($allNumeric) {
+                asort($pageValues, SORT_NUMERIC);
+            } else {
+                asort($pageValues, SORT_STRING);
+            }
+
+            $sortedPageIndices = array_map(
+                fn (int $p) => $this->cbor->encodeUint($p),
+                array_keys($pageValues),
+            );
+
+            $sortItems[] = $this->cbor->encodeArray([
+                $this->cbor->encodeString($field),
+                $this->cbor->encodeArray($sortedPageIndices),
+            ]);
+        }
+
+        return $this->cbor->encodeArray($sortItems);
     }
 
     /**
