@@ -413,6 +413,57 @@ class AiEndpointHandlerTest extends TestCase
     }
 
     // ===================================================================
+    // Sort hint — prompt content (false positive guard)
+    // ===================================================================
+
+    public function testSortIntentPromptForbidsSuperlativeQualifiers(): void
+    {
+        $ai = new PromptCapturingAiService('{"terms": ["gem", "rock", "mineral"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $handler->handleExpandQuery('test query');
+
+        $this->assertStringContainsString(
+            'SUPERLATIVES AS QUALIFIERS',
+            $ai->lastSystemPrompt,
+            'Sort intent prompt must explicitly address superlatives used as qualifiers'
+        );
+        $this->assertStringContainsString(
+            'most popular',
+            $ai->lastSystemPrompt,
+            'Sort intent prompt must list "most popular" as a counter-example'
+        );
+    }
+
+    public function testSortIntentPromptRequiresSemanticFieldMatch(): void
+    {
+        $ai = new PromptCapturingAiService('{"terms": ["gem", "rock"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price', 'date']);
+
+        $handler->handleExpandQuery('test');
+
+        $this->assertMatchesRegularExpression(
+            '/semantically? map|direct.*semantic|semantic.*match/i',
+            $ai->lastSystemPrompt,
+            'Sort intent prompt must require a semantic match between the sort signal and the field'
+        );
+    }
+
+    public function testSortIntentPromptPrefersFalseNegatives(): void
+    {
+        $ai = new PromptCapturingAiService('{"terms": ["gem", "rock"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $handler->handleExpandQuery('test');
+
+        $this->assertMatchesRegularExpression(
+            '/false negative|prefer.*omit|uncertain.*omit|when.*doubt.*omit/i',
+            $ai->lastSystemPrompt,
+            'Sort intent prompt must instruct the LLM to prefer omitting the sort key over false positives'
+        );
+    }
+
+    // ===================================================================
     // Sort hint — cache round-trip
     // ===================================================================
 
