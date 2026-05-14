@@ -282,4 +282,55 @@ class InvertedIndexBuilderTest extends TestCase
         $this->assertSame('/page', $page['url']);
         $this->assertArrayNotHasKey('url', $page['meta']);
     }
+
+    public function testSortableFieldsStoredInPageMetaAndSortable(): void
+    {
+        $item = new ContentItem(
+            id: 'doc-1',
+            title: 'Amethyst Ring',
+            bodyHtml: '<p>Beautiful gemstone ring at a great price, well worth buying.</p>',
+            url: 'https://example.com/ring',
+            date: '2026-01-01',
+            sortable: ['price' => '42.99'],
+        );
+        $result = $this->builder->build([$item]);
+
+        $page = array_values($result['pages'])[0];
+        $this->assertSame('42.99', $page['meta']['price']);
+        $this->assertSame(['price' => '42.99'], $page['sortable']);
+    }
+
+    public function testNoSortableFieldsProducesEmptySortable(): void
+    {
+        $result = $this->builder->build([
+            $this->makeItem('doc-1', 'Plain Page', 'Some plain content without any sort fields configured at all.'),
+        ]);
+
+        $page = array_values($result['pages'])[0];
+        $this->assertSame([], $page['sortable']);
+        $this->assertArrayNotHasKey('price', $page['meta']);
+        $this->assertArrayNotHasKey('rating', $page['meta']);
+    }
+
+    public function testSortableAndMetadataFieldsCoexist(): void
+    {
+        $item = new ContentItem(
+            id: 'doc-1',
+            title: 'Product',
+            bodyHtml: '<p>A product with both metadata and sortable fields configured.</p>',
+            url: 'https://example.com/product',
+            date: '2026-01-01',
+            metadata: ['sku' => 'GEM-001'],
+            sortable: ['price' => '29.99', 'rating' => '4.5'],
+        );
+        $result = $this->builder->build([$item]);
+
+        $page = array_values($result['pages'])[0];
+        // Sortable fields appear in both meta (for fragment JSON) and sortable (for sorts array).
+        $this->assertSame('29.99', $page['meta']['price']);
+        $this->assertSame('4.5', $page['meta']['rating']);
+        $this->assertSame(['price' => '29.99', 'rating' => '4.5'], $page['sortable']);
+        // Title and date are always present.
+        $this->assertSame('Product', $page['meta']['title']);
+    }
 }
