@@ -381,7 +381,7 @@ class IndexBuildOrchestratorTest extends TestCase
         $outputDirWithSuffix = $this->outputDir . '/pagefind';
         mkdir($outputDirWithSuffix, 0755, true);
 
-        $logger       = new class extends \Psr\Log\AbstractLogger {
+        $logger       = new class () extends \Psr\Log\AbstractLogger {
             public array $warnings = [];
             public function log($level, string|\Stringable $message, array $context = []): void
             {
@@ -402,7 +402,7 @@ class IndexBuildOrchestratorTest extends TestCase
 
     public function testOutputDirWithoutSuffixLogsNoWarning(): void
     {
-        $logger = new class extends \Psr\Log\AbstractLogger {
+        $logger = new class () extends \Psr\Log\AbstractLogger {
             public array $warnings = [];
             public function log($level, string|\Stringable $message, array $context = []): void
             {

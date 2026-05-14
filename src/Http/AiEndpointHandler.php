@@ -416,7 +416,7 @@ class AiEndpointHandler
             . "- Do NOT classify sort intent for research questions, conversational queries, or any query where the sort-like word is a modifier rather than the main goal.\n"
             . "  Counter-examples (must NOT trigger sort): 'most popular crystals', 'the latest research on...', 'most common git commands', 'best practices for...', 'cheapest way to comply with...', 'first aid for...'\n"
             . "- Prefer false negatives over false positives: a missed sort hint is far less harmful than an incorrect result reorder. When uncertain, ALWAYS omit the \"sort\" key.\n"
-            . "- When sort is detected, exclude the sort signal words (most, cheapest, newest, highest, lowest, etc.) from the expanded terms";
+            . '- When sort is detected, exclude the sort signal words (most, cheapest, newest, highest, lowest, etc.) from the expanded terms';
 
         return $prompt;
     }
