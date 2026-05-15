@@ -153,9 +153,9 @@ class PostingListValidityTest extends TestCase
             $allTokens = $this->tokenizer->tokenize($content);
             $picked = [];
             foreach ($allTokens as $token) {
-                $stemmed = $this->stemmer->stem($token['stem']);
+                $stemmed = $this->stemmer->stem($token->stem);
                 if ($stemmed !== '' && strlen($stemmed) > 3 && ctype_alpha($stemmed)) {
-                    $picked[$stemmed] = $token['stem'];
+                    $picked[$stemmed] = $token->stem;
                     if (count($picked) >= 5) {
                         break;
                     }
@@ -332,7 +332,7 @@ class PostingListValidityTest extends TestCase
         $tokens = $this->tokenizer->tokenize($text);
         $stemmed = [];
         foreach ($tokens as $token) {
-            $s = $this->stemmer->stem($token['stem']);
+            $s = $this->stemmer->stem($token->stem);
             if ($s !== '') {
                 $stemmed[] = $s;
             }

@@ -10,6 +10,7 @@ use Tag1\Scolta\Index\BuildIntent;
 use Tag1\Scolta\Index\IndexBuildOrchestrator;
 use Tag1\Scolta\Index\MemoryBudget;
 use Tag1\Scolta\Index\PhpIndexer;
+use Tag1\Scolta\Index\Token;
 
 /**
  * Tests for the page-word cache in PhpIndexer and IndexBuildOrchestrator.
@@ -95,7 +96,7 @@ class PageWordCacheTest extends TestCase
                 continue;
             }
             $chunkRaw = file_get_contents($chunkFile);
-            $chunkData = @unserialize($chunkRaw, ['allowed_classes' => false]);
+            $chunkData = @unserialize($chunkRaw, ['allowed_classes' => [Token::class]]);
             if (!is_array($chunkData)) {
                 continue;
             }
@@ -159,7 +160,7 @@ class PageWordCacheTest extends TestCase
         $chunkFile = $this->chunkDir()
             . '/chunk-' . str_pad((string) $chunkNum, 6, '0', STR_PAD_LEFT) . '.php';
         $chunkRaw = file_get_contents($chunkFile);
-        $chunkData = unserialize($chunkRaw, ['allowed_classes' => false]);
+        $chunkData = unserialize($chunkRaw, ['allowed_classes' => [Token::class]]);
 
         $chunkData[$hash][$field] = $value;
         file_put_contents($chunkFile, serialize($chunkData));
@@ -339,7 +340,7 @@ class PageWordCacheTest extends TestCase
 
         // Unchanged item keeps its original cache entry.
         $this->assertArrayHasKey($keyA, $cache2, 'Unchanged item must remain in cache');
-        $this->assertSame($cache1[$keyA], $cache2[$keyA], 'Unchanged item cache entry must be identical');
+        $this->assertEquals($cache1[$keyA], $cache2[$keyA], 'Unchanged item cache entry must be identical');
         $this->assertCount(2, $cache2, 'Cache should have exactly 2 entries (unchanged + new)');
     }
 

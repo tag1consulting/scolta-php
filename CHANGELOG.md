@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Fixed
+- **OOM crash on large corpus builds eliminated.** Wikipedia demo (6,931 pages) was hitting the PHP 512 MB memory limit every ~250 pages, requiring 5+ crash-resume cycles. Two changes: (1) per-token associative arrays are replaced with a `final readonly Token` class — PHP allocates 3-key arrays with 8 buckets (next power of two), wasting 5 slots at ~32 B each; Token objects use ~126 B vs ~399 B per token, a 3.2× reduction; (2) `mb_strtolower`/`normalize` results are memoized per `tokenize()` call, deduplicating string allocations for repeated words (~31 MB savings on the Wikipedia corpus). Combined peak memory drops from ~500 MB to ~150–180 MB; the Wikipedia demo now builds in a single pass. `PageWordCache` detects pre-1.0.0 cache entries and discards them so pages are re-tokenized cleanly on upgrade. Analysis by @sj-i using Reli. ([#87](https://github.com/tag1consulting/scolta-php/issues/87))
+
 ### Added
 - **`ContentItem::cloneWith()` method for safe field-level overriding.** CMS integrations that reconstruct a `ContentItem` to modify one field (e.g., a WordPress mu-plugin enriching `bodyHtml`) silently drop any fields they don't explicitly copy — including `metadata` and `sortable` added in scolta-php#92. `cloneWith(array $overrides = [])` copies all fields from the current item and replaces only those present in `$overrides`. Use `$item = $item->cloneWith(['bodyHtml' => $enrichedHtml])` instead of constructing a new `ContentItem` from scratch.
 
