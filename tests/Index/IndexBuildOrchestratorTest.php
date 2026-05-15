@@ -421,6 +421,128 @@ class IndexBuildOrchestratorTest extends TestCase
         $this->assertEmpty($pagefindWarnings, 'No /pagefind normalization warning expected for a correct output_dir');
     }
 
+    // -------------------------------------------------------------------
+    // gc_mem_caches() availability
+    // -------------------------------------------------------------------
+
+    public function testGcMemCachesIsAvailableOnPhp83(): void
+    {
+        if (PHP_VERSION_ID < 80300) {
+            $this->markTestSkipped('gc_mem_caches() requires PHP 8.3+');
+        }
+
+        $this->assertTrue(function_exists('gc_mem_caches'), 'gc_mem_caches() must exist on PHP 8.3+');
+    }
+
+    // -------------------------------------------------------------------
+    // Voluntary memory-aware restart
+    // -------------------------------------------------------------------
+
+    public function testBuildYieldsWithMemoryAbortWhenPressureDetected(): void
+    {
+        // Use more pages than one chunk and force the pressure probe to trigger
+        // after the first committed chunk.
+        $probeCallCount = 0;
+        $orchestrator = new IndexBuildOrchestrator(
+            $this->stateDir,
+            $this->outputDir,
+            memoryPressureProbe: function () use (&$probeCallCount): bool {
+                // Yield on the first pressure check (after chunk 0 is committed).
+                return ++$probeCallCount === 1;
+            },
+        );
+
+        $budget = MemoryBudget::conservative()->withChunkSize(2);
+        $items  = $this->makeItems(10);
+        $intent = BuildIntent::fresh(10, $budget);
+
+        $report = $orchestrator->build($intent, $items);
+
+        $this->assertFalse($report->success);
+        $this->assertSame('memory_abort', $report->error);
+        $this->assertGreaterThan(0, $report->chunksWritten);
+        $this->assertGreaterThan(0, $report->pagesProcessed);
+    }
+
+    public function testVoluntaryYieldPreservesStateForResume(): void
+    {
+        // Step 1: build with forced yield after first chunk.
+        $orchestrator = new IndexBuildOrchestrator(
+            $this->stateDir,
+            $this->outputDir,
+            memoryPressureProbe: static fn () => true,
+        );
+
+        $budget = MemoryBudget::conservative()->withChunkSize(3);
+        $items  = $this->makeItems(9);
+        $intent = BuildIntent::fresh(9, $budget);
+
+        $firstReport = $orchestrator->build($intent, $items);
+
+        $this->assertSame('memory_abort', $firstReport->error);
+        // Chunk files must be on disk for resume to work.
+        $this->assertGreaterThan(0, $firstReport->chunksWritten);
+    }
+
+    public function testResumeAfterVoluntaryYieldProducesCompleteIndex(): void
+    {
+        $budget  = MemoryBudget::conservative()->withChunkSize(3);
+        $allItems = $this->makeItems(9);
+        $total   = 9;
+
+        // Step 1: single-pass reference build.
+        $refStateDir  = sys_get_temp_dir() . '/scolta-ref-state-' . uniqid('', true);
+        $refOutputDir = sys_get_temp_dir() . '/scolta-ref-out-' . uniqid('', true);
+        mkdir($refStateDir, 0755, true);
+        mkdir($refOutputDir, 0755, true);
+
+        $refOrch = new IndexBuildOrchestrator($refStateDir, $refOutputDir);
+        $refReport = $refOrch->build(BuildIntent::fresh($total, $budget), $allItems);
+        $this->assertTrue($refReport->success, 'Reference build must succeed: ' . ($refReport->error ?? ''));
+
+        // Step 2: multi-cycle build via voluntary yield.
+        $yieldCycles = 0;
+        $maxCycles   = 20;
+        $pagesCommitted = 0;
+
+        do {
+            $probeHasFired = false;
+            $orch = new IndexBuildOrchestrator(
+                $this->stateDir,
+                $this->outputDir,
+                memoryPressureProbe: function () use (&$probeHasFired): bool {
+                    // Yield exactly once per build() invocation.
+                    if (!$probeHasFired) {
+                        $probeHasFired = true;
+                        return true;
+                    }
+                    return false;
+                },
+            );
+
+            $mode   = $yieldCycles === 0 ? BuildIntent::fresh($total, $budget) : BuildIntent::resume($budget);
+            $offset = $pagesCommitted;
+            $slice  = array_slice($allItems, $offset);
+
+            $report = $orch->build($mode, $slice);
+            $yieldCycles++;
+
+            if ($report->error === 'memory_abort') {
+                $pagesCommitted = $report->pagesProcessed;
+            }
+        } while ($report->error === 'memory_abort' && $yieldCycles < $maxCycles);
+
+        $this->assertTrue($report->success, 'Multi-cycle build must ultimately succeed: ' . ($report->error ?? ''));
+
+        // The final index must contain the same fragment files as the reference.
+        $refFragments  = glob($refOutputDir . '/pagefind/fragment/*.pf_fragment') ?: [];
+        $testFragments = glob($this->outputDir . '/pagefind/fragment/*.pf_fragment') ?: [];
+        $this->assertCount(count($refFragments), $testFragments, 'Fragment count must match single-pass reference');
+
+        $this->removeDir($refStateDir);
+        $this->removeDir($refOutputDir);
+    }
+
     private function removeDir(string $dir): void
     {
         if (!is_dir($dir)) {
