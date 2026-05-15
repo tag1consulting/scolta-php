@@ -65,6 +65,12 @@ class PagefindHtmlBuilder
             $escapedValue = htmlspecialchars((string) $value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
             $sortAttrs .= sprintf('<p data-pagefind-sort="%s:%s" hidden></p>' . "\n", $escapedKey, $escapedValue);
         }
+        if ($date !== '' && !isset($sortable['date'])) {
+            $sortAttrs .= sprintf(
+                '<p data-pagefind-sort="date:%s" hidden></p>' . "\n",
+                htmlspecialchars($date, ENT_QUOTES | ENT_HTML5, 'UTF-8')
+            );
+        }
 
         return sprintf(
             '<!DOCTYPE html>

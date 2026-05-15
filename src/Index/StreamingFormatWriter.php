@@ -150,8 +150,12 @@ class StreamingFormatWriter
         }
 
         // Accumulate sortable values for pf_meta sorts (position [4]).
-        if (!empty($pageData['sortable'])) {
-            $this->sortableData[$pageNum] = $pageData['sortable'];
+        $sortableData = $pageData['sortable'] ?? [];
+        if (!empty($pageData['date']) && !isset($sortableData['date'])) {
+            $sortableData['date'] = $pageData['date'];
+        }
+        if (!empty($sortableData)) {
+            $this->sortableData[$pageNum] = $sortableData;
         }
 
         // Track meta field names so pf_meta has the correct field list.
