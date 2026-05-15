@@ -29,6 +29,7 @@ final class CachedContentReference
      * @param string  $siteName    Site name for the index entry.
      * @param string  $language    BCP-47 language code.
      * @param array   $filters     Pagefind filter key/value pairs.
+     * @param array   $sortable    Sortable field values (e.g. ['word_count' => 4200]).
      */
     public function __construct(
         public readonly string $entityKey,
@@ -39,6 +40,7 @@ final class CachedContentReference
         public readonly string $siteName,
         public readonly string $language,
         public readonly array $filters,
+        public readonly array $sortable = [],
     ) {
     }
 }

@@ -7,11 +7,14 @@ namespace Tag1\Scolta\Tests\Index;
 use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\Export\ContentItem;
 use Tag1\Scolta\Index\BuildIntent;
+use Tag1\Scolta\Index\CachedContentReference;
 use Tag1\Scolta\Index\IndexBuildOrchestrator;
 use Tag1\Scolta\Index\MemoryBudget;
+use Tag1\Scolta\Index\PhpIndexer;
 use Tag1\Scolta\Index\StatusReport;
 use Tag1\Scolta\Storage\FilesystemDriver;
 use Tag1\Scolta\Storage\StorageDriverInterface;
+use Tag1\Scolta\Tests\Support\CborDecoder;
 
 class IndexBuildOrchestratorTest extends TestCase
 {
@@ -541,6 +544,60 @@ class IndexBuildOrchestratorTest extends TestCase
 
         $this->removeDir($refStateDir);
         $this->removeDir($refOutputDir);
+    }
+
+    // -------------------------------------------------------------------
+    // CachedContentReference sortable passthrough
+    // -------------------------------------------------------------------
+
+    public function testCachedContentReferenceCarriesSortableIntoIndex(): void
+    {
+        // Build 1: fresh index with ContentItem that has sortable data.
+        // This populates the PageWordCache with token data for the item.
+        $item = new ContentItem(
+            id: 'article-1',
+            title: 'Test Article',
+            bodyHtml: '<p>Wikipedia featured article about quantum physics with many references to notable works.</p>',
+            url: '/node/1',
+            date: '2024-01-01',
+            siteName: 'Test',
+            sortable: ['word_count' => 5000, 'reference_count' => 42],
+        );
+
+        $orch1  = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
+        $intent = BuildIntent::fresh(1, MemoryBudget::conservative());
+        $report = $orch1->build($intent, [$item]);
+        $this->assertTrue($report->success, 'Build 1 must succeed: ' . ($report->error ?? ''));
+
+        // Build 2: simulate an incremental rebuild using CachedContentReference.
+        // Same stateDir → PageWordCache loaded into memory before cleanup() wipes disk files.
+        $hash = PhpIndexer::contentHash($item);
+        $ref  = new CachedContentReference(
+            entityKey: '1',
+            contentHash: $hash,
+            id: 'article-1',
+            url: '/node/1',
+            date: '2024-01-01',
+            siteName: 'Test',
+            language: 'en',
+            filters: [],
+            sortable: ['word_count' => 5000, 'reference_count' => 42],
+        );
+
+        $orch2   = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
+        $intent2 = BuildIntent::fresh(1, MemoryBudget::conservative());
+        $report2 = $orch2->build($intent2, [$ref]);
+        $this->assertTrue($report2->success, 'Build 2 must succeed: ' . ($report2->error ?? ''));
+
+        // Verify the output pf_meta contains sort data for both fields.
+        $metaFiles = glob($this->outputDir . '/pagefind/pagefind.*.pf_meta') ?: [];
+        $this->assertCount(1, $metaFiles, 'Expected one pf_meta file');
+        $decoded = CborDecoder::decodePfFile($metaFiles[0]);
+        $sorts   = $decoded[4];
+
+        $sortFieldNames = array_column($sorts, 0);
+        $this->assertContains('word_count', $sortFieldNames, 'word_count sort data must be in the index');
+        $this->assertContains('reference_count', $sortFieldNames, 'reference_count sort data must be in the index');
     }
 
     private function removeDir(string $dir): void
