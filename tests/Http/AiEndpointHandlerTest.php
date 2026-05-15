@@ -464,6 +464,116 @@ class AiEndpointHandlerTest extends TestCase
     }
 
     // ===================================================================
+    // Subject terms — parsing
+    // ===================================================================
+
+    public function testSubjectTermsParsedWhenPresentWithSort(): void
+    {
+        $ai = new MockAiService('{"terms": ["gem", "gemstone"], "sort": {"field": "price", "direction": "desc"}, "subject_terms": ["tooth"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $result = $handler->handleExpandQuery('most expensive tooth');
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(['tooth'], $result['data']['subject_terms']);
+        $this->assertArrayHasKey('sort_hint', $result['data']);
+    }
+
+    public function testSubjectTermsMultipleWords(): void
+    {
+        $ai = new MockAiService('{"terms": ["gemstone", "mineral"], "sort": {"field": "price", "direction": "asc"}, "subject_terms": ["blue stone"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $result = $handler->handleExpandQuery('cheapest blue stone');
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(['blue stone'], $result['data']['subject_terms']);
+    }
+
+    public function testSubjectTermsAbsentWhenOnlySortIntent(): void
+    {
+        // "most expensive" — no subject — LLM returns empty subject_terms.
+        $ai = new MockAiService('{"terms": ["high price", "costly"], "sort": {"field": "price", "direction": "desc"}, "subject_terms": []}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $result = $handler->handleExpandQuery('most expensive');
+
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('subject_terms', $result['data']);
+    }
+
+    public function testSubjectTermsAbsentWhenOmittedByLlm(): void
+    {
+        // LLM didn't return subject_terms at all.
+        $ai = new MockAiService('{"terms": ["gem", "rock"], "sort": {"field": "price", "direction": "desc"}}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $result = $handler->handleExpandQuery('most expensive stone');
+
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('subject_terms', $result['data']);
+    }
+
+    public function testSubjectTermsAbsentWhenNoSort(): void
+    {
+        // No sort intent — subject_terms should not be present.
+        $ai = new MockAiService('{"terms": ["gem", "gemstone", "mineral"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $result = $handler->handleExpandQuery('blue stones');
+
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('subject_terms', $result['data']);
+        $this->assertArrayNotHasKey('sort_hint', $result['data']);
+    }
+
+    public function testSubjectTermsMalformedNotArrayIgnored(): void
+    {
+        // LLM returned subject_terms as a string instead of array.
+        $ai = new MockAiService('{"terms": ["gem", "rock"], "sort": {"field": "price", "direction": "desc"}, "subject_terms": "tooth"}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $result = $handler->handleExpandQuery('most expensive tooth');
+
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('subject_terms', $result['data']);
+    }
+
+    public function testSubjectTermsFiltersNonStringEntries(): void
+    {
+        // LLM returned mixed array — only valid strings should survive.
+        $ai = new MockAiService('{"terms": ["gem", "rock"], "sort": {"field": "price", "direction": "desc"}, "subject_terms": ["tooth", null, 42, "fossil"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $result = $handler->handleExpandQuery('most expensive tooth fossil');
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(['tooth', 'fossil'], $result['data']['subject_terms']);
+    }
+
+    public function testSubjectTermsInPromptWhenSortableFieldsConfigured(): void
+    {
+        $ai = new PromptCapturingAiService('{"terms": ["gem", "rock", "mineral"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $handler->handleExpandQuery('test query');
+
+        $this->assertStringContainsString('SUBJECT TERMS', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('subject_terms', $ai->lastSystemPrompt);
+    }
+
+    public function testSubjectTermsExampleInPromptShowsEmptyForSortOnlyQuery(): void
+    {
+        $ai = new PromptCapturingAiService('{"terms": ["gem", "rock"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $handler->handleExpandQuery('test');
+
+        $this->assertStringContainsString('most expensive', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('subject_terms: []', $ai->lastSystemPrompt);
+    }
+
+    // ===================================================================
     // Sort hint — cache round-trip
     // ===================================================================
 
