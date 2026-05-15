@@ -470,7 +470,7 @@ class IndexBuildOrchestratorTest extends TestCase
         $orchestrator = new IndexBuildOrchestrator(
             $this->stateDir,
             $this->outputDir,
-            memoryPressureProbe: static fn() => true,
+            memoryPressureProbe: static fn () => true,
         );
 
         $budget = MemoryBudget::conservative()->withChunkSize(3);
