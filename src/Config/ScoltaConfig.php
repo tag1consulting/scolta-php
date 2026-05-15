@@ -99,6 +99,35 @@ class ScoltaConfig
     /** @var string[] Field names CMS adapters should extract as sortable attributes (data-pagefind-sort). */
     public array $sortableFields = [];
 
+    /**
+     * Human-readable descriptions keyed by field name, used in the LLM prompt.
+     * e.g. ['price' => 'Product price in the store currency', 'word_count' => 'Article length in words'].
+     * When populated, descriptions are appended to field names in the sort-intent prompt.
+     * When empty, bare field names are used (backward compatible).
+     *
+     * @var array<string, string>
+     */
+    public array $sortableFieldDescriptions = [];
+
+    /**
+     * Filter dimension names available for filter-intent detection in LLM prompts.
+     * Must match the filter names emitted as data-pagefind-filter attributes.
+     * e.g. ['topic', 'era', 'region'].
+     *
+     * @var string[]
+     */
+    public array $filterFields = [];
+
+    /**
+     * Human-readable descriptions keyed by filter name, used in the LLM prompt.
+     * e.g. ['topic' => 'Subject area or domain (Science, History, Biography, etc.)'].
+     * When populated, descriptions are included in the filter-intent prompt.
+     * When empty, bare field names are used.
+     *
+     * @var array<string, string>
+     */
+    public array $filterFieldDescriptions = [];
+
     // -- Scoring preset --
     /** @var string Named preset to apply before explicit overrides (empty = no preset). */
     public string $preset = '';

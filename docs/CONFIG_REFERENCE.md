@@ -137,6 +137,9 @@ factor before being added to the final score; the title boost is unaffected.
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `sortableFields` | array | `[]` | Field names CMS adapters should extract as sortable attributes (`data-pagefind-sort`). CMS adapters read this list to determine which `ContentItem::$sortable` entries to populate. Empty by default — no sort attributes are emitted. When non-empty, these field names are also passed to the AI expansion prompt so the LLM can return a `sort_hint` alongside expanded terms when a query implies a sort intent (e.g., "most expensive stone" → `sort_hint: {field: "price", direction: "desc"}`). |
+| `sortableFieldDescriptions` | array | `[]` | Human-readable descriptions keyed by field name (e.g., `['price' => 'Product price in store currency', 'word_count' => 'Article length in words']`). When populated, descriptions are included in the sort-intent prompt alongside each field name so the LLM can map natural language queries to the correct field. Backward compatible — omitting this leaves existing behavior unchanged. |
+| `filterFields` | array | `[]` | Filter dimension names for filter-intent detection in the expansion prompt. Must match the filter names emitted as `data-pagefind-filter` attributes by the content gatherer (e.g., `['topic', 'era', 'region']`). When non-empty, the expansion prompt gains a FILTER INTENT section; the LLM can return a `filter_hint` that the browser applies as a Pagefind native filter before displaying results. |
+| `filterFieldDescriptions` | array | `[]` | Human-readable descriptions keyed by filter name (e.g., `['topic' => 'Subject area or domain. Values: Science, History, Biography, Geography, Arts, Technology']`). Listing valid values in the description helps the LLM match user language to the correct filter value. |
 
 ### Scoring Presets
 
@@ -260,6 +263,9 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 | ScoltaConfig Property | Drupal | Laravel | WordPress |
 |----------------------|--------|---------|-----------|
 | `sortableFields` | `sortable_fields` | `sortable_fields` | `sortable_fields` |
+| `sortableFieldDescriptions` | `sortable_field_descriptions` | `sortable_field_descriptions` | `sortable_field_descriptions` |
+| `filterFields` | `filter_fields` | `filter_fields` | `filter_fields` |
+| `filterFieldDescriptions` | `filter_field_descriptions` | `filter_field_descriptions` | `filter_field_descriptions` |
 
 ## Methods
 

@@ -397,7 +397,9 @@ class AiEndpointHandlerTest extends TestCase
 
         $handler->handleExpandQuery('test query');
 
-        $this->assertStringContainsString('price, date, rating', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('- price', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('- date', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('- rating', $ai->lastSystemPrompt);
         $this->assertStringContainsString('SORT INTENT', $ai->lastSystemPrompt);
     }
 
@@ -973,6 +975,202 @@ class AiEndpointHandlerTest extends TestCase
     // Helpers
     // ===================================================================
 
+    // ===================================================================
+    // Sortable field descriptions
+    // ===================================================================
+
+    public function testSortableFieldsWithDescriptionsAppearsInPrompt(): void
+    {
+        $ai = new PromptCapturingAiService('{"terms": ["gem", "rock"]}');
+        $handler = $this->makeHandler(
+            aiService: $ai,
+            sortableFields: ['price', 'word_count'],
+            sortableFieldDescriptions: ['price' => 'Product price in store currency', 'word_count' => 'Article length in words'],
+        );
+
+        $handler->handleExpandQuery('test');
+
+        $this->assertStringContainsString('- price: Product price in store currency', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('- word_count: Article length in words', $ai->lastSystemPrompt);
+    }
+
+    public function testSortableFieldsWithoutDescriptionsFallBackToBareNames(): void
+    {
+        $ai = new PromptCapturingAiService('{"terms": ["gem", "rock"]}');
+        $handler = $this->makeHandler(
+            aiService: $ai,
+            sortableFields: ['price', 'date'],
+        );
+
+        $handler->handleExpandQuery('test');
+
+        // Bare names with no description suffix.
+        $this->assertStringContainsString('- price', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('- date', $ai->lastSystemPrompt);
+        $this->assertStringNotContainsString('- price:', $ai->lastSystemPrompt);
+    }
+
+    public function testSortableFieldDescriptionsIgnoredWhenNoSortableFields(): void
+    {
+        $ai = new PromptCapturingAiService('{"terms": ["gem", "rock"]}');
+        $handler = $this->makeHandler(
+            aiService: $ai,
+            sortableFields: [],
+            sortableFieldDescriptions: ['price' => 'Should not appear'],
+        );
+
+        $handler->handleExpandQuery('test');
+
+        $this->assertStringNotContainsString('SORT INTENT', $ai->lastSystemPrompt);
+        $this->assertStringNotContainsString('Should not appear', $ai->lastSystemPrompt);
+    }
+
+    // ===================================================================
+    // Filter fields — prompt generation
+    // ===================================================================
+
+    public function testFilterFieldsInstructionAppearsWhenConfigured(): void
+    {
+        $ai = new PromptCapturingAiService('{"terms": ["gem", "rock"]}');
+        $handler = $this->makeHandler(
+            aiService: $ai,
+            filterFields: ['topic', 'era'],
+            filterFieldDescriptions: ['topic' => 'Subject area (Science, History, etc.)', 'era' => 'Historical period'],
+        );
+
+        $handler->handleExpandQuery('test');
+
+        $this->assertStringContainsString('FILTER INTENT', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('- topic: Subject area (Science, History, etc.)', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('- era: Historical period', $ai->lastSystemPrompt);
+    }
+
+    public function testFilterFieldsInstructionAbsentWhenNotConfigured(): void
+    {
+        $ai = new PromptCapturingAiService('{"terms": ["gem", "rock"]}');
+        $handler = $this->makeHandler(aiService: $ai, filterFields: []);
+
+        $handler->handleExpandQuery('test');
+
+        $this->assertStringNotContainsString('FILTER INTENT', $ai->lastSystemPrompt);
+    }
+
+    public function testFilterFieldsWithoutDescriptionsFallBackToBareNames(): void
+    {
+        $ai = new PromptCapturingAiService('{"terms": ["gem", "rock"]}');
+        $handler = $this->makeHandler(
+            aiService: $ai,
+            filterFields: ['topic', 'era'],
+        );
+
+        $handler->handleExpandQuery('test');
+
+        $this->assertStringContainsString('- topic', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('- era', $ai->lastSystemPrompt);
+        $this->assertStringNotContainsString('- topic:', $ai->lastSystemPrompt);
+    }
+
+    // ===================================================================
+    // Filter hint — parsing
+    // ===================================================================
+
+    public function testFilterHintParsedFromObjectFormat(): void
+    {
+        $ai = new MockAiService('{"terms": ["water", "hydrology"], "filters": {"topic": "Science"}}');
+        $handler = $this->makeHandler(aiService: $ai, filterFields: ['topic', 'era']);
+
+        $result = $handler->handleExpandQuery('Science articles about water');
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(['topic' => 'Science'], $result['data']['filter_hint']);
+    }
+
+    public function testFilterHintMultipleDimensions(): void
+    {
+        $ai = new MockAiService('{"terms": ["roman", "engineering"], "filters": {"topic": "History", "era": "Ancient"}}');
+        $handler = $this->makeHandler(aiService: $ai, filterFields: ['topic', 'era']);
+
+        $result = $handler->handleExpandQuery('Ancient Roman engineering');
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(['topic' => 'History', 'era' => 'Ancient'], $result['data']['filter_hint']);
+    }
+
+    public function testFilterHintAbsentWhenLlmOmitsIt(): void
+    {
+        $ai = new MockAiService('{"terms": ["water", "aqua"]}');
+        $handler = $this->makeHandler(aiService: $ai, filterFields: ['topic']);
+
+        $result = $handler->handleExpandQuery('water');
+
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('filter_hint', $result['data']);
+    }
+
+    public function testFilterHintAbsentWhenNoFilterFieldsConfigured(): void
+    {
+        $ai = new MockAiService('{"terms": ["water", "aqua"], "filters": {"topic": "Science"}}');
+        $handler = $this->makeHandler(aiService: $ai, filterFields: []);
+
+        $result = $handler->handleExpandQuery('Science water');
+
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('filter_hint', $result['data']);
+    }
+
+    public function testFilterHintInvalidDimensionRejected(): void
+    {
+        $ai = new MockAiService('{"terms": ["water", "aqua"], "filters": {"unknown_dim": "Science"}}');
+        $handler = $this->makeHandler(aiService: $ai, filterFields: ['topic', 'era']);
+
+        $result = $handler->handleExpandQuery('water');
+
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('filter_hint', $result['data']);
+    }
+
+    public function testFilterHintMalformedIgnored(): void
+    {
+        $ai = new MockAiService('{"terms": ["water", "aqua"], "filters": "invalid"}');
+        $handler = $this->makeHandler(aiService: $ai, filterFields: ['topic']);
+
+        $result = $handler->handleExpandQuery('water');
+
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('filter_hint', $result['data']);
+    }
+
+    public function testFilterHintAndSortHintCoexist(): void
+    {
+        $ai = new MockAiService('{"terms": ["science", "articles"], "sort": {"field": "date", "direction": "desc"}, "filters": {"topic": "Science"}}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['date'], filterFields: ['topic']);
+
+        $result = $handler->handleExpandQuery('newest Science articles');
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(['field' => 'date', 'direction' => 'desc'], $result['data']['sort_hint']);
+        $this->assertEquals(['topic' => 'Science'], $result['data']['filter_hint']);
+    }
+
+    public function testBackwardCompatNoBothDescriptions(): void
+    {
+        // A handler with only sortableFields (no descriptions, no filterFields) must behave
+        // identically to the old code — sort prompt appears, no filter prompt.
+        $ai = new PromptCapturingAiService('{"terms": ["gem", "rock"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price', 'date']);
+
+        $handler->handleExpandQuery('most expensive stone');
+
+        $this->assertStringContainsString('SORT INTENT', $ai->lastSystemPrompt);
+        $this->assertStringNotContainsString('FILTER INTENT', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('- price', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('- date', $ai->lastSystemPrompt);
+    }
+
+    // ===================================================================
+    // Helpers
+    // ===================================================================
+
     private function makeHandler(
         ?MockAiService $aiService = null,
         ?CacheDriverInterface $cache = null,
@@ -984,6 +1182,9 @@ class AiEndpointHandlerTest extends TestCase
         bool $aiExpandQuery = true,
         bool $aiSummarize = true,
         array $sortableFields = [],
+        array $sortableFieldDescriptions = [],
+        array $filterFields = [],
+        array $filterFieldDescriptions = [],
     ): AiEndpointHandler {
         return new AiEndpointHandler(
             aiService: $aiService ?? new MockAiService('["term1", "term2"]'),
@@ -996,6 +1197,9 @@ class AiEndpointHandlerTest extends TestCase
             aiExpandQuery: $aiExpandQuery,
             aiSummarize: $aiSummarize,
             sortableFields: $sortableFields,
+            sortableFieldDescriptions: $sortableFieldDescriptions,
+            filterFields: $filterFields,
+            filterFieldDescriptions: $filterFieldDescriptions,
         );
     }
 }
