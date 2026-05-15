@@ -371,7 +371,7 @@ class AiEndpointHandler
             return null;
         }
 
-        $filtered = array_values(array_filter($raw, static fn($v) => is_string($v) && $v !== ''));
+        $filtered = array_values(array_filter($raw, static fn ($v) => is_string($v) && $v !== ''));
 
         return !empty($filtered) ? $filtered : null;
     }
@@ -450,7 +450,7 @@ class AiEndpointHandler
             . "- \"newest blog posts about React\" → subject_terms: [\"blog posts about React\"]\n"
             . "- \"most expensive\" → subject_terms: [] (empty — query is ONLY sort intent, no subject)\n"
             . "- \"oldest fossils\" → subject_terms: [\"fossils\"]\n"
-            . "If no sort is detected, omit subject_terms entirely.";
+            . 'If no sort is detected, omit subject_terms entirely.';
 
         return $prompt;
     }
