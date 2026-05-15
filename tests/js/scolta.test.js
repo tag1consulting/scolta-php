@@ -220,13 +220,12 @@ describe('scolta.js structure', () => {
         expect(jsSource).toContain('Priority page matching failed');
     });
 
-    test('sort override state variables are declared', () => {
+    test('sort override state variable is declared', () => {
         expect(jsSource).toContain('currentSortOverride');
-        expect(jsSource).toContain('preOverrideResults');
     });
 
-    test('applySortOverride function exists', () => {
-        expect(jsSource).toContain('function applySortOverride(');
+    test('pagefindSearch passes sort option from sortHint', () => {
+        expect(jsSource).toContain('searchOpts.sort = { [sortHint.field]: sortHint.direction }');
     });
 
     test('renderSortIndicator function exists', () => {
@@ -258,7 +257,7 @@ describe('scolta.js structure', () => {
     });
 
     test('sort_hint field absent from all results falls back silently', () => {
-        expect(jsSource).toContain('absent from all results, using relevance sort');
+        expect(jsSource).toContain('absent from all results, falling back to relevance');
     });
 });
 

@@ -331,14 +331,22 @@ describe('scolta.js behavioral tests', () => {
 });
 
 // =============================================================================
-// Sort override behavioral tests
+// Native sort behavioral tests
 // =============================================================================
 
-// Patch source to expose applySortOverride and related state for direct testing.
-const sortOverrideExposedSource = patchedSource.replace(
-    '// SHARED SEARCH HELPERS',
-    '// SHARED SEARCH HELPERS\n  window.__applySortOverride = applySortOverride;\n  window.__getState = function() { return { currentSortOverride, preOverrideResults, allScoredResults }; };\n  window.__setState = function(s) { if (s.allScoredResults !== undefined) allScoredResults = s.allScoredResults; if (s.currentSortOverride !== undefined) currentSortOverride = s.currentSortOverride; };'
-);
+// Patch patchedSource to:
+// 1. Record pagefind.search call arguments so tests can verify sort options.
+// 2. Expose pagefindSearch for direct invocation.
+// 3. Expose instance state (currentSortOverride, allScoredResults).
+const nativeSortSource = patchedSource
+    .replace(
+        'search: function() { return Promise.resolve({ results: [] }); }',
+        'search: function(q, opts) { window.__lastPfSearchArgs = { q, opts: opts || null }; return Promise.resolve({ results: [] }); }'
+    )
+    .replace(
+        '// SHARED SEARCH HELPERS',
+        '// SHARED SEARCH HELPERS\n  window.__pagefindSearch = pagefindSearch;\n  window.__getState = function() { return { currentSortOverride, allScoredResults }; };'
+    );
 
 function createWindowForSort() {
     const dom = new JSDOM(
@@ -354,7 +362,7 @@ function createWindowForSort() {
     });
     win.console = { log: jest.fn(), error: jest.fn(), warn: jest.fn() };
     win.scrollTo = () => {};
-    win.eval(sortOverrideExposedSource);
+    win.eval(nativeSortSource);
     win.scolta = {
         scoring: {},
         endpoints: { expand: '/e', summarize: '/s', followup: '/f' },
@@ -368,14 +376,7 @@ function createWindowForSort() {
     return win;
 }
 
-function makeResultWithMeta(url, score, meta = {}) {
-    return {
-        score,
-        data: { url, excerpt: '', meta: { url, ...meta } },
-    };
-}
-
-describe('sort override behavioral tests', () => {
+describe('native sort behavioral tests', () => {
 
     test('sort indicator element exists after init', () => {
         const win = createWindowForSort();
@@ -389,76 +390,46 @@ describe('sort override behavioral tests', () => {
         expect(el.style.display).toBe('none');
     });
 
-    test('applySortOverride sorts by numeric meta field descending', () => {
+    test('pagefindSearch passes sort option when sortHint provided', async () => {
         const win = createWindowForSort();
-        win.__setState({
-            allScoredResults: [
-                makeResultWithMeta('/a', 0.9, { price: '10' }),
-                makeResultWithMeta('/b', 0.8, { price: '99' }),
-                makeResultWithMeta('/c', 0.7, { price: '45' }),
-            ],
-        });
-        const applied = win.__applySortOverride({ field: 'price', direction: 'desc' });
-        expect(applied).toBe(true);
-        const state = win.__getState();
-        const prices = state.allScoredResults.map(r => r.data.meta.price);
-        expect(prices).toEqual(['99', '45', '10']);
+        await new Promise(r => setTimeout(r, 50)); // wait for initPagefind async chain
+        await win.__pagefindSearch('expensive stone', {}, { field: 'price', direction: 'desc' });
+        expect(win.__lastPfSearchArgs).not.toBeNull();
+        expect(win.__lastPfSearchArgs.opts).toMatchObject({ sort: { price: 'desc' } });
     });
 
-    test('applySortOverride sorts by numeric meta field ascending', () => {
+    test('pagefindSearch does not pass sort option when sortHint absent', async () => {
         const win = createWindowForSort();
-        win.__setState({
-            allScoredResults: [
-                makeResultWithMeta('/a', 0.9, { price: '10' }),
-                makeResultWithMeta('/b', 0.8, { price: '99' }),
-                makeResultWithMeta('/c', 0.7, { price: '45' }),
-            ],
-        });
-        const applied = win.__applySortOverride({ field: 'price', direction: 'asc' });
-        expect(applied).toBe(true);
-        const state = win.__getState();
-        const prices = state.allScoredResults.map(r => r.data.meta.price);
-        expect(prices).toEqual(['10', '45', '99']);
+        await new Promise(r => setTimeout(r, 50));
+        await win.__pagefindSearch('popular crystals', {});
+        expect(win.__lastPfSearchArgs).not.toBeNull();
+        expect(win.__lastPfSearchArgs.opts?.sort).toBeUndefined();
     });
 
-    test('applySortOverride returns false when field absent from all results', () => {
+    test('pagefindSearch passes ascending sort option correctly', async () => {
         const win = createWindowForSort();
-        win.__setState({
-            allScoredResults: [
-                makeResultWithMeta('/a', 0.9, { title: 'No price here' }),
-                makeResultWithMeta('/b', 0.8, { title: 'Also no price' }),
-            ],
-        });
-        const applied = win.__applySortOverride({ field: 'price', direction: 'desc' });
-        expect(applied).toBe(false);
+        await new Promise(r => setTimeout(r, 50));
+        await win.__pagefindSearch('cheapest stone', {}, { field: 'price', direction: 'asc' });
+        expect(win.__lastPfSearchArgs.opts).toMatchObject({ sort: { price: 'asc' } });
     });
 
-    test('applySortOverride filters out results missing the sort field', () => {
+    test('pagefindSearch passes filter and sort options together', async () => {
         const win = createWindowForSort();
-        win.__setState({
-            allScoredResults: [
-                makeResultWithMeta('/a', 0.9, { price: '50' }),
-                makeResultWithMeta('/b', 0.8, { title: 'No price' }),
-                makeResultWithMeta('/c', 0.7, { price: '20' }),
-            ],
+        await new Promise(r => setTimeout(r, 50));
+        // Use win.Set so instanceof check inside the eval'd script works cross-context.
+        const filters = { language: new win.Set(['en']) };
+        await win.__pagefindSearch('expensive stone', filters, { field: 'price', direction: 'desc' });
+        expect(win.__lastPfSearchArgs.opts).toMatchObject({
+            filters: { language: 'en' },
+            sort: { price: 'desc' },
         });
-        win.__applySortOverride({ field: 'price', direction: 'desc' });
-        const state = win.__getState();
-        expect(state.allScoredResults.length).toBe(2);
-        expect(state.allScoredResults.every(r => r.data.meta.price !== undefined)).toBe(true);
     });
 
-    test('applySortOverride saves snapshot in preOverrideResults', () => {
+    test('pagefindSearch passes null sortHint without adding sort option', async () => {
         const win = createWindowForSort();
-        const origResults = [
-            makeResultWithMeta('/a', 0.9, { price: '50' }),
-            makeResultWithMeta('/b', 0.8, { price: '20' }),
-        ];
-        win.__setState({ allScoredResults: [...origResults] });
-        win.__applySortOverride({ field: 'price', direction: 'desc' });
-        const state = win.__getState();
-        expect(state.preOverrideResults).not.toBeNull();
-        expect(state.preOverrideResults.length).toBe(2);
+        await new Promise(r => setTimeout(r, 50));
+        await win.__pagefindSearch('tourmaline', {}, null);
+        expect(win.__lastPfSearchArgs.opts?.sort).toBeUndefined();
     });
 });
 
