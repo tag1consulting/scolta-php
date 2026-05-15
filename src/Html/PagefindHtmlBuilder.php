@@ -48,8 +48,11 @@ class PagefindHtmlBuilder
         $extraFilters = '';
         foreach ($filters as $key => $value) {
             $escapedKey = htmlspecialchars((string) $key, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            $escapedValue = htmlspecialchars((string) $value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            $extraFilters .= sprintf('<span data-pagefind-filter="%s:%s" hidden></span>' . "\n", $escapedKey, $escapedValue);
+            $values = is_array($value) ? $value : [$value];
+            foreach ($values as $v) {
+                $escapedValue = htmlspecialchars((string) $v, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                $extraFilters .= sprintf('<span data-pagefind-filter="%s:%s" hidden></span>' . "\n", $escapedKey, $escapedValue);
+            }
         }
 
         $extraMeta = '';

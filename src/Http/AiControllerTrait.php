@@ -77,6 +77,9 @@ trait AiControllerTrait
             aiSummaryMaxTokens: $config->aiSummaryMaxTokens,
             expandPrimaryWeight: $config->expandPrimaryWeight,
             sortableFields: $config->sortableFields,
+            sortableFieldDescriptions: $config->sortableFieldDescriptions,
+            filterFields: $config->filterFields,
+            filterFieldDescriptions: $config->filterFieldDescriptions,
         );
     }
 }

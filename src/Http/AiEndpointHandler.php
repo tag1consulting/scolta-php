@@ -31,19 +31,22 @@ use Tag1\Scolta\Prompt\PromptEnricherInterface;
 class AiEndpointHandler
 {
     /**
-     * @param object                    $aiService            AI service (duck-typed).
-     * @param CacheDriverInterface      $cache                Cache driver.
-     * @param int                       $generation           Generation counter for cache invalidation.
-     * @param int                       $cacheTtl             Cache TTL in seconds (0 = disabled).
-     * @param int                       $maxFollowUps         Maximum follow-up exchanges allowed.
-     * @param PromptEnricherInterface   $promptEnricher       Prompt enricher for site-specific context injection.
-     * @param array                     $aiLanguages          Supported languages for multilingual responses.
-     * @param LoggerInterface           $logger               PSR-3 logger (defaults to NullLogger).
-     * @param bool                      $aiExpandQuery        Whether the expand-query feature is enabled.
-     * @param bool                      $aiSummarize          Whether the summarize feature is enabled.
-     * @param int                       $aiSummaryMaxTokens   Max tokens for AI summary responses.
-     * @param float                     $expandPrimaryWeight  Weight of original results vs expansion results (0–1).
-     * @param array                     $sortableFields       Metadata field names available for sort-intent detection.
+     * @param object                    $aiService                  AI service (duck-typed).
+     * @param CacheDriverInterface      $cache                      Cache driver.
+     * @param int                       $generation                 Generation counter for cache invalidation.
+     * @param int                       $cacheTtl                   Cache TTL in seconds (0 = disabled).
+     * @param int                       $maxFollowUps               Maximum follow-up exchanges allowed.
+     * @param PromptEnricherInterface   $promptEnricher             Prompt enricher for site-specific context injection.
+     * @param array                     $aiLanguages                Supported languages for multilingual responses.
+     * @param LoggerInterface           $logger                     PSR-3 logger (defaults to NullLogger).
+     * @param bool                      $aiExpandQuery              Whether the expand-query feature is enabled.
+     * @param bool                      $aiSummarize                Whether the summarize feature is enabled.
+     * @param int                       $aiSummaryMaxTokens         Max tokens for AI summary responses.
+     * @param float                     $expandPrimaryWeight        Weight of original results vs expansion results (0–1).
+     * @param array                     $sortableFields             Metadata field names available for sort-intent detection.
+     * @param array<string, string>     $sortableFieldDescriptions  Human-readable descriptions for sortable fields.
+     * @param array                     $filterFields               Filter dimension names for filter-intent detection.
+     * @param array<string, string>     $filterFieldDescriptions    Human-readable descriptions for filter fields.
      */
     public function __construct(
         private readonly object $aiService,
@@ -59,6 +62,9 @@ class AiEndpointHandler
         private readonly int $aiSummaryMaxTokens = 1024,
         private readonly float $expandPrimaryWeight = 0.5,
         private readonly array $sortableFields = [],
+        private readonly array $sortableFieldDescriptions = [],
+        private readonly array $filterFields = [],
+        private readonly array $filterFieldDescriptions = [],
     ) {
     }
 
@@ -97,6 +103,7 @@ class AiEndpointHandler
             );
             $systemPrompt = $this->appendLanguageInstruction($systemPrompt, 'expand_query');
             $systemPrompt = $this->appendSortableFieldsInstruction($systemPrompt);
+            $systemPrompt = $this->appendFilterFieldsInstruction($systemPrompt);
 
             $response = $this->aiService->messageForOperation(
                 'expand_query',
@@ -118,6 +125,10 @@ class AiEndpointHandler
 
             if ($parsed['subject_terms'] !== null) {
                 $payload['subject_terms'] = $parsed['subject_terms'];
+            }
+
+            if ($parsed['filter_hint'] !== null) {
+                $payload['filter_hint'] = $parsed['filter_hint'];
             }
 
             if ($this->cacheTtl > 0) {
@@ -321,14 +332,14 @@ class AiEndpointHandler
     }
 
     /**
-     * Parse an AI expansion response and extract terms, an optional sort hint, and optional subject terms.
+     * Parse an AI expansion response and extract terms, an optional sort hint, optional subject terms, and optional filter hint.
      *
-     * Returns ['terms' => string[], 'sort_hint' => array{field: string, direction: string}|null, 'subject_terms' => string[]|null].
+     * Returns ['terms' => string[], 'sort_hint' => array{field: string, direction: string}|null, 'subject_terms' => string[]|null, 'filter_hint' => array<string,string>|null].
      * Parses defensively: malformed or absent fields are silently ignored.
      *
      * @param string $response      Raw AI response text.
      * @param string $originalQuery The original query (used as fallback for terms).
-     * @return array{terms: array, sort_hint: array{field: string, direction: string}|null, subject_terms: array|null}
+     * @return array{terms: array, sort_hint: array{field: string, direction: string}|null, subject_terms: array|null, filter_hint: array<string,string>|null}
      */
     protected function parseExpansionResult(string $response, string $originalQuery): array
     {
@@ -339,21 +350,22 @@ class AiEndpointHandler
 
         $decoded = json_decode($cleaned, true);
 
-        // New object format: {"terms": [...], "sort": {...}, "subject_terms": [...]}
+        // New object format: {"terms": [...], "sort": {...}, "subject_terms": [...], "filters": {...}}
         if (is_array($decoded) && isset($decoded['terms']) && is_array($decoded['terms'])) {
             $terms = count($decoded['terms']) >= 2 ? $decoded['terms'] : [$originalQuery];
             $sortHint = $this->extractSortHint($decoded['sort'] ?? null);
             $subjectTerms = $this->extractSubjectTerms($decoded['subject_terms'] ?? null);
+            $filterHint = $this->extractFilterHint($decoded['filters'] ?? null);
 
-            return ['terms' => $terms, 'sort_hint' => $sortHint, 'subject_terms' => $subjectTerms];
+            return ['terms' => $terms, 'sort_hint' => $sortHint, 'subject_terms' => $subjectTerms, 'filter_hint' => $filterHint];
         }
 
         // Legacy array format: ["term1", "term2", ...]
         if (is_array($decoded) && count($decoded) >= 2) {
-            return ['terms' => $decoded, 'sort_hint' => null, 'subject_terms' => null];
+            return ['terms' => $decoded, 'sort_hint' => null, 'subject_terms' => null, 'filter_hint' => null];
         }
 
-        return ['terms' => [$originalQuery], 'sort_hint' => null, 'subject_terms' => null];
+        return ['terms' => [$originalQuery], 'sort_hint' => null, 'subject_terms' => null, 'filter_hint' => null];
     }
 
     /**
@@ -412,6 +424,42 @@ class AiEndpointHandler
     }
 
     /**
+     * Validate and normalise a raw filter hint from the LLM response.
+     *
+     * Returns null when the hint is absent, malformed, or references invalid
+     * dimensions — so a bad LLM response never breaks expansion.
+     *
+     * @param mixed $raw The raw "filters" value from the decoded JSON.
+     * @return array<string, string>|null Validated dimension → value pairs, or null.
+     *
+     * @since 1.1.0
+     * @stability experimental
+     */
+    private function extractFilterHint(mixed $raw): ?array
+    {
+        if (!is_array($raw) || empty($raw)) {
+            return null;
+        }
+
+        $validated = [];
+        foreach ($raw as $dimension => $value) {
+            if (!is_string($dimension) || $dimension === '') {
+                continue;
+            }
+            if (!is_string($value) || $value === '') {
+                continue;
+            }
+            // Only honour filter hints when filter fields are configured and the dimension is in the list.
+            if (empty($this->filterFields) || !in_array($dimension, $this->filterFields, true)) {
+                continue;
+            }
+            $validated[$dimension] = $value;
+        }
+
+        return !empty($validated) ? $validated : null;
+    }
+
+    /**
      * Append sort-intent instructions to the expansion prompt when sortable fields are configured.
      *
      * When no sortable fields are configured the prompt is returned unchanged,
@@ -426,31 +474,111 @@ class AiEndpointHandler
             return $prompt;
         }
 
-        $fieldList = implode(', ', $this->sortableFields);
+        // Build field list with descriptions when available.
+        $fieldLines = [];
+        foreach ($this->sortableFields as $field) {
+            $desc = $this->sortableFieldDescriptions[$field] ?? '';
+            $fieldLines[] = $desc !== '' ? "- {$field}: {$desc}" : "- {$field}";
+        }
+        $fieldList = implode("\n", $fieldLines);
 
-        $prompt .= "\n\nSORT INTENT (optional):\n"
-            . "Available sortable fields: {$fieldList}\n\n"
-            . "Only add a \"sort\" key when sorting results is the query's PRIMARY purpose — the user explicitly wants results ranked by a specific field.\n"
-            . "Format: {\"terms\": [...], \"sort\": {\"field\": \"price\", \"direction\": \"desc\"}, \"subject_terms\": [\"tooth\"]}\n\n"
-            . "Rules:\n"
-            . "- field MUST be one of the available sortable fields listed above — no other values are permitted\n"
-            . "- direction must be \"asc\" or \"desc\"\n"
-            . "- The sort signal must map DIRECTLY to a specific field's semantics: 'most expensive' → price (desc), 'newest' → date (desc), 'cheapest' → price (asc). If there is no clear, direct semantic match to an available field, do NOT add sort.\n"
-            . "- SUPERLATIVES AS QUALIFIERS: superlatives like 'most popular', 'best known', 'most common', 'top rated', 'well known' describe what TYPE of item the user wants to discover — they are NOT sort intent. 'Most popular crystals' means 'find well-known crystals' (a discovery query), NOT 'sort crystals by a popularity field'. Do not classify these as sort intent even if a vaguely related field exists.\n"
-            . "- Only classify sort intent for short (2–4 word) queries where the sort word IS the primary goal, not a qualifier.\n"
-            . "- Do NOT classify sort intent for research questions, conversational queries, or any query where the sort-like word is a modifier rather than the main goal.\n"
-            . "  Counter-examples (must NOT trigger sort): 'most popular crystals', 'the latest research on...', 'most common git commands', 'best practices for...', 'cheapest way to comply with...', 'first aid for...'\n"
-            . "- Prefer false negatives over false positives: a missed sort hint is far less harmful than an incorrect result reorder. When uncertain, ALWAYS omit the \"sort\" key.\n"
-            . "- When sort is detected, exclude the sort signal words (most, cheapest, newest, highest, lowest, etc.) from the expanded terms\n\n"
-            . "SUBJECT TERMS (required when sort is detected):\n"
-            . "When you add a \"sort\" key, you MUST also add a \"subject_terms\" array containing ONLY the words from the original query that describe WHAT the user is searching for — with all sort-related words removed. Sort-related words include: superlatives (most, least, best, worst), comparatives (more, less, cheaper, faster), price/order words (expensive, cheap, costly, newest, oldest, latest, earliest), and the sort field name itself.\n"
-            . "Examples:\n"
-            . "- \"most expensive tooth\" → subject_terms: [\"tooth\"]\n"
-            . "- \"cheapest blue stone\" → subject_terms: [\"blue stone\"]\n"
-            . "- \"newest blog posts about React\" → subject_terms: [\"blog posts about React\"]\n"
-            . "- \"most expensive\" → subject_terms: [] (empty — query is ONLY sort intent, no subject)\n"
-            . "- \"oldest fossils\" → subject_terms: [\"fossils\"]\n"
-            . 'If no sort is detected, omit subject_terms entirely.';
+        $prompt .= <<<'ENDSORTINSTR'
+
+
+SORT INTENT (optional):
+Available sortable fields:
+{FIELD_LIST}
+
+Only add a "sort" key when sorting results is the query's PRIMARY purpose — the user explicitly wants results ordered by a specific field's value.
+
+Format: {"terms": [...], "sort": {"field": "<field_name>", "direction": "asc|desc"}, "subject_terms": ["..."]}
+
+Rules:
+- field MUST be one of the available sortable fields listed above — no other values are permitted.
+- direction must be "asc" or "desc".
+- Map the user's language to the closest available field using the field descriptions above. Common patterns:
+  · Price/cost language ("most expensive", "cheapest") → a price field (desc / asc)
+  · Recency language ("newest", "latest", "most recent", "oldest") → a date field (desc / asc)
+  · Size/depth language ("longest", "most comprehensive", "most in-depth") → a length or count field (desc)
+  · Quality/rigor language ("most cited", "most referenced", "best researched") → a citation or reference count field (desc)
+  · Severity/intensity language ("most severe", "highest risk", "most critical") → a severity or risk field (desc)
+  · Popularity/engagement language ("most starred", "most liked", "most discussed") → an engagement count field (desc)
+  If there is no clear, direct semantic match to an available field, do NOT add sort.
+- SUPERLATIVES AS QUALIFIERS: superlatives like "most popular", "best known", "most common", "top rated", "well known" describe what TYPE of item the user wants to discover — they are NOT sort intent. "Most popular crystals" means "find well-known crystals" (a discovery query), NOT "sort crystals by a popularity field". Do not classify these as sort intent UNLESS a field explicitly described as measuring popularity or engagement exists AND the query is short enough that sorting is clearly the primary goal.
+- Only classify sort intent for short (2–4 word) queries where the sort word IS the primary goal, not a qualifier.
+- Do NOT classify sort intent for research questions, conversational queries, or any query where the sort-like word is a modifier rather than the main goal.
+  Counter-examples (must NOT trigger sort): "most popular crystals" (no popularity field), "the latest research on..." (conversational), "most common git commands" (discovery), "best practices for..." (discovery), "cheapest way to comply with..." (advice question), "first aid for..." (informational)
+- Prefer false negatives over false positives: a missed sort hint is far less harmful than an incorrect result reorder. When uncertain, ALWAYS omit the "sort" key.
+- When sort is detected, exclude the sort signal words (most, cheapest, newest, highest, lowest, etc.) from the expanded terms.
+
+SUBJECT TERMS (required when sort is detected):
+When you add a "sort" key, you MUST also add a "subject_terms" array containing ONLY the words from the original query that describe WHAT the user is searching for — with all sort-related words removed. Sort-related words include: superlatives (most, least, best, worst), comparatives (more, less, cheaper, faster), order words (expensive, cheap, costly, newest, oldest, latest, earliest), and the sort field name itself.
+Examples:
+- "most expensive tooth" → subject_terms: ["tooth"]
+- "cheapest blue stone" → subject_terms: ["blue stone"]
+- "newest blog posts about React" → subject_terms: ["blog posts about React"]
+- "most comprehensive quantum physics articles" → subject_terms: ["quantum physics articles"]
+- "most expensive" → subject_terms: [] (empty — query is ONLY sort intent, no subject)
+- "oldest fossils" → subject_terms: ["fossils"]
+If no sort is detected, omit subject_terms entirely.
+ENDSORTINSTR;
+
+        $prompt = str_replace('{FIELD_LIST}', $fieldList, $prompt);
+
+        return $prompt;
+    }
+
+    /**
+     * Append filter-intent instructions to the expansion prompt when filter fields are configured.
+     *
+     * When no filter fields are configured the prompt is returned unchanged,
+     * so sites that have not opted into filter metadata see zero behaviour change.
+     *
+     * @param string $prompt The resolved, enriched system prompt.
+     * @return string The prompt with filter-intent instructions appended (when applicable).
+     *
+     * @since 1.1.0
+     * @stability experimental
+     */
+    private function appendFilterFieldsInstruction(string $prompt): string
+    {
+        if (empty($this->filterFields)) {
+            return $prompt;
+        }
+
+        // Build filter field list with descriptions when available.
+        $fieldLines = [];
+        foreach ($this->filterFields as $field) {
+            $desc = $this->filterFieldDescriptions[$field] ?? '';
+            $fieldLines[] = $desc !== '' ? "- {$field}: {$desc}" : "- {$field}";
+        }
+        $fieldList = implode("\n", $fieldLines);
+
+        $prompt .= <<<'ENDFILTERINSTR'
+
+
+FILTER INTENT (optional):
+Available filter dimensions:
+{FILTER_LIST}
+
+When the user's query implies restricting results to a specific category, type, or dimension — AND that dimension matches one of the available filter fields above — add a "filters" key to your response.
+
+Format: {"terms": [...], "filters": {"<dimension>": "<value>"}}
+
+Rules:
+- dimension MUST be one of the available filter dimensions listed above — no other values are permitted.
+- value should be the most specific match from the field description. Use title case for category names (e.g., "Science" not "science", "Medieval" not "medieval") unless the field description indicates otherwise.
+- Multiple filters can be active simultaneously: {"filters": {"topic": "Science", "era": "Ancient"}} is valid when the query implies both constraints.
+- Filter intent is detected when the user names or strongly implies a specific category value. "Science articles about water" → topic: "Science". "Ancient Roman engineering" → era: "Ancient". "European history" → region: "Europe".
+- Do NOT add filters for vague or implied categories. When uncertain, omit the filter — the semantic search will handle topical relevance on its own.
+- Filters and sort can coexist: "newest Science articles" → both a topic filter AND a date sort.
+- When a filter is detected, KEEP the filtered category's name in the expanded terms too. Filters narrow the result set; the expanded terms still need to match within that narrowed set.
+- Do NOT strip filter words from terms the way you strip sort words. Filter words like "Science" or "Medieval" are often meaningful search terms within the filtered set.
+
+If no filter intent is detected, omit the "filters" key entirely.
+ENDFILTERINSTR;
+
+        $prompt = str_replace('{FILTER_LIST}', $fieldList, $prompt);
 
         return $prompt;
     }
