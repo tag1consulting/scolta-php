@@ -38,6 +38,8 @@ final class IndexBuildOrchestrator
         private readonly ?string $hmacSecret = null,
         private readonly string $language = 'en',
         ?StorageDriverInterface $storage = null,
+        /** @var (\Closure(): bool)|null Injected in tests to force voluntary yield without real RSS pressure. */
+        private readonly ?\Closure $memoryPressureProbe = null,
     ) {
         // Strip a trailing /pagefind suffix if already present. atomicSwap()
         // always appends /pagefind internally, so a doubly-suffixed path would
@@ -184,6 +186,37 @@ final class IndexBuildOrchestrator
                     $chunk = [];
                     unset($partial);
                     gc_collect_cycles();
+                    if (function_exists('gc_mem_caches')) {
+                        gc_mem_caches();
+                    }
+
+                    // Voluntary yield: exit cleanly when heap pressure is high after cleanup.
+                    // State is already committed; the next invocation resumes from here.
+                    if ($this->isUnderMemoryPressure($telemetry)) {
+                        $committedChunks = count($this->coordinator->chunkFiles());
+                        $committedPages  = $this->coordinator->buildState()->getPagesProcessed();
+                        $this->cache->pruneAndSave();
+                        $this->tsManifest->pruneAndSave();
+                        $this->coordinator->releaseLockOnly();
+                        $logger->info(sprintf(
+                            '[scolta] Memory pressure detected after chunk %d — yielding for restart (%d pages committed).',
+                            $chunkNum - 1,
+                            $committedPages,
+                        ));
+                        return new StatusReport(
+                            version: '0.3.0',
+                            pagefindVersion: SupportedVersions::getVersionForMetadata(),
+                            resolvedIndexer: 'php',
+                            pagesProcessed: $committedPages,
+                            chunksWritten: $committedChunks,
+                            peakMemoryBytes: $telemetry->getPeakRssBytes(),
+                            memoryBudgetBytes: $budget->totalBudgetBytes(),
+                            durationSeconds: round(microtime(true) - $startTime, 3),
+                            outputDir: $this->outputDir,
+                            success: false,
+                            error: 'memory_abort',
+                        );
+                    }
                 }
             }
 
@@ -197,6 +230,9 @@ final class IndexBuildOrchestrator
                 $progress->advance(1, "Chunk {$chunkNum} ({$pagesInRun} pages)");
                 unset($partial, $chunk);
                 gc_collect_cycles();
+                if (function_exists('gc_mem_caches')) {
+                    gc_mem_caches();
+                }
             }
 
             $progress->finish("{$pagesInRun} pages indexed");
@@ -425,6 +461,29 @@ final class IndexBuildOrchestrator
         if ($this->storage->exists($oldDir)) {
             $this->storage->deleteDirectory($oldDir);
         }
+    }
+
+    /**
+     * Return true when the process should yield to avoid OOM.
+     *
+     * In production: checks whether current RSS has reached 75% of the effective
+     * memory limit (PHP limit or cgroup limit, whichever is lower).
+     *
+     * In tests: delegates to the injected $memoryPressureProbe closure so tests
+     * can trigger the yield path without actual memory pressure.
+     */
+    private function isUnderMemoryPressure(MemoryTelemetry $telemetry): bool
+    {
+        if ($this->memoryPressureProbe !== null) {
+            return ($this->memoryPressureProbe)();
+        }
+
+        $limit = $telemetry->effectiveLimitBytes();
+        if ($limit <= 0) {
+            return false;
+        }
+
+        return $telemetry->getCurrentRssBytes() >= (int) ($limit * 0.75);
     }
 
     /**
