@@ -320,7 +320,7 @@ final class PageWordCache
             return null;
         }
 
-        // Detect cache entries written before the Token class was introduced (pre-1.1.0).
+        // Detect cache entries written before the Token class was introduced (pre-1.0.0).
         // Old entries store tokens as plain arrays; reading them with ->stem would fatal.
         // Return null to force re-tokenization — the new entry will use Token objects.
         foreach ($data as $entry) {

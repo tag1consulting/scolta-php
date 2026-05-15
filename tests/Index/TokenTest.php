@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\Index\Token;
 
 /**
- * @since 1.1.0
+ * @since 1.0.0
  * @stability experimental
  */
 class TokenTest extends TestCase

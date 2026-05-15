@@ -9,7 +9,7 @@ use Tag1\Scolta\Index\Token;
 use Tag1\Scolta\Index\Tokenizer;
 
 /**
- * @since 1.1.0
+ * @since 1.0.0
  * @stability experimental
  */
 class MemoryUsageTest extends TestCase

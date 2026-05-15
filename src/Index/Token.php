@@ -17,7 +17,7 @@ namespace Tag1\Scolta\Index;
  *
  * @see https://github.com/tag1consulting/scolta-php/issues/87
  *
- * @since 1.1.0
+ * @since 1.0.0
  * @stability experimental
  */
 final class Token
