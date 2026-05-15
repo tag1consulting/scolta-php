@@ -545,16 +545,28 @@ class PagefindFormatWriterTest extends TestCase
         ['index' => $index, 'pages' => $pages] = $builder->build($items);
         $this->writer->write($index, $pages, $this->tmpDir);
 
-        // Verify pf_meta sorts: ascending price → sapphire (p1=12.50), amethyst (p0=42.99), ruby (p2=99.00)
+        // Verify pf_meta sorts: price and auto-included date.
         $decoded = $this->decodeMeta();
         $sorts = $decoded[4];
-        $this->assertCount(1, $sorts);
-        $this->assertSame('price', $sorts[0][0]);
-        $this->assertSame([1, 0, 2], $sorts[0][1]);
+        $this->assertCount(2, $sorts);
 
-        // Verify meta_fields includes price.
+        $byField = [];
+        foreach ($sorts as $entry) {
+            $byField[$entry[0]] = $entry[1];
+        }
+
+        // ascending price → sapphire (p1=12.50), amethyst (p0=42.99), ruby (p2=99.00)
+        $this->assertArrayHasKey('price', $byField);
+        $this->assertSame([1, 0, 2], $byField['price']);
+
+        // ascending date → 2026-01-01 (p0), 2026-01-02 (p1), 2026-01-03 (p2)
+        $this->assertArrayHasKey('date', $byField);
+        $this->assertSame([0, 1, 2], $byField['date']);
+
+        // Verify meta_fields includes price and date.
         $metaFields = $decoded[5];
         $this->assertContains('price', $metaFields);
+        $this->assertContains('date', $metaFields);
 
         // Verify fragments include price in meta.
         $fragmentFiles = glob($this->tmpDir . '/.scolta-building/fragment/*.pf_fragment');

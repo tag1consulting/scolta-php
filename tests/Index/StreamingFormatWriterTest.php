@@ -228,6 +228,44 @@ class StreamingFormatWriterTest extends TestCase
         $this->assertNotContains('url', $metaFields, 'url must not appear in meta_fields');
     }
 
+    public function testAutoIncludesDateInSortsWhenPageDataHasDate(): void
+    {
+        $pages = [
+            0 => array_merge($this->makePage('/a', 'A'), ['date' => '2026-01-03']),
+            1 => array_merge($this->makePage('/b', 'B'), ['date' => '2026-01-01']),
+            2 => array_merge($this->makePage('/c', 'C'), ['date' => '2026-01-02']),
+        ];
+
+        $this->writeSingleChunkAndRun($pages);
+        $decoded = $this->decodeMeta();
+        $sorts   = $decoded[4];
+
+        $byField = [];
+        foreach ($sorts as $entry) {
+            $byField[$entry[0]] = $entry[1];
+        }
+
+        // ascending lexicographic date order: 2026-01-01 (p1), 2026-01-02 (p2), 2026-01-03 (p0)
+        $this->assertArrayHasKey('date', $byField);
+        $this->assertSame([1, 2, 0], $byField['date']);
+    }
+
+    public function testExplicitSortableDateTakesPrecedenceOverPageDataDate(): void
+    {
+        $pages = [
+            0 => array_merge($this->makePage('/a', 'A', ['date' => '2026-01-01']), ['date' => '2026-06-01']),
+        ];
+
+        $this->writeSingleChunkAndRun($pages);
+        $decoded = $this->decodeMeta();
+        $sorts   = $decoded[4];
+
+        // sortable['date'] = '2026-01-01' takes precedence over pageData['date'] = '2026-06-01'
+        $this->assertCount(1, $sorts);
+        $this->assertSame('date', $sorts[0][0]);
+        $this->assertSame([0], $sorts[0][1]);
+    }
+
     public function testEndToEndSortableFieldsFlowFromContentItemToIndex(): void
     {
         $builder = new InvertedIndexBuilder(new Tokenizer(), new Stemmer('en'));
@@ -282,15 +320,27 @@ class StreamingFormatWriterTest extends TestCase
         (new IndexMerger())->mergeStreaming([$chunkPath], $this->writer);
         $this->writer->endWrite();
 
-        // pf_meta[4] sorts: ascending price → sapphire=12.50 (p1), amethyst=42.99 (p0), ruby=99.00 (p2)
+        // pf_meta[4] sorts: price and auto-included date.
         $decoded = $this->decodeMeta();
         $sorts   = $decoded[4];
-        $this->assertCount(1, $sorts);
-        $this->assertSame('price', $sorts[0][0]);
-        $this->assertSame([1, 0, 2], $sorts[0][1]);
+        $this->assertCount(2, $sorts);
 
-        // pf_meta[5] meta_fields must contain price.
+        $byField = [];
+        foreach ($sorts as $entry) {
+            $byField[$entry[0]] = $entry[1];
+        }
+
+        // ascending price → sapphire=12.50 (p1), amethyst=42.99 (p0), ruby=99.00 (p2)
+        $this->assertArrayHasKey('price', $byField);
+        $this->assertSame([1, 0, 2], $byField['price']);
+
+        // ascending date → 2026-01-01 (p0), 2026-01-02 (p1), 2026-01-03 (p2)
+        $this->assertArrayHasKey('date', $byField);
+        $this->assertSame([0, 1, 2], $byField['date']);
+
+        // pf_meta[5] meta_fields must contain price and date.
         $this->assertContains('price', $decoded[5]);
+        $this->assertContains('date', $decoded[5]);
 
         // Every fragment must have price in its meta.
         $fragmentFiles = glob($this->tmpDir . '/.scolta-building/fragment/*.pf_fragment');

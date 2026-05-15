@@ -267,4 +267,45 @@ class PagefindHtmlBuilderTest extends TestCase
         $this->assertStringContainsString('data-pagefind-meta="published:2024-06-15"', $html);
         $this->assertStringContainsString('data-pagefind-sort="price:9.99"', $html);
     }
+
+    public function testAutoIncludesDateAsSortable(): void
+    {
+        $html = PagefindHtmlBuilder::build(
+            id: 'doc-17',
+            title: 'Test',
+            body: 'Body',
+            url: 'https://example.com',
+            date: '2026-05-15',
+        );
+
+        $this->assertStringContainsString('data-pagefind-sort="date:2026-05-15"', $html);
+    }
+
+    public function testExplicitSortableDateTakesPrecedence(): void
+    {
+        $html = PagefindHtmlBuilder::build(
+            id: 'doc-18',
+            title: 'Test',
+            body: 'Body',
+            url: 'https://example.com',
+            date: '2026-05-15',
+            sortable: ['date' => '2026-01-01'],
+        );
+
+        $this->assertStringContainsString('data-pagefind-sort="date:2026-01-01"', $html);
+        $this->assertStringNotContainsString('data-pagefind-sort="date:2026-05-15"', $html);
+    }
+
+    public function testEmptyDateNotAutoIncludedAsSortable(): void
+    {
+        $html = PagefindHtmlBuilder::build(
+            id: 'doc-19',
+            title: 'Test',
+            body: 'Body',
+            url: 'https://example.com',
+            date: '',
+        );
+
+        $this->assertStringNotContainsString('data-pagefind-sort="date:"', $html);
+    }
 }

@@ -152,6 +152,10 @@ class InvertedIndexBuilder
 
         foreach ($tokenDataList as ['item' => $item, 'tokenData' => $tokenData]) {
             $itemSortable = $item->sortable ?? [];
+            $itemDate = $item->date ?? '';
+            if ($itemDate !== '' && !isset($itemSortable['date'])) {
+                $itemSortable['date'] = $itemDate;
+            }
             $pages[$pageNum] = [
                 'id'        => $item->id,
                 'url'       => $item->url,

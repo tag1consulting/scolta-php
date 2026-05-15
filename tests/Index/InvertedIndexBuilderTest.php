@@ -297,17 +297,19 @@ class InvertedIndexBuilderTest extends TestCase
 
         $page = array_values($result['pages'])[0];
         $this->assertSame('42.99', $page['meta']['price']);
-        $this->assertSame(['price' => '42.99'], $page['sortable']);
+        // date is auto-included alongside any explicit sortable fields.
+        $this->assertSame(['price' => '42.99', 'date' => '2026-01-01'], $page['sortable']);
     }
 
-    public function testNoSortableFieldsProducesEmptySortable(): void
+    public function testNoSortableFieldsAutoIncludesDate(): void
     {
         $result = $this->builder->build([
             $this->makeItem('doc-1', 'Plain Page', 'Some plain content without any sort fields configured at all.'),
         ]);
 
         $page = array_values($result['pages'])[0];
-        $this->assertSame([], $page['sortable']);
+        // date is always auto-included in sortable when a date is present.
+        $this->assertSame(['date' => '2026-01-01'], $page['sortable']);
         $this->assertArrayNotHasKey('price', $page['meta']);
         $this->assertArrayNotHasKey('rating', $page['meta']);
     }
@@ -329,7 +331,8 @@ class InvertedIndexBuilderTest extends TestCase
         // Sortable fields appear in both meta (for fragment JSON) and sortable (for sorts array).
         $this->assertSame('29.99', $page['meta']['price']);
         $this->assertSame('4.5', $page['meta']['rating']);
-        $this->assertSame(['price' => '29.99', 'rating' => '4.5'], $page['sortable']);
+        // date is auto-included alongside explicit sortable fields.
+        $this->assertSame(['price' => '29.99', 'rating' => '4.5', 'date' => '2026-01-01'], $page['sortable']);
         // Title and date are always present.
         $this->assertSame('Product', $page['meta']['title']);
     }
