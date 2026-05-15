@@ -336,4 +336,27 @@ class InvertedIndexBuilderTest extends TestCase
         // Title and date are always present.
         $this->assertSame('Product', $page['meta']['title']);
     }
+
+    public function testZeroIntegerSortableValuePreservedInMeta(): void
+    {
+        // Regression: array_filter() with no callback strips falsy values (including integer 0).
+        // A sortable field with value 0 (e.g. reference_count for an article with no citations)
+        // must appear in meta so scolta.js can validate the sort field is present in the index.
+        // If it is absent, scolta.js falls back to relevance and the sort badge never renders.
+        $item = new ContentItem(
+            id: 'doc-1',
+            title: 'Article',
+            bodyHtml: '<p>An article with zero references.</p>',
+            url: 'https://example.com/article',
+            date: '2026-01-01',
+            sortable: ['word_count' => 5000, 'reference_count' => 0],
+        );
+        $result = $this->builder->build([$item]);
+
+        $page = array_values($result['pages'])[0];
+        $this->assertSame(5000, $page['meta']['word_count']);
+        $this->assertArrayHasKey('reference_count', $page['meta'], 'reference_count: 0 must not be stripped from meta by array_filter');
+        $this->assertSame(0, $page['meta']['reference_count']);
+        $this->assertSame(['word_count' => 5000, 'reference_count' => 0, 'date' => '2026-01-01'], $page['sortable']);
+    }
 }
