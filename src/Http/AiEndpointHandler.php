@@ -116,6 +116,10 @@ class AiEndpointHandler
                 $payload['sort_hint'] = $parsed['sort_hint'];
             }
 
+            if ($parsed['subject_terms'] !== null) {
+                $payload['subject_terms'] = $parsed['subject_terms'];
+            }
+
             if ($this->cacheTtl > 0) {
                 $this->cache->set($cacheKey, $payload, $this->cacheTtl);
             }
@@ -317,14 +321,14 @@ class AiEndpointHandler
     }
 
     /**
-     * Parse an AI expansion response and extract both terms and an optional sort hint.
+     * Parse an AI expansion response and extract terms, an optional sort hint, and optional subject terms.
      *
-     * Returns ['terms' => string[], 'sort_hint' => array{field: string, direction: string}|null].
-     * Parses defensively: malformed or absent sort_hint is silently ignored.
+     * Returns ['terms' => string[], 'sort_hint' => array{field: string, direction: string}|null, 'subject_terms' => string[]|null].
+     * Parses defensively: malformed or absent fields are silently ignored.
      *
      * @param string $response      Raw AI response text.
      * @param string $originalQuery The original query (used as fallback for terms).
-     * @return array{terms: array, sort_hint: array{field: string, direction: string}|null}
+     * @return array{terms: array, sort_hint: array{field: string, direction: string}|null, subject_terms: array|null}
      */
     protected function parseExpansionResult(string $response, string $originalQuery): array
     {
@@ -335,20 +339,41 @@ class AiEndpointHandler
 
         $decoded = json_decode($cleaned, true);
 
-        // New object format: {"terms": [...], "sort": {...}}
+        // New object format: {"terms": [...], "sort": {...}, "subject_terms": [...]}
         if (is_array($decoded) && isset($decoded['terms']) && is_array($decoded['terms'])) {
             $terms = count($decoded['terms']) >= 2 ? $decoded['terms'] : [$originalQuery];
             $sortHint = $this->extractSortHint($decoded['sort'] ?? null);
+            $subjectTerms = $this->extractSubjectTerms($decoded['subject_terms'] ?? null);
 
-            return ['terms' => $terms, 'sort_hint' => $sortHint];
+            return ['terms' => $terms, 'sort_hint' => $sortHint, 'subject_terms' => $subjectTerms];
         }
 
         // Legacy array format: ["term1", "term2", ...]
         if (is_array($decoded) && count($decoded) >= 2) {
-            return ['terms' => $decoded, 'sort_hint' => null];
+            return ['terms' => $decoded, 'sort_hint' => null, 'subject_terms' => null];
         }
 
-        return ['terms' => [$originalQuery], 'sort_hint' => null];
+        return ['terms' => [$originalQuery], 'sort_hint' => null, 'subject_terms' => null];
+    }
+
+    /**
+     * Validate and normalise a raw subject_terms value from the LLM response.
+     *
+     * Returns null when the value is absent, malformed, or empty — so a bad LLM
+     * response never breaks expansion.
+     *
+     * @param mixed $raw The raw "subject_terms" value from the decoded JSON.
+     * @return string[]|null
+     */
+    private function extractSubjectTerms(mixed $raw): ?array
+    {
+        if (!is_array($raw)) {
+            return null;
+        }
+
+        $filtered = array_values(array_filter($raw, static fn ($v) => is_string($v) && $v !== ''));
+
+        return !empty($filtered) ? $filtered : null;
     }
 
     /**
@@ -406,7 +431,7 @@ class AiEndpointHandler
         $prompt .= "\n\nSORT INTENT (optional):\n"
             . "Available sortable fields: {$fieldList}\n\n"
             . "Only add a \"sort\" key when sorting results is the query's PRIMARY purpose — the user explicitly wants results ranked by a specific field.\n"
-            . "Format: {\"terms\": [...], \"sort\": {\"field\": \"price\", \"direction\": \"desc\"}}\n\n"
+            . "Format: {\"terms\": [...], \"sort\": {\"field\": \"price\", \"direction\": \"desc\"}, \"subject_terms\": [\"tooth\"]}\n\n"
             . "Rules:\n"
             . "- field MUST be one of the available sortable fields listed above — no other values are permitted\n"
             . "- direction must be \"asc\" or \"desc\"\n"
@@ -416,7 +441,16 @@ class AiEndpointHandler
             . "- Do NOT classify sort intent for research questions, conversational queries, or any query where the sort-like word is a modifier rather than the main goal.\n"
             . "  Counter-examples (must NOT trigger sort): 'most popular crystals', 'the latest research on...', 'most common git commands', 'best practices for...', 'cheapest way to comply with...', 'first aid for...'\n"
             . "- Prefer false negatives over false positives: a missed sort hint is far less harmful than an incorrect result reorder. When uncertain, ALWAYS omit the \"sort\" key.\n"
-            . '- When sort is detected, exclude the sort signal words (most, cheapest, newest, highest, lowest, etc.) from the expanded terms';
+            . "- When sort is detected, exclude the sort signal words (most, cheapest, newest, highest, lowest, etc.) from the expanded terms\n\n"
+            . "SUBJECT TERMS (required when sort is detected):\n"
+            . "When you add a \"sort\" key, you MUST also add a \"subject_terms\" array containing ONLY the words from the original query that describe WHAT the user is searching for — with all sort-related words removed. Sort-related words include: superlatives (most, least, best, worst), comparatives (more, less, cheaper, faster), price/order words (expensive, cheap, costly, newest, oldest, latest, earliest), and the sort field name itself.\n"
+            . "Examples:\n"
+            . "- \"most expensive tooth\" → subject_terms: [\"tooth\"]\n"
+            . "- \"cheapest blue stone\" → subject_terms: [\"blue stone\"]\n"
+            . "- \"newest blog posts about React\" → subject_terms: [\"blog posts about React\"]\n"
+            . "- \"most expensive\" → subject_terms: [] (empty — query is ONLY sort intent, no subject)\n"
+            . "- \"oldest fossils\" → subject_terms: [\"fossils\"]\n"
+            . 'If no sort is detected, omit subject_terms entirely.';
 
         return $prompt;
     }

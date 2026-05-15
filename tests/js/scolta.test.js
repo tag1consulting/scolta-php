@@ -259,6 +259,53 @@ describe('scolta.js structure', () => {
     test('sort_hint field absent from all results falls back silently', () => {
         expect(jsSource).toContain('absent from all results, falling back to relevance');
     });
+
+    test('expandQuery returns subject_terms from API response', () => {
+        expect(jsSource).toContain('data?.subject_terms');
+        expect(jsSource).toContain('subject_terms: null');
+    });
+
+    test('mergeExpandedSearchResults accepts subjectTerms parameter', () => {
+        expect(jsSource).toMatch(/mergeExpandedSearchResults\([^)]*subjectTerms/);
+    });
+
+    test('dual-search runs subject-only search when subjectTerms present', () => {
+        expect(jsSource).toContain('subjectSearchP');
+        expect(jsSource).toContain("subjectTerms.join(' ')");
+    });
+
+    test('subject URL set built from subject search results', () => {
+        expect(jsSource).toContain('subjectUrlSet');
+        expect(jsSource).toContain('subjectSearch.results.length');
+    });
+
+    test('intersection applied when subject URL set is non-empty', () => {
+        expect(jsSource).toContain('subjectUrlSet.has(');
+        expect(jsSource).toContain('intersection.length >= 3');
+    });
+
+    test('intersection fallback appends remainder when fewer than 3 results', () => {
+        expect(jsSource).toContain('intersection.length > 0');
+        expect(jsSource).toContain('remainder');
+        expect(jsSource).toContain('[...intersection, ...remainder]');
+    });
+
+    test('warns and falls back to sorted results when intersection is empty', () => {
+        expect(jsSource).toContain('Subject filter intersection empty');
+    });
+
+    test('warns and falls back when subject search returns no results', () => {
+        expect(jsSource).toContain('Subject filter search returned no results');
+    });
+
+    test('subject search skipped when subjectTerms is null or empty', () => {
+        expect(jsSource).toContain('subjectTerms && subjectTerms.length > 0');
+        expect(jsSource).toContain('Promise.resolve(null)');
+    });
+
+    test('doSearch extracts subject_terms from expansion response', () => {
+        expect(jsSource).toContain('expansion?.subject_terms');
+    });
 });
 
 describe('scolta.css structure', () => {
