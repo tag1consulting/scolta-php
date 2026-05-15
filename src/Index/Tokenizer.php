@@ -49,7 +49,7 @@ class Tokenizer
      *
      * @param string $text Input text (plain text, not HTML).
      * @param int $startPosition Character position offset for position tracking.
-     * @return array<int, array{stem: string, original: string, position: int}>
+     * @return array<int, Token>
      */
     public function tokenize(string $text, int $startPosition = 0): array
     {
@@ -58,6 +58,8 @@ class Tokenizer
         }
 
         $tokens = [];
+        $lowerCache = [];
+        $normalizeCache = [];
         $originalText = $text;
 
         // Detect pure-ASCII text once per call. When true:
@@ -104,21 +106,16 @@ class Tokenizer
                     continue;
                 }
 
-                // Lowercase after splitting.
-                $lower = $this->textIsAscii ? strtolower($part) : mb_strtolower($part);
-
-                // Normalize diacritics for the stem form.
-                $normalized = $this->normalize($lower);
+                // Lowercase after splitting. Memo deduplicates string allocations
+                // for repeated words within a single page tokenization call.
+                $lower = $lowerCache[$part] ??= ($this->textIsAscii ? strtolower($part) : mb_strtolower($part));
+                $normalized = $normalizeCache[$lower] ??= $this->normalize($lower);
 
                 if ($normalized === '') {
                     continue;
                 }
 
-                $tokens[] = [
-                    'stem' => $normalized,
-                    'original' => $lower,
-                    'position' => $position + $partOffset,
-                ];
+                $tokens[] = new Token($normalized, $lower, $position + $partOffset);
             }
 
             // Advance char position past this word so the next gap is measured

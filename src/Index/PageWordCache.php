@@ -314,9 +314,24 @@ final class PageWordCache
         }
 
         $raw = $this->storage->get($file);
-        $data = @unserialize($raw, ['allowed_classes' => false]);
+        $data = @unserialize($raw, ['allowed_classes' => [Token::class]]);
 
-        return is_array($data) ? $data : null;
+        if (!is_array($data)) {
+            return null;
+        }
+
+        // Detect cache entries written before the Token class was introduced (pre-1.1.0).
+        // Old entries store tokens as plain arrays; reading them with ->stem would fatal.
+        // Return null to force re-tokenization — the new entry will use Token objects.
+        foreach ($data as $entry) {
+            $firstTokens = $entry['titleTokens'] ?? $entry['bodyTokens'] ?? [];
+            if (!empty($firstTokens) && is_array(reset($firstTokens))) {
+                return null;
+            }
+            break;
+        }
+
+        return $data;
     }
 
     private function writeChunkFile(int $chunkNumber, array $entries): void

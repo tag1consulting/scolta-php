@@ -64,8 +64,8 @@ class InvertedIndexBuilder
      *
      * Returns the token arrays and derived text fields needed to build index
      * entries. Returns null when the cleaned body is too short to index.
-     * The returned array is safe to serialize into a persistent cache — it
-     * contains no objects, only scalars and arrays.
+     * The returned array is safe to serialize into a persistent cache.
+     * Token objects serialize efficiently and are allowed in PageWordCache.
      *
      * Tokenize title and body separately for weight differentiation.
      * Strip HTML tags and decode entities — CMS adapters may pass
@@ -77,7 +77,7 @@ class InvertedIndexBuilder
      * character offsets. Positions are reindexed after tokenization so
      * they are comparable across pages and phrase_proximity_multiplier fires.
      *
-     * @return array{titleTokens: array, bodyTokens: array, urlTokens: array,
+     * @return array{titleTokens: Token[], bodyTokens: Token[], urlTokens: Token[],
      *               wordCount: int, cleanTitle: string, content: string}|null
      */
     public function tokenizeItem(ContentItem $item): ?array
@@ -188,20 +188,18 @@ class InvertedIndexBuilder
      * Pagefind uses word-sequential indices (0, 1, 2, 3...) not
      * character offsets. This method converts after tokenization.
      *
-     * @param array $tokens Tokens from Tokenizer::tokenize()
+     * @param Token[] $tokens Tokens from Tokenizer::tokenize()
      * @param int $startIndex Starting word index
-     * @return array{tokens: array, nextIndex: int}
+     * @return array{tokens: Token[], nextIndex: int}
      */
     private function reindexToWordPositions(array $tokens, int $startIndex = 0): array
     {
         $reindexed = [];
         $wordIndex = $startIndex;
         foreach ($tokens as $token) {
-            $reindexed[] = [
-                'stem' => $token['stem'],
-                'original' => $token['original'],
-                'position' => $wordIndex,
-            ];
+            // New Token with reassigned position; stem/original strings are shared by
+            // PHP's copy-on-write — no new string allocation for those properties.
+            $reindexed[] = new Token($token->stem, $token->original, $wordIndex);
             $wordIndex++;
         }
         return ['tokens' => $reindexed, 'nextIndex' => $wordIndex];
@@ -209,12 +207,14 @@ class InvertedIndexBuilder
 
     /**
      * Add tokens to the inverted index for a page.
+     *
+     * @param Token[] $tokens
      */
     private function indexTokens(array &$index, array $tokens, int $pageNum, int $weight): void
     {
         foreach ($tokens as $token) {
-            $stemmed = $this->stemmer->stem($token['stem']);
-            $position = $token['position'];
+            $stemmed = $this->stemmer->stem($token->stem);
+            $position = $token->position;
 
             // Initialize word entry if needed.
             if (!isset($index[$stemmed])) {
@@ -245,11 +245,11 @@ class InvertedIndexBuilder
             }
 
             // Track diacritic variants.
-            if ($token['stem'] !== $token['original']) {
+            if ($token->stem !== $token->original) {
                 if (!isset($index[$stemmed]['_variants'])) {
                     $index[$stemmed]['_variants'] = [];
                 }
-                $original = $token['original'];
+                $original = $token->original;
                 if (!isset($index[$stemmed]['_variants'][$original])) {
                     $index[$stemmed]['_variants'][$original] = [];
                 }
