@@ -171,7 +171,7 @@ class InvertedIndexBuilder
                 'meta'      => array_filter([
                     'title' => $tokenData['cleanTitle'],
                     'date'  => $item->date,
-                ] + $itemSortable),
+                ] + $itemSortable, fn ($v) => $v !== null && $v !== ''),
                 'sortable'  => $itemSortable,
                 'hash'      => hash('sha256', $tokenData['content']),
             ];

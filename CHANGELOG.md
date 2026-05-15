@@ -7,6 +7,7 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ## [Unreleased]
 
 ### Fixed
+- **Sort badge no longer silently fails when a sortable field has value 0.** `InvertedIndexBuilder` used `array_filter()` without a callback on the meta array, which strips PHP falsy values including integer `0`. A sortable field like `reference_count: 0` was removed from the fragment's `meta` JSON; `scolta.js` checked `data.meta[field]` and found `undefined`, causing it to fall back to relevance order and suppress the sort badge. The fix uses a strict `fn($v) => $v !== null && $v !== ''` predicate so numeric zero is preserved in meta while still excluding null and empty strings.
 - **`CachedContentReference` now carries `sortable` data through incremental builds.** When a content gatherer yields a `CachedContentReference` for an unchanged entity, the orchestrator built the chunk entry without a `sortable` field — so items indexed from cache always had empty sort metadata on the second and subsequent builds. `CachedContentReference` gains an optional `sortable: array = []` parameter; `IndexBuildOrchestrator` now includes `sortable` in the cached-reference chunk entry alongside `filters`. Gatherers (e.g. scolta-drupal) that store `sortable` in the timestamp manifest and pass it through the reference will now produce correct sort output on incremental builds.
 
 ### Added
