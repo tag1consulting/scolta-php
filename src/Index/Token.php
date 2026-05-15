@@ -26,5 +26,6 @@ final class Token
         public readonly string $stem,
         public readonly string $original,
         public readonly int $position,
-    ) {}
+    ) {
+    }
 }
