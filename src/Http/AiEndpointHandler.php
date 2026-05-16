@@ -493,26 +493,50 @@ Only add a "sort" key when sorting results is the query's PRIMARY purpose — th
 
 Format: {"terms": [...], "sort": {"field": "<field_name>", "direction": "asc|desc"}, "subject_terms": ["..."]}
 
-Rules:
-- field MUST be one of the available sortable fields listed above — no other values are permitted.
+DECISION SEQUENCE — follow in order, stop at the first match:
+
+STEP 1: EXPLICIT SORT SYNTAX (always classify)
+If the query contains "sort by", "sorted by", "order by", "arrange by", "rank by", or "group by" followed by a field name or concept, this IS sort intent regardless of query length or complexity. Map the named concept to the closest available field.
+Examples: "sort by date" → date desc, "articles about wars sorted by date" → date desc, "rank by word count" → word_count desc.
+
+STEP 2: DISCOVERY QUALIFIERS / SUPERLATIVES AS QUALIFIERS (never classify as sort)
+If the sort-like word is a QUALIFIER describing what TYPE of result the user wants to discover — not how to ORDER them — do NOT add sort. These qualifiers describe the item itself, not a ranking preference:
+- "most common", "most popular", "best known", "well known", "top rated", "widely used", "most famous", "most important", "best", "worst", "top", "leading"
+- These words answer "WHICH items?" not "IN WHAT ORDER?"
+- "Most common elements" = "find elements that are well-known" (discovery) — NOT "sort elements by commonality"
+- "Most popular crystals" = "find famous crystals" — NOT "sort by a popularity metric"
+- "Best practices for deployment" = "find good practices" — NOT sort intent
+- "Top programming languages" = "find the leading languages" — NOT sort intent
+EXCEPTION: classify as sort ONLY if a field explicitly described as measuring the qualifier concept exists (e.g., a "popularity_score" field for "most popular") AND the query is clearly requesting an ordered list, not information about popular items.
+
+STEP 3: RESEARCH / ADVICE / CONVERSATIONAL QUERIES (never classify as sort)
+If the query is asking a question, seeking advice, or requesting information, do NOT add sort — even if sort-like words appear:
+- "the latest research on..." (research question, "latest" = current, not a date sort)
+- "cheapest way to comply with..." (advice question)
+- "first aid for radiation exposure" ("first" is not temporal)
+- "what are the newest trends in..." (informational)
+- "best practices for..." (advice)
+- "how to find the most..." (instructional)
+
+STEP 4: CLEAR SORT-INTENT SIGNALS (classify when a matching field exists)
+If the query's primary purpose is ordering results by a measurable field, AND a matching sortable field exists, add sort. Map user language to available fields:
+  · Price/cost: "most expensive", "cheapest", "priciest", "lowest price" → price field
+  · Recency: "newest", "latest", "most recent", "oldest", "earliest" → date field
+  · Recency (adverb forms): "recently updated", "recently added", "recently published", "newly created", "freshly posted" → date field (desc)
+  · Size/depth: "longest", "shortest", "most comprehensive", "most in-depth", "most detailed" → length/count field
+  · Citation/quality: "most cited", "most referenced", "best researched" → citation/reference count field
+  · Severity: "most severe", "highest risk", "most critical" → severity/risk field
+  · Engagement: "most starred", "most liked", "most discussed" → engagement count field
+  If there is no clear, direct semantic match between the user's language and an available field's description, do NOT add sort.
+
+GENERAL RULES:
+- field MUST be one of the available sortable fields listed above — no other values permitted.
 - direction must be "asc" or "desc".
-- Map the user's language to the closest available field using the field descriptions above. Common patterns:
-  · Price/cost language ("most expensive", "cheapest") → a price field (desc / asc)
-  · Recency language ("newest", "latest", "most recent", "oldest") → a date field (desc / asc)
-  · Size/depth language ("longest", "most comprehensive", "most in-depth") → a length or count field (desc)
-  · Quality/rigor language ("most cited", "most referenced", "best researched") → a citation or reference count field (desc)
-  · Severity/intensity language ("most severe", "highest risk", "most critical") → a severity or risk field (desc)
-  · Popularity/engagement language ("most starred", "most liked", "most discussed") → an engagement count field (desc)
-  If there is no clear, direct semantic match to an available field, do NOT add sort.
-- SUPERLATIVES AS QUALIFIERS: superlatives like "most popular", "best known", "most common", "top rated", "well known" describe what TYPE of item the user wants to discover — they are NOT sort intent. "Most popular crystals" means "find well-known crystals" (a discovery query), NOT "sort crystals by a popularity field". Do not classify these as sort intent UNLESS a field explicitly described as measuring popularity or engagement exists AND the query is short enough that sorting is clearly the primary goal.
-- Only classify sort intent for short (2–4 word) queries where the sort word IS the primary goal, not a qualifier.
-- Do NOT classify sort intent for research questions, conversational queries, or any query where the sort-like word is a modifier rather than the main goal.
-  Counter-examples (must NOT trigger sort): "most popular crystals" (no popularity field), "the latest research on..." (conversational), "most common git commands" (discovery), "best practices for..." (discovery), "cheapest way to comply with..." (advice question), "first aid for..." (informational)
-- Prefer false negatives over false positives: a missed sort hint is far less harmful than an incorrect result reorder. When uncertain, ALWAYS omit the "sort" key.
-- When sort is detected, exclude the sort signal words (most, cheapest, newest, highest, lowest, etc.) from the expanded terms.
+- Prefer false negatives over false positives: a missed sort is far less harmful than a wrong reorder. When uncertain, ALWAYS omit "sort".
+- When sort is detected, exclude sort signal words (most, cheapest, newest, highest, lowest, recently, etc.) from expanded terms.
 
 SUBJECT TERMS (required when sort is detected):
-When you add a "sort" key, you MUST also add a "subject_terms" array containing ONLY the words from the original query that describe WHAT the user is searching for — with all sort-related words removed. Sort-related words include: superlatives (most, least, best, worst), comparatives (more, less, cheaper, faster), order words (expensive, cheap, costly, newest, oldest, latest, earliest), and the sort field name itself.
+When you add a "sort" key, you MUST also add a "subject_terms" array containing ONLY the words from the original query that describe WHAT the user is searching for — with all sort-related words removed. Sort-related words include: superlatives (most, least, best, worst), comparatives (more, less, cheaper, faster), order words (expensive, cheap, costly, newest, oldest, latest, earliest), adverb modifiers (recently, newly, freshly), explicit sort syntax (sort by, sorted by, order by), and the sort field name itself.
 Examples:
 - "most expensive tooth" → subject_terms: ["tooth"]
 - "cheapest blue stone" → subject_terms: ["blue stone"]
@@ -520,6 +544,8 @@ Examples:
 - "most comprehensive quantum physics articles" → subject_terms: ["quantum physics articles"]
 - "most expensive" → subject_terms: [] (empty — query is ONLY sort intent, no subject)
 - "oldest fossils" → subject_terms: ["fossils"]
+- "recently updated chemistry articles" → subject_terms: ["chemistry articles"]
+- "articles about wars sorted by date" → subject_terms: ["articles about wars"]
 If no sort is detected, omit subject_terms entirely.
 ENDSORTINSTR;
 
