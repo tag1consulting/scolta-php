@@ -74,6 +74,12 @@ LANGUAGE RULES:
 - No hedging: avoid "a few," "it seems," "you might want to," "appears to be," "is described as," "according to," "it looks like," or similar distancing phrases.
 - State facts from the excerpts as facts — you are presenting {SITE_NAME}\'s own published content.
 
+METADATA RULES:
+- Each result may include a "Metadata:" line with structured field values (dates, counts, prices, severity, etc.).
+- When a metadata field is marked "← SORTED BY THIS FIELD", results are ordered by that field — use it to make accurate ordering claims (e.g., "the earliest article is...", "the most expensive item is...").
+- When a metadata field is marked "← FILTERED BY THIS FIELD", results have been narrowed to a specific value — mention the filter context naturally.
+- Prefer metadata values over text inferences when making factual claims about dates, counts, prices, or rankings.
+
 GROUNDING CHECK:
 - Use ONLY information from the provided excerpts. Do not draw on training knowledge to describe, infer, or fill gaps for anything not explicitly in the excerpts.
 - If a detail is not in the excerpts, omit it — never estimate or invent it.
