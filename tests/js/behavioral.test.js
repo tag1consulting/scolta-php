@@ -328,6 +328,56 @@ describe('scolta.js behavioral tests', () => {
 
         expect(layout.classList.contains('has-filters')).toBe(false);
     });
+
+    test('no-results not shown while expansion is in flight (foreign language query)', async () => {
+        const { window } = createWindow();
+        const noResults = window.document.querySelector('#scolta-no-results');
+
+        // Hold the expand response pending so we can inspect mid-flight state.
+        let resolveExpand;
+        window.fetch = jest.fn().mockImplementation(url => {
+            if (url !== '/e') {
+                return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+            }
+            return new Promise(resolve => {
+                resolveExpand = () => resolve({
+                    ok: true,
+                    status: 200,
+                    json: () => Promise.resolve({ terms: [], sort_hint: null }),
+                });
+            });
+        });
+
+        const input = window.document.querySelector('#scolta-query');
+        input.value = 'hola mundo';
+        window.document.querySelector('#scolta-search-btn').click();
+
+        // Primary search resolves with 0 results; expansion is still pending.
+        await new Promise(r => setTimeout(r, 50));
+        expect(noResults.style.display).not.toBe('block');
+
+        // Resolve expansion — no valid terms, no results.
+        resolveExpand();
+        await new Promise(r => setTimeout(r, 50));
+
+        // Now "No Results Found" should appear.
+        expect(noResults.style.display).toBe('block');
+    });
+
+    test('no-results shown immediately when AI expansion is disabled', async () => {
+        const { window } = createWindow('<div id="scolta-search"></div>', {
+            scoring: { AI_EXPAND_QUERY: false },
+        });
+        const noResults = window.document.querySelector('#scolta-no-results');
+
+        const input = window.document.querySelector('#scolta-query');
+        input.value = 'hola mundo';
+        window.document.querySelector('#scolta-search-btn').click();
+
+        await new Promise(r => setTimeout(r, 50));
+
+        expect(noResults.style.display).toBe('block');
+    });
 });
 
 // =============================================================================
