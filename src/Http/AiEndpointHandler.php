@@ -7,7 +7,9 @@ namespace Tag1\Scolta\Http;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Tag1\Scolta\Cache\CacheDriverInterface;
+use Tag1\Scolta\Exception\ApiKeyInvalidException;
 use Tag1\Scolta\Exception\ApiKeyMissingException;
+use Tag1\Scolta\Exception\RateLimitException;
 use Tag1\Scolta\Prompt\NullEnricher;
 use Tag1\Scolta\Prompt\PromptEnricherInterface;
 
@@ -138,6 +140,17 @@ class AiEndpointHandler
             return ['ok' => true, 'data' => $payload];
         } catch (ApiKeyMissingException $e) {
             return ['ok' => true, 'data' => ['terms' => [$query], 'expand_primary_weight' => $this->expandPrimaryWeight]];
+        } catch (ApiKeyInvalidException $e) {
+            $this->logger->error('Scolta query expansion failed: invalid API key', ['exception' => $e]);
+
+            return ['ok' => false, 'status' => 401, 'error' => 'AI API key is invalid or expired'];
+        } catch (RateLimitException $e) {
+            $result = ['ok' => false, 'status' => 429, 'error' => 'AI API rate limit reached'];
+            if ($e->retryAfter !== null) {
+                $result['retry_after'] = $e->retryAfter;
+            }
+
+            return $result;
         } catch (\Exception $e) {
             $this->logger->error('Scolta query expansion failed', ['exception' => $e]);
 
@@ -203,6 +216,17 @@ class AiEndpointHandler
             return ['ok' => true, 'data' => $result];
         } catch (ApiKeyMissingException $e) {
             return ['ok' => true, 'data' => []];
+        } catch (ApiKeyInvalidException $e) {
+            $this->logger->error('Scolta summarization failed: invalid API key', ['exception' => $e]);
+
+            return ['ok' => false, 'status' => 401, 'error' => 'AI API key is invalid or expired'];
+        } catch (RateLimitException $e) {
+            $result = ['ok' => false, 'status' => 429, 'error' => 'AI API rate limit reached'];
+            if ($e->retryAfter !== null) {
+                $result['retry_after'] = $e->retryAfter;
+            }
+
+            return $result;
         } catch (\Exception $e) {
             $this->logger->error('Scolta summarization failed', ['exception' => $e]);
 
@@ -271,6 +295,17 @@ class AiEndpointHandler
             ]];
         } catch (ApiKeyMissingException $e) {
             return ['ok' => true, 'data' => ['response' => '', 'remaining' => 0]];
+        } catch (ApiKeyInvalidException $e) {
+            $this->logger->error('Scolta follow-up failed: invalid API key', ['exception' => $e]);
+
+            return ['ok' => false, 'status' => 401, 'error' => 'AI API key is invalid or expired'];
+        } catch (RateLimitException $e) {
+            $result = ['ok' => false, 'status' => 429, 'error' => 'AI API rate limit reached'];
+            if ($e->retryAfter !== null) {
+                $result['retry_after'] = $e->retryAfter;
+            }
+
+            return $result;
         } catch (\Exception $e) {
             $this->logger->error('Scolta follow-up failed', ['exception' => $e]);
 

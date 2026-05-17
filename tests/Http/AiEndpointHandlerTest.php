@@ -6,7 +6,9 @@ namespace Tag1\Scolta\Tests\Http;
 
 use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\Cache\CacheDriverInterface;
+use Tag1\Scolta\Exception\ApiKeyInvalidException;
 use Tag1\Scolta\Exception\ApiKeyMissingException;
+use Tag1\Scolta\Exception\RateLimitException;
 use Tag1\Scolta\Http\AiEndpointHandler;
 use Tag1\Scolta\Prompt\NullEnricher;
 use Tag1\Scolta\Prompt\PromptEnricherInterface;
@@ -638,6 +640,123 @@ class AiEndpointHandlerTest extends TestCase
     }
 
     // ===================================================================
+    // Invalid API key — 401
+    // ===================================================================
+
+    public function testExpandQueryReturns401OnInvalidApiKey(): void
+    {
+        $ai = new MockAiService('', throwApiKeyInvalid: true);
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleExpandQuery('test query');
+
+        $this->assertFalse($result['ok']);
+        $this->assertEquals(401, $result['status']);
+        $this->assertStringContainsString('invalid', strtolower($result['error']));
+    }
+
+    public function testSummarizeReturns401OnInvalidApiKey(): void
+    {
+        $ai = new MockAiService('', throwApiKeyInvalid: true);
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleSummarize('test', 'some context');
+
+        $this->assertFalse($result['ok']);
+        $this->assertEquals(401, $result['status']);
+    }
+
+    public function testFollowUpReturns401OnInvalidApiKey(): void
+    {
+        $ai = new MockAiService('', throwApiKeyInvalid: true);
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleFollowUp([['role' => 'user', 'content' => 'hello']]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertEquals(401, $result['status']);
+    }
+
+    public function testInvalidApiKeyLogsError(): void
+    {
+        $ai = new MockAiService('', throwApiKeyInvalid: true);
+        $logger = new SpyLogger();
+        $handler = new AiEndpointHandler(
+            aiService: $ai,
+            cache: new InMemoryCacheDriver(),
+            generation: 1,
+            cacheTtl: 0,
+            maxFollowUps: 3,
+            logger: $logger,
+        );
+
+        $handler->handleSummarize('test', 'context');
+
+        $this->assertNotEmpty($logger->errors, 'Invalid API key should be logged as an error');
+    }
+
+    // ===================================================================
+    // Rate limiting — 429
+    // ===================================================================
+
+    public function testExpandQueryReturns429OnRateLimit(): void
+    {
+        $ai = new MockAiService('', throwRateLimit: true);
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleExpandQuery('test query');
+
+        $this->assertFalse($result['ok']);
+        $this->assertEquals(429, $result['status']);
+    }
+
+    public function testSummarizeReturns429OnRateLimit(): void
+    {
+        $ai = new MockAiService('', throwRateLimit: true);
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleSummarize('test', 'some context');
+
+        $this->assertFalse($result['ok']);
+        $this->assertEquals(429, $result['status']);
+    }
+
+    public function testFollowUpReturns429OnRateLimit(): void
+    {
+        $ai = new MockAiService('', throwRateLimit: true);
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleFollowUp([['role' => 'user', 'content' => 'hello']]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertEquals(429, $result['status']);
+    }
+
+    public function testRateLimitResponseIncludesRetryAfterWhenPresent(): void
+    {
+        $ai = new MockAiService('', throwRateLimit: true, rateLimitRetryAfter: '60');
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleExpandQuery('test query');
+
+        $this->assertFalse($result['ok']);
+        $this->assertEquals(429, $result['status']);
+        $this->assertEquals('60', $result['retry_after']);
+    }
+
+    public function testRateLimitResponseOmitsRetryAfterWhenAbsent(): void
+    {
+        $ai = new MockAiService('', throwRateLimit: true, rateLimitRetryAfter: null);
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleExpandQuery('test query');
+
+        $this->assertFalse($result['ok']);
+        $this->assertEquals(429, $result['status']);
+        $this->assertArrayNotHasKey('retry_after', $result);
+    }
+
+    // ===================================================================
     // No API key — graceful degradation
     // ===================================================================
 
@@ -1220,6 +1339,9 @@ class MockAiService
         private readonly bool $throwOnMessage = false,
         private readonly bool $throwOnConversation = false,
         private readonly bool $throwApiKeyMissing = false,
+        private readonly bool $throwApiKeyInvalid = false,
+        private readonly bool $throwRateLimit = false,
+        private readonly ?string $rateLimitRetryAfter = null,
     ) {
     }
 
@@ -1240,12 +1362,7 @@ class MockAiService
 
     public function message(string $systemPrompt, string $userMessage, int $maxTokens): string
     {
-        if ($this->throwApiKeyMissing) {
-            throw new ApiKeyMissingException('Scolta AI API key not configured.');
-        }
-        if ($this->throwOnMessage) {
-            throw new \RuntimeException('AI service unavailable');
-        }
+        $this->throwIfConfigured();
         $this->callCount++;
         return $this->response;
     }
@@ -1257,14 +1374,28 @@ class MockAiService
 
     public function conversation(string $systemPrompt, array $messages, int $maxTokens): string
     {
-        if ($this->throwApiKeyMissing) {
-            throw new ApiKeyMissingException('Scolta AI API key not configured.');
-        }
         if ($this->throwOnConversation) {
             throw new \RuntimeException('AI service unavailable');
         }
+        $this->throwIfConfigured();
         $this->callCount++;
         return $this->response;
+    }
+
+    private function throwIfConfigured(): void
+    {
+        if ($this->throwApiKeyMissing) {
+            throw new ApiKeyMissingException('Scolta AI API key not configured.');
+        }
+        if ($this->throwApiKeyInvalid) {
+            throw new ApiKeyInvalidException('Scolta AI API key is invalid or expired.');
+        }
+        if ($this->throwRateLimit) {
+            throw new RateLimitException('Scolta AI API rate limit reached.', $this->rateLimitRetryAfter);
+        }
+        if ($this->throwOnMessage) {
+            throw new \RuntimeException('AI service unavailable');
+        }
     }
 }
 

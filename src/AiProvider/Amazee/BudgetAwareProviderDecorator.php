@@ -75,8 +75,14 @@ final class BudgetAwareProviderDecorator
 
     private function rethrowIfBudgetExceeded(\RuntimeException $e): void
     {
-        if (str_contains($e->getMessage(), self::BUDGET_MESSAGE)) {
-            throw new AmazeeBudgetExceededException($e);
+        // Walk the exception chain: RateLimitException wraps the Guzzle ClientException
+        // whose message contains the raw API response body with the budget error text.
+        $cause = $e;
+        while ($cause !== null) {
+            if (str_contains($cause->getMessage(), self::BUDGET_MESSAGE)) {
+                throw new AmazeeBudgetExceededException($e);
+            }
+            $cause = $cause->getPrevious();
         }
     }
 }
