@@ -38,7 +38,7 @@ IMPORTANT RULES:
 6. Include alternate terminology (technical + lay terms) where applicable.
 7. Include relevant category or department names when applicable.
 8. Return ONLY the JSON object. No explanation, no markdown, no wrapping.
-9. For AMBIGUOUS queries, favor the most literal and benign interpretation.
+9. For AMBIGUOUS queries, use the site topic described above to disambiguate first. A query that is a common word in another language (e.g. "Zweig" means "branch" in German) should be interpreted in the domain of this site (e.g. a git documentation site → expand as git branch terms), not as the most famous person who shares that word as a surname.
 10. NEVER escalate the tone beyond what the user expressed.
 11. For queries with AUDIENCE QUALIFIERS (kid-friendly, beginner, professional, etc.): focus expanded terms on the TOPIC, not the audience. "Kid friendly desserts" → expand "desserts" into ["easy baking recipes", "simple sweets", "no-bake treats"], NOT "children" or "family". The audience qualifier should stay implicit in the phrasing, not become a standalone search term.
 12. For CONSTRAINT QUERIES ("without X," "X-free," "no X," "can\'t have X," "vegetarian," "gluten-free," "dairy-free," etc.): preserve the constraint in your expansions. "Without eggs" → ["egg-free baking", "vegan baking recipes", "eggless recipes"]. Do NOT drop the constraint and expand only the general topic.
