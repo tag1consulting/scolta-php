@@ -74,6 +74,7 @@ class ScoltaConfig
     public int $excerptLength = 300;
     public int $resultsPerPage = 10;
     public int $maxPagefindResults = 50;
+    public bool $showAttribution = false;
 
     // -- AI feature toggles --
     public bool $aiExpandQuery = true;

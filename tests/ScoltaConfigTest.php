@@ -38,6 +38,7 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals(300, $config->excerptLength);
         $this->assertEquals(10, $config->resultsPerPage);
         $this->assertEquals(50, $config->maxPagefindResults);
+        $this->assertFalse($config->showAttribution);
         $this->assertTrue($config->aiExpandQuery);
         $this->assertTrue($config->aiSummarize);
         $this->assertEquals(10, $config->aiSummaryTopN);
@@ -211,6 +212,49 @@ class ScoltaConfigTest extends TestCase
     {
         $config = ScoltaConfig::fromArray(['indexer' => 'binary']);
         $this->assertSame('binary', $config->indexer);
+    }
+
+    // -------------------------------------------------------------------
+    // showAttribution
+    // -------------------------------------------------------------------
+
+    public function testShowAttributionDefaultsToFalse(): void
+    {
+        $config = new ScoltaConfig();
+        $this->assertFalse($config->showAttribution);
+    }
+
+    public function testFromArrayMapsShowAttributionTrue(): void
+    {
+        $config = ScoltaConfig::fromArray(['show_attribution' => true]);
+        $this->assertTrue($config->showAttribution);
+    }
+
+    public function testFromArrayMapsShowAttributionFalse(): void
+    {
+        $config = ScoltaConfig::fromArray(['show_attribution' => false]);
+        $this->assertFalse($config->showAttribution);
+    }
+
+    public function testFromArrayCoercesShowAttributionStringOne(): void
+    {
+        $config = ScoltaConfig::fromArray(['show_attribution' => '1']);
+        $this->assertIsBool($config->showAttribution);
+        $this->assertTrue($config->showAttribution);
+    }
+
+    public function testFromArrayCoercesShowAttributionStringZero(): void
+    {
+        $config = ScoltaConfig::fromArray(['show_attribution' => '0']);
+        $this->assertIsBool($config->showAttribution);
+        $this->assertFalse($config->showAttribution);
+    }
+
+    public function testShowAttributionAbsentPreservesDefaultBehavior(): void
+    {
+        // Sites that don't set show_attribution see no change in behavior.
+        $config = ScoltaConfig::fromArray([]);
+        $this->assertFalse($config->showAttribution);
     }
 
     public function testSortableFieldsDefaultsToEmpty(): void

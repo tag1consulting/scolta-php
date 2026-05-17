@@ -100,6 +100,7 @@ factor before being added to the final score; the title boost is unaffected.
 | `excerptLength` | int | `300` | Maximum excerpt length in characters |
 | `resultsPerPage` | int | `10` | Results shown per page |
 | `maxPagefindResults` | int | `50` | Maximum results fetched from Pagefind |
+| `showAttribution` | bool | `false` | Show "Powered by Scolta" attribution on the search page. Disabled by default to comply with WordPress.org Guideline 10 (no unsolicited attribution on user-facing pages). Enable only when the site administrator explicitly opts in. |
 
 ### AI Features
 
@@ -226,6 +227,7 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 | `excerptLength` | `excerpt_length` | `display.excerpt_length` | `excerpt_length` |
 | `resultsPerPage` | `results_per_page` | `display.results_per_page` | `results_per_page` |
 | `maxPagefindResults` | `max_pagefind_results` | `display.max_pagefind_results` | `max_pagefind_results` |
+| `showAttribution` | `show_attribution` | `show_attribution` / `SCOLTA_SHOW_ATTRIBUTION` | `show_attribution` |
 
 ### AI Feature Keys
 
