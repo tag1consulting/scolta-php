@@ -250,3 +250,46 @@ jobs:
             exit 1
           fi
           echo "PASS: Versions match."
+
+  dist-clean:
+    name: Dist archive excludes dev files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify export-ignore excludes tests and log files
+        run: |
+          FAIL=0
+
+          # Build a tar of what would ship via composer --prefer-dist (git archive
+          # honours export-ignore attributes from the archived commit's .gitattributes).
+          git archive HEAD --format=tar -o /tmp/dist-check.tar
+
+          # tests/ must not appear in the archive
+          if tar -tf /tmp/dist-check.tar | grep -q '^tests/'; then
+            echo "::error::tests/ directory is present in dist archive"
+            tar -tf /tmp/dist-check.tar | grep '^tests/' | head -5
+            FAIL=1
+          else
+            echo "PASS: tests/ is absent from dist archive"
+          fi
+
+          # No .log files of any kind
+          if tar -tf /tmp/dist-check.tar | grep -q '\.log$'; then
+            echo "::error::.log files are present in dist archive"
+            tar -tf /tmp/dist-check.tar | grep '\.log$'
+            FAIL=1
+          else
+            echo "PASS: no .log files in dist archive"
+          fi
+
+          # .github/ must not appear in the archive
+          if tar -tf /tmp/dist-check.tar | grep -q '^\.github/'; then
+            echo "::error::.github/ directory is present in dist archive"
+            FAIL=1
+          else
+            echo "PASS: .github/ is absent from dist archive"
+          fi
+
+          [ $FAIL -eq 0 ] && echo "PASS: dist archive is clean."
+          exit $FAIL
