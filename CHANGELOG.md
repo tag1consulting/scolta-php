@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Added
+- **`showAttribution` config option controls "Powered by Scolta" display (default `false`).** Attribution on user-facing search pages is opt-in only, per WordPress.org Guideline 10. `ScoltaConfig` gains a `show_attribution` property (default `false`); the shared `templates/search.html` no longer hard-codes the attribution. CMS adapters (WordPress, Drupal, Laravel) will expose this as a setting in their respective admin UIs in follow-up PRs. Sites that do not set `show_attribution` see no change in behavior. ([#102](https://github.com/tag1consulting/scolta-php/issues/102))
+
 ### Fixed
 - **Dev-only files (tests/, .github/, etc.) are now excluded from Composer dist archives.** Added `.gitattributes` with `export-ignore` for `tests/`, `.github/`, `phpunit.xml`, `.php-cs-fixer.dist.php`, `benchmarks/`, `scripts/`, and other dev-only paths. `composer install --prefer-dist` no longer ships `build.log` fixture files that WordPress.org reviewers flagged as a security concern. A new CI job (`dist-clean`) verifies the archive is clean on every push/PR. ([#103](https://github.com/tag1consulting/scolta-php/issues/103))
 - **Follow-up queries now resolve numbered and ordinal result references.** The `follow_up` system prompt template lacked an instruction for resolving references like "#6", "number 4", or "the third one" to the correspondingly numbered entry in the original search context. The search context already includes `[1]`, `[2]`, … labels, but the LLM had no guidance to use them for reference resolution. Added a NUMBERED RESULT REFERENCES section to the template with explicit examples for numeric references (#3, number 4, item 2) and ordinal references (the third one, the last result, the first article), mapping ordinal positions to numeric labels. ([#110](https://github.com/tag1consulting/scolta-php/issues/110))
