@@ -6,8 +6,11 @@ namespace Tag1\Scolta;
 
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
+use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Exception\GuzzleException;
+use Tag1\Scolta\Exception\ApiKeyInvalidException;
 use Tag1\Scolta\Exception\ApiKeyMissingException;
+use Tag1\Scolta\Exception\RateLimitException;
 
 /**
  * Provider-agnostic AI client for LLM API calls.
@@ -136,10 +139,29 @@ class AiClient
             }
 
             return $this->sendAnthropicRequest($systemPrompt, $messages, $maxTokens, $useModel);
+        } catch (ClientException $e) {
+            $status = $e->getResponse()->getStatusCode();
+            if ($status === 401) {
+                throw new ApiKeyInvalidException(
+                    'Scolta AI API key is invalid or expired. Verify the key in your Scolta configuration.',
+                    0,
+                    $e,
+                );
+            }
+            if ($status === 429) {
+                $retryAfter = $e->getResponse()->getHeaderLine('Retry-After') ?: null;
+                throw new RateLimitException(
+                    'Scolta AI API rate limit reached.',
+                    $retryAfter,
+                    0,
+                    $e,
+                );
+            }
+            throw new \RuntimeException('Scolta AI API request failed: ' . $e->getMessage(), 0, $e);
         } catch (GuzzleException $e) {
-            throw new \RuntimeException('Scolta AI API request failed: ' . $e->getMessage());
+            throw new \RuntimeException('Scolta AI API request failed: ' . $e->getMessage(), 0, $e);
         } catch (\JsonException $e) {
-            throw new \RuntimeException('Scolta AI API returned malformed JSON: ' . $e->getMessage());
+            throw new \RuntimeException('Scolta AI API returned malformed JSON: ' . $e->getMessage(), 0, $e);
         }
     }
 

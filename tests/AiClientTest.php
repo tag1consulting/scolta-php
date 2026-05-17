@@ -11,7 +11,9 @@ use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\AiClient;
+use Tag1\Scolta\Exception\ApiKeyInvalidException;
 use Tag1\Scolta\Exception\ApiKeyMissingException;
+use Tag1\Scolta\Exception\RateLimitException;
 
 class AiClientTest extends TestCase
 {
@@ -291,6 +293,90 @@ class AiClientTest extends TestCase
     {
         $mock = new MockHandler([
             new \GuzzleHttp\Exception\ConnectException('Connection refused', new \GuzzleHttp\Psr7\Request('POST', 'https://api.anthropic.com')),
+        ]);
+
+        $client = new AiClient(
+            ['api_key' => 'key'],
+            new Client(['handler' => HandlerStack::create($mock)])
+        );
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('API request failed');
+        $client->message('sys', 'msg');
+    }
+
+    public function testHttp401ThrowsApiKeyInvalidException(): void
+    {
+        $mock = new MockHandler([
+            new Response(401, [], json_encode(['error' => ['type' => 'authentication_error']])),
+        ]);
+
+        $client = new AiClient(
+            ['api_key' => 'bad-key'],
+            new Client(['handler' => HandlerStack::create($mock)])
+        );
+
+        $this->expectException(ApiKeyInvalidException::class);
+        $client->message('sys', 'msg');
+    }
+
+    public function testHttp429ThrowsRateLimitException(): void
+    {
+        $mock = new MockHandler([
+            new Response(429, ['Retry-After' => '30'], json_encode(['error' => ['type' => 'rate_limit_error']])),
+        ]);
+
+        $client = new AiClient(
+            ['api_key' => 'key'],
+            new Client(['handler' => HandlerStack::create($mock)])
+        );
+
+        $this->expectException(RateLimitException::class);
+        $client->message('sys', 'msg');
+    }
+
+    public function testHttp429RetryAfterHeaderIsPreserved(): void
+    {
+        $mock = new MockHandler([
+            new Response(429, ['Retry-After' => '60'], json_encode(['error' => ['type' => 'rate_limit_error']])),
+        ]);
+
+        $client = new AiClient(
+            ['api_key' => 'key'],
+            new Client(['handler' => HandlerStack::create($mock)])
+        );
+
+        try {
+            $client->message('sys', 'msg');
+            $this->fail('Expected RateLimitException');
+        } catch (RateLimitException $e) {
+            $this->assertEquals('60', $e->retryAfter);
+        }
+    }
+
+    public function testHttp429WithoutRetryAfterHasNullRetryAfter(): void
+    {
+        $mock = new MockHandler([
+            new Response(429, [], json_encode(['error' => ['type' => 'rate_limit_error']])),
+        ]);
+
+        $client = new AiClient(
+            ['api_key' => 'key'],
+            new Client(['handler' => HandlerStack::create($mock)])
+        );
+
+        try {
+            $client->message('sys', 'msg');
+            $this->fail('Expected RateLimitException');
+        } catch (RateLimitException $e) {
+            $this->assertNull($e->retryAfter);
+        }
+    }
+
+    public function testHttp500ThrowsRuntimeException(): void
+    {
+        $mock = new MockHandler([
+            new Response(500, [], json_encode(['error' => 'Internal Server Error'])),
         ]);
 
         $client = new AiClient(

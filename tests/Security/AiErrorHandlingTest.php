@@ -13,6 +13,7 @@ use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\AiClient;
+use Tag1\Scolta\Exception\RateLimitException;
 
 /**
  * AI API error-handling tests.
@@ -32,16 +33,18 @@ class AiErrorHandlingTest extends TestCase
     // HTTP 429 — provider rate-limited us
     // -----------------------------------------------------------------------
 
-    public function testAnthropicRateLimitThrowsRuntimeException(): void
+    public function testAnthropicRateLimitThrowsRateLimitException(): void
     {
         $client = $this->makeClient([
             new Response(429, ['Retry-After' => '30'], json_encode(['error' => ['message' => 'Rate limit exceeded']])),
         ]);
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('API request failed');
-
-        $client->message('system', 'hello');
+        try {
+            $client->message('system', 'hello');
+            $this->fail('Expected RateLimitException');
+        } catch (RateLimitException $e) {
+            $this->assertEquals('30', $e->retryAfter);
+        }
     }
 
     public function testOpenAiRateLimitThrowsRuntimeException(): void
