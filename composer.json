@@ -41,6 +41,9 @@
             "dev-main": "1.0.x-dev"
         }
     },
+    "archive": {
+        "exclude": ["tests/"]
+    },
     "config": {
         "audit": {
             "ignore": [

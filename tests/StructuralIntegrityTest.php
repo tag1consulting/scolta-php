@@ -35,6 +35,14 @@ class StructuralIntegrityTest extends TestCase
         $this->assertEquals('src/', $composer['autoload']['psr-4']['Tag1\\Scolta\\']);
     }
 
+    public function testComposerArchiveExcludesTests(): void
+    {
+        $composer = json_decode(file_get_contents($this->root . '/composer.json'), true);
+        $this->assertArrayHasKey('archive', $composer, 'composer.json must have an "archive" key to exclude dev files from dist');
+        $this->assertArrayHasKey('exclude', $composer['archive'], 'composer.json archive must have an "exclude" list');
+        $this->assertContains('tests/', $composer['archive']['exclude'], 'tests/ must be excluded from Composer archive distribution');
+    }
+
     // -------------------------------------------------------------------
     // Rename integrity — no stale references
     // -------------------------------------------------------------------
