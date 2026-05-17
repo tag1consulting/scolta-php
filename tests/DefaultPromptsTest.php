@@ -123,6 +123,54 @@ class DefaultPromptsTest extends TestCase
         );
     }
 
+    // -------------------------------------------------------------------------
+    // PR fix/follow-up-numbered-result-references — ordinal reference resolution
+    // -------------------------------------------------------------------------
+
+    public function testFollowUpTemplateContainsNumberedResultReferencesSection(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::FOLLOW_UP);
+
+        $this->assertStringContainsString(
+            'NUMBERED RESULT REFERENCES',
+            $template,
+            'follow_up template must contain a NUMBERED RESULT REFERENCES section'
+        );
+    }
+
+    public function testFollowUpTemplateInstructsExplicitNumberedReferenceResolution(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::FOLLOW_UP);
+
+        $this->assertMatchesRegularExpression(
+            '/#\d|number \d|item \d|result \d/i',
+            $template,
+            'follow_up template must give examples of explicit number references (#3, number 4, etc.)'
+        );
+    }
+
+    public function testFollowUpTemplateInstructsOrdinalReferenceResolution(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::FOLLOW_UP);
+
+        $this->assertMatchesRegularExpression(
+            '/the (first|second|third|last) (one|result|article|option)/i',
+            $template,
+            'follow_up template must give examples of ordinal references (the third one, the last result, etc.)'
+        );
+    }
+
+    public function testFollowUpTemplateMapsPosToNumberedLabel(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::FOLLOW_UP);
+
+        $this->assertMatchesRegularExpression(
+            '/first\s*=\s*\[1\]|second\s*=\s*\[2\]/i',
+            $template,
+            'follow_up template must map ordinal positions to numeric labels (first = [1], second = [2])'
+        );
+    }
+
     public function testSummarizeTemplatePartialRelevanceInstruction(): void
     {
         $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
