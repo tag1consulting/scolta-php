@@ -220,6 +220,43 @@ class DefaultPromptsTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // PR fix/expand-query-site-context-disambiguation — ambiguous multilingual queries
+    // -------------------------------------------------------------------------
+
+    public function testExpandQueryRuleNineReferencesSiteContext(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
+
+        $this->assertStringContainsString(
+            'site topic',
+            $template,
+            'expand_query rule 9 must instruct the model to use the site topic to disambiguate ambiguous queries'
+        );
+    }
+
+    public function testExpandQueryRuleNineCoversMultilingualAmbiguity(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
+
+        $this->assertMatchesRegularExpression(
+            '/another language|common word.{0,50}language|language.{0,50}common word/i',
+            $template,
+            'expand_query rule 9 must mention that a query word may be a common word in another language'
+        );
+    }
+
+    public function testExpandQueryRuleNineInstructsDomainInterpretation(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
+
+        $this->assertMatchesRegularExpression(
+            '/domain of this site|interpreted in the domain|in the domain/i',
+            $template,
+            'expand_query rule 9 must instruct interpretation within the site domain'
+        );
+    }
+
+    // -------------------------------------------------------------------------
     // PR fix/prompt-drift-cross-adapter-tests — CATEGORY and VARIETY guardrails
     // -------------------------------------------------------------------------
 
