@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Fixed
+- **E2E test suite no longer races on `BuildCoordinator` lock when Playwright runs test files in parallel.** `debug.spec.js` and `search-compatibility.spec.js` both call `build-php-index.php` in their `beforeAll` hooks. On a multi-CPU CI runner, Playwright spawns one worker per test file concurrently; both PHP processes called `uniqid()` at the same microsecond and received identical state-directory paths, causing `flock(LOCK_EX | LOCK_NB)` to fail in one of them. Fixed by appending `getmypid()` to the state-directory name (process ID is guaranteed unique per running process) and setting `workers: 1` in `playwright.config.js` so E2E test files that share filesystem state run sequentially.
+
 ### Added
 - **`showAttribution` config option controls "Powered by Scolta" display (default `false`).** Attribution on user-facing search pages is opt-in only, per WordPress.org Guideline 10. `ScoltaConfig` gains a `show_attribution` property (default `false`); the shared `templates/search.html` no longer hard-codes the attribution. CMS adapters (WordPress, Drupal, Laravel) will expose this as a setting in their respective admin UIs in follow-up PRs. Sites that do not set `show_attribution` see no change in behavior. ([#102](https://github.com/tag1consulting/scolta-php/issues/102))
 

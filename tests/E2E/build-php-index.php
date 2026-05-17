@@ -16,7 +16,7 @@ use Tag1\Scolta\Index\PhpIndexer;
 
 $outputDir = $argv[1] ?? sys_get_temp_dir() . '/scolta-e2e-output';
 $corpusDir = __DIR__ . '/../fixtures/concordance/corpus';
-$stateDir = sys_get_temp_dir() . '/scolta-e2e-state-' . uniqid();
+$stateDir = sys_get_temp_dir() . '/scolta-e2e-state-' . getmypid() . '-' . uniqid();
 
 if (!is_dir($stateDir)) {
     mkdir($stateDir, 0755, true);
