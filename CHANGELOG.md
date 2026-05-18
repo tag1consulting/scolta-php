@@ -6,6 +6,10 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+_No changes yet._
+
+## [1.0.0-rc4] - 2026-05-18
+
 ### Fixed
 - **Expand-query no longer ignores site context when disambiguating multilingual queries.** Rule 9 of the `expand_query` system prompt told the LLM to "favor the most literal and benign interpretation" for ambiguous queries, with no reference to the site domain. A German query like "Zweig" (meaning "branch") on a Git documentation site was expanded to famous German authors (Stefan Zweig, Arnold Zweig) instead of git branch-related terms. Rule 9 now explicitly instructs the LLM to use the site topic to disambiguate first, interpreting query terms within the site's domain before falling back to a generic interpretation. ([#88](https://github.com/tag1consulting/scolta-php/issues/88))
 - **`tests/` directory is now excluded from `composer archive` distributions.** Added `"archive": { "exclude": ["tests/"] }` to `composer.json` so the ~4 MB stemmer corpus and concordance fixtures are not shipped to end-users via Packagist dist archives. (`export-ignore` in `.gitattributes` already handled the git-export path; this covers the `composer archive` path.) ([#91](https://github.com/tag1consulting/scolta-php/issues/91))
