@@ -6,7 +6,8 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
-_No changes yet._
+### Fixed
+- **`PhpIndexer::processChunk()` now passes `sortable` and `metadata` to the index builder.** The slim item proxy created for each content item omitted `sortable` and `metadata` properties, so `InvertedIndexBuilder::buildFromTokenData()` read `$item->sortable ?? []` as an empty array. Sort values from `ContentItem::$sortable` (populated by platform hooks) were silently dropped — fragments had no sort-field metadata, the pf_meta sorts array was empty, and both Pagefind native sort and the JS client-side re-sort fell back to relevance ordering. Only affected the `PhpIndexer::processChunk()` legacy path; `IndexBuildOrchestrator::build()` already included `sortable`.
 
 ## [1.0.0-rc4] - 2026-05-18
 
