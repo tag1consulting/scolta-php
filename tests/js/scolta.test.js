@@ -269,38 +269,28 @@ describe('scolta.js structure', () => {
         expect(jsSource).toMatch(/mergeExpandedSearchResults\([^)]*subjectTerms/);
     });
 
-    test('dual-search runs subject-only search when subjectTerms present', () => {
-        expect(jsSource).toContain('subjectSearchP');
-        expect(jsSource).toContain("subjectTerms.join(' ')");
+    test('filter+sort discovery caches Pagefind filters on init', () => {
+        expect(jsSource).toContain('cachedPagefindFilters');
+        expect(jsSource).toContain('pagefind.filters()');
     });
 
-    test('subject URL set built from subject search results', () => {
-        expect(jsSource).toContain('subjectUrlSet');
-        expect(jsSource).toContain('subjectSearch.results.length');
+    test('matchSubjectToFilters function exists and skips non-subject dimensions', () => {
+        expect(jsSource).toContain('matchSubjectToFilters');
+        expect(jsSource).toContain('SKIP_FILTER_DIMENSIONS');
     });
 
-    test('intersection applied when subject URL set is non-empty', () => {
-        expect(jsSource).toContain('subjectUrlSet.has(');
-        expect(jsSource).toContain('intersection.length >= 3');
+    test('sort path matches subject terms against cached filters', () => {
+        expect(jsSource).toContain('matchSubjectToFilters(subjectTerms, cachedPagefindFilters)');
+        expect(jsSource).toContain('Subject filter match:');
     });
 
-    test('intersection fallback appends remainder when fewer than 3 results', () => {
-        expect(jsSource).toContain('intersection.length > 0');
-        expect(jsSource).toContain('remainder');
-        expect(jsSource).toContain('[...intersection, ...remainder]');
+    test('sort path merges subject filters with active filters', () => {
+        expect(jsSource).toContain('mergedFilters');
+        expect(jsSource).toContain('new Set([val])');
     });
 
-    test('warns and falls back to sorted results when intersection is empty', () => {
-        expect(jsSource).toContain('Subject filter intersection empty');
-    });
-
-    test('warns and falls back when subject search returns no results', () => {
-        expect(jsSource).toContain('Subject filter search returned no results');
-    });
-
-    test('subject search skipped when subjectTerms is null or empty', () => {
-        expect(jsSource).toContain('subjectTerms && subjectTerms.length > 0');
-        expect(jsSource).toContain('Promise.resolve(null)');
+    test('sort path logs when no filter match found', () => {
+        expect(jsSource).toContain('No filter match for subject terms, using sort only');
     });
 
     test('doSearch extracts subject_terms from expansion response', () => {

@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Changed
+- **Sort path now uses Pagefind filter discovery instead of subject intersection heuristic.** `scolta.js` caches available Pagefind filters on init via `pagefind.filters()`. When a sort override is active with `subject_terms`, keywords are matched against filter values and passed to Pagefind as native filters alongside the sort. Sites with structured metadata (e.g. `topics`, `era`, `region`) get precise filter+sort — only topic-matching articles in sort order. Sites without filters get honest sort-only. Removes the parallel subject-only search, URL intersection, and arbitrary threshold of 3 that silently dropped high-sort-value items or ignored subject entirely. ([#127](https://github.com/tag1consulting/scolta-php/issues/127))
+
 ### Fixed
 - **`PhpIndexer::processChunk()` now passes `sortable` and `metadata` to the index builder.** The slim item proxy created for each content item omitted `sortable` and `metadata` properties, so `InvertedIndexBuilder::buildFromTokenData()` read `$item->sortable ?? []` as an empty array. Sort values from `ContentItem::$sortable` (populated by platform hooks) were silently dropped — fragments had no sort-field metadata, the pf_meta sorts array was empty, and both Pagefind native sort and the JS client-side re-sort fell back to relevance ordering. Only affected the `PhpIndexer::processChunk()` legacy path; `IndexBuildOrchestrator::build()` already included `sortable`.
 
