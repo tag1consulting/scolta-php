@@ -338,13 +338,17 @@ class PagefindFormatWriter
         $filters = [];
         foreach ($pages as $pageNum => $page) {
             foreach ($page['filters'] ?? [] as $filterName => $filterValue) {
-                if (!isset($filters[$filterName])) {
-                    $filters[$filterName] = [];
+                $values = is_array($filterValue) ? $filterValue : [$filterValue];
+                foreach ($values as $v) {
+                    $v = (string) $v;
+                    if (!isset($filters[$filterName])) {
+                        $filters[$filterName] = [];
+                    }
+                    if (!isset($filters[$filterName][$v])) {
+                        $filters[$filterName][$v] = [];
+                    }
+                    $filters[$filterName][$v][] = $pageNum;
                 }
-                if (!isset($filters[$filterName][$filterValue])) {
-                    $filters[$filterName][$filterValue] = [];
-                }
-                $filters[$filterName][$filterValue][] = $pageNum;
             }
         }
 
