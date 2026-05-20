@@ -7,6 +7,7 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ## [Unreleased]
 
 ### Fixed
+- **Sort intersection fallback no longer breaks monotonic sort order.** When the subject intersection had fewer than 3 items, `mergeExpandedSearchResults()` prepended those items before the sorted remainder, breaking the descending/ascending order promised by the sort badge. For example, "longest articles about history sorted by word count" would show 2 subject-matched articles with lower word counts before the correctly sorted results. Now: intersections smaller than 3 fall back to the full sorted result set, treating a tiny intersection as not meaningful enough to override the sort contract. ([#127](https://github.com/tag1consulting/scolta-php/issues/127))
 - **`PhpIndexer::processChunk()` now passes `sortable` and `metadata` to the index builder.** The slim item proxy created for each content item omitted `sortable` and `metadata` properties, so `InvertedIndexBuilder::buildFromTokenData()` read `$item->sortable ?? []` as an empty array. Sort values from `ContentItem::$sortable` (populated by platform hooks) were silently dropped — fragments had no sort-field metadata, the pf_meta sorts array was empty, and both Pagefind native sort and the JS client-side re-sort fell back to relevance ordering. Only affected the `PhpIndexer::processChunk()` legacy path; `IndexBuildOrchestrator::build()` already included `sortable`.
 
 ## [1.0.0-rc4] - 2026-05-18

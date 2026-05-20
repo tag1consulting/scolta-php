@@ -1404,13 +1404,12 @@
           const intersection = withField.filter(d => subjectUrlSet.has(normUrl(resolveUrl(d.url || ''))));
           if (intersection.length >= 3) {
             allScoredResults = intersection.map(data => ({ data, score: 0 }));
-          } else if (intersection.length > 0) {
-            // Intersection too small — prepend subject-matched items, append the rest.
-            const intNorms = new Set(intersection.map(d => normUrl(resolveUrl(d.url || ''))));
-            const remainder = withField.filter(d => !intNorms.has(normUrl(resolveUrl(d.url || ''))));
-            allScoredResults = [...intersection, ...remainder].map(data => ({ data, score: 0 }));
           } else {
-            console.warn('[scolta:sort] Subject filter intersection empty, using sorted results');
+            if (intersection.length > 0) {
+              console.log('[scolta:sort] Subject intersection too small (' + intersection.length + '), using full sorted results');
+            } else {
+              console.log('[scolta:sort] Subject intersection empty, using full sorted results');
+            }
             allScoredResults = withField.map(data => ({ data, score: 0 }));
           }
         } else if (subjectUrlSet !== null) {
