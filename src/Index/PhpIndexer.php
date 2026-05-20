@@ -105,6 +105,8 @@ class PhpIndexer
                     'siteName' => $item->siteName,
                     'language' => $item->language,
                     'filters'  => $item->filters,
+                    'metadata' => $item->metadata,
+                    'sortable' => $item->sortable,
                 ], 'tokenData' => $tokenData];
             }
         }
