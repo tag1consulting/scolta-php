@@ -997,7 +997,7 @@
       for (const [dim, vals] of Object.entries(filters)) {
         if (vals instanceof Set && vals.size > 0) {
           const arr = [...vals];
-          pagefindFilters[dim] = arr.length === 1 ? arr[0] : arr;
+          pagefindFilters[dim] = arr.length === 1 ? arr[0] : { any: arr };
         }
       }
       if (Object.keys(pagefindFilters).length > 0) {
