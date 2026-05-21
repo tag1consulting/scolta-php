@@ -358,6 +358,62 @@ class StreamingFormatWriterTest extends TestCase
         $this->assertSame('99.00', $metaByUrl['/ruby']['price']);
     }
 
+    public function testMultiValueFiltersProduceSeparateEntries(): void
+    {
+        $pages = [
+            0 => array_merge(
+                $this->makePage('/a', 'Article A'),
+                ['filters' => ['topic' => ['Science', 'History', 'Biography']]]
+            ),
+            1 => array_merge(
+                $this->makePage('/b', 'Article B'),
+                ['filters' => ['topic' => 'Science']]
+            ),
+        ];
+
+        $this->writeSingleChunkAndRun($pages);
+
+        $filterFiles = glob($this->tmpDir . '/.scolta-building/filter/*.pf_filter');
+        $this->assertCount(1, $filterFiles, 'Expected one filter file (topic)');
+
+        $decoded = CborDecoder::decodePfFile($filterFiles[0]);
+        $this->assertSame('topic', $decoded[0]);
+
+        $valueMap = [];
+        foreach ($decoded[1] as $entry) {
+            $valueMap[$entry[0]] = $entry[1];
+        }
+
+        $this->assertArrayHasKey('Science', $valueMap);
+        $this->assertArrayHasKey('History', $valueMap);
+        $this->assertArrayHasKey('Biography', $valueMap);
+
+        $this->assertContains(0, $valueMap['Science']);
+        $this->assertContains(1, $valueMap['Science']);
+        $this->assertSame([0], $valueMap['History']);
+        $this->assertSame([0], $valueMap['Biography']);
+    }
+
+    public function testMultiValueFiltersInFragmentJsonAreArrays(): void
+    {
+        $pages = [
+            0 => array_merge(
+                $this->makePage('/x', 'Multi-Filter Page'),
+                ['filters' => ['color' => ['Red', 'Blue']]]
+            ),
+        ];
+
+        $this->writeSingleChunkAndRun($pages);
+
+        $fragmentFiles = glob($this->tmpDir . '/.scolta-building/fragment/*.pf_fragment');
+        $this->assertCount(1, $fragmentFiles);
+
+        $json = preg_replace('/^pagefind_dcd/', '', gzdecode(file_get_contents($fragmentFiles[0])));
+        $data = json_decode($json, true);
+
+        $this->assertSame(['Red', 'Blue'], $data['filters']['color']);
+    }
+
     private function removeDir(string $dir): void
     {
         if (!is_dir($dir)) {
