@@ -553,10 +553,8 @@ describe('mergeResults behavioral tests (JS fallback)', () => {
         expect(urls.filter(u => u === 'https://example.com/page-a').length).toBe(1);
     });
 
-    test('weight: when same URL appears in both sets, higher score wins', () => {
+    test('weight: when same URL appears in both sets, score includes cross-list bonus', () => {
         const win = createWindowForMerge();
-        // set1 is the primary (weight 1.0); set2 is expanded (weight 0.7).
-        // When the primary score is higher, it must win.
         const set1 = [makeResult('https://example.com/shared', 0.9)];
         const set2 = [makeResult('https://example.com/shared', 0.4)];
 
@@ -564,7 +562,7 @@ describe('mergeResults behavioral tests (JS fallback)', () => {
         const shared = merged.find(r => (r.data.meta?.url || r.data.url) === 'https://example.com/shared');
 
         expect(shared).toBeDefined();
-        expect(shared.score).toBe(0.9);
+        expect(shared.score).toBe(0.9 + 0.15);
     });
 
     test('unique URLs from both sets all appear in the merged result', () => {
@@ -604,13 +602,119 @@ describe('mergeResults behavioral tests (JS fallback)', () => {
         // Three distinct URLs.
         expect(merged.length).toBe(3);
 
-        // Shared URL uses the higher score from set1.
+        // Shared URL uses the higher score from set1 plus cross-list bonus.
         const shared = merged.find(r => (r.data.meta?.url || r.data.url) === 'https://example.com/shared');
-        expect(shared.score).toBe(0.9);
+        expect(shared.score).toBe(0.9 + 0.15);
 
         // Both unique-only URLs are present.
         const urls = new Set(merged.map(r => r.data.meta?.url || r.data.url));
         expect(urls.has('https://example.com/only-in-primary')).toBe(true);
         expect(urls.has('https://example.com/only-in-expanded')).toBe(true);
+    });
+
+    test('cross-list results receive additive bonus above max score', () => {
+        const win = createWindowForMerge();
+        const primaryResults = [
+            makeResult('https://example.com/article-a', 0.5, 'Article A'),
+            makeResult('https://example.com/article-b', 0.8, 'Article B'),
+        ];
+        const expandedResults = [
+            makeResult('https://example.com/article-a', 0.4, 'Article A'),
+            makeResult('https://example.com/article-c', 0.6, 'Article C'),
+        ];
+        const merged = win.__mergeResults(primaryResults, expandedResults);
+        const articleA = merged.find(r => (r.data.meta?.url || r.data.url) === 'https://example.com/article-a');
+        expect(articleA.score).toBeGreaterThan(0.5);
+        expect(articleA.score).toBe(0.5 + 0.15);
+    });
+
+    test('unique results in one set receive no cross-list bonus', () => {
+        const win = createWindowForMerge();
+        const set1 = [makeResult('https://example.com/only-primary', 0.7, 'Only Primary')];
+        const set2 = [makeResult('https://example.com/only-expanded', 0.6, 'Only Expanded')];
+        const merged = win.__mergeResults(set1, set2);
+        const primary = merged.find(r => (r.data.meta?.url || r.data.url) === 'https://example.com/only-primary');
+        const expanded = merged.find(r => (r.data.meta?.url || r.data.url) === 'https://example.com/only-expanded');
+        expect(primary.score).toBe(0.7);
+        expect(expanded.score).toBe(0.6);
+    });
+
+    test('cross-list bonus makes mediocre dual-match beat strong single-match', () => {
+        const win = createWindowForMerge();
+        const set1 = [
+            makeResult('https://example.com/dual', 0.4, 'Dual Match'),
+            makeResult('https://example.com/single', 0.5, 'Single Match'),
+        ];
+        const set2 = [
+            makeResult('https://example.com/dual', 0.35, 'Dual Match'),
+        ];
+        const merged = win.__mergeResults(set1, set2);
+        const dual = merged.find(r => (r.data.meta?.url || r.data.url) === 'https://example.com/dual');
+        const single = merged.find(r => (r.data.meta?.url || r.data.url) === 'https://example.com/single');
+        expect(dual.score).toBeGreaterThan(single.score);
+    });
+});
+
+// =============================================================================
+// Word explosion removal tests
+// =============================================================================
+
+describe('expansion phrase preservation (no word explosion)', () => {
+
+    test('multi-word expansion terms are not split into individual word searches', () => {
+        const jsSource = fs.readFileSync(
+            path.join(__dirname, '../../assets/js/scolta.js'), 'utf-8'
+        );
+        const relevancePath = jsSource.match(/Relevance path:[\s\S]*?searchAndLoadParallel/);
+        expect(relevancePath).not.toBeNull();
+        expect(relevancePath[0]).not.toContain('extractSearchTerms(term)');
+    });
+
+    test('sort path does not word-explode expansion terms into individual searches', () => {
+        const jsSource = fs.readFileSync(
+            path.join(__dirname, '../../assets/js/scolta.js'), 'utf-8'
+        );
+        const sortPath = jsSource.match(/const termSet = new Set\(\[searchQuery\]\);[\s\S]*?\.map\(t => pagefindSearch/);
+        expect(sortPath).not.toBeNull();
+        expect(sortPath[0]).not.toContain('extractSearchTerms');
+    });
+
+    test('highlight term splitting is preserved for display purposes', () => {
+        const jsSource = fs.readFileSync(
+            path.join(__dirname, '../../assets/js/scolta.js'), 'utf-8'
+        );
+        const highlightBlock = jsSource.match(/for \(const term of validTerms\)[\s\S]*?allHighlightTerms/);
+        expect(highlightBlock).not.toBeNull();
+        expect(highlightBlock[0]).toContain('split');
+    });
+});
+
+// =============================================================================
+// EXPAND_PRIMARY_WEIGHT default alignment test
+// =============================================================================
+
+describe('config default alignment', () => {
+
+    test('JS fallback EXPAND_PRIMARY_WEIGHT default matches PHP (0.5)', () => {
+        const jsSource = fs.readFileSync(
+            path.join(__dirname, '../../assets/js/scolta.js'), 'utf-8'
+        );
+        const matches = jsSource.match(/EXPAND_PRIMARY_WEIGHT:\s*s\.EXPAND_PRIMARY_WEIGHT\s*\?\?\s*([\d.]+)/g);
+        expect(matches).not.toBeNull();
+        for (const m of matches) {
+            expect(m).toContain('0.5');
+        }
+    });
+
+    test('CROSS_LIST_BONUS config key exists with default 0.15', () => {
+        const jsSource = fs.readFileSync(
+            path.join(__dirname, '../../assets/js/scolta.js'), 'utf-8'
+        );
+        const matches = jsSource.match(/CROSS_LIST_BONUS:\s*s\.CROSS_LIST_BONUS\s*\?\?\s*([\d.]+)/g);
+        expect(matches).not.toBeNull();
+        expect(matches.length).toBeGreaterThanOrEqual(1);
+        for (const m of matches) {
+            expect(m).toContain('0.15');
+        }
     });
 });

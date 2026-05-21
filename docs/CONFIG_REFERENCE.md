@@ -72,6 +72,7 @@ factor before being added to the final score; the title boost is unaffected.
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `expandPrimaryWeight` | float | `0.5` | Weight applied to original query results during N-set merge. Lower values give AI-expanded terms more relative influence (better intent matching); higher values make literal keyword matches dominate. Set to 0.7+ if you want exact terms to dominate. |
+| `crossListBonus` | float | `0.15` | Additive score bonus when a result appears in both the primary and expanded result sets. Cross-list agreement is a strong relevance signal — a result matching both the literal query and semantic expansions receives this bonus on top of its highest score. Set to 0 to disable. |
 
 ### Scoring: Priority Pages
 
@@ -215,6 +216,7 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 | `phraseNearWindow` | `scoring.phrase_near_window` | `scoring.phrase_near_window` | `phrase_near_window` |
 | `phraseWindow` | `scoring.phrase_window` | `scoring.phrase_window` | `phrase_window` |
 | `expandPrimaryWeight` | `scoring.expand_primary_weight` | `scoring.expand_primary_weight` | `expand_primary_weight` |
+| `crossListBonus` | `scoring.cross_list_bonus` | `scoring.cross_list_bonus` | `cross_list_bonus` |
 | `language` | `scoring.language` | `scoring.language` / `SCOLTA_LANGUAGE` | `language` |
 | `customStopWords` | `scoring.custom_stop_words` | `scoring.custom_stop_words` | `custom_stop_words` |
 | `recencyStrategy` | `scoring.recency_strategy` | `scoring.recency_strategy` / `SCOLTA_RECENCY_STRATEGY` | `recency_strategy` |

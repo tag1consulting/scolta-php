@@ -373,7 +373,7 @@ class ScoltaConfigTest extends TestCase
             'CONTENT_MATCH_BOOST', 'PHRASE_ADJACENT_MULTIPLIER', 'PHRASE_NEAR_MULTIPLIER',
             'PHRASE_NEAR_WINDOW', 'PHRASE_WINDOW', 'EXCERPT_LENGTH', 'RESULTS_PER_PAGE',
             'MAX_PAGEFIND_RESULTS', 'AI_EXPAND_QUERY', 'AI_SUMMARIZE', 'AI_SUMMARY_TOP_N',
-            'AI_SUMMARY_MAX_CHARS', 'EXPAND_PRIMARY_WEIGHT', 'AI_MAX_FOLLOWUPS',
+            'AI_SUMMARY_MAX_CHARS', 'EXPAND_PRIMARY_WEIGHT', 'CROSS_LIST_BONUS', 'AI_MAX_FOLLOWUPS',
             'AI_LANGUAGES', 'AUTO_LANGUAGE_FILTER', 'LANGUAGE', 'CUSTOM_STOP_WORDS', 'RECENCY_STRATEGY', 'RECENCY_CURVE',
         ];
 
@@ -381,7 +381,7 @@ class ScoltaConfigTest extends TestCase
             $this->assertArrayHasKey($key, $js, "Missing key: {$key}");
         }
 
-        $this->assertCount(26, $js, 'Expected exactly 26 keys in toJsScoringConfig()');
+        $this->assertCount(27, $js, 'Expected exactly 27 keys in toJsScoringConfig()');
     }
 
     public function testToJsScoringConfigValuesMatchConfig(): void
