@@ -55,6 +55,7 @@ class ScoltaConfig
 
     // -- Scoring: Expanded terms --
     public float $expandPrimaryWeight = 0.5;
+    public float $crossListBonus = 0.15;
 
     // -- Scoring: Language and stop words --
     public string $language = 'en';
@@ -318,6 +319,7 @@ class ScoltaConfig
             'AI_SUMMARY_TOP_N' => $this->aiSummaryTopN,
             'AI_SUMMARY_MAX_CHARS' => $this->aiSummaryMaxChars,
             'EXPAND_PRIMARY_WEIGHT' => $this->expandPrimaryWeight,
+            'CROSS_LIST_BONUS' => $this->crossListBonus,
             'AI_MAX_FOLLOWUPS' => $this->maxFollowUps,
             'AI_LANGUAGES' => $this->aiLanguages,
             'AUTO_LANGUAGE_FILTER' => $this->autoLanguageFilter,
