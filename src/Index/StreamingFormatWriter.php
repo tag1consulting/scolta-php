@@ -146,7 +146,10 @@ class StreamingFormatWriter
 
         // Accumulate filter data (typically one 'site' key per page).
         foreach ($pageData['filters'] ?? [] as $filterName => $filterValue) {
-            $this->filterData[$filterName][$filterValue][] = $pageNum;
+            $values = is_array($filterValue) ? $filterValue : [$filterValue];
+            foreach ($values as $v) {
+                $this->filterData[$filterName][(string) $v][] = $pageNum;
+            }
         }
 
         // Accumulate sortable values for pf_meta sorts (position [4]).

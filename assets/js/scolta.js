@@ -518,7 +518,7 @@
     }
   }
 
-  async function summarizeResults(query, results, expandedTerms = [], sortHint = null, filterHint = null) {
+  async function summarizeResults(query, results, expandedTerms = [], sortHint = null, filterHint = null, userFilters = {}) {
     const CONFIG = getInstanceConfig();
     const endpoints = getInstanceEndpoints();
     if (!CONFIG.AI_SUMMARIZE || results.length === 0) return null;
@@ -579,6 +579,18 @@
         .map(([dim, val]) => `"${dim}: ${val}"`);
       if (filterParts.length > 0) {
         contextHeader += `[Results are filtered by ${filterParts.join(', ')}]\n`;
+      }
+    }
+    if (userFilters && typeof userFilters === 'object') {
+      const userFilterParts = [];
+      for (const dim of Object.keys(userFilters)) {
+        const vals = userFilters[dim];
+        if (vals instanceof Set && vals.size > 0) {
+          userFilterParts.push(dim + ': ' + [...vals].join(', '));
+        }
+      }
+      if (userFilterParts.length > 0) {
+        contextHeader += '[User has filtered results by ' + userFilterParts.join('; ') + ']\n';
       }
     }
     if (contextHeader) {
@@ -1447,7 +1459,7 @@
       // Relevance path: existing multi-term expand-and-merge behavior.
       const queries = [];
       let weightIndex = 0;
-      const expandBase = 1.0 - CONFIG.EXPAND_PRIMARY_WEIGHT;
+      const expandBase = CONFIG.EXPAND_PRIMARY_WEIGHT;
       for (const term of validTerms) {
         const weight = Math.max(expandBase - (weightIndex * 0.05), 0.1);
         queries.push({ term, weight });
@@ -1475,8 +1487,8 @@
       allScoredResults = mergeResults(
         allScoredResults,
         expandedResults,
-        CONFIG.EXPAND_PRIMARY_WEIGHT,
-        1.0 - CONFIG.EXPAND_PRIMARY_WEIGHT
+        1.0,
+        1.0
       );
       allScoredResults.sort((a, b) => b.score - a.score);
       allScoredResults = deduplicateByTitle(allScoredResults);
@@ -1661,7 +1673,7 @@
       const expandedLabel = expandedTerms
         ? expandedTerms.filter(t => t.toLowerCase() !== query.toLowerCase())
         : [];
-      summarizeResults(query, allScoredResults, expandedLabel, sortHint, filterHint);
+      summarizeResults(query, allScoredResults, expandedLabel, sortHint, filterHint, activeFilters);
     });
   }
 

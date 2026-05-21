@@ -33,8 +33,10 @@ class ContentItem
         /** Language code for multi-language Pagefind filtering. */
         public readonly string $language = 'en',
         /** Extra Pagefind filter attributes keyed by filter name.
-         *  e.g. ['base_topic' => 'Cardiology']. Values pass directly into
-         *  data-pagefind-filter — they bypass HtmlCleaner so HTML is not stripped. */
+         *  String values: ['base_topic' => 'Cardiology'].
+         *  Array values for multi-value fields: ['topics' => ['Science', 'History']].
+         *  Each array element emits a separate filter entry for the same key.
+         *  Values pass directly into data-pagefind-filter — they bypass HtmlCleaner. */
         public readonly array $filters = [],
         /** Key-value metadata pairs emitted as data-pagefind-meta attributes.
          *  Use for typed fields (numeric, date) that support faceting or display.

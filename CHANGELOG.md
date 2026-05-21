@@ -6,6 +6,11 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Fixed
+- **NL query expansion ranking: inverted weight formula gave expanded results near-zero weight.** `mergeExpandedSearchResults()` calculated `expandBase = 1.0 - EXPAND_PRIMARY_WEIGHT`, inverting the intended behavior — with the default 0.7, expanded results got weight 0.3 instead of 0.7. Additionally, `mergeResults()` applied the weight penalty a second time in the WASM path (0.3 × 0.3 = 0.09 effective weight). Fixed by using `expandBase = EXPAND_PRIMARY_WEIGHT` directly and passing equal weights (1.0, 1.0) to the final merge since weight differentiation already happens in `scoreResults()`.
+- **AI Summary now reflects user-selected facet filters.** When a user toggled a facet checkbox, `summarizeResults()` was re-called with the filtered results but never told the LLM which filters were active. The summary described the full collection instead of the filtered subset. Active filter names are now passed to the context header as `[User has filtered results by ...]`.
+- **`StreamingFormatWriter::writePageEntry()` crashed on multi-value filter arrays.** Filter values that are arrays (multi-value taxonomy fields) were used directly as array keys, throwing `TypeError`. Normalized with `is_array() ? ... : [...]` to match `PagefindHtmlBuilder` behavior.
+
 ### Changed
 - **Sort path now uses Pagefind filter discovery instead of subject intersection heuristic.** `scolta.js` caches available Pagefind filters on init via `pagefind.filters()`. When a sort override is active with `subject_terms`, keywords are matched against filter values and passed to Pagefind as native filters alongside the sort. Sites with structured metadata (e.g. `topics`, `era`, `region`) get precise filter+sort — only topic-matching articles in sort order. Sites without filters get honest sort-only. Removes the parallel subject-only search, URL intersection, and arbitrary threshold of 3 that silently dropped high-sort-value items or ignored subject entirely. ([#127](https://github.com/tag1consulting/scolta-php/issues/127))
 
