@@ -33,6 +33,7 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals(0.3, $config->recencyMaxPenalty);
         $this->assertEquals(1.0, $config->titleMatchBoost);
         $this->assertEquals(1.5, $config->titleAllTermsMultiplier);
+        $this->assertEquals(5.0, $config->exactTitleMatchBoost);
         $this->assertEquals(0.4, $config->contentMatchBoost);
         $this->assertEquals(0.5, $config->expandPrimaryWeight);
         $this->assertEquals(300, $config->excerptLength);
@@ -81,6 +82,7 @@ class ScoltaConfigTest extends TestCase
         $config = ScoltaConfig::fromArray([
             'title_match_boost' => 2.5,
             'title_all_terms_multiplier' => 3.0,
+            'exact_title_match_boost' => 8.0,
             'content_match_boost' => 0.8,
             'recency_boost_max' => 1.0,
             'recency_half_life_days' => 180,
@@ -91,6 +93,7 @@ class ScoltaConfigTest extends TestCase
 
         $this->assertEquals(2.5, $config->titleMatchBoost);
         $this->assertEquals(3.0, $config->titleAllTermsMultiplier);
+        $this->assertEquals(8.0, $config->exactTitleMatchBoost);
         $this->assertEquals(0.8, $config->contentMatchBoost);
         $this->assertEquals(1.0, $config->recencyBoostMax);
         $this->assertEquals(180, $config->recencyHalfLifeDays);
@@ -370,6 +373,7 @@ class ScoltaConfigTest extends TestCase
         $expected = [
             'RECENCY_BOOST_MAX', 'RECENCY_HALF_LIFE_DAYS', 'RECENCY_PENALTY_AFTER_DAYS',
             'RECENCY_MAX_PENALTY', 'TITLE_MATCH_BOOST', 'TITLE_ALL_TERMS_MULTIPLIER',
+            'EXACT_TITLE_MATCH_BOOST',
             'CONTENT_MATCH_BOOST', 'PHRASE_ADJACENT_MULTIPLIER', 'PHRASE_NEAR_MULTIPLIER',
             'PHRASE_NEAR_WINDOW', 'PHRASE_WINDOW', 'EXCERPT_LENGTH', 'RESULTS_PER_PAGE',
             'MAX_PAGEFIND_RESULTS', 'AI_EXPAND_QUERY', 'AI_SUMMARIZE', 'AI_SUMMARY_TOP_N',
@@ -381,7 +385,7 @@ class ScoltaConfigTest extends TestCase
             $this->assertArrayHasKey($key, $js, "Missing key: {$key}");
         }
 
-        $this->assertCount(27, $js, 'Expected exactly 27 keys in toJsScoringConfig()');
+        $this->assertCount(28, $js, 'Expected exactly 28 keys in toJsScoringConfig()');
     }
 
     public function testToJsScoringConfigValuesMatchConfig(): void
@@ -491,6 +495,7 @@ class ScoltaConfigTest extends TestCase
         $this->assertSame('none', $config->recencyStrategy);
         $this->assertEquals(2.0, $config->titleMatchBoost);
         $this->assertEquals(2.5, $config->titleAllTermsMultiplier);
+        $this->assertEquals(5.0, $config->exactTitleMatchBoost);
         $this->assertEquals(0.5, $config->contentMatchBoost);
         $this->assertEquals(0.9, $config->expandPrimaryWeight);
         $this->assertEquals(15, $config->aiSummaryTopN);
@@ -530,6 +535,7 @@ class ScoltaConfigTest extends TestCase
         $this->assertSame('none', $config->recencyStrategy);
         $this->assertEquals(2.0, $config->titleMatchBoost);
         $this->assertEquals(2.5, $config->titleAllTermsMultiplier);
+        $this->assertEquals(5.0, $config->exactTitleMatchBoost);
         $this->assertEquals(0.5, $config->contentMatchBoost);
         $this->assertEquals(0.6, $config->expandPrimaryWeight);
         $this->assertEquals(15, $config->aiSummaryTopN);

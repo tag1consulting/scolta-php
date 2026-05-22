@@ -181,6 +181,13 @@ describe('scolta.js behavioral tests', () => {
         expect(window.document.querySelector('#scolta-search').children.length).toBeGreaterThan(0);
     });
 
+    test('exact title match boost config accepted without error', () => {
+        const { window } = createWindow('<div id="scolta-search"></div>', {
+            scoring: { EXACT_TITLE_MATCH_BOOST: 10.0 },
+        });
+        expect(window.document.querySelector('#scolta-search').children.length).toBeGreaterThan(0);
+    });
+
     test('search button click calls fetch for expand', async () => {
         const { window } = createWindow();
         const input = window.document.querySelector('#scolta-query');

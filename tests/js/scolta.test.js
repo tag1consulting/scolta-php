@@ -133,6 +133,7 @@ describe('scolta.js structure', () => {
         expect(jsSource).toContain('CONFIG.RECENCY_BOOST_MAX');
         expect(jsSource).toContain('CONFIG.RECENCY_HALF_LIFE_DAYS');
         expect(jsSource).toContain('CONFIG.TITLE_MATCH_BOOST');
+        expect(jsSource).toContain('CONFIG.EXACT_TITLE_MATCH_BOOST');
         expect(jsSource).toContain('CONFIG.CONTENT_MATCH_BOOST');
         expect(jsSource).toContain('CONFIG.RESULTS_PER_PAGE');
         expect(jsSource).toContain('CONFIG.EXPAND_PRIMARY_WEIGHT');
@@ -142,6 +143,7 @@ describe('scolta.js structure', () => {
         expect(jsSource).toContain('RECENCY_BOOST_MAX: s.RECENCY_BOOST_MAX ?? 0.5');
         expect(jsSource).toContain('RECENCY_HALF_LIFE_DAYS: s.RECENCY_HALF_LIFE_DAYS ?? 365');
         expect(jsSource).toContain('TITLE_MATCH_BOOST: s.TITLE_MATCH_BOOST ?? 1.0');
+        expect(jsSource).toContain('EXACT_TITLE_MATCH_BOOST: s.EXACT_TITLE_MATCH_BOOST ?? 5.0');
         expect(jsSource).toContain('RESULTS_PER_PAGE: s.RESULTS_PER_PAGE ?? 10');
     });
 
@@ -212,6 +214,22 @@ describe('scolta.js structure', () => {
     test('sanitizeQueryForLogging utility exists', () => {
         expect(jsSource).toContain('sanitizeQueryForLogging');
         expect(jsSource).toContain('sanitize_query');
+    });
+
+    test('exact title match boost applied in scoreResults', () => {
+        expect(jsSource).toContain('EXACT_TITLE_MATCH_BOOST');
+        // Verify the boost is multiplicative (score *= ...) not additive
+        expect(jsSource).toContain('r.score *= CONFIG.EXACT_TITLE_MATCH_BOOST');
+        // Verify case-insensitive comparison
+        expect(jsSource).toContain(".toLowerCase().trim()");
+    });
+
+    test('exact title match uses primaryQuery when available', () => {
+        // When scoring expansion terms, the boost should fire against the
+        // original user query (primaryQuery), not the expansion term.
+        const scoreBody = jsSource.match(/function scoreResults[\s\S]*?return scored;\s*\}/);
+        expect(scoreBody).not.toBeNull();
+        expect(scoreBody[0]).toContain('primaryQuery || query');
     });
 
     test('priority page boosting is supported when configured', () => {
