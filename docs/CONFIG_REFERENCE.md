@@ -52,6 +52,7 @@ All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Platfo
 |----------|------|---------|-------------|
 | `titleMatchBoost` | float | `1.0` | Boost for title keyword matches |
 | `titleAllTermsMultiplier` | float | `1.5` | Multiplier when all search terms appear in title |
+| `exactTitleMatchBoost` | float | `5.0` | Multiplicative boost when the result's title exactly matches the query (case-insensitive). Applied after all other scoring so an article titled "DNA" always ranks #1 for the search "DNA" regardless of BM25 scores. Set to 1.0 to disable. |
 | `contentMatchBoost` | float | `0.4` | Boost for content/excerpt keyword matches |
 
 ### Scoring: Phrase Proximity

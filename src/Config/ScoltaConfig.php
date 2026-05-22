@@ -45,6 +45,7 @@ class ScoltaConfig
     // -- Scoring: Title/Content match --
     public float $titleMatchBoost = 1.0;
     public float $titleAllTermsMultiplier = 1.5;
+    public float $exactTitleMatchBoost = 5.0;
     public float $contentMatchBoost = 0.4;
 
     // -- Scoring: Phrase proximity --
@@ -160,6 +161,7 @@ class ScoltaConfig
                 'recency_strategy' => 'none',
                 'title_match_boost' => 2.0,
                 'title_all_terms_multiplier' => 2.5,
+                'exact_title_match_boost' => 5.0,
                 'content_match_boost' => 0.5,
                 'expand_primary_weight' => 0.9,
                 'ai_summary_top_n' => 15,
@@ -174,6 +176,7 @@ class ScoltaConfig
                 'recency_strategy' => 'none',
                 'title_match_boost' => 2.0,
                 'title_all_terms_multiplier' => 2.5,
+                'exact_title_match_boost' => 5.0,
                 'content_match_boost' => 0.5,
                 'expand_primary_weight' => 0.6,
                 'ai_summary_top_n' => 15,
@@ -306,6 +309,7 @@ class ScoltaConfig
             'RECENCY_MAX_PENALTY' => $this->recencyMaxPenalty,
             'TITLE_MATCH_BOOST' => $this->titleMatchBoost,
             'TITLE_ALL_TERMS_MULTIPLIER' => $this->titleAllTermsMultiplier,
+            'EXACT_TITLE_MATCH_BOOST' => $this->exactTitleMatchBoost,
             'CONTENT_MATCH_BOOST' => $this->contentMatchBoost,
             'PHRASE_ADJACENT_MULTIPLIER' => $this->phraseAdjacentMultiplier,
             'PHRASE_NEAR_MULTIPLIER' => $this->phraseNearMultiplier,

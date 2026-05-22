@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Added
+- **`exactTitleMatchBoost` config option (default `5.0`).** Multiplicative boost applied when a result's title exactly matches the search query (case-insensitive). Ensures articles whose title IS the query always rank #1 regardless of BM25 differentials. For example, searching "DNA" now ranks the article titled "DNA" above "DNA nanotechnology" even when the longer article has a higher BM25 score from more term mentions. Applies as a post-scoring step to both the WASM and JS fallback scoring paths. Set to `1.0` to disable.
+
 ### Fixed
 - **Expansion merge: cross-list agreement now boosts score instead of being discarded.** When the same URL appeared in both primary and expanded results, `mergeResults()` kept whichever score was higher and discarded the other. A result relevant from multiple angles (matching both the literal query and semantic expansions) got zero credit for cross-list agreement. Now applies a configurable additive bonus (`cross_list_bonus`, default 0.15) when a result appears in both sets. The dual-scoring path in `searchAndLoadParallel()` also uses additive scoring instead of `Math.max()`.
 - **Expansion phrases no longer word-exploded into individual search queries.** Multi-word expansion terms from the LLM (e.g. "stellar death") were split into individual word searches ("stellar", "death"), injecting noise — isolated "death" pulled in Death Valley, Death of Ms Dhu, and other irrelevant articles. Removed the word-explosion block from both the relevance path and the sort path. Highlight-term splitting (for marking matching words in result text) is unchanged.
