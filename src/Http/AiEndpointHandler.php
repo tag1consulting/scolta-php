@@ -530,6 +530,11 @@ Format: {"terms": [...], "sort": {"field": "<field_name>", "direction": "asc|des
 
 DECISION SEQUENCE — follow in order, stop at the first match:
 
+STEP 0: FIELD AVAILABILITY CHECK (always perform first)
+Identify what concept the user's sort intent implies (recency, length, price, citation count, etc.). Check if ANY available sortable field directly measures that exact concept. If no field measures it, set sort to null and skip all further steps. Do NOT substitute an unrelated field.
+Example: "newest articles" → concept is RECENCY → requires a date/time field → no date field in the list → sort is null, STOP.
+Example: "oldest history articles" → concept is RECENCY → requires a date/time field → no date field in the list → sort is null, STOP.
+
 STEP 1: EXPLICIT SORT SYNTAX (always classify)
 If the query contains "sort by", "sorted by", "order by", "arrange by", "rank by", or "group by" followed by a field name or concept, this IS sort intent regardless of query length or complexity. Map the named concept to the closest available field.
 Examples: "sort by date" → date desc, "articles about wars sorted by date" → date desc, "rank by word count" → word_count desc.
@@ -542,6 +547,9 @@ If the sort-like word is a QUALIFIER describing what TYPE of result the user wan
 - "Most popular crystals" = "find famous crystals" — NOT "sort by a popularity metric"
 - "Best practices for deployment" = "find good practices" — NOT sort intent
 - "Top programming languages" = "find the leading languages" — NOT sort intent
+NOT discovery qualifiers — these describe MEASURABLE quantities, not subjective fame:
+- "most cited", "most referenced" → these count citations, which is a measurable numeric field, NOT a fame/popularity qualifier. Proceed to STEP 4.
+- "longest", "shortest", "most words" → these measure word count, a numeric field. Proceed to STEP 4.
 EXCEPTION: classify as sort ONLY if a field explicitly described as measuring the qualifier concept exists (e.g., a "popularity_score" field for "most popular") AND the query is clearly requesting an ordered list, not information about popular items.
 
 STEP 3: RESEARCH / ADVICE / CONVERSATIONAL QUERIES (never classify as sort)
@@ -563,10 +571,14 @@ If the query's primary purpose is ordering results by a measurable field, AND a 
   · Severity: "most severe", "highest risk", "most critical" → severity/risk field
   · Engagement: "most starred", "most liked", "most discussed" → engagement count field
   If there is no clear, direct semantic match between the user's language and an available field's description, do NOT add sort.
+  WRONG: "newest articles" → word_count desc (word_count measures LENGTH, not DATE — this is a concept mismatch, omit sort)
+  WRONG: "oldest articles" → reference_count asc (reference_count measures CITATIONS, not DATE — omit sort)
+  RIGHT: "newest articles" when no date field exists → omit sort entirely
 
 GENERAL RULES:
 - field MUST be one of the available sortable fields listed above — no other values permitted.
 - direction must be "asc" or "desc".
+- NEVER SUBSTITUTE A DIFFERENT FIELD. If the user's sort intent maps to a concept with no matching available field, omit sort entirely. For example: "newest" implies date sorting — if no date field is available, do NOT fall back to word_count or any other field. A wrong sort is worse than no sort.
 - Prefer false negatives over false positives: a missed sort is far less harmful than a wrong reorder. When uncertain, ALWAYS omit "sort".
 - When sort is detected, exclude sort signal words (most, cheapest, newest, highest, lowest, recently, etc.) from expanded terms.
 
