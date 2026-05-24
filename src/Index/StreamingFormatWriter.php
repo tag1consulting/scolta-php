@@ -50,8 +50,8 @@ class StreamingFormatWriter
     /** Meta field names seen across all pages. */
     private array $collectedMetaFields = ['title' => true];
 
-    /** pageNum → [field => value] — accumulated for building pf_meta sorts. */
-    private array $sortableData = [];
+    /** field → [pageNum → value] — accumulated in transposed form for pf_meta sorts. */
+    private array $sortFields = [];
 
     // ── Current open index-chunk state ─────────────────────────────────────
 
@@ -99,7 +99,7 @@ class StreamingFormatWriter
 
         $this->pageMeta             = [];
         $this->filterData           = [];
-        $this->sortableData         = [];
+        $this->sortFields           = [];
         $this->collectedMetaFields  = ['title' => true];
         $this->currentChunkItems    = [];
         $this->currentChunkWords    = [];
@@ -152,13 +152,14 @@ class StreamingFormatWriter
             }
         }
 
-        // Accumulate sortable values for pf_meta sorts (position [4]).
+        // Accumulate sortable values directly in transposed form (field → pageNum → value)
+        // to avoid a temporary doubling during buildSortsArray().
         $sortableData = $pageData['sortable'] ?? [];
         if (!empty($pageData['date']) && !isset($sortableData['date'])) {
             $sortableData['date'] = $pageData['date'];
         }
-        if (!empty($sortableData)) {
-            $this->sortableData[$pageNum] = $sortableData;
+        foreach ($sortableData as $field => $value) {
+            $this->sortFields[$field][$pageNum] = (string) $value;
         }
 
         // Track meta field names so pf_meta has the correct field list.
@@ -374,22 +375,18 @@ class StreamingFormatWriter
      * by that field's value. Numeric values are sorted numerically; non-numeric
      * values are sorted lexicographically. Pages missing a value for a given
      * sort field are excluded from that field's sorted index.
+     *
+     * Sort data is accumulated directly in transposed form (field → pageNum → value)
+     * during writePage(), so no intermediate transposition allocation is needed here.
      */
     private function buildSortsArray(): string
     {
-        $sortFields = [];
-        foreach ($this->sortableData as $pageNum => $fields) {
-            foreach ($fields as $field => $value) {
-                $sortFields[$field][$pageNum] = (string) $value;
-            }
-        }
-
-        if (empty($sortFields)) {
+        if (empty($this->sortFields)) {
             return $this->cbor->encodeArray([]);
         }
 
         $sortItems = [];
-        foreach ($sortFields as $field => $pageValues) {
+        foreach ($this->sortFields as $field => $pageValues) {
             $allNumeric = array_reduce(
                 $pageValues,
                 fn (bool $carry, string $v) => $carry && is_numeric($v),

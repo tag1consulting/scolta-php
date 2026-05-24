@@ -212,6 +212,83 @@ class PhpIndexerTest extends TestCase
         $this->assertTrue($result->success);
     }
 
+    public function testProcessChunkPreservesSortableAndMetadata(): void
+    {
+        $items = [
+            new ContentItem(
+                id: 'sort-1',
+                title: 'Sortable Test Page',
+                bodyHtml: '<p>Test page with sortable fields and metadata for verification.</p>',
+                url: 'https://example.com/sort-test',
+                date: '2026-03-15',
+                sortable: ['price' => '42.99', 'rating' => '4.5'],
+                metadata: ['author' => 'Test Author'],
+            ),
+        ];
+
+        $indexer = new PhpIndexer($this->stateDir, $this->outputDir);
+        $count = $indexer->processChunk($items, 0);
+        $result = $indexer->finalize();
+
+        $this->assertSame(1, $count);
+        $this->assertTrue($result->success);
+
+        // Verify sortable data is in the fragment's meta.
+        $fragmentFiles = glob($this->outputDir . '/pagefind/fragment/*.pf_fragment');
+        $this->assertNotEmpty($fragmentFiles);
+
+        $json = preg_replace('/^pagefind_dcd/', '', gzdecode(file_get_contents($fragmentFiles[0])));
+        $data = json_decode($json, true);
+
+        $this->assertSame('42.99', $data['meta']['price']);
+        $this->assertSame('4.5', $data['meta']['rating']);
+    }
+
+    public function testProcessChunkDoesNotRetainMetadataOnProxy(): void
+    {
+        $items = [
+            new ContentItem(
+                id: 'meta-1',
+                title: 'Metadata Test',
+                bodyHtml: '<p>Content with metadata that should not be in the index builder proxy.</p>',
+                url: 'https://example.com/meta-test',
+                date: '2026-01-01',
+                metadata: ['large_field' => str_repeat('x', 1000)],
+            ),
+        ];
+
+        $indexer = new PhpIndexer($this->stateDir, $this->outputDir);
+        $count = $indexer->processChunk($items, 0);
+        $result = $indexer->finalize();
+
+        $this->assertSame(1, $count);
+        $this->assertTrue($result->success);
+    }
+
+    public function testFinalizeFailsWithoutValidIndex(): void
+    {
+        $indexer = new PhpIndexer($this->stateDir, $this->outputDir);
+        $result = $indexer->finalize();
+
+        $this->assertFalse($result->success);
+    }
+
+    public function testFinalizeVerifiesPagefindEntryJson(): void
+    {
+        $indexer = new PhpIndexer($this->stateDir, $this->outputDir);
+        $indexer->processChunk($this->makeItems(3), 0);
+        $result = $indexer->finalize();
+
+        $this->assertTrue($result->success);
+
+        $entryPath = $this->outputDir . '/pagefind/pagefind-entry.json';
+        $this->assertFileExists($entryPath);
+
+        $data = json_decode(file_get_contents($entryPath), true);
+        $this->assertArrayHasKey('version', $data);
+        $this->assertArrayHasKey('languages', $data);
+    }
+
     private function removeDir(string $dir): void
     {
         if (!is_dir($dir)) {

@@ -600,6 +600,63 @@ class IndexBuildOrchestratorTest extends TestCase
         $this->assertContains('reference_count', $sortFieldNames, 'reference_count sort data must be in the index');
     }
 
+    // -------------------------------------------------------------------
+    // Index verification
+    // -------------------------------------------------------------------
+
+    public function testVerifyIndexCompletePassesOnValidBuild(): void
+    {
+        $orch   = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
+        $intent = BuildIntent::fresh(3, MemoryBudget::conservative());
+        $report = $orch->build($intent, $this->makeItems(3));
+
+        $this->assertTrue($report->success);
+
+        // Should not throw — index is valid.
+        IndexBuildOrchestrator::verifyIndexComplete($this->outputDir);
+        $this->assertTrue(true); // Assertion to confirm no exception
+    }
+
+    public function testVerifyIndexCompleteThrowsWhenEntryMissing(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/pagefind-entry\.json not found/');
+
+        IndexBuildOrchestrator::verifyIndexComplete($this->outputDir);
+    }
+
+    public function testVerifyIndexCompleteThrowsOnMalformedEntry(): void
+    {
+        $pagefindDir = $this->outputDir . '/pagefind';
+        mkdir($pagefindDir, 0755, true);
+        file_put_contents($pagefindDir . '/pagefind-entry.json', '{"broken": true}');
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/malformed/');
+
+        IndexBuildOrchestrator::verifyIndexComplete($this->outputDir);
+    }
+
+    public function testMemoryAbortDoesNotProduceValidIndex(): void
+    {
+        $orch = new IndexBuildOrchestrator(
+            $this->stateDir,
+            $this->outputDir,
+            memoryPressureProbe: static fn () => true,
+        );
+
+        $budget = MemoryBudget::conservative()->withChunkSize(2);
+        $intent = BuildIntent::fresh(10, $budget);
+        $report = $orch->build($intent, $this->makeItems(10));
+
+        $this->assertFalse($report->success);
+        $this->assertSame('memory_abort', $report->error);
+
+        // pagefind-entry.json must NOT exist after an aborted build.
+        $entryPath = $this->outputDir . '/pagefind/pagefind-entry.json';
+        $this->assertFileDoesNotExist($entryPath);
+    }
+
     private function removeDir(string $dir): void
     {
         if (!is_dir($dir)) {
