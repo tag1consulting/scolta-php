@@ -7,6 +7,7 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ## [Unreleased]
 
 ### Added
+- **Memory regression test for `processChunk()` writer phase.** Asserts peak memory stays under a defined threshold when indexing 100 pages with sortable and metadata fields populated. Catches reintroduction of the flat-list token accumulation pattern fixed in #139. [#133]
 - **`exactTitleMatchBoost` config option (default `5.0`).** Multiplicative boost applied when a result's title exactly matches the search query (case-insensitive). Ensures articles whose title IS the query always rank #1 regardless of BM25 differentials. For example, searching "DNA" now ranks the article titled "DNA" above "DNA nanotechnology" even when the longer article has a higher BM25 score from more term mentions. Applies as a post-scoring step to both the WASM and JS fallback scoring paths. Set to `1.0` to disable.
 
 ### Fixed
