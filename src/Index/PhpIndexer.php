@@ -67,6 +67,10 @@ class PhpIndexer
      * future builds. Pass $force = true to bypass cache lookups while still
      * populating the cache (useful when --force is passed from a CLI command).
      *
+     * Uses a generator internally so that token arrays (the largest per-item
+     * allocation) are freed after each item is indexed, rather than holding all
+     * items' token data in memory simultaneously.
+     *
      * @param \Tag1\Scolta\Export\ContentItem[] $items
      * @param int $chunkNumber Chunk number (0-based).
      * @param int|null $totalPages Total pages across all chunks.
@@ -86,7 +90,23 @@ class PhpIndexer
             $this->prepared = true;
         }
 
-        $tokenDataList = [];
+        $itemStream = $this->tokenizeItems($items, $force);
+        $partial = $this->builder->buildFromItemStream($itemStream, $this->currentPageOffset);
+        $this->currentPageOffset += count($partial['pages']);
+
+        $this->coordinator->commitChunk($chunkNumber, $partial);
+
+        return count($partial['pages']);
+    }
+
+    /**
+     * Yield tokenized items one at a time so token arrays are freed after indexing.
+     *
+     * @param \Tag1\Scolta\Export\ContentItem[] $items
+     * @return \Generator<int, array{item: object, tokenData: array}>
+     */
+    private function tokenizeItems(array $items, bool $force): \Generator
+    {
         foreach ($items as $item) {
             $hash = self::contentHash($item);
             $tokenData = (!$force) ? $this->cache->get($hash) : null;
@@ -98,25 +118,17 @@ class PhpIndexer
             }
 
             if ($tokenData !== null) {
-                $tokenDataList[] = ['item' => (object) [
+                yield ['item' => (object) [
                     'id'       => $item->id,
                     'url'      => $item->url,
                     'date'     => $item->date,
                     'siteName' => $item->siteName,
                     'language' => $item->language,
                     'filters'  => $item->filters,
-                    'metadata' => $item->metadata,
                     'sortable' => $item->sortable,
                 ], 'tokenData' => $tokenData];
             }
         }
-
-        $partial = $this->builder->buildFromTokenData($tokenDataList, $this->currentPageOffset);
-        $this->currentPageOffset += count($partial['pages']);
-
-        $this->coordinator->commitChunk($chunkNumber, $partial);
-
-        return count($partial['pages']);
     }
 
     /**
@@ -149,6 +161,8 @@ class PhpIndexer
             $pageCount = $this->coordinator->pagesProcessed();
 
             $this->atomicSwap();
+
+            IndexBuildOrchestrator::verifyIndexComplete($this->outputDir);
 
             $fileCount = $this->countFiles($this->outputDir . '/pagefind');
 

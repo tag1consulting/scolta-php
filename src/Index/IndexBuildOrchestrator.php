@@ -512,6 +512,44 @@ final class IndexBuildOrchestrator
                 . 'The write may have failed silently. Check filesystem permissions and available space.'
             );
         }
+
+        self::verifyIndexComplete($this->outputDir);
+    }
+
+    /**
+     * Verify that a completed index is usable: pagefind-entry.json exists and parses.
+     *
+     * Framework adapters MUST call this (or check StatusReport::$success) before
+     * exiting 0. A build that aborts without producing a valid pagefind-entry.json
+     * must exit non-zero — otherwise deploy pipelines route traffic to dead search.
+     *
+     * @param string $outputDir The base output directory (pagefind/ will be appended).
+     * @throws \RuntimeException If the index is missing or malformed.
+     */
+    public static function verifyIndexComplete(string $outputDir): void
+    {
+        $entryPath = $outputDir . '/pagefind/pagefind-entry.json';
+        if (!file_exists($entryPath)) {
+            throw new \RuntimeException(
+                "Index verification failed: pagefind-entry.json not found at {$entryPath}. "
+                . 'The build did not produce a usable index. Do not exit 0.'
+            );
+        }
+
+        $content = file_get_contents($entryPath);
+        if ($content === false) {
+            throw new \RuntimeException(
+                "Index verification failed: cannot read pagefind-entry.json at {$entryPath}."
+            );
+        }
+
+        $data = json_decode($content, true);
+        if (!is_array($data) || !isset($data['version']) || !isset($data['languages'])) {
+            throw new \RuntimeException(
+                "Index verification failed: pagefind-entry.json is malformed (missing 'version' or 'languages' key). "
+                . 'The index may be incomplete or corrupted.'
+            );
+        }
     }
 
 }

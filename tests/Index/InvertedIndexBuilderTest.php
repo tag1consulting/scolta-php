@@ -359,4 +359,82 @@ class InvertedIndexBuilderTest extends TestCase
         $this->assertSame(0, $page['meta']['reference_count']);
         $this->assertSame(['word_count' => 5000, 'reference_count' => 0, 'date' => '2026-01-01'], $page['sortable']);
     }
+
+    public function testBuildFromItemStreamProducesSameResultAsBuildFromTokenData(): void
+    {
+        $items = [
+            $this->makeItem('doc-1', 'Apple Pie Recipe', 'A delicious apple pie recipe for baking enthusiasts.'),
+            $this->makeItem('doc-2', 'Banana Bread Guide', 'How to make banana bread from scratch with simple ingredients.'),
+            $this->makeItem('doc-3', 'Cherry Tart Tips', 'Professional tips for making the perfect cherry tart dessert.'),
+        ];
+
+        $tokenDataList = [];
+        foreach ($items as $item) {
+            $tokenData = $this->builder->tokenizeItem($item);
+            $tokenDataList[] = ['item' => (object) [
+                'id'       => $item->id,
+                'url'      => $item->url,
+                'date'     => $item->date,
+                'siteName' => $item->siteName,
+                'language' => $item->language,
+                'filters'  => $item->filters,
+                'sortable' => $item->sortable,
+            ], 'tokenData' => $tokenData];
+        }
+
+        $resultArray = $this->builder->buildFromTokenData($tokenDataList, 0);
+
+        // Use a generator for the stream version.
+        $stream = (function () use ($tokenDataList) {
+            yield from $tokenDataList;
+        })();
+        $resultStream = $this->builder->buildFromItemStream($stream, 0);
+
+        $this->assertSame(
+            array_keys($resultArray['pages']),
+            array_keys($resultStream['pages']),
+        );
+        $this->assertSame(
+            array_keys($resultArray['index']),
+            array_keys($resultStream['index']),
+        );
+
+        // Verify page content matches.
+        foreach ($resultArray['pages'] as $pageNum => $pageData) {
+            $this->assertSame($pageData['url'], $resultStream['pages'][$pageNum]['url']);
+            $this->assertSame($pageData['sortable'], $resultStream['pages'][$pageNum]['sortable']);
+        }
+    }
+
+    public function testBuildFromItemStreamWithSortableData(): void
+    {
+        $item = new ContentItem(
+            id: 'sorted-1',
+            title: 'Sortable Stream Test',
+            bodyHtml: '<p>Testing sortable data flows through the item stream path correctly.</p>',
+            url: 'https://example.com/stream-sort',
+            date: '2026-05-01',
+            sortable: ['price' => '19.99', 'weight' => '250'],
+        );
+
+        $tokenData = $this->builder->tokenizeItem($item);
+        $stream = (function () use ($item, $tokenData) {
+            yield ['item' => (object) [
+                'id'       => $item->id,
+                'url'      => $item->url,
+                'date'     => $item->date,
+                'siteName' => $item->siteName,
+                'language' => $item->language,
+                'filters'  => $item->filters,
+                'sortable' => $item->sortable,
+            ], 'tokenData' => $tokenData];
+        })();
+
+        $result = $this->builder->buildFromItemStream($stream, 0);
+
+        $page = $result['pages'][0];
+        $this->assertSame('19.99', $page['meta']['price']);
+        $this->assertSame('250', $page['meta']['weight']);
+        $this->assertSame(['price' => '19.99', 'weight' => '250', 'date' => '2026-05-01'], $page['sortable']);
+    }
 }

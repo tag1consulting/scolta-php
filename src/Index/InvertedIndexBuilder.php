@@ -129,6 +129,63 @@ class InvertedIndexBuilder
     }
 
     /**
+     * Build a partial index from a stream of pre-tokenized items.
+     *
+     * Unlike buildFromTokenData() which requires all items in an array, this
+     * method accepts an iterable (typically a generator). Each item's token
+     * arrays are freed after indexing, so only one item's tokens are in memory
+     * at a time. This reduces peak RSS from O(N × tokens_per_page) to
+     * O(tokens_per_page) for the token component.
+     *
+     * The inverted index and pages array still accumulate (unavoidable for a
+     * single chunk commit), but token arrays dominate per-item memory.
+     *
+     * @param iterable<array{item: object, tokenData: array}> $items
+     * @return array{index: array, pages: array}
+     */
+    public function buildFromItemStream(iterable $items, int $pageOffset = 0): array
+    {
+        $index   = [];
+        $pages   = [];
+        $pageNum = $pageOffset;
+
+        foreach ($items as ['item' => $item, 'tokenData' => $tokenData]) {
+            $itemSortable = $item->sortable ?? [];
+            $itemDate = $item->date ?? '';
+            if ($itemDate !== '' && !isset($itemSortable['date'])) {
+                $itemSortable['date'] = $itemDate;
+            }
+            $pages[$pageNum] = [
+                'id'        => $item->id,
+                'url'       => $item->url,
+                'title'     => $tokenData['cleanTitle'],
+                'content'   => $tokenData['content'],
+                'wordCount' => $tokenData['wordCount'],
+                'date'      => $item->date,
+                'filters'   => array_merge(
+                    $item->siteName !== '' ? ['site' => $item->siteName] : [],
+                    $item->language !== '' ? ['language' => $item->language] : [],
+                    $item->filters,
+                ),
+                'meta'      => array_filter([
+                    'title' => $tokenData['cleanTitle'],
+                    'date'  => $item->date,
+                ] + $itemSortable, fn ($v) => $v !== null && $v !== ''),
+                'sortable'  => $itemSortable,
+                'hash'      => hash('sha256', $tokenData['content']),
+            ];
+
+            $this->indexTokens($index, $tokenData['titleTokens'], $pageNum, self::TITLE_WEIGHT);
+            $this->indexTokens($index, $tokenData['bodyTokens'], $pageNum, self::BODY_WEIGHT);
+            $this->indexTokens($index, $tokenData['urlTokens'], $pageNum, self::BODY_WEIGHT);
+
+            $pageNum++;
+        }
+
+        return ['index' => $index, 'pages' => $pages];
+    }
+
+    /**
      * Build a partial index from pre-tokenized item data.
      *
      * Accepts the output of tokenizeItem() paired with a metadata object for
