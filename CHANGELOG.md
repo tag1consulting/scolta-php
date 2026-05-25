@@ -7,6 +7,7 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ## [Unreleased]
 
 ### Fixed
+- **Subject filter matches now update UI state (badges + checkboxes).** When `subject_terms` matched a Pagefind filter, the filtered results were correct but `activeFilters` and `llmAppliedFilters` were never set, so sidebar checkboxes stayed unchecked and no filter badge appeared. Users saw filtered results with no visual indication or dismiss affordance. Now mirrors the `filter_hint` path's UI state updates with guards to prevent overwriting user-selected or LLM-applied filters.
 - **`computeFilterCounts()` now counts all values in multi-value filter arrays.** Previously only `val[0]` was counted, so articles tagged with `["Science", "History"]` only incremented the first topic in the facet display. Now iterates all array elements.
 
 ### Added

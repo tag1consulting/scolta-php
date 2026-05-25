@@ -307,6 +307,15 @@ describe('scolta.js structure', () => {
         expect(jsSource).toContain('new Set([val])');
     });
 
+    test('subject filter match updates activeFilters and llmAppliedFilters', () => {
+        const sortBlock = jsSource.substring(
+            jsSource.indexOf('if (hasFilterMatch)'),
+            jsSource.indexOf('const termSet = new Set')
+        );
+        expect(sortBlock).toContain('activeFilters[dim]');
+        expect(sortBlock).toContain('llmAppliedFilters[dim]');
+    });
+
     test('sort path logs when no filter match found', () => {
         expect(jsSource).toContain('No filter match for subject terms, using sort only');
     });
