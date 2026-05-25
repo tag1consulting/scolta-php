@@ -7,6 +7,7 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ## [Unreleased]
 
 ### Fixed
+- **Summarize/follow-up prompts now reference corpus scope when results are weak or missing.** Previously the LLM either answered from tangential results (misleading) or gave a vague "no relevant results found" without explaining why. Now the GROUNDING CHECK section instructs the LLM to reference the collection scope from `{SITE_DESCRIPTION}` (e.g., "This collection of ~6,900 Featured Articles doesn't include a dedicated article on [topic]") and to present whatever tangential content IS useful while being upfront about the gap.
 - **Subject filter matches now update UI state (badges + checkboxes).** When `subject_terms` matched a Pagefind filter, the filtered results were correct but `activeFilters` and `llmAppliedFilters` were never set, so sidebar checkboxes stayed unchecked and no filter badge appeared. Users saw filtered results with no visual indication or dismiss affordance. Now mirrors the `filter_hint` path's UI state updates with guards to prevent overwriting user-selected or LLM-applied filters.
 - **`computeFilterCounts()` now counts all values in multi-value filter arrays.** Previously only `val[0]` was counted, so articles tagged with `["Science", "History"]` only incremented the first topic in the facet display. Now iterates all array elements.
 
