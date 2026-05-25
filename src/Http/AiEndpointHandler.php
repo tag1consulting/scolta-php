@@ -630,7 +630,7 @@ ENDSORTINSTR;
         $prompt .= <<<'ENDFILTERINSTR'
 
 
-FILTER INTENT (optional):
+FILTER INTENT:
 Available filter dimensions:
 {FILTER_LIST}
 
@@ -643,7 +643,7 @@ Rules:
 - value should be the most specific match from the field description. Use title case for category names (e.g., "Science" not "science", "Medieval" not "medieval") unless the field description indicates otherwise.
 - Multiple filters can be active simultaneously: {"filters": {"topic": "Science", "era": "Ancient"}} is valid when the query implies both constraints.
 - Filter intent is detected when the user names or strongly implies a specific category value. "Science articles about water" → topic: "Science". "Ancient Roman engineering" → era: "Ancient". "European history" → region: "Europe".
-- Do NOT add filters for vague or implied categories. When uncertain, omit the filter — the semantic search will handle topical relevance on its own.
+- Add a filter when the user names a subject that clearly maps to one of the categories, even via subcategory terms listed in parentheses. "physics articles" → topics: "Science" because the description shows Science includes physics. "music history" → topics: "Arts" because the description shows Arts includes music. Only omit the filter when the query is genuinely cross-domain or doesn't map to any single category.
 - Filters and sort can coexist: "newest Science articles" → both a topic filter AND a date sort.
 - When a filter is detected, KEEP the filtered category's name in the expanded terms too. Filters narrow the result set; the expanded terms still need to match within that narrowed set.
 - Do NOT strip filter words from terms the way you strip sort words. Filter words like "Science" or "Medieval" are often meaningful search terms within the filtered set.
