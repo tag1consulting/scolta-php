@@ -7,6 +7,12 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ## [Unreleased]
 
 ### Fixed
+- **`computeFilterCounts()` now counts all values in multi-value filter arrays.** Previously only `val[0]` was counted, so articles tagged with `["Science", "History"]` only incremented the first topic in the facet display. Now iterates all array elements.
+
+### Added
+- **Filter field description validation test.** `FilterFieldDescriptionValidationTest` parses `filter_field_descriptions` entries and verifies every enumerated value exists in the expected index values (and vice versa). Catches config descriptions that drift from actual taxonomy terms.
+
+### Fixed
 - **Sort intent prompt: no-fallback rule prevents wrong sort badges.** When the user's sort intent maps to a field not in the available sortable fields (e.g., "newest" implying date sort when only word_count and reference_count exist), the LLM would fall back to an unrelated field. Added an explicit "NEVER SUBSTITUTE A DIFFERENT FIELD" rule to the prompt's GENERAL RULES section.
 - **Sort intent prompt: "most cited" now correctly triggers reference_count desc.** Added explicit carve-out in the discovery-qualifier step (STEP 2) so that measurable-quantity phrases ("most cited", "most referenced") are not mistaken for subjective discovery qualifiers and instead proceed to the sort-intent classification in STEP 4.
 
