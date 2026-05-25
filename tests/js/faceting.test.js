@@ -180,10 +180,12 @@ function computeFilterCountsTest(results) {
         const filters = r.data.filters || {};
         for (const [dim, val] of Object.entries(filters)) {
             if (!val) continue;
-            const v = Array.isArray(val) ? val[0] : val;
-            if (!v) continue;
-            if (!counts[dim]) counts[dim] = {};
-            counts[dim][v] = (counts[dim][v] || 0) + 1;
+            const values = Array.isArray(val) ? val : [val];
+            for (const v of values) {
+                if (!v) continue;
+                if (!counts[dim]) counts[dim] = {};
+                counts[dim][v] = (counts[dim][v] || 0) + 1;
+            }
         }
     }
     return counts;
@@ -260,13 +262,42 @@ describe('faceting: computeFilterCounts logic', () => {
         expect(counts.site).toEqual({ 'Site A': 1, 'Site B': 1 });
     });
 
-    test('handles array filter values by using first element', () => {
+    test('handles single-element array filter values', () => {
         const results = [
             { data: { filters: { language: ['en'] } } },
             { data: { filters: { language: ['en'] } } },
         ];
         expect(computeFilterCountsTest(results)).toEqual({
             language: { en: 2 },
+        });
+    });
+
+    test('handles multi-value array filters by counting each value', () => {
+        const results = [
+            { data: { filters: { topics: ['Science', 'History'] } } },
+            { data: { filters: { topics: ['Science'] } } },
+            { data: { filters: { topics: ['Arts'] } } },
+        ];
+        expect(computeFilterCountsTest(results)).toEqual({
+            topics: { Science: 2, History: 1, Arts: 1 },
+        });
+    });
+
+    test('multi-value array with null elements skips nulls', () => {
+        const results = [
+            { data: { filters: { topics: ['Science', null, 'History'] } } },
+        ];
+        expect(computeFilterCountsTest(results)).toEqual({
+            topics: { Science: 1, History: 1 },
+        });
+    });
+
+    test('multi-value array with empty string elements skips empties', () => {
+        const results = [
+            { data: { filters: { topics: ['Science', '', 'History'] } } },
+        ];
+        expect(computeFilterCountsTest(results)).toEqual({
+            topics: { Science: 1, History: 1 },
         });
     });
 
