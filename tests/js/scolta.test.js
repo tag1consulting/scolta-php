@@ -317,7 +317,7 @@ describe('scolta.js structure', () => {
     });
 
     test('sort path matches subject terms against cached filters', () => {
-        expect(jsSource).toContain('matchSubjectToFilters(subjectTerms, cachedPagefindFilters)');
+        expect(jsSource).toContain('matchSubjectToFilters(subjectTerms, cachedPagefindFilters, filterDescs)');
         expect(jsSource).toContain('Subject filter match:');
     });
 
@@ -336,7 +336,7 @@ describe('scolta.js structure', () => {
     });
 
     test('sort path logs when no filter match found', () => {
-        expect(jsSource).toContain('No filter match for subject terms, using sort only');
+        expect(jsSource).toContain('No subject terms, using sort only');
     });
 
     test('doSearch extracts subject_terms from expansion response', () => {

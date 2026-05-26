@@ -352,6 +352,7 @@ class ScoltaConfig
             'wasmPath' => '',
             'siteName' => $this->siteName,
             'pagefindPath' => $this->pagefindIndexPath . '/pagefind.js',
+            'filterFieldDescriptions' => $this->filterFieldDescriptions,
         ];
     }
 

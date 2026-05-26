@@ -791,3 +791,195 @@ describe('auto-language filter: AI_LANGUAGES guard', () => {
         expect(searchCall[1]).not.toHaveProperty('filters');
     });
 });
+
+// ===========================================================================
+// matchSubjectToFilters tests (with subcategory matching)
+// ===========================================================================
+
+const SKIP_FILTER_DIMENSIONS_TEST = new Set(['site', 'language', 'content_type', 'entity_type']);
+
+function matchSubjectToFiltersTest(subjectTerms, availableFilters, filterDescriptions) {
+    if (!subjectTerms || !subjectTerms.length || !availableFilters) return {};
+
+    const keywords = new Set();
+    for (const term of subjectTerms) {
+        for (const word of term.toLowerCase().split(/\s+/)) {
+            if (word.length > 2) keywords.add(word);
+        }
+    }
+
+    const matched = {};
+    for (const [dimension, values] of Object.entries(availableFilters)) {
+        if (SKIP_FILTER_DIMENSIONS_TEST.has(dimension.toLowerCase())) continue;
+
+        for (const filterValue of Object.keys(values)) {
+            const lowerValue = filterValue.toLowerCase();
+            for (const keyword of keywords) {
+                if (lowerValue === keyword
+                    || (lowerValue.length > 2 && keyword.includes(lowerValue))
+                    || (keyword.length > 2 && lowerValue.includes(keyword))) {
+                    matched[dimension] = filterValue;
+                    break;
+                }
+            }
+            if (matched[dimension]) break;
+        }
+
+        if (!matched[dimension] && filterDescriptions) {
+            const desc = (filterDescriptions[dimension] || '').toLowerCase();
+            for (const filterValue of Object.keys(values)) {
+                const escapedValue = filterValue.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const pattern = new RegExp(escapedValue + '\\s*\\(([^)]+)\\)');
+                const m = desc.match(pattern);
+                if (m) {
+                    const subcategories = m[1].split(',').map(s => s.trim());
+                    for (const sub of subcategories) {
+                        if (keywords.has(sub) || [...keywords].some(kw =>
+                            (sub.length > 2 && kw.includes(sub)) ||
+                            (kw.length > 2 && sub.includes(kw))
+                        )) {
+                            matched[dimension] = filterValue;
+                            break;
+                        }
+                    }
+                }
+                if (matched[dimension]) break;
+            }
+        }
+    }
+
+    return matched;
+}
+
+describe('matchSubjectToFilters: direct matching (Pass 1)', () => {
+    test('matches exact filter value name', () => {
+        const result = matchSubjectToFiltersTest(
+            ['history'],
+            { topics: { History: 5, Science: 3 } },
+            {}
+        );
+        expect(result).toEqual({ topics: 'History' });
+    });
+
+    test('matches via substring (keyword includes filter value)', () => {
+        const result = matchSubjectToFiltersTest(
+            ['science'],
+            { topics: { Science: 3 } },
+            null
+        );
+        expect(result).toEqual({ topics: 'Science' });
+    });
+
+    test('returns empty when no match', () => {
+        const result = matchSubjectToFiltersTest(
+            ['articles about happiness'],
+            { topics: { History: 5, Science: 3 } },
+            { topics: 'Science (physics, chemistry), History (ancient, medieval)' }
+        );
+        expect(result).toEqual({});
+    });
+
+    test('skips SKIP_FILTER_DIMENSIONS', () => {
+        const result = matchSubjectToFiltersTest(
+            ['english'],
+            { language: { en: 100 } },
+            {}
+        );
+        expect(result).toEqual({});
+    });
+});
+
+describe('matchSubjectToFilters: subcategory matching (Pass 2)', () => {
+    const topicFilters = { topics: { History: 5, Science: 3, Arts: 2 } };
+    const topicDescs = {
+        topics: 'Arts (music, painting, sculpture), Science (physics, chemistry, biology), History (ancient, medieval)',
+    };
+
+    test('physics matches Science via subcategory description', () => {
+        const result = matchSubjectToFiltersTest(
+            ['articles about physics'],
+            topicFilters,
+            topicDescs
+        );
+        expect(result).toEqual({ topics: 'Science' });
+    });
+
+    test('music matches Arts via subcategory description', () => {
+        const result = matchSubjectToFiltersTest(
+            ['music and revolution'],
+            topicFilters,
+            topicDescs
+        );
+        expect(result).toEqual({ topics: 'Arts' });
+    });
+
+    test('ancient matches History via subcategory description when not a direct match', () => {
+        // "ancient" is 7 chars, "History" filter value doesn't contain "ancient"
+        // but the description has History (ancient, medieval)
+        const result = matchSubjectToFiltersTest(
+            ['ancient civilizations'],
+            { topics: { Science: 3, Arts: 2 } },
+            { topics: 'Arts (music, painting), Science (physics, chemistry)' }
+        );
+        // No match — "ancient" not in Arts or Science subcategories
+        expect(result).toEqual({});
+    });
+
+    test('no descriptions falls back to direct matching only', () => {
+        const result = matchSubjectToFiltersTest(
+            ['physics'],
+            { topics: { Science: 3 } },
+            null
+        );
+        // "physics" doesn't directly match "Science", so no match
+        expect(result).toEqual({});
+    });
+
+    test('empty descriptions object falls back to direct matching only', () => {
+        const result = matchSubjectToFiltersTest(
+            ['physics'],
+            { topics: { Science: 3 } },
+            {}
+        );
+        expect(result).toEqual({});
+    });
+
+    test('direct match takes priority over subcategory match', () => {
+        // "history" directly matches "History" in Pass 1, so Pass 2 is skipped
+        const result = matchSubjectToFiltersTest(
+            ['history'],
+            topicFilters,
+            topicDescs
+        );
+        expect(result).toEqual({ topics: 'History' });
+    });
+});
+
+// ===========================================================================
+// Sort-without-filter fallback (source-structure tests)
+// ===========================================================================
+
+describe('sort-without-filter fallback: source structure', () => {
+    test('sort path drops sort when subject terms have no filter match', () => {
+        expect(scoltaSource).toContain(
+            'No filter match for subject terms — dropping sort, using relevance'
+        );
+    });
+
+    test('sort path checks subjectTerms length before dropping sort', () => {
+        expect(scoltaSource).toContain('subjectTerms && subjectTerms.length > 0');
+    });
+
+    test('sort path uses useSortPath variable for branching', () => {
+        expect(scoltaSource).toContain('let useSortPath');
+        expect(scoltaSource).toContain('if (useSortPath)');
+    });
+
+    test('matchSubjectToFilters receives filterDescriptions parameter', () => {
+        expect(scoltaSource).toContain('function matchSubjectToFilters(subjectTerms, availableFilters, filterDescriptions)');
+    });
+
+    test('sort path passes filterFieldDescriptions from instanceConfig', () => {
+        expect(scoltaSource).toContain('instanceConfig.filterFieldDescriptions');
+    });
+});
