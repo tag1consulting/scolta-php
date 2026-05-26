@@ -162,11 +162,30 @@ describe('scolta.js structure', () => {
     });
 
     test('markdown formatting handled in summary rendering', () => {
-        // formatSummary converts markdown-style text (bold, bullets, links)
-        // Code fence stripping is done server-side in PHP controllers
         expect(jsSource).toContain('formatSummary');
         expect(jsSource).toContain('formatInline');
         expect(jsSource).toContain('<strong>');
+    });
+
+    test('formatInline handles bold markdown', () => {
+        expect(jsSource).toContain(".replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')");
+    });
+
+    test('formatInline handles italic markdown', () => {
+        expect(jsSource).toContain(".replace(/\\*(.+?)\\*/g, '<em>$1</em>')");
+    });
+
+    test('formatInline handles bold+italic markdown', () => {
+        expect(jsSource).toContain(".replace(/\\*\\*\\*(.+?)\\*\\*\\*/g, '<strong><em>$1</em></strong>')");
+    });
+
+    test('formatInline processes bold+italic before bold before italic', () => {
+        const boldItalicIdx = jsSource.indexOf("\\*\\*\\*(.+?)\\*\\*\\*");
+        const boldIdx = jsSource.indexOf("\\*\\*(.+?)\\*\\*", boldItalicIdx + 20);
+        const italicIdx = jsSource.indexOf("\\*(.+?)\\*", boldIdx + 15);
+        expect(boldItalicIdx).toBeGreaterThan(-1);
+        expect(boldIdx).toBeGreaterThan(boldItalicIdx);
+        expect(italicIdx).toBeGreaterThan(boldIdx);
     });
 
     test('event delegation used instead of inline handlers', () => {

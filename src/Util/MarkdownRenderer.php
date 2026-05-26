@@ -83,8 +83,14 @@ final class MarkdownRenderer
         // Escape all HTML entities first for XSS safety.
         $text = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
 
+        // Bold+italic: ***text*** -> <strong><em>text</em></strong>
+        $text = preg_replace('/\*\*\*(.+?)\*\*\*/', '<strong><em>$1</em></strong>', $text);
+
         // Bold: **text** -> <strong>text</strong>
         $text = preg_replace('/\*\*(.+?)\*\*/', '<strong>$1</strong>', $text);
+
+        // Italic: *text* -> <em>text</em>
+        $text = preg_replace('/\*(.+?)\*/', '<em>$1</em>', $text);
 
         // Links: [text](url) -> <a href="url" target="_blank" rel="noopener">text</a>
         $text = preg_replace(
