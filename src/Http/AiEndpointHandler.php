@@ -562,14 +562,16 @@ If the query is asking a question, seeking advice, or requesting information, do
 - "how to find the most..." (instructional)
 
 STEP 4: CLEAR SORT-INTENT SIGNALS (classify when a matching field exists)
-If the query's primary purpose is ordering results by a measurable field, AND a matching sortable field exists, add sort. Map user language to available fields:
-  · Price/cost: "most expensive", "cheapest", "priciest", "lowest price" → price field
-  · Recency: "newest", "latest", "most recent", "oldest", "earliest" → date field
+If the query's primary purpose is ordering results by a measurable field, AND a matching sortable field exists, add sort. Map user language to available fields AND directions:
+  · Price/cost (desc): "most expensive", "priciest", "highest price", "costliest" → price field, direction desc
+  · Price/cost (asc): "cheapest", "lowest price", "most affordable", "least expensive", "budget" → price field, direction asc
+  · Recency (desc): "newest", "latest", "most recent" → date field, direction desc
+  · Recency (asc): "oldest", "earliest" → date field, direction asc
   · Recency (adverb forms): "recently updated", "recently added", "recently published", "newly created", "freshly posted" → date field (desc)
-  · Size/depth: "longest", "shortest", "most comprehensive", "most in-depth", "most detailed" → length/count field
-  · Citation/quality: "most cited", "most referenced", "best researched" → citation/reference count field
-  · Severity: "most severe", "highest risk", "most critical" → severity/risk field
-  · Engagement: "most starred", "most liked", "most discussed" → engagement count field
+  · Size/depth: "longest", "most comprehensive", "most in-depth", "most detailed" → length/count field (desc); "shortest" → length/count field (asc)
+  · Citation/quality: "most cited", "most referenced", "best researched" → citation/reference count field (desc)
+  · Severity: "most severe", "highest risk", "most critical" → severity/risk field (desc)
+  · Engagement: "most starred", "most liked", "most discussed" → engagement count field (desc)
   If there is no clear, direct semantic match between the user's language and an available field's description, do NOT add sort.
   WRONG: "newest articles" → word_count desc (word_count measures LENGTH, not DATE — this is a concept mismatch, omit sort)
   WRONG: "oldest articles" → reference_count asc (reference_count measures CITATIONS, not DATE — omit sort)
@@ -580,13 +582,15 @@ GENERAL RULES:
 - direction must be "asc" or "desc".
 - NEVER SUBSTITUTE A DIFFERENT FIELD. If the user's sort intent maps to a concept with no matching available field, omit sort entirely. For example: "newest" implies date sorting — if no date field is available, do NOT fall back to word_count or any other field. A wrong sort is worse than no sort.
 - Prefer false negatives over false positives: a missed sort is far less harmful than a wrong reorder. When uncertain, ALWAYS omit "sort".
-- When sort is detected, exclude sort signal words (most, cheapest, newest, highest, lowest, recently, etc.) from expanded terms.
+- When sort is detected, exclude sort signal words (most, cheapest, affordable, budget, newest, highest, lowest, recently, etc.) from expanded terms.
 
 SUBJECT TERMS (required when sort is detected):
-When you add a "sort" key, you MUST also add a "subject_terms" array containing ONLY the words from the original query that describe WHAT the user is searching for — with all sort-related words removed. Sort-related words include: superlatives (most, least, best, worst), comparatives (more, less, cheaper, faster), order words (expensive, cheap, costly, newest, oldest, latest, earliest), adverb modifiers (recently, newly, freshly), explicit sort syntax (sort by, sorted by, order by), and the sort field name itself.
+When you add a "sort" key, you MUST also add a "subject_terms" array containing ONLY the words from the original query that describe WHAT the user is searching for — with all sort-related words removed. Sort-related words include: superlatives (most, least, best, worst), comparatives (more, less, cheaper, faster), order words (expensive, cheap, costly, affordable, budget, newest, oldest, latest, earliest), adverb modifiers (recently, newly, freshly), explicit sort syntax (sort by, sorted by, order by), and the sort field name itself.
 Examples:
 - "most expensive tooth" → subject_terms: ["tooth"]
 - "cheapest blue stone" → subject_terms: ["blue stone"]
+- "most affordable crystals" → subject_terms: ["crystals"]
+- "least expensive gemstones" → subject_terms: ["gemstones"]
 - "newest blog posts about React" → subject_terms: ["blog posts about React"]
 - "most comprehensive quantum physics articles" → subject_terms: ["quantum physics articles"]
 - "most expensive" → subject_terms: [] (empty — query is ONLY sort intent, no subject)

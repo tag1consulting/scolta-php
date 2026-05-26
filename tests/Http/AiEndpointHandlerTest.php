@@ -375,6 +375,113 @@ class AiEndpointHandlerTest extends TestCase
         $this->assertEquals(['field' => 'price', 'direction' => 'asc'], $result['data']['sort_hint']);
     }
 
+    // ===================================================================
+    // Sort hint — ascending price vocabulary (#124)
+    // ===================================================================
+
+    public function testPromptContainsAscendingPricePatterns(): void
+    {
+        $ai = new PromptCapturingAiService('{"terms": ["gem"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $handler->handleExpandQuery('cheapest crystals');
+
+        $this->assertStringContainsString('cheapest', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('lowest price', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('most affordable', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('least expensive', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('budget', $ai->lastSystemPrompt);
+    }
+
+    public function testPromptSpecifiesAscDirectionForCheapestPatterns(): void
+    {
+        $ai = new PromptCapturingAiService('{"terms": ["gem"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $handler->handleExpandQuery('cheapest crystals');
+
+        $this->assertStringContainsString('Price/cost (asc)', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('direction asc', $ai->lastSystemPrompt);
+    }
+
+    public function testPromptSpecifiesDescDirectionForExpensivePatterns(): void
+    {
+        $ai = new PromptCapturingAiService('{"terms": ["gem"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $handler->handleExpandQuery('most expensive crystals');
+
+        $this->assertStringContainsString('Price/cost (desc)', $ai->lastSystemPrompt);
+        $this->assertStringContainsString('direction desc', $ai->lastSystemPrompt);
+    }
+
+    public function testCheapestQueryParsesAscSortHint(): void
+    {
+        $ai = new MockAiService('{"terms": ["crystal", "gem"], "sort": {"field": "price", "direction": "asc"}, "subject_terms": ["crystals"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $result = $handler->handleExpandQuery('cheapest crystals');
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(['field' => 'price', 'direction' => 'asc'], $result['data']['sort_hint']);
+        $this->assertEquals(['crystals'], $result['data']['subject_terms']);
+    }
+
+    public function testLowestPriceQueryParsesAscSortHint(): void
+    {
+        $ai = new MockAiService('{"terms": ["crystal", "gem"], "sort": {"field": "price", "direction": "asc"}, "subject_terms": ["crystals"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $result = $handler->handleExpandQuery('lowest price crystals');
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(['field' => 'price', 'direction' => 'asc'], $result['data']['sort_hint']);
+    }
+
+    public function testMostAffordableQueryParsesAscSortHint(): void
+    {
+        $ai = new MockAiService('{"terms": ["crystal", "gem"], "sort": {"field": "price", "direction": "asc"}, "subject_terms": ["crystals"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $result = $handler->handleExpandQuery('most affordable crystals');
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(['field' => 'price', 'direction' => 'asc'], $result['data']['sort_hint']);
+    }
+
+    public function testLeastExpensiveQueryParsesAscSortHint(): void
+    {
+        $ai = new MockAiService('{"terms": ["crystal", "gem"], "sort": {"field": "price", "direction": "asc"}, "subject_terms": ["crystals"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $result = $handler->handleExpandQuery('least expensive crystals');
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(['field' => 'price', 'direction' => 'asc'], $result['data']['sort_hint']);
+    }
+
+    public function testMostExpensiveStillParsesDescSortHint(): void
+    {
+        $ai = new MockAiService('{"terms": ["crystal", "gem"], "sort": {"field": "price", "direction": "desc"}, "subject_terms": ["crystals"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $result = $handler->handleExpandQuery('most expensive crystals');
+
+        $this->assertTrue($result['ok']);
+        $this->assertEquals(['field' => 'price', 'direction' => 'desc'], $result['data']['sort_hint']);
+    }
+
+    public function testNonSortQueryOmitsSortHint(): void
+    {
+        $ai = new MockAiService('{"terms": ["crystal", "healing", "meditation"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $result = $handler->handleExpandQuery('crystals for meditation');
+
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('sort_hint', $result['data']);
+    }
+
     public function testLegacyArrayResponseStillWorksWithSortableFields(): void
     {
         // Custom prompt or cached response may still return a JSON array — must parse without error.
