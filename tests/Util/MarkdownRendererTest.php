@@ -140,6 +140,66 @@ class MarkdownRendererTest extends TestCase
     }
 
     // -------------------------------------------------------------------
+    // Italic rendering
+    // -------------------------------------------------------------------
+
+    public function testItalicRendersAsEm(): void
+    {
+        $this->assertSame(
+            '<p>This is <em>italic</em> text</p>',
+            MarkdownRenderer::render('This is *italic* text'),
+        );
+    }
+
+    public function testMultipleItalicInSameLine(): void
+    {
+        $this->assertSame(
+            '<p><em>first</em> and <em>second</em></p>',
+            MarkdownRenderer::render('*first* and *second*'),
+        );
+    }
+
+    public function testItalicInsideListItem(): void
+    {
+        $input = "- An *italic* item\n- A normal item";
+        $expected = '<ul><li>An <em>italic</em> item</li><li>A normal item</li></ul>';
+
+        $this->assertSame($expected, MarkdownRenderer::render($input));
+    }
+
+    public function testMixedBoldAndItalic(): void
+    {
+        $this->assertSame(
+            '<p><strong>bold</strong> and <em>italic</em> text</p>',
+            MarkdownRenderer::render('**bold** and *italic* text'),
+        );
+    }
+
+    public function testBoldItalicRendersAsBoth(): void
+    {
+        $this->assertSame(
+            '<p>This is <strong><em>bold italic</em></strong> text</p>',
+            MarkdownRenderer::render('This is ***bold italic*** text'),
+        );
+    }
+
+    public function testPlainTextWithoutMarkdownUnchanged(): void
+    {
+        $this->assertSame(
+            '<p>No formatting here</p>',
+            MarkdownRenderer::render('No formatting here'),
+        );
+    }
+
+    public function testXssInItalicIsEscaped(): void
+    {
+        $result = MarkdownRenderer::render('*<img src=x onerror=alert(1)>*');
+
+        $this->assertStringNotContainsString('<img', $result);
+        $this->assertStringContainsString('<em>', $result);
+    }
+
+    // -------------------------------------------------------------------
     // Broken link cleanup (AI truncation recovery)
     // -------------------------------------------------------------------
 
