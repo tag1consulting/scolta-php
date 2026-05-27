@@ -49,7 +49,7 @@
         }
     },
     "archive": {
-        "exclude": ["tests/", "scripts/", "benchmarks/", ".github/", "phpunit.xml", ".php-cs-fixer.dist.php", "CLAUDE.md", ".editorconfig", "docs/BENCHMARKS-LATEST.md", "docs/LANGUAGE_PARITY.md"]
+        "exclude": ["vendor/", "tests/", "scripts/", "benchmarks/", ".github/", "phpunit.xml", ".php-cs-fixer.dist.php", "CLAUDE.md", ".editorconfig", "docs/BENCHMARKS-LATEST.md", "docs/LANGUAGE_PARITY.md"]
     },
     "config": {
         "audit": {
