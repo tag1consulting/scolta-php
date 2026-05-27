@@ -9,3 +9,6 @@
 /package-lock.json  export-ignore
 /playwright.config.js export-ignore
 /CLAUDE.md          export-ignore
+/.editorconfig      export-ignore
+/docs/BENCHMARKS-LATEST.md export-ignore
+/docs/LANGUAGE_PARITY.md export-ignore

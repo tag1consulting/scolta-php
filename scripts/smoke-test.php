@@ -231,13 +231,13 @@ $mockAi = new class {
     public function getExpandPrompt(): string { return 'Expand: {QUERY}'; }
     public function getSummarizePrompt(): string { return 'Summarize: {QUERY}'; }
     public function getFollowUpPrompt(): string { return 'Follow-up: {QUERY}'; }
-    public function message(string $prompt): \Tag1\Scolta\Ai\AiResponse
+    public function message(string $prompt): \Tag1\Scolta\Provider\AiResponse
     {
-        return new \Tag1\Scolta\Ai\AiResponse(true, '["result1", "result2"]');
+        return new \Tag1\Scolta\Provider\AiResponse('["result1", "result2"]');
     }
-    public function conversation(array $messages): \Tag1\Scolta\Ai\AiResponse
+    public function conversation(array $messages): \Tag1\Scolta\Provider\AiResponse
     {
-        return new \Tag1\Scolta\Ai\AiResponse(true, 'Follow-up answer.');
+        return new \Tag1\Scolta\Provider\AiResponse('Follow-up answer.');
     }
 };
 

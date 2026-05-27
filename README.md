@@ -36,7 +36,7 @@ require_once __DIR__ . '/vendor/autoload.php';
 use Tag1\Scolta\Export\ContentItem;
 use Tag1\Scolta\Index\IndexBuildOrchestrator;
 use Tag1\Scolta\Index\BuildIntent;
-use Tag1\Scolta\Config\MemoryBudget;
+use Tag1\Scolta\Index\MemoryBudget;
 
 // Load the 20 recipe HTML files from the fixture directory
 $fixtures = glob(__DIR__ . '/tests/fixtures/recipes/*.html');
@@ -139,8 +139,8 @@ Typical platform baselines (before any indexing work):
 The default profile is `conservative` (96 MB internal budget). On WordPress, expect total peak RSS around **175 MB**; on Drupal, around **240 MB**. Scolta never silently upgrades to a larger profile. To opt in to a larger profile:
 
 ```php
-use Tag1\Scolta\Config\MemoryBudget;
-use Tag1\Scolta\Config\MemoryBudgetSuggestion;
+use Tag1\Scolta\Index\MemoryBudget;
+use Tag1\Scolta\Index\MemoryBudgetSuggestion;
 
 // Auto-detect and suggest a profile based on the current PHP memory_limit
 $suggestion = MemoryBudgetSuggestion::suggest();
@@ -165,7 +165,7 @@ You can also pass the profile string at the CLI via `--memory-budget=balanced` i
 
 Scolta's AI tier is optional. When enabled:
 
-- The LLM receives: the query text, and the titles and excerpts of the top N results (default: 5, configurable via `ai_summary_top_n`).
+- The LLM receives: the query text, and the titles and excerpts of the top N results (default: 10, configurable via `ai_summary_top_n`).
 - The LLM does not receive: the full index contents, full page text, user session data, or visitor identity.
 - Which provider receives the query data depends on your `ai_provider` setting: `anthropic`, `openai`, or a self-hosted endpoint via `ai_base_url`.
 
@@ -243,8 +243,10 @@ All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Platfo
 | `aiBaseUrl` | `ai_base_url` | string | `''` | Custom API base URL (empty = provider default) |
 | `aiExpandQuery` | `ai_expand_query` | bool | `true` | Enable AI query expansion |
 | `aiSummarize` | `ai_summarize` | bool | `true` | Enable AI result summarization |
-| `aiSummaryTopN` | `ai_summary_top_n` | int | `5` | Number of top results sent to AI for summarization |
-| `aiSummaryMaxChars` | `ai_summary_max_chars` | int | `2000` | Maximum characters of content sent to AI for summarization |
+| `aiExpansionModel` | `ai_expansion_model` | string | `''` | Model for query expansion (empty = use `aiModel`) |
+| `aiSummaryTopN` | `ai_summary_top_n` | int | `10` | Number of top results sent to AI for summarization |
+| `aiSummaryMaxChars` | `ai_summary_max_chars` | int | `4000` | Maximum characters of content sent to AI for summarization |
+| `aiSummaryMaxTokens` | `ai_summary_max_tokens` | int | `512` | Maximum output tokens for AI summarization |
 | `aiLanguages` | `ai_languages` | array | `['en']` | Supported languages for AI responses. With multiple languages, the AI responds in the user's query language if it matches; otherwise falls back to the primary (first) language. |
 
 ### Scoring: Recency
@@ -265,7 +267,18 @@ All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Platfo
 | `titleMatchBoost` | `title_match_boost` | float | `1.0` | Boost for title keyword matches |
 | `titleAllTermsMultiplier` | `title_all_terms_multiplier` | float | `1.5` | Multiplier when all search terms appear in title |
 | `contentMatchBoost` | `content_match_boost` | float | `0.4` | Boost for content/excerpt keyword matches |
-| `expandPrimaryWeight` | `expand_primary_weight` | float | `0.7` | Weight given to original query results vs expanded results during merge |
+| `exactTitleMatchBoost` | `exact_title_match_boost` | float | `5.0` | Boost for exact title matches |
+| `expandPrimaryWeight` | `expand_primary_weight` | float | `0.5` | Weight given to original query results vs expanded results during merge |
+| `crossListBonus` | `cross_list_bonus` | float | `0.15` | Bonus for results appearing in both original and expanded result sets |
+
+### Scoring: Phrase Proximity
+
+| Property | snake_case key | Type | Default | Description |
+| -------- | -------------- | ---- | ------- | ----------- |
+| `phraseAdjacentMultiplier` | `phrase_adjacent_multiplier` | float | `2.5` | Multiplier for adjacent phrase matches |
+| `phraseNearMultiplier` | `phrase_near_multiplier` | float | `1.5` | Multiplier for near-phrase matches |
+| `phraseNearWindow` | `phrase_near_window` | int | `5` | Window size for near-phrase detection (word positions) |
+| `phraseWindow` | `phrase_window` | int | `15` | Maximum window for any phrase-proximity bonus |
 
 ### Scoring: Language
 
@@ -281,6 +294,39 @@ All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Platfo
 | `excerptLength` | `excerpt_length` | int | `300` | Maximum excerpt length in characters |
 | `resultsPerPage` | `results_per_page` | int | `10` | Results shown per page |
 | `maxPagefindResults` | `max_pagefind_results` | int | `50` | Maximum results fetched from Pagefind |
+
+### Display / UI
+
+| Property | snake_case key | Type | Default | Description |
+| -------- | -------------- | ---- | ------- | ----------- |
+| `showAttribution` | `show_attribution` | bool | `false` | Show "Powered by Scolta" attribution |
+| `autoLanguageFilter` | `auto_language_filter` | bool | `false` | Auto-detect and filter by the page language |
+
+### Sortable Fields
+
+| Property | snake_case key | Type | Default | Description |
+| -------- | -------------- | ---- | ------- | ----------- |
+| `sortableFields` | `sortable_fields` | array | `[]` | Metadata fields available for sort-override (e.g. `['price', 'date']`) |
+| `sortableFieldDescriptions` | `sortable_field_descriptions` | array | `[]` | Human-readable labels for each sortable field |
+
+### Filter Fields
+
+| Property | snake_case key | Type | Default | Description |
+| -------- | -------------- | ---- | ------- | ----------- |
+| `filterFields` | `filter_fields` | array | `[]` | Metadata fields available for filtering |
+| `filterFieldDescriptions` | `filter_field_descriptions` | array | `[]` | Human-readable labels for each filter field |
+
+### Preset
+
+| Property | snake_case key | Type | Default | Description |
+| -------- | -------------- | ---- | ------- | ----------- |
+| `preset` | `preset` | string | `''` | Scoring preset name. Presets apply a curated set of scoring defaults for common site types. Use `ScoltaConfig::getPresetValues()` to see available presets. |
+
+### Indexer
+
+| Property | snake_case key | Type | Default | Description |
+| -------- | -------------- | ---- | ------- | ----------- |
+| `indexer` | `indexer` | string | `auto` | Indexer backend: `auto` (PHP indexer), `binary` (Pagefind binary), or `php` (explicit PHP). `auto` uses the PHP indexer by default; set to `binary` to require the Pagefind binary. |
 
 ### Site Identity
 
