@@ -338,7 +338,7 @@ Returns an array suitable for constructing an `AiClient` instance, containing `p
 | `$configuredBinaryPath` | `?string` | Pagefind binary path from platform config |
 | `$projectDir` | `?string` | Project root for binary resolution |
 | `$aiApiKey` | `?string` | AI API key value (not source) |
-| `$wasmPath` | `?string` | Custom WASM binary path, or null for default |
+| `$browserWasmDir` | `?string` | Custom browser WASM directory path, or null for default |
 
 ### Return Structure
 

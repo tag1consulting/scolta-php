@@ -4,6 +4,13 @@
     "description": "AI-powered search with Pagefind \u2014 PHP language binding",
     "type": "library",
     "license": "MIT",
+    "authors": [{"name": "Tag1 Consulting", "homepage": "https://tag1.com"}],
+    "homepage": "https://tag1.com",
+    "support": {
+        "issues": "https://github.com/tag1consulting/scolta-php/issues",
+        "source": "https://github.com/tag1consulting/scolta-php"
+    },
+    "keywords": ["search", "ai", "pagefind", "wasm", "scoring"],
     "autoload": {
         "psr-4": {
             "Tag1\\Scolta\\": "src/"
@@ -42,7 +49,7 @@
         }
     },
     "archive": {
-        "exclude": ["tests/"]
+        "exclude": ["tests/", "scripts/", "benchmarks/", ".github/", "phpunit.xml", ".php-cs-fixer.dist.php", "CLAUDE.md", ".editorconfig", "docs/BENCHMARKS-LATEST.md", "docs/LANGUAGE_PARITY.md"]
     },
     "config": {
         "audit": {

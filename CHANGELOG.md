@@ -6,6 +6,18 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Added
+- **Subcategory matching in `matchSubjectToFilters()`.** Pass 2 parses parenthetical subcategory hints from `filter_field_descriptions` (e.g., `Science (physics, chemistry, biology)`), allowing "physics" to match the "Science" filter even though "physics" isn't a direct filter value. Requires `filterFieldDescriptions` to be passed to the JS frontend.
+- **`filterFieldDescriptions` exposed in `toBrowserConfig()`.** Platform adapters can now pass filter descriptions to the JS frontend for subcategory matching.
+- **Filter field description validation test.** `FilterFieldDescriptionValidationTest` parses `filter_field_descriptions` entries and verifies every enumerated value exists in the expected index values (and vice versa). Catches config descriptions that drift from actual taxonomy terms.
+- **Memory regression test for `processChunk()` writer phase.** Asserts peak memory stays under a defined threshold when indexing 100 pages with sortable and metadata fields populated. Catches reintroduction of the flat-list token accumulation pattern fixed in #139. [#133]
+- **`exactTitleMatchBoost` config option (default `5.0`).** Multiplicative boost applied when a result's title exactly matches the search query (case-insensitive). Ensures articles whose title IS the query always rank #1 regardless of BM25 differentials. For example, searching "DNA" now ranks the article titled "DNA" above "DNA nanotechnology" even when the longer article has a higher BM25 score from more term mentions. Applies as a post-scoring step to both the WASM and JS fallback scoring paths. Set to `1.0` to disable.
+- **`crossListBonus` config option (default `0.15`).** Additive score bonus applied when a result appears in both primary and expanded result sets. Configurable via `cross_list_bonus` in all platform adapters (Drupal, WordPress, Laravel). Set to `0` to disable.
+
+### Changed
+- **Filter prompt strengthened.** Removed "(optional)" from FILTER INTENT header and updated rules to encourage filter hints for subcategory matches. Belt-and-suspenders with the client-side heuristic.
+- **Sort path now uses Pagefind filter discovery instead of subject intersection heuristic.** `scolta.js` caches available Pagefind filters on init via `pagefind.filters()`. When a sort override is active with `subject_terms`, keywords are matched against filter values and passed to Pagefind as native filters alongside the sort. Sites with structured metadata (e.g. `topics`, `era`, `region`) get precise filter+sort — only topic-matching articles in sort order. Sites without filters get honest sort-only. Removes the parallel subject-only search, URL intersection, and arbitrary threshold of 3 that silently dropped high-sort-value items or ignored subject entirely. ([#127](https://github.com/tag1consulting/scolta-php/issues/127))
+
 ### Fixed
 - **Filter substring matching selects shorter value over exact match.** `matchSubjectToFilters()` used single-pass substring matching that could select "Apollo 1" over "Apollo 11" because `includes()` matched the shorter string first. Now uses a two-pass approach: exact match first, substring fallback second. Full subject terms (not just individual words) are also included in the keyword set so multi-word filter values can exact-match.
 - **`filter_hint` values not canonicalized against Pagefind filters.** When the LLM returned a `filter_hint` value that didn't exactly match a Pagefind filter key (e.g., different casing), the filter silently failed. Now resolves LLM values against `cachedPagefindFilters` with case-insensitive fallback before applying.
@@ -16,40 +28,14 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 - **Subject filter matches now update UI state (badges + checkboxes).** When `subject_terms` matched a Pagefind filter, the filtered results were correct but `activeFilters` and `llmAppliedFilters` were never set, so sidebar checkboxes stayed unchecked and no filter badge appeared. Users saw filtered results with no visual indication or dismiss affordance. Now mirrors the `filter_hint` path's UI state updates with guards to prevent overwriting user-selected or LLM-applied filters.
 - **Sort-without-filter fallback: drop sort when subject terms can't be matched to a filter.** When a sort+subject query like "longest articles about physics" couldn't match "physics" to any filter value, the sort was applied to the entire unfiltered corpus, returning globally longest articles regardless of topic. Now drops the sort and falls through to relevance ranking so the subject keywords still help narrow results. Pure sort-only queries ("longest articles" with no subject) remain valid.
 - **`computeFilterCounts()` now counts all values in multi-value filter arrays.** Previously only `val[0]` was counted, so articles tagged with `["Science", "History"]` only incremented the first topic in the facet display. Now iterates all array elements.
-
-### Added
-- **Subcategory matching in `matchSubjectToFilters()`.** Pass 2 parses parenthetical subcategory hints from `filter_field_descriptions` (e.g., `Science (physics, chemistry, biology)`), allowing "physics" to match the "Science" filter even though "physics" isn't a direct filter value. Requires `filterFieldDescriptions` to be passed to the JS frontend.
-- **`filterFieldDescriptions` exposed in `toBrowserConfig()`.** Platform adapters can now pass filter descriptions to the JS frontend for subcategory matching.
-- **Filter field description validation test.** `FilterFieldDescriptionValidationTest` parses `filter_field_descriptions` entries and verifies every enumerated value exists in the expected index values (and vice versa). Catches config descriptions that drift from actual taxonomy terms.
-
-### Changed
-- **Filter prompt strengthened.** Removed "(optional)" from FILTER INTENT header and updated rules to encourage filter hints for subcategory matches. Belt-and-suspenders with the client-side heuristic.
-
-### Fixed
 - **Sort intent prompt: no-fallback rule prevents wrong sort badges.** When the user's sort intent maps to a field not in the available sortable fields (e.g., "newest" implying date sort when only word_count and reference_count exist), the LLM would fall back to an unrelated field. Added an explicit "NEVER SUBSTITUTE A DIFFERENT FIELD" rule to the prompt's GENERAL RULES section.
 - **Sort intent prompt: "most cited" now correctly triggers reference_count desc.** Added explicit carve-out in the discovery-qualifier step (STEP 2) so that measurable-quantity phrases ("most cited", "most referenced") are not mistaken for subjective discovery qualifiers and instead proceed to the sort-intent classification in STEP 4.
-
-### Added
-- **Memory regression test for `processChunk()` writer phase.** Asserts peak memory stays under a defined threshold when indexing 100 pages with sortable and metadata fields populated. Catches reintroduction of the flat-list token accumulation pattern fixed in #139. [#133]
-- **`exactTitleMatchBoost` config option (default `5.0`).** Multiplicative boost applied when a result's title exactly matches the search query (case-insensitive). Ensures articles whose title IS the query always rank #1 regardless of BM25 differentials. For example, searching "DNA" now ranks the article titled "DNA" above "DNA nanotechnology" even when the longer article has a higher BM25 score from more term mentions. Applies as a post-scoring step to both the WASM and JS fallback scoring paths. Set to `1.0` to disable.
-
-### Fixed
 - **Expansion merge: cross-list agreement now boosts score instead of being discarded.** When the same URL appeared in both primary and expanded results, `mergeResults()` kept whichever score was higher and discarded the other. A result relevant from multiple angles (matching both the literal query and semantic expansions) got zero credit for cross-list agreement. Now applies a configurable additive bonus (`cross_list_bonus`, default 0.15) when a result appears in both sets. The dual-scoring path in `searchAndLoadParallel()` also uses additive scoring instead of `Math.max()`.
 - **Expansion phrases no longer word-exploded into individual search queries.** Multi-word expansion terms from the LLM (e.g. "stellar death") were split into individual word searches ("stellar", "death"), injecting noise — isolated "death" pulled in Death Valley, Death of Ms Dhu, and other irrelevant articles. Removed the word-explosion block from both the relevance path and the sort path. Highlight-term splitting (for marking matching words in result text) is unchanged.
 - **JS fallback `EXPAND_PRIMARY_WEIGHT` default aligned with PHP.** The JS fallback default was `0.7` while `ScoltaConfig.php` had `0.5`. Sites without explicit config got different behavior depending on whether the PHP-rendered config was present. Both now default to `0.5`.
-
-### Added
-- **`crossListBonus` config option (default `0.15`).** Additive score bonus applied when a result appears in both primary and expanded result sets. Configurable via `cross_list_bonus` in all platform adapters (Drupal, WordPress, Laravel). Set to `0` to disable.
-
-### Fixed
 - **NL query expansion ranking: inverted weight formula gave expanded results near-zero weight.** `mergeExpandedSearchResults()` calculated `expandBase = 1.0 - EXPAND_PRIMARY_WEIGHT`, inverting the intended behavior — with the default 0.7, expanded results got weight 0.3 instead of 0.7. Additionally, `mergeResults()` applied the weight penalty a second time in the WASM path (0.3 × 0.3 = 0.09 effective weight). Fixed by using `expandBase = EXPAND_PRIMARY_WEIGHT` directly and passing equal weights (1.0, 1.0) to the final merge since weight differentiation already happens in `scoreResults()`.
 - **AI Summary now reflects user-selected facet filters.** When a user toggled a facet checkbox, `summarizeResults()` was re-called with the filtered results but never told the LLM which filters were active. The summary described the full collection instead of the filtered subset. Active filter names are now passed to the context header as `[User has filtered results by ...]`.
 - **`StreamingFormatWriter::writePageEntry()` crashed on multi-value filter arrays.** Filter values that are arrays (multi-value taxonomy fields) were used directly as array keys, throwing `TypeError`. Normalized with `is_array() ? ... : [...]` to match `PagefindHtmlBuilder` behavior.
-
-### Changed
-- **Sort path now uses Pagefind filter discovery instead of subject intersection heuristic.** `scolta.js` caches available Pagefind filters on init via `pagefind.filters()`. When a sort override is active with `subject_terms`, keywords are matched against filter values and passed to Pagefind as native filters alongside the sort. Sites with structured metadata (e.g. `topics`, `era`, `region`) get precise filter+sort — only topic-matching articles in sort order. Sites without filters get honest sort-only. Removes the parallel subject-only search, URL intersection, and arbitrary threshold of 3 that silently dropped high-sort-value items or ignored subject entirely. ([#127](https://github.com/tag1consulting/scolta-php/issues/127))
-
-### Fixed
 - **PHP indexer: reduced writer phase memory usage that regressed ~75% in rc4, restoring builds on 256 MB containers (e.g., Laravel Cloud).** `processChunk()` held all items' token arrays in a flat list before indexing — for large corpora, token data (the dominant per-item allocation) for all pages was resident simultaneously. Refactored to stream items via a generator so only one item's tokens are in memory at a time, and removed dead-weight `metadata` from the proxy (never consumed by the index builder). `StreamingFormatWriter` now accumulates sort data in transposed form to eliminate a temporary doubling during `buildSortsArray()`. [#133]
 - **PHP indexer: auto-resume exit path now verifies index completeness before exit 0; builds that fail to produce a usable index exit non-zero.** Added `IndexBuildOrchestrator::verifyIndexComplete()` which checks that `pagefind-entry.json` exists and parses as valid JSON with expected top-level keys. Called on all success paths in both `IndexBuildOrchestrator` and `PhpIndexer::finalize()`. Framework adapters that handle `memory_abort` StatusReport errors must not exit 0 without calling this verification. [#133]
 - **Multi-value facet filters now produce OR (union) results within a dimension.** Selecting two or more values in the same facet dimension (e.g. two eras) silently returned zero results because `pagefindSearch()` passed a plain array to Pagefind. Pagefind requires `{ any: [...] }` syntax for OR within a filter dimension. Single-value and cross-dimension (AND) filters were unaffected.
@@ -515,3 +501,25 @@ Coordinated release with scolta-core, scolta-wp, scolta-drupal, scolta-laravel. 
 - `CacheDriverInterface` contract for platform-specific cache implementations
 - Shared frontend assets (`scolta.js`, `scolta.css`) used by all platform adapters
 - Pre-built `scolta_core.wasm` binary shipped in the package
+
+[Unreleased]: https://github.com/tag1consulting/scolta-php/compare/v1.0.0-rc4...HEAD
+[1.0.0-rc4]: https://github.com/tag1consulting/scolta-php/compare/v1.0.0-rc3...v1.0.0-rc4
+[1.0.0-rc3]: https://github.com/tag1consulting/scolta-php/compare/v1.0.0-rc2...v1.0.0-rc3
+[1.0.0-rc2]: https://github.com/tag1consulting/scolta-php/compare/v1.0.0-rc1...v1.0.0-rc2
+[1.0.0-rc1]: https://github.com/tag1consulting/scolta-php/compare/v0.3.10...v1.0.0-rc1
+[0.3.10]: https://github.com/tag1consulting/scolta-php/compare/v0.3.9...v0.3.10
+[0.3.9]: https://github.com/tag1consulting/scolta-php/compare/v0.3.8...v0.3.9
+[0.3.8]: https://github.com/tag1consulting/scolta-php/compare/v0.3.7...v0.3.8
+[0.3.7]: https://github.com/tag1consulting/scolta-php/compare/v0.3.6...v0.3.7
+[0.3.6]: https://github.com/tag1consulting/scolta-php/compare/v0.3.5...v0.3.6
+[0.3.5]: https://github.com/tag1consulting/scolta-php/compare/v0.3.4...v0.3.5
+[0.3.4]: https://github.com/tag1consulting/scolta-php/compare/v0.3.3...v0.3.4
+[0.3.3]: https://github.com/tag1consulting/scolta-php/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/tag1consulting/scolta-php/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/tag1consulting/scolta-php/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/tag1consulting/scolta-php/compare/v0.2.4...v0.3.0
+[0.2.4]: https://github.com/tag1consulting/scolta-php/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/tag1consulting/scolta-php/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/tag1consulting/scolta-php/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/tag1consulting/scolta-php/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/tag1consulting/scolta-php/compare/v0.1.0...v0.2.0

@@ -5,13 +5,13 @@ set -euo pipefail
 # Run manually, commit output. Not run during CI.
 #
 # Usage: ./scripts/generate-concordance-fixtures.sh [pagefind-version]
-# Example: ./scripts/generate-concordance-fixtures.sh 1.5.1
+# Example: ./scripts/generate-concordance-fixtures.sh 1.5.0
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PACKAGE_DIR="$(dirname "$SCRIPT_DIR")"
 CORPUS_DIR="${PACKAGE_DIR}/tests/fixtures/concordance/corpus"
 REFERENCE_DIR="${PACKAGE_DIR}/tests/fixtures/concordance/reference"
-PAGEFIND_VERSION="${1:-1.5.1}"
+PAGEFIND_VERSION="${1:-1.5.0}"
 
 # Clean previous reference (keep metadata)
 rm -rf "${REFERENCE_DIR}"

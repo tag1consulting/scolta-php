@@ -22,6 +22,7 @@ use Tag1\Scolta\Storage\StorageDriverInterface;
  */
 final class IndexBuildOrchestrator
 {
+    private const VERSION = '1.0.0';
     private readonly BuildCoordinator $coordinator;
     private readonly InvertedIndexBuilder $builder;
     private readonly IndexMerger $merger;
@@ -205,7 +206,7 @@ final class IndexBuildOrchestrator
                             $committedPages,
                         ));
                         return new StatusReport(
-                            version: '0.3.0',
+                            version: self::VERSION,
                             pagefindVersion: SupportedVersions::getVersionForMetadata(),
                             resolvedIndexer: 'php',
                             pagesProcessed: $committedPages,
@@ -251,7 +252,7 @@ final class IndexBuildOrchestrator
                 $telemetry->emit('finalize_deferred', ['heap_pct' => round($segmentBytes / $limitBytes * 100, 1)]);
                 $logger->warning('[scolta] RSS at ' . round($segmentBytes / $limitBytes * 100, 1) . '% of memory limit after indexing. Merge deferred — run `drush scolta:finalize` to complete.');
                 return new StatusReport(
-                    version: '0.3.0',
+                    version: self::VERSION,
                     pagefindVersion: SupportedVersions::getVersionForMetadata(),
                     resolvedIndexer: 'php',
                     pagesProcessed: $pagesInRun,
@@ -290,7 +291,7 @@ final class IndexBuildOrchestrator
             $this->tsManifest->pruneAndSave();
 
             return new StatusReport(
-                version: '0.3.0',
+                version: self::VERSION,
                 pagefindVersion: SupportedVersions::getVersionForMetadata(),
                 resolvedIndexer: 'php',
                 pagesProcessed: $pagesForReport,
@@ -325,7 +326,7 @@ final class IndexBuildOrchestrator
             }
 
             return new StatusReport(
-                version: '0.3.0',
+                version: self::VERSION,
                 pagefindVersion: SupportedVersions::getVersionForMetadata(),
                 resolvedIndexer: 'php',
                 pagesProcessed: $committedPages,
@@ -369,7 +370,7 @@ final class IndexBuildOrchestrator
             $chunkFiles = $this->coordinator->chunkFiles();
             if (count($chunkFiles) === 0) {
                 return new StatusReport(
-                    version: '0.3.0',
+                    version: self::VERSION,
                     pagefindVersion: SupportedVersions::getVersionForMetadata(),
                     resolvedIndexer: 'php',
                     pagesProcessed: 0,
@@ -401,7 +402,7 @@ final class IndexBuildOrchestrator
             $this->coordinator->release();
 
             return new StatusReport(
-                version: '0.3.0',
+                version: self::VERSION,
                 pagefindVersion: SupportedVersions::getVersionForMetadata(),
                 resolvedIndexer: 'php',
                 pagesProcessed: $pagesProcessed,
@@ -419,7 +420,7 @@ final class IndexBuildOrchestrator
             }
 
             return new StatusReport(
-                version: '0.3.0',
+                version: self::VERSION,
                 pagefindVersion: SupportedVersions::getVersionForMetadata(),
                 resolvedIndexer: 'php',
                 pagesProcessed: 0,
