@@ -6,6 +6,10 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+_No changes yet._
+
+## [1.0.0] - 2026-05-27
+
 ### Added
 - **Subcategory matching in `matchSubjectToFilters()`.** Pass 2 parses parenthetical subcategory hints from `filter_field_descriptions` (e.g., `Science (physics, chemistry, biology)`), allowing "physics" to match the "Science" filter even though "physics" isn't a direct filter value. Requires `filterFieldDescriptions` to be passed to the JS frontend.
 - **`filterFieldDescriptions` exposed in `toBrowserConfig()`.** Platform adapters can now pass filter descriptions to the JS frontend for subcategory matching.
