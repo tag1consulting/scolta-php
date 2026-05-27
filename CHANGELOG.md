@@ -6,7 +6,8 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
-_No changes yet._
+### Fixed
+- Added `vendor/` to `archive.exclude` in `composer.json` to prevent dev `vendor/` from leaking into dist archives when installed via Composer path repositories.
 
 ## [1.0.0] - 2026-05-27
 
