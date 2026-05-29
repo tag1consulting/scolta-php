@@ -2,6 +2,10 @@
 /**
  * Verify all Scolta packages share the same major version.
  *
+ * Local-only major check — assumes the side-by-side packages/ layout.
+ * Minor/patch versions are independent per package; this script only
+ * enforces that all five packages share the same MAJOR number.
+ *
  * Run from anywhere in the workspace:
  *   php packages/scolta-php/scripts/check-version-sync.php
  */

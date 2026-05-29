@@ -2,12 +2,15 @@
 
 All notable changes to scolta-php will be documented in this file.
 
-This project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages.
+This project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages; minor and patch versions are released independently per package.
 
 ## [Unreleased]
 
 ### Fixed
 - Added `vendor/` to `archive.exclude` in `composer.json` to prevent dev `vendor/` from leaking into dist archives when installed via Composer path repositories.
+
+### Documentation
+- **Clarified independent versioning model.** CLAUDE.md, CHANGELOG.md, and UPGRADE.md now state that minor and patch versions are released independently per package, with adapters pinning scolta-php via `composer.lock` within their `^1.x` constraint. Added a comment to `scripts/check-version-sync.php` noting it is a local-only major check.
 
 ## [1.0.0] - 2026-05-27
 
