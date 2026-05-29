@@ -30,7 +30,7 @@ All public methods now carry `@stability stable` annotations. Going forward, sem
 
 - **Patch releases** (1.0.x): Bug fixes only.
 - **Minor releases** (1.x.0): New features, deprecations. No breaking changes to stable APIs.
-- **Major releases** (x.0.0): Breaking changes. Coordinated across all Scolta packages.
+- **Major releases** (x.0.0): Breaking changes. Coordinated across all Scolta packages. This is the only release that requires all packages to bump together; minor and patch versions are released independently per package.
 
 ## Upgrade Checklist
 

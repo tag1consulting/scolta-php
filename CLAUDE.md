@@ -2,7 +2,7 @@
 
 ## Versioning (CRITICAL — read scolta-core/VERSIONING.md)
 
-This package follows the Scolta versioning policy. Major versions are synchronized across all Scolta packages. **Violations are blocking errors.**
+This package follows the Scolta versioning policy. Major versions are synchronized across all Scolta packages; minor and patch versions are released independently per package. Adapters pin scolta-php via `composer.lock` within their `^1.x` constraint. **Violations of the major-version rule are blocking errors.**
 
 ### Adding a new public method
 
