@@ -7,7 +7,17 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 ## [Unreleased]
 
 ### Fixed
+- **Binary indexer now emits canonical URLs instead of build-artifact URLs.** `ContentExporter` writes exported HTML files in a nested directory structure mirroring the canonical URL (`/recipe/cake/` → `recipe/cake/index.html`) so Pagefind `--site` derives `data.url` identical to the PHP indexer. Previously, flat `{id}.html` exports caused `data.url = /{id}.html` — a path that 404s on the live site. Resolves the root cause behind #155 and closes #157.
+- **AI summary citation URLs now prefer canonical `meta.url` over Pagefind file path.** Both `summarizeResults()` (WASM path) and `buildLLMContext()` (JS fallback) now use `r.data.meta?.url || resolveUrl(r.data.url)`, matching the pattern already used in the result card renderer. Fixes #155.
 - Added `vendor/` to `archive.exclude` in `composer.json` to prevent dev `vendor/` from leaking into dist archives when installed via Composer path repositories.
+
+### Added
+- `ContentExporter::urlToExportPath()` — maps a canonical URL to the export file path Pagefind will crawl. Shared by all platform adapters.
+- `ContentExporter::countHtmlFiles()` — recursive HTML file count, replacing flat `glob('*.html')` in adapters.
+- `ContentExporter::writeManifest()` / `readManifest()` — ID-to-path manifest for incremental deletes in the nested layout.
+- `ContentExporter::deleteById()` / `deleteByUrl()` — delete export files by item ID (manifest + flat fallback) or canonical URL.
+- Indexer URL parity test (`IndexerUrlParityTest`) that joins fragments by stable item ID and asserts `data.url` equality, collision detection, and `urlToExportPath` mapping correctness.
+- Citation URL structural tests in JS test suite — locks the `meta.url ||` fallback pattern in both summary builders.
 
 ### Documentation
 - **Clarified independent versioning model.** CLAUDE.md, CHANGELOG.md, and UPGRADE.md now state that minor and patch versions are released independently per package, with adapters pinning scolta-php via `composer.lock` within their `^1.x` constraint. Added a comment to `scripts/check-version-sync.php` noting it is a local-only major check.

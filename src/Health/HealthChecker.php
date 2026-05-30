@@ -60,6 +60,12 @@ final class HealthChecker
             ? 'Pagefind binary not found. Set indexer to "php" or install Pagefind: npm install -g pagefind'
             : null;
 
+        $staleIndex = $this->detectStaleArtifactUrls();
+
+        if ($staleIndex) {
+            $status = 'degraded';
+        }
+
         return [
             'status' => $status,
             'ai_provider' => $this->config->aiProvider ?: 'anthropic',
@@ -70,6 +76,10 @@ final class HealthChecker
             'indexer_active' => $indexerActive,
             'indexer_upgrade_available' => ($configuredIndexer === 'binary' && !$binaryStatus['available']),
             'indexer_upgrade_message' => $upgradeMessage,
+            'stale_artifact_urls' => $staleIndex,
+            'stale_artifact_message' => $staleIndex
+                ? 'Index contains /{id}.html URLs from a pre-1.1.0 binary build. Run a full rebuild to fix.'
+                : null,
             'pagefind' => [
                 'available' => $binaryStatus['available'],
                 'version' => $binaryStatus['version'],
@@ -80,5 +90,46 @@ final class HealthChecker
                 'message' => 'Server-side WASM removed — HTML processing is now pure PHP',
             ],
         ];
+    }
+
+    /**
+     * Sample index fragments for /{id}.html-shaped URLs.
+     *
+     * Pre-1.1.0 binary builds stored flat file paths as data.url. These
+     * 404 on the live site. Sampling a few fragments is enough to flag
+     * the issue without scanning the entire index.
+     */
+    private function detectStaleArtifactUrls(): bool
+    {
+        $indexDir = file_exists($this->indexOutputDir . '/pagefind/pagefind-entry.json')
+            ? $this->indexOutputDir . '/pagefind'
+            : $this->indexOutputDir;
+
+        $fragmentDir = is_dir($indexDir . '/fragment') ? $indexDir . '/fragment' : $indexDir;
+        $fragments = glob($fragmentDir . '/*.pf_fragment');
+
+        if (empty($fragments)) {
+            return false;
+        }
+
+        $sample = array_slice($fragments, 0, 5);
+        foreach ($sample as $file) {
+            $data = @gzdecode((string) file_get_contents($file));
+            if ($data === false) {
+                continue;
+            }
+            if (str_starts_with($data, 'pagefind_dcd')) {
+                $data = substr($data, 12);
+            }
+            $json = json_decode($data, true);
+            if (!is_array($json) || !isset($json['url'])) {
+                continue;
+            }
+            if (preg_match('#^/[a-zA-Z0-9_-]+\.html$#', $json['url'])) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
