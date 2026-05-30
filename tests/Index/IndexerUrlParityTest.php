@@ -8,7 +8,6 @@ use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\Export\ContentExporter;
 use Tag1\Scolta\Export\ContentItem;
 use Tag1\Scolta\Index\PhpIndexer;
-use Tag1\Scolta\Tests\Support\CborDecoder;
 
 /**
  * Prove both indexers produce identical data.url values for the same content.

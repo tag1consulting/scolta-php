@@ -6,7 +6,6 @@ namespace Tag1\Scolta\Health;
 
 use Tag1\Scolta\Binary\PagefindBinary;
 use Tag1\Scolta\Config\ScoltaConfig;
-use Tag1\Scolta\Export\ContentExporter;
 
 /**
  * Shared health check logic for all platform adapters.
