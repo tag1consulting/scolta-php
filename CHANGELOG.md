@@ -6,6 +6,8 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-05-30
+
 ### Fixed
 - **Binary indexer now emits canonical URLs instead of build-artifact URLs.** `ContentExporter` writes exported HTML files in a nested directory structure mirroring the canonical URL (`/recipe/cake/` → `recipe/cake/index.html`) so Pagefind `--site` derives `data.url` identical to the PHP indexer. Previously, flat `{id}.html` exports caused `data.url = /{id}.html` — a path that 404s on the live site. Resolves the root cause behind #155 and closes #157.
 - **AI summary citation URLs now prefer canonical `meta.url` over Pagefind file path.** Both `summarizeResults()` (WASM path) and `buildLLMContext()` (JS fallback) now use `r.data.meta?.url || resolveUrl(r.data.url)`, matching the pattern already used in the result card renderer. Fixes #155.
