@@ -117,7 +117,8 @@ class ContentExporterTest extends TestCase
         $this->assertFalse($result);
         $this->assertEquals(1, $exporter->getStats()['skipped']);
         $this->assertEquals(0, $exporter->getStats()['exported']);
-        $this->assertFileDoesNotExist($this->tmpDir . '/short-1.html');
+        $expectedPath = $this->tmpDir . '/' . ContentExporter::urlToExportPath('/short');
+        $this->assertFileDoesNotExist($expectedPath);
     }
 
     public function testExportWritesFileForSufficientContent(): void
@@ -138,10 +139,11 @@ class ContentExporterTest extends TestCase
         $this->assertTrue($result);
         $this->assertEquals(1, $exporter->getStats()['exported']);
         $this->assertEquals(0, $exporter->getStats()['skipped']);
-        $this->assertFileExists($this->tmpDir . '/good-1.html');
 
-        // Verify the exported HTML has pagefind attributes.
-        $html = file_get_contents($this->tmpDir . '/good-1.html');
+        $expectedPath = $this->tmpDir . '/' . ContentExporter::urlToExportPath('/good');
+        $this->assertFileExists($expectedPath);
+
+        $html = file_get_contents($expectedPath);
         $this->assertStringContainsString('data-pagefind-body', $html);
         $this->assertStringContainsString('Good Article', $html);
     }
@@ -163,7 +165,8 @@ class ContentExporterTest extends TestCase
 
         $exporter->export($item);
 
-        $html = file_get_contents($this->tmpDir . '/es-1.html');
+        $expectedPath = $this->tmpDir . '/' . ContentExporter::urlToExportPath('/es/articulo');
+        $html = file_get_contents($expectedPath);
         $this->assertStringContainsString('<html lang="es">', $html);
         $this->assertStringContainsString('data-pagefind-filter="language:es"', $html);
     }
@@ -186,7 +189,7 @@ class ContentExporterTest extends TestCase
         $this->assertEquals(2, $stats['skipped']);
     }
 
-    public function testExportUsesItemIdAsFilename(): void
+    public function testExportUsesCanonicalUrlAsPath(): void
     {
         $exporter = new ContentExporter($this->tmpDir, minContentLength: 5);
         $exporter->prepareOutputDir();
@@ -195,11 +198,12 @@ class ContentExporterTest extends TestCase
             'my-article-42',
             'Title',
             '<p>Enough content here.</p>',
-            'https://x.com',
+            'https://x.com/articles/my-post',
             '2024-01-01',
         ));
 
-        $this->assertFileExists($this->tmpDir . '/my-article-42.html');
+        $expectedPath = $this->tmpDir . '/articles/my-post/index.html';
+        $this->assertFileExists($expectedPath);
     }
 
     public function testExportCustomMinLength(): void
@@ -260,8 +264,7 @@ class ContentExporterTest extends TestCase
         $exporter->exportToItems($items);
 
         // No files should be written to disk.
-        $files = glob($this->tmpDir . '/*.html');
-        $this->assertEmpty($files);
+        $this->assertSame(0, ContentExporter::countHtmlFiles($this->tmpDir));
     }
 
     // -------------------------------------------------------------------------
@@ -317,8 +320,7 @@ class ContentExporterTest extends TestCase
         // Consume the generator.
         iterator_to_array($exporter->filterItems($items));
 
-        $files = glob($this->tmpDir . '/*.html');
-        $this->assertEmpty($files);
+        $this->assertSame(0, ContentExporter::countHtmlFiles($this->tmpDir));
     }
 
     // -------------------------------------------------------------------------

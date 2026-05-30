@@ -342,6 +342,28 @@ describe('scolta.js structure', () => {
     test('doSearch extracts subject_terms from expansion response', () => {
         expect(jsSource).toContain('expansion?.subject_terms');
     });
+
+    // ---------------------------------------------------------------
+    // Citation URL correctness (locks #155 / #157 at the structural level)
+    // ---------------------------------------------------------------
+
+    test('summarizeResults uses meta.url fallback for citation URLs', () => {
+        const fnMatch = jsSource.match(/function summarizeResults\b[\s\S]*?function\s+\w+/);
+        expect(fnMatch).not.toBeNull();
+        const fnBody = fnMatch[0];
+        expect(fnBody).toContain('r.data.meta?.url');
+    });
+
+    test('buildLLMContext uses meta.url fallback for citation URLs', () => {
+        const fnMatch = jsSource.match(/function buildLLMContext\b[\s\S]*?function\s+\w+/);
+        expect(fnMatch).not.toBeNull();
+        const fnBody = fnMatch[0];
+        expect(fnBody).toContain('r.data.meta?.url');
+    });
+
+    test('result card renderer uses meta.url fallback', () => {
+        expect(jsSource).toContain("data.meta?.url || resolveUrl(data.url || '')");
+    });
 });
 
 describe('scolta.css structure', () => {

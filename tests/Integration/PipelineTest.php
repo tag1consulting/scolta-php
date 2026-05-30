@@ -67,8 +67,8 @@ class PipelineTest extends TestCase
         $this->assertEquals(2, $stats['exported'], 'Both items should be exported');
 
         // Step 3: Verify exported HTML has pagefind attributes.
-        $html1 = file_get_contents($this->tempDir . '/article-1.html');
-        $html2 = file_get_contents($this->tempDir . '/article-2.html');
+        $html1 = file_get_contents($this->tempDir . '/' . ContentExporter::urlToExportPath('/php-guide'));
+        $html2 = file_get_contents($this->tempDir . '/' . ContentExporter::urlToExportPath('/php-patterns'));
 
         $this->assertStringContainsString('data-pagefind-body', $html1);
         $this->assertStringContainsString('Getting Started with PHP', $html1);
