@@ -1,0 +1,76 @@
+{
+  "_comment": "Result-count regression baseline for the sub-word frequency guard (issue #156). Each demo entry pins a broad multi-word query, its multi-word expansion terms, and the real corpus frequency (document count) of every constituent sub-word. tests/js/result-count-baseline.test.js drives the real scolta.js guard against a synthetic pagefind corpus built from these counts and asserts the merged result count stays within [band.min, band.max]. Frequencies are from real pagefind measurements: recipes/terra-collecta from frequency-guard-sweep-verification.md; git-manual from a live per-language (English partition) measurement on gitmastery.ddev.site (2026-05-31). The guard's denominator is the language-scoped corpus, so git-manual uses the 286-doc English partition. The band catches BOTH a recall collapse (sub-word block removed, as in commit 690a2288: count drops below min) AND a precision spike (high-frequency noise admitted: count exceeds max). referenceLiveCounts records the union counts measured live for traceability; the deterministic CI assertion uses the synthetic union model (no MAX_PAGEFIND_RESULTS-capped overlap) and its own band. social-network and wikipedia are exercised by the live demo regression (tests/demo-regression.sh), not here.",
+  "maxPagefindResults": 50,
+  "demos": {
+    "recipes": {
+      "preset": "content_catalog",
+      "threshold": 0.10,
+      "totalDocs": 3743,
+      "queries": {
+        "meatless recipes": {
+          "primaryCount": 88,
+          "expansionTerms": ["vegetarian dishes", "grilled vegetables", "meatless meals"],
+          "subwordFreq": {
+            "vegetarian": 102,
+            "dishes": 1079,
+            "grilled": 280,
+            "vegetables": 936,
+            "meatless": 88,
+            "meals": 279,
+            "recipes": 3743
+          },
+          "band": { "min": 200, "max": 330 },
+          "expectsRecovery": true,
+          "referenceLiveCounts": { "base": 88, "at5pct": 171, "at10pct": 312 }
+        }
+      }
+    },
+    "terra-collecta": {
+      "preset": "ecommerce",
+      "threshold": 0.05,
+      "totalDocs": 1000,
+      "queries": {
+        "handmade pottery": {
+          "primaryCount": 67,
+          "expansionTerms": ["artisan ceramics", "organic clay", "geological materials"],
+          "subwordFreq": {
+            "artisan": 12,
+            "ceramics": 40,
+            "organic": 47,
+            "clay": 12,
+            "geological": 1000,
+            "materials": 1000,
+            "pottery": 67
+          },
+          "band": { "min": 120, "max": 240 },
+          "expectsRecovery": true,
+          "referenceLiveCounts": { "base": 67, "at5pct": 76, "at10pct": 76 }
+        }
+      }
+    },
+    "git-manual": {
+      "preset": "reference",
+      "threshold": 0.05,
+      "totalDocs": 286,
+      "_comment": "English partition (286 docs). At 5% nearly every candidate sub-word exceeds the guard (only rare terms like 'shelve' pass), so recovery is minimal — matching the measured +1/query for the English partition. expectsRecovery is false: the band guards the PRECISION ceiling (count must not spike toward the all-sub-words count of ~183 if the threshold were wrongly raised), not recall.",
+      "queries": {
+        "stash uncommitted changes": {
+          "primaryCount": 83,
+          "expansionTerms": ["save modifications", "shelve work"],
+          "subwordFreq": {
+            "save": 41,
+            "modifications": 30,
+            "shelve": 2,
+            "work": 60,
+            "uncommitted": 18,
+            "changes": 95,
+            "storage": 24
+          },
+          "band": { "min": 50, "max": 90 },
+          "expectsRecovery": false,
+          "referenceLiveCounts": { "base": 83, "at5pct": 160 }
+        }
+      }
+    }
+  }
+}

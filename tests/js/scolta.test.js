@@ -140,9 +140,9 @@ describe('scolta.js structure', () => {
     });
 
     test('scoring defaults match expected values', () => {
-        expect(jsSource).toContain('RECENCY_BOOST_MAX: s.RECENCY_BOOST_MAX ?? 0.5');
+        expect(jsSource).toContain('RECENCY_BOOST_MAX: s.RECENCY_BOOST_MAX ?? 0.25');
         expect(jsSource).toContain('RECENCY_HALF_LIFE_DAYS: s.RECENCY_HALF_LIFE_DAYS ?? 365');
-        expect(jsSource).toContain('TITLE_MATCH_BOOST: s.TITLE_MATCH_BOOST ?? 1.0');
+        expect(jsSource).toContain('TITLE_MATCH_BOOST: s.TITLE_MATCH_BOOST ?? 2.0');
         expect(jsSource).toContain('EXACT_TITLE_MATCH_BOOST: s.EXACT_TITLE_MATCH_BOOST ?? 5.0');
         expect(jsSource).toContain('RESULTS_PER_PAGE: s.RESULTS_PER_PAGE ?? 10');
     });

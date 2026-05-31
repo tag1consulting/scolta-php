@@ -27,15 +27,17 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals('/pagefind', $config->pagefindIndexPath);
         $this->assertEquals(2592000, $config->cacheTtl);
         $this->assertEquals(3, $config->maxFollowUps);
-        $this->assertEquals(0.5, $config->recencyBoostMax);
+        $this->assertEquals(0.25, $config->recencyBoostMax);
         $this->assertEquals(365, $config->recencyHalfLifeDays);
         $this->assertEquals(1825, $config->recencyPenaltyAfterDays);
         $this->assertEquals(0.3, $config->recencyMaxPenalty);
-        $this->assertEquals(1.0, $config->titleMatchBoost);
+        $this->assertEquals(2.0, $config->titleMatchBoost);
         $this->assertEquals(1.5, $config->titleAllTermsMultiplier);
         $this->assertEquals(5.0, $config->exactTitleMatchBoost);
         $this->assertEquals(0.4, $config->contentMatchBoost);
         $this->assertEquals(0.5, $config->expandPrimaryWeight);
+        $this->assertEquals(0.05, $config->crossListBonus);
+        $this->assertEquals(0.05, $config->expandSubwordMaxFrequency);
         $this->assertEquals(300, $config->excerptLength);
         $this->assertEquals(10, $config->resultsPerPage);
         $this->assertEquals(50, $config->maxPagefindResults);
@@ -377,7 +379,8 @@ class ScoltaConfigTest extends TestCase
             'CONTENT_MATCH_BOOST', 'PHRASE_ADJACENT_MULTIPLIER', 'PHRASE_NEAR_MULTIPLIER',
             'PHRASE_NEAR_WINDOW', 'PHRASE_WINDOW', 'EXCERPT_LENGTH', 'RESULTS_PER_PAGE',
             'MAX_PAGEFIND_RESULTS', 'AI_EXPAND_QUERY', 'AI_SUMMARIZE', 'AI_SUMMARY_TOP_N',
-            'AI_SUMMARY_MAX_CHARS', 'EXPAND_PRIMARY_WEIGHT', 'CROSS_LIST_BONUS', 'AI_MAX_FOLLOWUPS',
+            'AI_SUMMARY_MAX_CHARS', 'EXPAND_PRIMARY_WEIGHT', 'CROSS_LIST_BONUS', 'EXPAND_SUBWORD_MAX_FREQ',
+            'AI_MAX_FOLLOWUPS',
             'AI_LANGUAGES', 'AUTO_LANGUAGE_FILTER', 'LANGUAGE', 'CUSTOM_STOP_WORDS', 'RECENCY_STRATEGY', 'RECENCY_CURVE',
         ];
 
@@ -385,7 +388,7 @@ class ScoltaConfigTest extends TestCase
             $this->assertArrayHasKey($key, $js, "Missing key: {$key}");
         }
 
-        $this->assertCount(28, $js, 'Expected exactly 28 keys in toJsScoringConfig()');
+        $this->assertCount(29, $js, 'Expected exactly 29 keys in toJsScoringConfig()');
     }
 
     public function testToJsScoringConfigValuesMatchConfig(): void
@@ -477,9 +480,15 @@ class ScoltaConfigTest extends TestCase
         $this->assertArrayNotHasKey('values', $values);
     }
 
-    public function testGetPresetValuesForNoneReturnsEmpty(): void
+    public function testGetPresetValuesForNoneSetsSubwordFrequencyOnly(): void
     {
-        $this->assertSame([], ScoltaConfig::getPresetValues('none'));
+        // 'none' is "start from scratch" but deliberately ships a broadened
+        // sub-word frequency (10%) since an uncategorized corpus benefits from
+        // wider recall — it must not fall through to the 0.05 global default.
+        $this->assertSame(
+            ['expand_subword_max_frequency' => 0.10],
+            ScoltaConfig::getPresetValues('none')
+        );
     }
 
     public function testGetPresetValuesForUnknownReturnsEmpty(): void
@@ -503,6 +512,70 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals(12, $config->resultsPerPage);
     }
 
+    // -------------------------------------------------------------------
+    // Issue #156 bundle: sub-word frequency guard + ranking knob threading
+    // -------------------------------------------------------------------
+
+    public function testSubwordFrequencyThreadsFromArrayToJs(): void
+    {
+        $config = ScoltaConfig::fromArray(['expand_subword_max_frequency' => 0.07]);
+        $this->assertSame(0.07, $config->expandSubwordMaxFrequency);
+        $this->assertIsFloat($config->expandSubwordMaxFrequency);
+        $this->assertEquals(0.07, $config->toJsScoringConfig()['EXPAND_SUBWORD_MAX_FREQ']);
+    }
+
+    public function testSubwordFrequencyPresetResolution(): void
+    {
+        // content_catalog and none broaden to 0.10; every other preset (and the
+        // global default) stays at the conservative 0.05.
+        $expected = [
+            'none' => 0.10,
+            'content_catalog' => 0.10,
+            'reference' => 0.05,
+            'ecommerce' => 0.05,
+            'blog' => 0.05,
+        ];
+        foreach ($expected as $preset => $freq) {
+            $config = ScoltaConfig::fromArray(['preset' => $preset]);
+            $this->assertEquals(
+                $freq,
+                $config->expandSubwordMaxFrequency,
+                "Preset '{$preset}' should resolve sub-word frequency to {$freq}"
+            );
+            $this->assertEquals(
+                $freq,
+                $config->toJsScoringConfig()['EXPAND_SUBWORD_MAX_FREQ'],
+                "Preset '{$preset}' sub-word frequency must reach the JS config"
+            );
+        }
+    }
+
+    public function testRankingKnobDefaultsThreadToJs(): void
+    {
+        // The three ranking-tuning knobs from the full-matrix sweep.
+        $js = (new ScoltaConfig())->toJsScoringConfig();
+        $this->assertEquals(0.05, $js['CROSS_LIST_BONUS']);
+        $this->assertEquals(2.0, $js['TITLE_MATCH_BOOST']);
+        $this->assertEquals(0.25, $js['RECENCY_BOOST_MAX']);
+    }
+
+    public function testRecencyBoostMaxPresetOverrides(): void
+    {
+        // reference/content_catalog disable recency entirely; blog gets 0.25.
+        $this->assertEquals(0.0, ScoltaConfig::fromArray(['preset' => 'reference'])->recencyBoostMax);
+        $this->assertEquals(0.0, ScoltaConfig::fromArray(['preset' => 'content_catalog'])->recencyBoostMax);
+        $this->assertEquals(0.25, ScoltaConfig::fromArray(['preset' => 'blog'])->recencyBoostMax);
+    }
+
+    public function testSubwordFrequencyExplicitValueOverridesPreset(): void
+    {
+        $config = ScoltaConfig::fromArray([
+            'preset' => 'content_catalog',
+            'expand_subword_max_frequency' => 0.02,
+        ]);
+        $this->assertSame(0.02, $config->expandSubwordMaxFrequency);
+    }
+
     public function testExplicitValuesOverridePreset(): void
     {
         $config = ScoltaConfig::fromArray([
@@ -524,7 +597,7 @@ class ScoltaConfigTest extends TestCase
         $config = ScoltaConfig::fromArray(['preset' => 'nonexistent_preset']);
         // Unknown preset — property stays empty, defaults apply.
         $this->assertSame('', $config->preset);
-        $this->assertEquals(1.0, $config->titleMatchBoost);
+        $this->assertEquals(2.0, $config->titleMatchBoost);
     }
 
     public function testReferencePresetSetsExpectedDefaults(): void
@@ -566,7 +639,7 @@ class ScoltaConfigTest extends TestCase
 
         $this->assertSame('blog', $config->preset);
         $this->assertSame('exponential', $config->recencyStrategy);
-        $this->assertEquals(0.1, $config->recencyBoostMax);
+        $this->assertEquals(0.25, $config->recencyBoostMax);
         $this->assertEquals(365, $config->recencyHalfLifeDays);
         $this->assertEquals(1.5, $config->titleMatchBoost);
         $this->assertEquals(2.0, $config->titleAllTermsMultiplier);

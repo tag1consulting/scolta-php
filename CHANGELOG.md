@@ -6,8 +6,17 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Fixed
+- **Broad multi-word queries recover the recall lost in v1.0.0 (closes #156).** Commit `690a2288` removed the sub-word expansion block from `scolta.js`, causing broad-query result counts to drop 4–50× on high-overlap corpora. Sub-word expansion is reintroduced behind a corpus-frequency guard: a multi-word expansion term's constituent words are added as search terms only when each word's corpus frequency is below `expandSubwordMaxFrequency` (default `0.05`; `0.10` for the `content_catalog` and `none` presets). This restores low-frequency domain words ("vegetarian", "cuisine") while blocking high-frequency noise ("recipes", "cooking") that polluted pre-v1.0.0 results. Frequency is measured against the same active filters the search uses (including the language partition when `autoLanguageFilter` is on), so the denominator matches the corpus actually being searched. The guard applies in both the relevance and native-sort code paths. Setting the threshold to `0` reproduces v1.0.0 (no sub-words); `>= 1.0` reproduces the pre-v1.0.0 behavior (all sub-words).
+
+### Added
+- **`expandSubwordMaxFrequency` config option (default `0.05`).** Maximum corpus frequency (fraction of indexed documents) for a multi-word expansion term's constituent word to be added as a standalone search term. Configurable via `expand_subword_max_frequency` in all platform adapters. Presets `content_catalog` and `none` ship `0.10`; `reference`, `ecommerce`, and `blog` use the `0.05` default. Set to `0` to disable sub-word expansion entirely.
+- **Result-count baseline regression test (`tests/js/result-count-baseline.test.js` + `tests/fixtures/result-count-baseline.json`).** Drives the real `scolta.js` guard against a synthetic corpus built from real measured frequencies and asserts merged result counts stay within a per-demo band, flagging both recall collapse (sub-word block removed) and precision spikes (high-frequency noise admitted). This is the regression guard whose absence let `690a2288` ship a silent count drop.
+- **Sub-word frequency guard behavioral test (`tests/js/subword-frequency-guard.test.js`).** Executes `scolta.js` against a recording Pagefind mock and asserts only sub-words below the threshold feed results, covering the boundary behaviors (`0` and `>= 1`).
+
 ### Changed
 - Opened 1.0.2-dev development cycle.
+- **Scoring default tuning from the full-matrix sweep (120+ queries, 9 demos).** `crossListBonus` default `0.15` -> `0.05` (a smaller tie-breaker that doesn't override single-source precision); `recencyBoostMax` default `0.5` -> `0.25`, with preset overrides `reference: 0`, `content_catalog: 0`, and `blog: 0.25` (recency adds noise on non-time-sensitive content); `titleMatchBoost` default `1.0` -> `2.0` (improves top-1 precision across all demos; already shipped in the `reference`/`content_catalog` presets). These are ranking-quality changes independent of the #156 recall fix.
 
 ## [1.0.1] - 2026-05-30
 
