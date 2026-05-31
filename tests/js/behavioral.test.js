@@ -569,7 +569,7 @@ describe('mergeResults behavioral tests (JS fallback)', () => {
         const shared = merged.find(r => (r.data.meta?.url || r.data.url) === 'https://example.com/shared');
 
         expect(shared).toBeDefined();
-        expect(shared.score).toBe(0.9 + 0.15);
+        expect(shared.score).toBe(0.9 + 0.05);
     });
 
     test('unique URLs from both sets all appear in the merged result', () => {
@@ -611,7 +611,7 @@ describe('mergeResults behavioral tests (JS fallback)', () => {
 
         // Shared URL uses the higher score from set1 plus cross-list bonus.
         const shared = merged.find(r => (r.data.meta?.url || r.data.url) === 'https://example.com/shared');
-        expect(shared.score).toBe(0.9 + 0.15);
+        expect(shared.score).toBe(0.9 + 0.05);
 
         // Both unique-only URLs are present.
         const urls = new Set(merged.map(r => r.data.meta?.url || r.data.url));
@@ -632,7 +632,7 @@ describe('mergeResults behavioral tests (JS fallback)', () => {
         const merged = win.__mergeResults(primaryResults, expandedResults);
         const articleA = merged.find(r => (r.data.meta?.url || r.data.url) === 'https://example.com/article-a');
         expect(articleA.score).toBeGreaterThan(0.5);
-        expect(articleA.score).toBe(0.5 + 0.15);
+        expect(articleA.score).toBe(0.5 + 0.05);
     });
 
     test('unique results in one set receive no cross-list bonus', () => {
@@ -648,9 +648,12 @@ describe('mergeResults behavioral tests (JS fallback)', () => {
 
     test('cross-list bonus makes mediocre dual-match beat strong single-match', () => {
         const win = createWindowForMerge();
+        // The dual-match starts below the single-match; the 0.05 cross-list
+        // bonus (current default) flips the ranking when the gap is within the
+        // bonus. 0.4 + 0.05 = 0.45 > 0.43.
         const set1 = [
             makeResult('https://example.com/dual', 0.4, 'Dual Match'),
-            makeResult('https://example.com/single', 0.5, 'Single Match'),
+            makeResult('https://example.com/single', 0.43, 'Single Match'),
         ];
         const set2 = [
             makeResult('https://example.com/dual', 0.35, 'Dual Match'),
@@ -666,24 +669,42 @@ describe('mergeResults behavioral tests (JS fallback)', () => {
 // Word explosion removal tests
 // =============================================================================
 
-describe('expansion phrase preservation (no word explosion)', () => {
+describe('sub-word expansion is frequency-guarded (issue #156)', () => {
 
-    test('multi-word expansion terms are not split into individual word searches', () => {
+    test('relevance path word-explodes expansion terms behind the frequency guard', () => {
         const jsSource = fs.readFileSync(
             path.join(__dirname, '../../assets/js/scolta.js'), 'utf-8'
         );
         const relevancePath = jsSource.match(/Relevance path:[\s\S]*?searchAndLoadParallel/);
         expect(relevancePath).not.toBeNull();
-        expect(relevancePath[0]).not.toContain('extractSearchTerms(term)');
+        // Sub-word decomposition is restored...
+        expect(relevancePath[0]).toContain('extractSearchTerms(term)');
+        // ...but only added when the frequency guard passes.
+        expect(relevancePath[0]).toContain('await subwordAllowed(word)');
     });
 
-    test('sort path does not word-explode expansion terms into individual searches', () => {
+    test('sort path word-explodes expansion terms behind the frequency guard', () => {
         const jsSource = fs.readFileSync(
             path.join(__dirname, '../../assets/js/scolta.js'), 'utf-8'
         );
         const sortPath = jsSource.match(/const termSet = new Set\(\[searchQuery\]\);[\s\S]*?\.map\(t => pagefindSearch/);
         expect(sortPath).not.toBeNull();
-        expect(sortPath[0]).not.toContain('extractSearchTerms');
+        expect(sortPath[0]).toContain('extractSearchTerms(term)');
+        expect(sortPath[0]).toContain('await subwordAllowed(word)');
+    });
+
+    test('the guard measures frequency against EXPAND_SUBWORD_MAX_FREQ with shared filter scope', () => {
+        const jsSource = fs.readFileSync(
+            path.join(__dirname, '../../assets/js/scolta.js'), 'utf-8'
+        );
+        const guard = jsSource.match(/async function subwordAllowed\(word\)[\s\S]*?\n    }/);
+        expect(guard).not.toBeNull();
+        // 0 -> v1.0.0 (no sub-words); >= 1 -> all sub-words.
+        expect(guard[0]).toContain('subwordMaxFreq <= 0');
+        expect(guard[0]).toContain('subwordMaxFreq >= 1');
+        // Numerator and denominator both use the active search filters.
+        expect(guard[0]).toContain('pagefindSearch(null, activeFilters)');
+        expect(guard[0]).toContain('pagefindSearch(word, activeFilters)');
     });
 
     test('highlight term splitting is preserved for display purposes', () => {
@@ -713,7 +734,7 @@ describe('config default alignment', () => {
         }
     });
 
-    test('CROSS_LIST_BONUS config key exists with default 0.15', () => {
+    test('JS fallback CROSS_LIST_BONUS default matches PHP (0.05)', () => {
         const jsSource = fs.readFileSync(
             path.join(__dirname, '../../assets/js/scolta.js'), 'utf-8'
         );
@@ -721,7 +742,41 @@ describe('config default alignment', () => {
         expect(matches).not.toBeNull();
         expect(matches.length).toBeGreaterThanOrEqual(1);
         for (const m of matches) {
-            expect(m).toContain('0.15');
+            expect(m).toContain('0.05');
+        }
+    });
+
+    test('JS fallback TITLE_MATCH_BOOST default matches PHP (2.0)', () => {
+        const jsSource = fs.readFileSync(
+            path.join(__dirname, '../../assets/js/scolta.js'), 'utf-8'
+        );
+        const matches = jsSource.match(/TITLE_MATCH_BOOST:\s*s\.TITLE_MATCH_BOOST\s*\?\?\s*([\d.]+)/g);
+        expect(matches).not.toBeNull();
+        for (const m of matches) {
+            expect(m).toContain('2.0');
+        }
+    });
+
+    test('JS fallback RECENCY_BOOST_MAX default matches PHP (0.25)', () => {
+        const jsSource = fs.readFileSync(
+            path.join(__dirname, '../../assets/js/scolta.js'), 'utf-8'
+        );
+        const matches = jsSource.match(/RECENCY_BOOST_MAX:\s*s\.RECENCY_BOOST_MAX\s*\?\?\s*([\d.]+)/g);
+        expect(matches).not.toBeNull();
+        for (const m of matches) {
+            expect(m).toContain('0.25');
+        }
+    });
+
+    test('JS fallback EXPAND_SUBWORD_MAX_FREQ default matches PHP (0.05)', () => {
+        const jsSource = fs.readFileSync(
+            path.join(__dirname, '../../assets/js/scolta.js'), 'utf-8'
+        );
+        const matches = jsSource.match(/EXPAND_SUBWORD_MAX_FREQ:\s*s\.EXPAND_SUBWORD_MAX_FREQ\s*\?\?\s*([\d.]+)/g);
+        expect(matches).not.toBeNull();
+        expect(matches.length).toBeGreaterThanOrEqual(2); // getConfig + getInstanceConfig
+        for (const m of matches) {
+            expect(m).toContain('0.05');
         }
     });
 });

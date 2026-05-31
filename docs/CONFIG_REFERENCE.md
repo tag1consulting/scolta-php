@@ -41,7 +41,7 @@ All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Platfo
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `recencyBoostMax` | float | `0.5` | Maximum positive boost for recent content |
+| `recencyBoostMax` | float | `0.25` | Maximum positive boost for recent content. Preset overrides: `reference` and `content_catalog` set this to `0` (recency adds noise on non-time-sensitive content); `blog` sets `0.25`. |
 | `recencyHalfLifeDays` | int | `365` | Half-life for recency decay (days) |
 | `recencyPenaltyAfterDays` | int | `1825` | Age threshold before penalty applies (days, ~5 years) |
 | `recencyMaxPenalty` | float | `0.3` | Maximum penalty for old content |
@@ -50,7 +50,7 @@ All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Platfo
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `titleMatchBoost` | float | `1.0` | Boost for title keyword matches |
+| `titleMatchBoost` | float | `2.0` | Boost for title keyword matches. Raised from `1.0` based on a full-matrix scoring sweep (improves top-1 precision across all demos). |
 | `titleAllTermsMultiplier` | float | `1.5` | Multiplier when all search terms appear in title |
 | `exactTitleMatchBoost` | float | `5.0` | Multiplicative boost when the result's title exactly matches the query (case-insensitive). Applied after all other scoring so an article titled "DNA" always ranks #1 for the search "DNA" regardless of BM25 scores. Set to 1.0 to disable. |
 | `contentMatchBoost` | float | `0.4` | Boost for content/excerpt keyword matches |
@@ -73,7 +73,8 @@ factor before being added to the final score; the title boost is unaffected.
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `expandPrimaryWeight` | float | `0.5` | Weight applied to original query results during N-set merge. Lower values give AI-expanded terms more relative influence (better intent matching); higher values make literal keyword matches dominate. Set to 0.7+ if you want exact terms to dominate. |
-| `crossListBonus` | float | `0.15` | Additive score bonus when a result appears in both the primary and expanded result sets. Cross-list agreement is a strong relevance signal — a result matching both the literal query and semantic expansions receives this bonus on top of its highest score. Set to 0 to disable. |
+| `crossListBonus` | float | `0.05` | Additive score bonus when a result appears in both the primary and expanded result sets. Cross-list agreement is a relevance signal — a result matching both the literal query and semantic expansions receives this bonus on top of its highest score. Lowered from `0.15` based on a full-matrix scoring sweep (a smaller tie-breaker preserves single-source precision). Set to 0 to disable. |
+| `expandSubwordMaxFrequency` | float | `0.05` | Maximum corpus frequency (fraction of indexed documents) for a multi-word expansion term's constituent word to be added as a standalone search term. Restores broad-query recall while blocking high-frequency noise words. Frequency is measured against the active search filters (including the language partition when `autoLanguageFilter` is on). Presets `content_catalog` and `none` raise this to `0.10`. Set to `0` to disable sub-word expansion (v1.0.0 behavior); `>= 1.0` admits every sub-word. |
 
 ### Scoring: Priority Pages
 
@@ -156,11 +157,11 @@ Available presets:
 
 | Preset | Label | Purpose | Key `values` |
 |--------|-------|---------|-------------|
-| `none` | Start from Scratch | No preset; use defaults | _(empty)_ |
-| `content_catalog` | Recipe & Content Catalog | Recipe/catalog sites where content quality matters more than freshness | `recencyStrategy: none`, `titleMatchBoost: 2.0`, `titleAllTermsMultiplier: 2.5`, `contentMatchBoost: 0.5`, `expandPrimaryWeight: 0.9`, `aiSummaryTopN: 15`, `maxPagefindResults: 75`, `resultsPerPage: 12` |
-| `reference` | Documentation & Reference | Knowledge bases, documentation, encyclopedias, medical/compliance references | `recencyStrategy: none`, `titleMatchBoost: 2.0`, `titleAllTermsMultiplier: 2.5`, `contentMatchBoost: 0.5`, `expandPrimaryWeight: 0.6`, `aiSummaryTopN: 15`, `maxPagefindResults: 75`, `resultsPerPage: 12`, `excerptLength: 350` |
+| `none` | Start from Scratch | No preset; use defaults (with sub-word recall slightly broadened) | `expandSubwordMaxFrequency: 0.10` |
+| `content_catalog` | Recipe & Content Catalog | Recipe/catalog sites where content quality matters more than freshness | `recencyStrategy: none`, `recencyBoostMax: 0`, `titleMatchBoost: 2.0`, `titleAllTermsMultiplier: 2.5`, `contentMatchBoost: 0.5`, `expandPrimaryWeight: 0.9`, `expandSubwordMaxFrequency: 0.10`, `aiSummaryTopN: 15`, `maxPagefindResults: 75`, `resultsPerPage: 12` |
+| `reference` | Documentation & Reference | Knowledge bases, documentation, encyclopedias, medical/compliance references | `recencyStrategy: none`, `recencyBoostMax: 0`, `titleMatchBoost: 2.0`, `titleAllTermsMultiplier: 2.5`, `contentMatchBoost: 0.5`, `expandPrimaryWeight: 0.6`, `aiSummaryTopN: 15`, `maxPagefindResults: 75`, `resultsPerPage: 12`, `excerptLength: 350` |
 | `ecommerce` | E-commerce & Product Store | Product catalogs and stores with natural-language queries | `recencyStrategy: none`, `titleMatchBoost: 1.5`, `titleAllTermsMultiplier: 2.0`, `contentMatchBoost: 0.6`, `expandPrimaryWeight: 0.8`, `aiSummaryTopN: 12`, `maxPagefindResults: 75`, `resultsPerPage: 12`, `excerptLength: 300` |
-| `blog` | Blog & Editorial | Narrative/editorial content with gentle temporal relevance | `recencyStrategy: exponential`, `recencyBoostMax: 0.1`, `recencyHalfLifeDays: 365`, `titleMatchBoost: 1.5`, `titleAllTermsMultiplier: 2.0`, `contentMatchBoost: 0.5`, `expandPrimaryWeight: 0.7`, `aiSummaryTopN: 12`, `maxPagefindResults: 60`, `resultsPerPage: 10`, `excerptLength: 350` |
+| `blog` | Blog & Editorial | Narrative/editorial content with gentle temporal relevance | `recencyStrategy: exponential`, `recencyBoostMax: 0.25`, `recencyHalfLifeDays: 365`, `titleMatchBoost: 1.5`, `titleAllTermsMultiplier: 2.0`, `contentMatchBoost: 0.5`, `expandPrimaryWeight: 0.7`, `aiSummaryTopN: 12`, `maxPagefindResults: 60`, `resultsPerPage: 10`, `excerptLength: 350` |
 
 ### Choosing a Preset
 
@@ -218,6 +219,7 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 | `phraseWindow` | `scoring.phrase_window` | `scoring.phrase_window` | `phrase_window` |
 | `expandPrimaryWeight` | `scoring.expand_primary_weight` | `scoring.expand_primary_weight` | `expand_primary_weight` |
 | `crossListBonus` | `scoring.cross_list_bonus` | `scoring.cross_list_bonus` | `cross_list_bonus` |
+| `expandSubwordMaxFrequency` | `scoring.expand_subword_max_frequency` | `scoring.expand_subword_max_frequency` | `expand_subword_max_frequency` |
 | `language` | `scoring.language` | `scoring.language` / `SCOLTA_LANGUAGE` | `language` |
 | `customStopWords` | `scoring.custom_stop_words` | `scoring.custom_stop_words` | `custom_stop_words` |
 | `recencyStrategy` | `scoring.recency_strategy` | `scoring.recency_strategy` / `SCOLTA_RECENCY_STRATEGY` | `recency_strategy` |

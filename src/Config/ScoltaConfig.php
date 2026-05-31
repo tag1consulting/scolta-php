@@ -37,13 +37,13 @@ class ScoltaConfig
     public int $maxFollowUps = 3;
 
     // -- Scoring: Recency --
-    public float $recencyBoostMax = 0.5;
+    public float $recencyBoostMax = 0.25;
     public int $recencyHalfLifeDays = 365;
     public int $recencyPenaltyAfterDays = 1825;
     public float $recencyMaxPenalty = 0.3;
 
     // -- Scoring: Title/Content match --
-    public float $titleMatchBoost = 1.0;
+    public float $titleMatchBoost = 2.0;
     public float $titleAllTermsMultiplier = 1.5;
     public float $exactTitleMatchBoost = 5.0;
     public float $contentMatchBoost = 0.4;
@@ -56,7 +56,17 @@ class ScoltaConfig
 
     // -- Scoring: Expanded terms --
     public float $expandPrimaryWeight = 0.5;
-    public float $crossListBonus = 0.15;
+    public float $crossListBonus = 0.05;
+
+    /**
+     * Maximum corpus frequency for a multi-word expansion term's constituent
+     * words to be added as standalone search terms (issue #156). A sub-word is
+     * added only when it appears in fewer than this fraction of indexed
+     * documents, so low-frequency domain words broaden recall while
+     * high-frequency noise words are blocked. 0 disables sub-word expansion
+     * (v1.0.0 behavior); >= 1.0 admits every sub-word.
+     */
+    public float $expandSubwordMaxFrequency = 0.05;
 
     // -- Scoring: Language and stop words --
     public string $language = 'en';
@@ -151,19 +161,23 @@ class ScoltaConfig
     public const PRESETS = [
         'none' => [
             'label' => 'Start from Scratch',
-            'description' => 'No preset applied. All scoring parameters use Scolta defaults. This is your starting point for fully custom configuration — select this as your starting point — or leave it as-is. You can optionally adjust any individual setting below.',
-            'values' => [],
+            'description' => 'No preset applied. All scoring parameters use Scolta defaults, except sub-word expansion is slightly broadened (10%) since an uncategorized corpus benefits from wider recall. This is your starting point for fully custom configuration — select this as your starting point — or leave it as-is. You can optionally adjust any individual setting below.',
+            'values' => [
+                'expand_subword_max_frequency' => 0.10,
+            ],
         ],
         'content_catalog' => [
             'label' => 'Recipe & Content Catalog',
             'description' => 'Best for recipe sites, wikis, and content collections with structured titles. Strongly prioritizes title matches — a recipe called "Chocolate Brownies" ranks high for that search — and shows more results per page for browsing. Newer and older content rank equally since catalog items stay relevant over time. Select this as your starting point — or leave it as-is. You can optionally adjust any individual setting below.',
             'values' => [
                 'recency_strategy' => 'none',
+                'recency_boost_max' => 0.0,
                 'title_match_boost' => 2.0,
                 'title_all_terms_multiplier' => 2.5,
                 'exact_title_match_boost' => 5.0,
                 'content_match_boost' => 0.5,
                 'expand_primary_weight' => 0.9,
+                'expand_subword_max_frequency' => 0.10,
                 'ai_summary_top_n' => 15,
                 'max_pagefind_results' => 75,
                 'results_per_page' => 12,
@@ -174,6 +188,7 @@ class ScoltaConfig
             'description' => 'Best for knowledge bases, documentation, encyclopedias, and compliance references. Strongly favors exact title matches and understands domain synonyms (e.g., searching "GDPR" also finds "data protection regulation"). Newer and older content rank equally since reference material stays relevant over time. Select this as your starting point — or leave it as-is. You can optionally adjust any individual setting below.',
             'values' => [
                 'recency_strategy' => 'none',
+                'recency_boost_max' => 0.0,
                 'title_match_boost' => 2.0,
                 'title_all_terms_multiplier' => 2.5,
                 'exact_title_match_boost' => 5.0,
@@ -205,7 +220,7 @@ class ScoltaConfig
             'description' => 'Best for blogs, news sites, and editorial content. Gives a gentle boost to newer posts while keeping older content findable, and interprets searches broadly so readers searching by topic or feeling ("scary moment", "funny story") get good results. Select this as your starting point — or leave it as-is. You can optionally adjust any individual setting below.',
             'values' => [
                 'recency_strategy' => 'exponential',
-                'recency_boost_max' => 0.1,
+                'recency_boost_max' => 0.25,
                 'recency_half_life_days' => 365,
                 'title_match_boost' => 1.5,
                 'title_all_terms_multiplier' => 2.0,
@@ -324,6 +339,7 @@ class ScoltaConfig
             'AI_SUMMARY_MAX_CHARS' => $this->aiSummaryMaxChars,
             'EXPAND_PRIMARY_WEIGHT' => $this->expandPrimaryWeight,
             'CROSS_LIST_BONUS' => $this->crossListBonus,
+            'EXPAND_SUBWORD_MAX_FREQ' => $this->expandSubwordMaxFrequency,
             'AI_MAX_FOLLOWUPS' => $this->maxFollowUps,
             'AI_LANGUAGES' => $this->aiLanguages,
             'AUTO_LANGUAGE_FILTER' => $this->autoLanguageFilter,
