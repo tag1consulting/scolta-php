@@ -75,6 +75,7 @@ factor before being added to the final score; the title boost is unaffected.
 | `expandPrimaryWeight` | float | `0.5` | Weight applied to original query results during N-set merge. Lower values give AI-expanded terms more relative influence (better intent matching); higher values make literal keyword matches dominate. Set to 0.7+ if you want exact terms to dominate. |
 | `crossListBonus` | float | `0.05` | Additive score bonus when a result appears in both the primary and expanded result sets. Cross-list agreement is a relevance signal — a result matching both the literal query and semantic expansions receives this bonus on top of its highest score. Lowered from `0.15` based on a full-matrix scoring sweep (a smaller tie-breaker preserves single-source precision). Set to 0 to disable. |
 | `expandSubwordMaxFrequency` | float | `0.05` | Maximum corpus frequency (fraction of indexed documents) for a multi-word expansion term's constituent word to be added as a standalone search term. Restores broad-query recall while blocking high-frequency noise words. Frequency is measured against the active search filters (including the language partition when `autoLanguageFilter` is on). Presets `content_catalog` and `none` raise this to `0.10`. Set to `0` to disable sub-word expansion (v1.0.0 behavior); `>= 1.0` admits every sub-word. |
+| `expandSubwordDenyList` | array | `[]` | Guard-only veto list for the sub-word query-term exemption. A sub-word that the user literally typed normally bypasses the `expandSubwordMaxFrequency` check (a typed subject word is wanted regardless of how common it is); words listed here do NOT get that exemption, so a site can stop a typed-but-generic word (e.g. `hot` on a recipe corpus) from re-flooding results. Distinct from `customStopWords`: it does **not** affect relevance scoring or query tokenization — listed words stay searchable and scorable. Browser-side only (the guard is JS-side). |
 
 ### Scoring: Priority Pages
 
@@ -87,7 +88,7 @@ factor before being added to the final score; the title boost is unaffected.
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `language` | string | `'en'` | ISO 639-1 language code for stop word filtering (`en`, `de`, `fr`, …). 30 languages supported; CJK and unknown codes apply no stop word filtering. |
-| `customStopWords` | array | `[]` | Additional stop words to filter beyond the language's built-in list. |
+| `customStopWords` | array | `[]` | Additional stop words to filter beyond the language's built-in list. Applied in both the WASM scorer and JS query tokenization (`scolta.js` `extractSearchTerms`) — no longer scoring-only. |
 
 ### Scoring: Recency Strategy
 
@@ -220,6 +221,7 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 | `expandPrimaryWeight` | `scoring.expand_primary_weight` | `scoring.expand_primary_weight` | `expand_primary_weight` |
 | `crossListBonus` | `scoring.cross_list_bonus` | `scoring.cross_list_bonus` | `cross_list_bonus` |
 | `expandSubwordMaxFrequency` | `scoring.expand_subword_max_frequency` | `scoring.expand_subword_max_frequency` | `expand_subword_max_frequency` |
+| `expandSubwordDenyList` | `scoring.expand_subword_deny_list` | `scoring.expand_subword_deny_list` | `expand_subword_deny_list` |
 | `language` | `scoring.language` | `scoring.language` / `SCOLTA_LANGUAGE` | `language` |
 | `customStopWords` | `scoring.custom_stop_words` | `scoring.custom_stop_words` | `custom_stop_words` |
 | `recencyStrategy` | `scoring.recency_strategy` | `scoring.recency_strategy` / `SCOLTA_RECENCY_STRATEGY` | `recency_strategy` |

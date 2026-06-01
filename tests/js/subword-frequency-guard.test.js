@@ -38,6 +38,7 @@ const CORPUS = {
     recipes: 100,    // 100% — blocked at 0.05
     cooking: 60,     // 60%  — blocked at 0.05
     dishes: 28,      // 28%  — blocked at 0.05
+    spicy: 20,       // 20%  — blocked at 0.10 unless query-typed (Fix A)
 };
 // Multi-word expansion terms the LLM "returns"; each decomposes to the words above.
 const EXPANSION_TERMS = ['vegetarian recipes', 'meatless cuisine', 'cooking dishes'];
@@ -176,8 +177,114 @@ describe('sub-word frequency guard (relevance path)', () => {
 
     test('threshold >= 1 reproduces pre-v1.0.0: all sub-words are added', async () => {
         const loaded = await runSearch(1.0);
-        for (const w of Object.keys(CORPUS)) {
+        // Sub-words of the EXPANSION_TERMS this run decomposes (not 'spicy',
+        // which only appears in the Fix A+D block's own expansion terms).
+        for (const w of ['vegetarian', 'recipes', 'meatless', 'cuisine', 'cooking', 'dishes']) {
             expect(loaded.has(w)).toBe(true);
         }
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Fix A+D (issue #156 follow-up): query-term exemption + guard denylist.
+// A high-frequency word the user literally typed must bypass the frequency
+// check; a denylist entry vetoes that exemption; a high-frequency word that
+// is NOT a query token stays frequency-blocked.
+// ---------------------------------------------------------------------------
+
+function createWindowEx({ subwordMaxFreq, denylist, expansionTerms, loadedQueries }) {
+    const dom = new JSDOM(
+        `<!DOCTYPE html><html><body><div id="scolta-search"></div></body></html>`,
+        { url: 'https://example.com', runScripts: 'dangerously' }
+    );
+    const window = dom.window;
+
+    window.__pfMock = {
+        init: () => Promise.resolve(),
+        mergeIndex: () => Promise.resolve(),
+        filters: () => Promise.resolve({}),
+        search: (query) => Promise.resolve(buildResults(query, loadedQueries)),
+    };
+
+    window.fetch = jest.fn((url) => {
+        const u = String(url);
+        if (u.includes('pagefind-entry.json')) {
+            return Promise.resolve({
+                ok: true, status: 200,
+                json: () => Promise.resolve({ languages: { en: { page_count: TOTAL_DOCS } } }),
+                text: () => Promise.resolve('{}'),
+            });
+        }
+        if (u === '/e') {
+            return Promise.resolve({
+                ok: true, status: 200,
+                json: () => Promise.resolve({ terms: expansionTerms }),
+                text: () => Promise.resolve('{}'),
+            });
+        }
+        return Promise.resolve({
+            ok: true, status: 200,
+            json: () => Promise.resolve({}),
+            text: () => Promise.resolve('{}'),
+        });
+    });
+
+    window.console = { log: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() };
+    window.scrollTo = () => {};
+    global.__pfMockWindow = window;
+
+    window.eval(patchedSource);
+
+    window.scolta = {
+        scoring: {
+            EXPAND_SUBWORD_MAX_FREQ: subwordMaxFreq,
+            EXPAND_SUBWORD_DENYLIST: denylist || [],
+            AI_EXPAND_QUERY: true,
+            AI_SUMMARIZE: false,
+        },
+        endpoints: { expand: '/e', summarize: '/s', followup: '/f' },
+        pagefindPath: '/pf.js',
+        wasmPath: '/wasm.js',
+        siteName: 'Test',
+        container: '#scolta-search',
+    };
+    window.Scolta.init('#scolta-search');
+    return window;
+}
+
+async function runSearchEx({ subwordMaxFreq, query, denylist, expansionTerms }) {
+    const loadedQueries = [];
+    const window = createWindowEx({ subwordMaxFreq, denylist, expansionTerms, loadedQueries });
+    for (let i = 0; i < 10; i++) await tick(0);
+    const input = window.document.querySelector('#scolta-query');
+    input.value = query;
+    await window.Scolta.doSearch();
+    for (let i = 0; i < 30; i++) await tick(0);
+    return new Set(loadedQueries);
+}
+
+describe('query-term exemption + guard denylist (Fix A+D)', () => {
+    // Threshold 0.10: spicy (20%) and dishes (28%) are both above it.
+    // The query is multi-word so the primary (ANDed) pagefind search is
+    // 'spicy thai' — distinct from the standalone sub-word 'spicy' the guard
+    // decides on. This isolates the exemption from the always-loaded primary.
+    const OPTS = { subwordMaxFreq: 0.10, query: 'spicy thai', expansionTerms: ['spicy dishes'] };
+
+    test('a high-frequency query token is exempted from the frequency check', async () => {
+        const loaded = await runSearchEx({ ...OPTS });
+        // 'spicy' is above threshold but the user typed it => searched anyway.
+        expect(loaded.has('spicy')).toBe(true);
+    });
+
+    test('the denylist vetoes the exemption for a typed word', async () => {
+        const loaded = await runSearchEx({ ...OPTS, denylist: ['spicy'] });
+        // On the denylist => not exempted => frequency-blocked (20% > 10%).
+        expect(loaded.has('spicy')).toBe(false);
+    });
+
+    test('a high-frequency non-query sub-word stays frequency-blocked', async () => {
+        const loaded = await runSearchEx({ ...OPTS });
+        // 'dishes' is expansion-derived, not typed => still blocked (28% > 10%).
+        expect(loaded.has('dishes')).toBe(false);
     });
 });

@@ -68,6 +68,18 @@ class ScoltaConfig
      */
     public float $expandSubwordMaxFrequency = 0.05;
 
+    /**
+     * Guard-only veto list for sub-word query-term exemption (issue #156 follow-up).
+     * Words here are never auto-exempted from the sub-word frequency guard even when
+     * the user types them — so a site can stop a typed generic word (e.g. "hot" on a
+     * recipe corpus) from re-flooding results via the exemption. Unlike
+     * customStopWords this does NOT affect relevance scoring or query tokenization.
+     * Lowercase tokens. Default empty.
+     *
+     * @var string[]
+     */
+    public array $expandSubwordDenyList = [];
+
     // -- Scoring: Language and stop words --
     public string $language = 'en';
     /** @var string[] */
@@ -340,6 +352,7 @@ class ScoltaConfig
             'EXPAND_PRIMARY_WEIGHT' => $this->expandPrimaryWeight,
             'CROSS_LIST_BONUS' => $this->crossListBonus,
             'EXPAND_SUBWORD_MAX_FREQ' => $this->expandSubwordMaxFrequency,
+            'EXPAND_SUBWORD_DENYLIST' => $this->expandSubwordDenyList,
             'AI_MAX_FOLLOWUPS' => $this->maxFollowUps,
             'AI_LANGUAGES' => $this->aiLanguages,
             'AUTO_LANGUAGE_FILTER' => $this->autoLanguageFilter,

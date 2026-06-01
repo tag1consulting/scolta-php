@@ -365,6 +365,27 @@ class ScoltaConfigTest extends TestCase
     }
 
     // -------------------------------------------------------------------
+    // expandSubwordDenyList (issue #156 follow-up) — guard-only veto list
+    // -------------------------------------------------------------------
+
+    public function testExpandSubwordDenyListDefaultsEmpty(): void
+    {
+        $this->assertEquals([], (new ScoltaConfig())->expandSubwordDenyList);
+    }
+
+    public function testExpandSubwordDenyListThreadsThroughFromArray(): void
+    {
+        $config = ScoltaConfig::fromArray(['expand_subword_deny_list' => ['a', 'b']]);
+        $this->assertEquals(['a', 'b'], $config->expandSubwordDenyList);
+    }
+
+    public function testExpandSubwordDenyListExportedToJsScoringConfig(): void
+    {
+        $config = ScoltaConfig::fromArray(['expand_subword_deny_list' => ['hot']]);
+        $this->assertEquals(['hot'], $config->toJsScoringConfig()['EXPAND_SUBWORD_DENYLIST']);
+    }
+
+    // -------------------------------------------------------------------
     // toJsScoringConfig — completeness and correctness
     // -------------------------------------------------------------------
 
@@ -380,6 +401,7 @@ class ScoltaConfigTest extends TestCase
             'PHRASE_NEAR_WINDOW', 'PHRASE_WINDOW', 'EXCERPT_LENGTH', 'RESULTS_PER_PAGE',
             'MAX_PAGEFIND_RESULTS', 'AI_EXPAND_QUERY', 'AI_SUMMARIZE', 'AI_SUMMARY_TOP_N',
             'AI_SUMMARY_MAX_CHARS', 'EXPAND_PRIMARY_WEIGHT', 'CROSS_LIST_BONUS', 'EXPAND_SUBWORD_MAX_FREQ',
+            'EXPAND_SUBWORD_DENYLIST',
             'AI_MAX_FOLLOWUPS',
             'AI_LANGUAGES', 'AUTO_LANGUAGE_FILTER', 'LANGUAGE', 'CUSTOM_STOP_WORDS', 'RECENCY_STRATEGY', 'RECENCY_CURVE',
         ];
@@ -388,7 +410,7 @@ class ScoltaConfigTest extends TestCase
             $this->assertArrayHasKey($key, $js, "Missing key: {$key}");
         }
 
-        $this->assertCount(29, $js, 'Expected exactly 29 keys in toJsScoringConfig()');
+        $this->assertCount(30, $js, 'Expected exactly 30 keys in toJsScoringConfig()');
     }
 
     public function testToJsScoringConfigValuesMatchConfig(): void
