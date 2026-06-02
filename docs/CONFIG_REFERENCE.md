@@ -54,7 +54,6 @@ All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Platfo
 | `titleAllTermsMultiplier` | float | `1.5` | Multiplier when all search terms appear in title |
 | `exactTitleMatchBoost` | float | `5.0` | Multiplicative boost when the result's title exactly matches the query (case-insensitive). Applied after all other scoring so an article titled "DNA" always ranks #1 for the search "DNA" regardless of BM25 scores. Set to 1.0 to disable. |
 | `contentMatchBoost` | float | `0.4` | Boost for content/excerpt keyword matches |
-| `incidentalMatchWeight` | float | `0.3` | Weight applied to a query word's title/content match contribution when the expansion endpoint labels it `incidental` (generic framing/modifiers like `grilled` in `grilled vegetables`). `content` words and any word absent from the per-query-word importance map keep weight `1.0`, so a result matching only an incidental query word ranks below one matching the content word. This is a re-ranking knob — result counts are unchanged. Gated by `aiQueryWordImportance`: when that flag is off the importance map is not sent to the scorer, so this weight has no effect. `1.0` reproduces equal weighting. Range `0.0–1.0`. |
 
 ### Scoring: Phrase Proximity
 
@@ -112,7 +111,6 @@ factor before being added to the final score; the title boost is unaffected.
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `aiExpandQuery` | bool | `true` | Enable AI query expansion |
-| `aiQueryWordImportance` | bool | `true` | Gate the sub-word typed-word exemption on the expansion endpoint's per-query-word importance classification. When `true`, a typed query word keeps its exemption from `expandSubwordMaxFrequency` only if the LLM labels it `content`; words labeled `incidental` (generic framing/modifiers like `recipe` or `grilled`) fall back to the frequency check so they cannot broaden results on their own. Set to `false` to exempt every typed word (exact pre-classification behavior). Browser-side only; absent/empty classifications fall back to the all-content behavior regardless of this flag. |
 | `aiSummarize` | bool | `true` | Enable AI result summarization |
 | `aiSummaryTopN` | int | `10` | Number of top results sent to AI for summarization |
 | `aiSummaryMaxChars` | int | `4000` | Maximum characters of content sent to AI for summarization |
@@ -243,7 +241,6 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 | ScoltaConfig Property | Drupal | Laravel | WordPress |
 |----------------------|--------|---------|-----------|
 | `aiExpandQuery` | `ai_expand_query` | `ai_expand_query` / `SCOLTA_AI_EXPAND` | `ai_expand_query` |
-| `aiQueryWordImportance` | `ai_query_word_importance` | `ai_query_word_importance` | `ai_query_word_importance` |
 | `aiSummarize` | `ai_summarize` | `ai_summarize` / `SCOLTA_AI_SUMMARIZE` | `ai_summarize` |
 | `aiSummaryTopN` | `ai_summary_top_n` | `ai_summary_top_n` | `ai_summary_top_n` |
 | `aiSummaryMaxChars` | `ai_summary_max_chars` | `ai_summary_max_chars` | `ai_summary_max_chars` |

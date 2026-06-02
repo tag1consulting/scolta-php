@@ -1063,13 +1063,8 @@ class AiEndpointHandlerTest extends TestCase
 
         $handler->handleExpandQuery('test');
 
-        // NullEnricher must not modify the prompt: it should begin with the raw
-        // prompt verbatim. The handler still appends the always-on query-word
-        // importance instruction (like the sort/filter instructions), but no
-        // enricher-injected site context.
-        $this->assertStringStartsWith('Expand the following search query.', $ai->lastSystemPrompt);
-        $this->assertStringNotContainsString('SORT INTENT', $ai->lastSystemPrompt);
-        $this->assertStringNotContainsString('FILTER INTENT', $ai->lastSystemPrompt);
+        // The prompt should be the raw prompt from the AI service, unmodified.
+        $this->assertEquals('Expand the following search query.', $ai->lastSystemPrompt);
     }
 
     // ===================================================================
@@ -1396,106 +1391,6 @@ class AiEndpointHandlerTest extends TestCase
         $this->assertStringNotContainsString('FILTER INTENT', $ai->lastSystemPrompt);
         $this->assertStringContainsString('- price', $ai->lastSystemPrompt);
         $this->assertStringContainsString('- date', $ai->lastSystemPrompt);
-    }
-
-    // ===================================================================
-    // Query word importance (#156 follow-up — semantic typed-word gate)
-    // ===================================================================
-
-    public function testQueryWordImportanceParsedFromObjectFormat(): void
-    {
-        $ai = new MockAiService('{"terms": ["veggies", "produce", "greens"], "query_word_importance": {"vegetables": "content", "grilled": "incidental"}}');
-        $handler = $this->makeHandler(aiService: $ai);
-
-        $result = $handler->handleExpandQuery('grilled vegetables');
-
-        $this->assertTrue($result['ok']);
-        $this->assertEquals(
-            ['vegetables' => 'content', 'grilled' => 'incidental'],
-            $result['data']['query_word_importance']
-        );
-    }
-
-    public function testQueryWordImportanceLowercasesKeysAndLabels(): void
-    {
-        $ai = new MockAiService('{"terms": ["pasta", "noodles", "penne"], "query_word_importance": {"Pasta": "Content", "Recipe": "INCIDENTAL"}}');
-        $handler = $this->makeHandler(aiService: $ai);
-
-        $result = $handler->handleExpandQuery('Pasta Recipe');
-
-        $this->assertEquals(
-            ['pasta' => 'content', 'recipe' => 'incidental'],
-            $result['data']['query_word_importance']
-        );
-    }
-
-    public function testQueryWordImportanceAbsentWhenOmittedByLlm(): void
-    {
-        $ai = new MockAiService('{"terms": ["gem", "gemstone", "mineral"]}');
-        $handler = $this->makeHandler(aiService: $ai);
-
-        $result = $handler->handleExpandQuery('blue stones');
-
-        $this->assertTrue($result['ok']);
-        $this->assertArrayNotHasKey('query_word_importance', $result['data']);
-    }
-
-    public function testQueryWordImportanceIgnoredWhenNotAnObject(): void
-    {
-        $ai = new MockAiService('{"terms": ["gem", "rock"], "query_word_importance": "content"}');
-        $handler = $this->makeHandler(aiService: $ai);
-
-        $result = $handler->handleExpandQuery('blue stones');
-
-        $this->assertArrayNotHasKey('query_word_importance', $result['data']);
-    }
-
-    public function testQueryWordImportanceFiltersInvalidLabelsAndKeys(): void
-    {
-        // Keep only string keys with a valid "content"/"incidental" label.
-        $ai = new MockAiService('{"terms": ["gem", "rock"], "query_word_importance": {"vintage": "content", "jewelry": "important", "": "content", "shiny": 42}}');
-        $handler = $this->makeHandler(aiService: $ai);
-
-        $result = $handler->handleExpandQuery('vintage jewelry');
-
-        $this->assertEquals(['vintage' => 'content'], $result['data']['query_word_importance']);
-    }
-
-    public function testQueryWordImportanceAbsentWhenNoValidEntries(): void
-    {
-        $ai = new MockAiService('{"terms": ["gem", "rock"], "query_word_importance": {"foo": "maybe", "bar": "unknown"}}');
-        $handler = $this->makeHandler(aiService: $ai);
-
-        $result = $handler->handleExpandQuery('foo bar');
-
-        $this->assertArrayNotHasKey('query_word_importance', $result['data']);
-    }
-
-    public function testQueryWordImportanceSurvivesCacheRoundTrip(): void
-    {
-        $cache = new InMemoryCacheDriver();
-        $ai = new MockAiService('{"terms": ["veggies", "produce", "greens"], "query_word_importance": {"vegetables": "content", "grilled": "incidental"}}');
-        $handler = $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600);
-
-        $first = $handler->handleExpandQuery('grilled vegetables');
-        $this->assertEquals(['vegetables' => 'content', 'grilled' => 'incidental'], $first['data']['query_word_importance']);
-
-        // Second handler with a mock that would error if called — proves the cache served it.
-        $handler2 = $this->makeHandler(aiService: new MockAiService('should not be called'), cache: $cache, cacheTtl: 3600);
-        $second = $handler2->handleExpandQuery('grilled vegetables');
-        $this->assertEquals(['vegetables' => 'content', 'grilled' => 'incidental'], $second['data']['query_word_importance']);
-    }
-
-    public function testPromptContainsQueryWordImportanceInstruction(): void
-    {
-        $ai = new PromptCapturingAiService('{"terms": ["a", "b"]}');
-        $handler = $this->makeHandler(aiService: $ai);
-
-        $handler->handleExpandQuery('grilled vegetables');
-
-        $this->assertStringContainsString('QUERY WORD IMPORTANCE', $ai->lastSystemPrompt);
-        $this->assertStringContainsString('query_word_importance', $ai->lastSystemPrompt);
-        $this->assertStringContainsString('grilled vegetables', $ai->lastSystemPrompt);
     }
 
     // ===================================================================
