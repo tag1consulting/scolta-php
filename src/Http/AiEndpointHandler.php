@@ -106,7 +106,6 @@ class AiEndpointHandler
             $systemPrompt = $this->appendLanguageInstruction($systemPrompt, 'expand_query');
             $systemPrompt = $this->appendSortableFieldsInstruction($systemPrompt);
             $systemPrompt = $this->appendFilterFieldsInstruction($systemPrompt);
-            $systemPrompt = $this->appendQueryWordImportanceInstruction($systemPrompt);
 
             $response = $this->aiService->messageForOperation(
                 'expand_query',
@@ -132,10 +131,6 @@ class AiEndpointHandler
 
             if ($parsed['filter_hint'] !== null) {
                 $payload['filter_hint'] = $parsed['filter_hint'];
-            }
-
-            if ($parsed['query_word_importance'] !== null) {
-                $payload['query_word_importance'] = $parsed['query_word_importance'];
             }
 
             if ($this->cacheTtl > 0) {
@@ -372,14 +367,14 @@ class AiEndpointHandler
     }
 
     /**
-     * Parse an AI expansion response and extract terms, an optional sort hint, optional subject terms, an optional filter hint, and an optional per-query-word importance map.
+     * Parse an AI expansion response and extract terms, an optional sort hint, optional subject terms, and optional filter hint.
      *
-     * Returns ['terms' => string[], 'sort_hint' => array{field: string, direction: string}|null, 'subject_terms' => string[]|null, 'filter_hint' => array<string,string>|null, 'query_word_importance' => array<string,string>|null].
+     * Returns ['terms' => string[], 'sort_hint' => array{field: string, direction: string}|null, 'subject_terms' => string[]|null, 'filter_hint' => array<string,string>|null].
      * Parses defensively: malformed or absent fields are silently ignored.
      *
      * @param string $response      Raw AI response text.
      * @param string $originalQuery The original query (used as fallback for terms).
-     * @return array{terms: array, sort_hint: array{field: string, direction: string}|null, subject_terms: array|null, filter_hint: array<string,string>|null, query_word_importance: array<string,string>|null}
+     * @return array{terms: array, sort_hint: array{field: string, direction: string}|null, subject_terms: array|null, filter_hint: array<string,string>|null}
      */
     protected function parseExpansionResult(string $response, string $originalQuery): array
     {
@@ -390,23 +385,22 @@ class AiEndpointHandler
 
         $decoded = json_decode($cleaned, true);
 
-        // New object format: {"terms": [...], "sort": {...}, "subject_terms": [...], "filters": {...}, "query_word_importance": {...}}
+        // New object format: {"terms": [...], "sort": {...}, "subject_terms": [...], "filters": {...}}
         if (is_array($decoded) && isset($decoded['terms']) && is_array($decoded['terms'])) {
             $terms = count($decoded['terms']) >= 2 ? $decoded['terms'] : [$originalQuery];
             $sortHint = $this->extractSortHint($decoded['sort'] ?? null);
             $subjectTerms = $this->extractSubjectTerms($decoded['subject_terms'] ?? null);
             $filterHint = $this->extractFilterHint($decoded['filters'] ?? null);
-            $queryWordImportance = $this->extractQueryWordImportance($decoded['query_word_importance'] ?? null);
 
-            return ['terms' => $terms, 'sort_hint' => $sortHint, 'subject_terms' => $subjectTerms, 'filter_hint' => $filterHint, 'query_word_importance' => $queryWordImportance];
+            return ['terms' => $terms, 'sort_hint' => $sortHint, 'subject_terms' => $subjectTerms, 'filter_hint' => $filterHint];
         }
 
         // Legacy array format: ["term1", "term2", ...]
         if (is_array($decoded) && count($decoded) >= 2) {
-            return ['terms' => $decoded, 'sort_hint' => null, 'subject_terms' => null, 'filter_hint' => null, 'query_word_importance' => null];
+            return ['terms' => $decoded, 'sort_hint' => null, 'subject_terms' => null, 'filter_hint' => null];
         }
 
-        return ['terms' => [$originalQuery], 'sort_hint' => null, 'subject_terms' => null, 'filter_hint' => null, 'query_word_importance' => null];
+        return ['terms' => [$originalQuery], 'sort_hint' => null, 'subject_terms' => null, 'filter_hint' => null];
     }
 
     /**
@@ -427,48 +421,6 @@ class AiEndpointHandler
         $filtered = array_values(array_filter($raw, static fn ($v) => is_string($v) && $v !== ''));
 
         return !empty($filtered) ? $filtered : null;
-    }
-
-    /**
-     * Validate and normalise a raw query_word_importance map from the LLM response.
-     *
-     * Maps each significant word of the user's query to "content" (the thing being
-     * searched for) or "incidental" (generic framing/modifier words). The JS
-     * typed-word exemption (#156 follow-up) gates on this: only "content" words keep
-     * the exemption from the sub-word frequency guard, so an incidental typed word
-     * (e.g. "grilled" in "grilled vegetables") can no longer broaden results on its
-     * own. Returns null when the value is absent, malformed, or yields no usable
-     * entries — the JS side then falls back to the #162 all-content behaviour, so a
-     * bad LLM response never regresses recall.
-     *
-     * @param mixed $raw The raw "query_word_importance" value from the decoded JSON.
-     * @return array<string, string>|null Lowercased word => "content"|"incidental", or null.
-     *
-     * @since 1.0.2
-     * @stability experimental
-     */
-    private function extractQueryWordImportance(mixed $raw): ?array
-    {
-        if (!is_array($raw) || empty($raw)) {
-            return null;
-        }
-
-        $validated = [];
-        foreach ($raw as $word => $label) {
-            if (!is_string($word) || $word === '') {
-                continue;
-            }
-            if (!is_string($label)) {
-                continue;
-            }
-            $label = strtolower($label);
-            if ($label !== 'content' && $label !== 'incidental') {
-                continue;
-            }
-            $validated[strtolower($word)] = $label;
-        }
-
-        return !empty($validated) ? $validated : null;
     }
 
     /**
@@ -704,59 +656,6 @@ If no filter intent is detected, omit the "filters" key entirely.
 ENDFILTERINSTR;
 
         $prompt = str_replace('{FILTER_LIST}', $fieldList, $prompt);
-
-        return $prompt;
-    }
-
-    /**
-     * Append the per-query-word importance instruction to the expansion prompt.
-     *
-     * Asks the LLM to label each significant word of the user's query as
-     * "content" (the thing being searched for) or "incidental" (generic framing /
-     * modifier words that should not broaden results on their own). The browser
-     * gates the #156 typed-word exemption on this: incidental typed words fall
-     * back to the sub-word frequency guard, so an off-topic modifier riding in on
-     * an expansion term (e.g. "grilled" in "grilled vegetables") can no longer
-     * flood results. The conservative "when unsure, content" default and the
-     * cross-domain few-shot are the recall guard — they keep legitimate subject
-     * words (textures, compound names, technical terms) exempt across all corpora.
-     *
-     * Appended by the handler (not baked into DefaultPrompts) so it also applies
-     * to sites with a custom expand prompt, mirroring the sort/filter instructions.
-     * The classification is additive and optional: a missing or malformed map makes
-     * the browser fall back to the pre-classification all-content behaviour.
-     *
-     * @param string $prompt The resolved, enriched system prompt.
-     * @return string The prompt with the importance instruction appended.
-     *
-     * @since 1.0.2
-     * @stability experimental
-     */
-    private function appendQueryWordImportanceInstruction(string $prompt): string
-    {
-        $prompt .= <<<'ENDIMPORTANCEINSTR'
-
-
-QUERY WORD IMPORTANCE (optional):
-For each significant word in the user's ORIGINAL query (not the expansion terms), add an optional "query_word_importance" object mapping that lowercased word to "content" or "incidental":
-- "content" — the thing being searched for: head nouns, key concepts, named entities, constraints, and attribute words that are themselves the subject (e.g. a texture, color, or quality the user is looking for).
-- "incidental" — generic framing words that should NOT broaden results on their own: "recipe", "guide", "info", "tips", "how to", "recommendations", and modifiers that merely qualify the real subject rather than being it.
-When unsure, label the word "content" — a conservative default protects recall. Only classify words from the user's actual query. Skip this object entirely for single-word queries: the lone word is always the subject.
-
-Format: {"terms": [...], "query_word_importance": {"<word>": "content|incidental"}}
-
-Examples (across domains):
-- "grilled vegetables" → {"vegetables": "content", "grilled": "incidental"}
-- "crispy soft" → {"crispy": "content", "soft": "content"}
-- "pasta recipe" → {"pasta": "content", "recipe": "incidental"}
-- "slow cooker" → {"slow": "content", "cooker": "content"}
-- "merge conflicts" → {"merge": "content", "conflicts": "content"}
-- "data protection" → {"data": "content", "protection": "content"}
-- "bone density loss" → {"bone": "content", "density": "content", "loss": "content"}
-- "vintage jewelry" → {"vintage": "content", "jewelry": "content"}
-- "music recommendations" → {"music": "content", "recommendations": "incidental"}
-- "quick breakfast" → {"breakfast": "content", "quick": "incidental"}
-ENDIMPORTANCEINSTR;
 
         return $prompt;
     }
