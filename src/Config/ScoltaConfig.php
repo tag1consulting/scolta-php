@@ -48,19 +48,6 @@ class ScoltaConfig
     public float $exactTitleMatchBoost = 5.0;
     public float $contentMatchBoost = 0.4;
 
-    /**
-     * Weight applied to a query word's title/content match contribution when the
-     * expansion endpoint labels it "incidental" (generic framing/modifiers like
-     * "grilled" in "grilled vegetables"). "content" words and any word absent
-     * from the per-query-word importance map keep weight 1.0. Default 0.3
-     * down-weights incidental-word matches so a result matching only an incidental
-     * query word ranks below one matching the content word (re-ranking, not
-     * filtering — result counts are unchanged). Gated by aiQueryWordImportance:
-     * when that flag is off, the importance map is not sent to the scorer, so this
-     * weight has no effect. 1.0 reproduces equal weighting. Range 0.0–1.0.
-     */
-    public float $incidentalMatchWeight = 0.3;
-
     // -- Scoring: Phrase proximity --
     public float $phraseAdjacentMultiplier = 2.5;
     public float $phraseNearMultiplier = 1.5;
@@ -364,7 +351,6 @@ class ScoltaConfig
             'TITLE_ALL_TERMS_MULTIPLIER' => $this->titleAllTermsMultiplier,
             'EXACT_TITLE_MATCH_BOOST' => $this->exactTitleMatchBoost,
             'CONTENT_MATCH_BOOST' => $this->contentMatchBoost,
-            'INCIDENTAL_MATCH_WEIGHT' => $this->incidentalMatchWeight,
             'PHRASE_ADJACENT_MULTIPLIER' => $this->phraseAdjacentMultiplier,
             'PHRASE_NEAR_MULTIPLIER' => $this->phraseNearMultiplier,
             'PHRASE_NEAR_WINDOW' => $this->phraseNearWindow,

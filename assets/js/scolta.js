@@ -462,63 +462,38 @@
     } catch { return 0; }
   }
 
-  // Per-query-word importance weighting (issue #163 follow-up). Mirrors the Rust
-  // scorer: each query word's match contribution is scaled by its weight —
-  // "content" words and any word absent from the `importance` map weigh 1.0;
-  // "incidental" words use INCIDENTAL_MATCH_WEIGHT. `importance` is the
-  // {word: "content"|"incidental"} map keyed on the primary query's words (or a
-  // falsy value to disable weighting). The denominator stays the raw term count
-  // so an incidental-only match earns a fraction of a content-word match. The
-  // all-terms multiplier keys on content words only. An absent map (or
-  // AI_QUERY_WORD_IMPORTANCE off) makes every weight 1.0 — byte-identical to the
-  // pre-importance formula.
-  function titleMatchScoreFallback(title, query, importance) {
+  function titleMatchScoreFallback(title, query) {
     const CONFIG = getInstanceConfig();
     if (!title || !query) return 0;
     const titleLower = title.toLowerCase();
     const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
     if (terms.length === 0) return 0;
-    const useImportance = !!importance && CONFIG.AI_QUERY_WORD_IMPORTANCE !== false;
-    let matchedWeight = 0;
-    let contentTotal = 0;
-    let contentMatched = 0;
+    let matchCount = 0;
     for (const term of terms) {
-      const label = useImportance ? importance[term] : null;
-      const w = (typeof label === 'string' && label.toLowerCase() === 'incidental')
-        ? CONFIG.INCIDENTAL_MATCH_WEIGHT : 1.0;
-      const isContent = w >= 1.0;
-      if (isContent) contentTotal++;
       const regex = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, "i");
-      if (regex.test(titleLower)) {
-        matchedWeight += w;
-        if (isContent) contentMatched++;
-      }
+      if (regex.test(titleLower)) matchCount++;
     }
-    if (matchedWeight === 0) return 0;
+    if (matchCount === 0) return 0;
     let boost = CONFIG.TITLE_MATCH_BOOST;
-    if (contentTotal > 0 && contentMatched === contentTotal && terms.length > 1) {
+    if (matchCount === terms.length && terms.length > 1) {
       boost *= CONFIG.TITLE_ALL_TERMS_MULTIPLIER;
     }
-    return boost * (matchedWeight / terms.length);
+    return boost * (matchCount / terms.length);
   }
 
-  function contentMatchScoreFallback(excerpt, query, importance) {
+  function contentMatchScoreFallback(excerpt, query) {
     const CONFIG = getInstanceConfig();
     if (!excerpt || !query) return 0;
     const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
     if (terms.length === 0) return 0;
     const excerptLower = excerpt.toLowerCase();
-    const useImportance = !!importance && CONFIG.AI_QUERY_WORD_IMPORTANCE !== false;
-    let matchedWeight = 0;
+    let matchCount = 0;
     for (const term of terms) {
-      const label = useImportance ? importance[term] : null;
-      const w = (typeof label === 'string' && label.toLowerCase() === 'incidental')
-        ? CONFIG.INCIDENTAL_MATCH_WEIGHT : 1.0;
       const regex = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, "i");
-      if (regex.test(excerptLower)) matchedWeight += w;
+      if (regex.test(excerptLower)) matchCount++;
     }
-    if (matchedWeight === 0) return 0;
-    return CONFIG.CONTENT_MATCH_BOOST * (matchedWeight / terms.length);
+    if (matchCount === 0) return 0;
+    return CONFIG.CONTENT_MATCH_BOOST * (matchCount / terms.length);
   }
 
   // --- AI features ---
@@ -1163,21 +1138,8 @@
   }
 
   // Score a set of loaded results against a query.
-  function scoreResults(loaded, query, sourceWeight, primaryQuery, queryWordImportance) {
+  function scoreResults(loaded, query, sourceWeight, primaryQuery) {
     const CONFIG = getInstanceConfig();
-    // Per-query-word importance down-weights matches on "incidental" query words
-    // (issue #163 follow-up). The map keys on the primary query's words, so it
-    // bites on the primary-query scoring pass and is a no-op for expansion-term
-    // passes whose words aren't in the map. Gated by AI_QUERY_WORD_IMPORTANCE:
-    // when off, the map is omitted, so the scorer falls back to equal weighting.
-    const importance =
-      CONFIG.AI_QUERY_WORD_IMPORTANCE !== false &&
-      queryWordImportance &&
-      typeof queryWordImportance === 'object' &&
-      !Array.isArray(queryWordImportance) &&
-      Object.keys(queryWordImportance).length > 0
-        ? queryWordImportance
-        : null;
     let scored;
     if (scoltaWasm) {
       // WASM scoring — canonical Rust implementation
@@ -1205,7 +1167,6 @@
         results: results,
         config: wasmConfig,
         primary_query: primaryQuery || undefined,
-        query_word_importance: importance || undefined,
       });
       try {
         const output = scoltaWasm.score_results(input);
@@ -1226,8 +1187,8 @@
       scored = loaded.map((data, i) => {
         const pagefindScore = count > 1 ? 1 - (i / (count - 1)) : 1;
         const recency = recencyScoreFallback(data.meta?.date);
-        const titleBoost = titleMatchScoreFallback(data.meta?.title, query, importance);
-        const contentBoost = contentMatchScoreFallback(data.excerpt, query, importance);
+        const titleBoost = titleMatchScoreFallback(data.meta?.title, query);
+        const contentBoost = contentMatchScoreFallback(data.excerpt, query);
         const finalScore = (pagefindScore + recency + titleBoost + contentBoost) * sourceWeight;
         return { data, score: finalScore };
       });
@@ -1429,7 +1390,7 @@
     return scoreResults(loaded, query, weight);
   }
 
-  async function searchAndLoadParallel(queries, filters, originalQuery, queryWordImportance) {
+  async function searchAndLoadParallel(queries, filters, originalQuery) {
     const CONFIG = getInstanceConfig();
     if (queries.length === 0) return [];
 
@@ -1460,8 +1421,8 @@
     for (const [term, items] of byTerm) {
       const weight = items[0].weight;
       const loaded = items.map(i => i.data);
-      const scoredVsTerm = scoreResults(loaded, term, weight, originalQuery, queryWordImportance);
-      const scoredVsOriginal = scoreResults(loaded, originalQuery, weight * 0.5, undefined, queryWordImportance);
+      const scoredVsTerm = scoreResults(loaded, term, weight, originalQuery);
+      const scoredVsOriginal = scoreResults(loaded, originalQuery, weight * 0.5);
 
       const BONUS = getInstanceConfig().CROSS_LIST_BONUS;
       const best = scoredVsTerm.map((r, idx) => ({
@@ -1717,7 +1678,7 @@
         }
       }
 
-      const expandedResults = await searchAndLoadParallel(queries, activeFilters, searchQuery, queryWordImportance);
+      const expandedResults = await searchAndLoadParallel(queries, activeFilters, searchQuery);
 
       if (version !== searchVersion) {
         debugLog('[scolta:expand] Discarding stale expansion after load (version', version, 'vs current', searchVersion, ')');

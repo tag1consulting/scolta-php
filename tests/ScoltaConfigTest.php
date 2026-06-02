@@ -35,7 +35,6 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals(1.5, $config->titleAllTermsMultiplier);
         $this->assertEquals(5.0, $config->exactTitleMatchBoost);
         $this->assertEquals(0.4, $config->contentMatchBoost);
-        $this->assertEquals(0.3, $config->incidentalMatchWeight);
         $this->assertEquals(0.5, $config->expandPrimaryWeight);
         $this->assertEquals(0.05, $config->crossListBonus);
         $this->assertEquals(0.05, $config->expandSubwordMaxFrequency);
@@ -87,7 +86,6 @@ class ScoltaConfigTest extends TestCase
             'title_all_terms_multiplier' => 3.0,
             'exact_title_match_boost' => 8.0,
             'content_match_boost' => 0.8,
-            'incidental_match_weight' => 0.5,
             'recency_boost_max' => 1.0,
             'recency_half_life_days' => 180,
             'recency_penalty_after_days' => 730,
@@ -99,7 +97,6 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals(3.0, $config->titleAllTermsMultiplier);
         $this->assertEquals(8.0, $config->exactTitleMatchBoost);
         $this->assertEquals(0.8, $config->contentMatchBoost);
-        $this->assertEquals(0.5, $config->incidentalMatchWeight);
         $this->assertEquals(1.0, $config->recencyBoostMax);
         $this->assertEquals(180, $config->recencyHalfLifeDays);
         $this->assertEquals(730, $config->recencyPenaltyAfterDays);
@@ -421,7 +418,7 @@ class ScoltaConfigTest extends TestCase
             'RECENCY_BOOST_MAX', 'RECENCY_HALF_LIFE_DAYS', 'RECENCY_PENALTY_AFTER_DAYS',
             'RECENCY_MAX_PENALTY', 'TITLE_MATCH_BOOST', 'TITLE_ALL_TERMS_MULTIPLIER',
             'EXACT_TITLE_MATCH_BOOST',
-            'CONTENT_MATCH_BOOST', 'INCIDENTAL_MATCH_WEIGHT', 'PHRASE_ADJACENT_MULTIPLIER', 'PHRASE_NEAR_MULTIPLIER',
+            'CONTENT_MATCH_BOOST', 'PHRASE_ADJACENT_MULTIPLIER', 'PHRASE_NEAR_MULTIPLIER',
             'PHRASE_NEAR_WINDOW', 'PHRASE_WINDOW', 'EXCERPT_LENGTH', 'RESULTS_PER_PAGE',
             'MAX_PAGEFIND_RESULTS', 'AI_EXPAND_QUERY', 'AI_SUMMARIZE', 'AI_SUMMARY_TOP_N',
             'AI_SUMMARY_MAX_CHARS', 'EXPAND_PRIMARY_WEIGHT', 'CROSS_LIST_BONUS', 'EXPAND_SUBWORD_MAX_FREQ',
@@ -434,7 +431,7 @@ class ScoltaConfigTest extends TestCase
             $this->assertArrayHasKey($key, $js, "Missing key: {$key}");
         }
 
-        $this->assertCount(32, $js, 'Expected exactly 32 keys in toJsScoringConfig()');
+        $this->assertCount(31, $js, 'Expected exactly 31 keys in toJsScoringConfig()');
     }
 
     public function testToJsScoringConfigValuesMatchConfig(): void
@@ -466,15 +463,6 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals(1500, $js['AI_SUMMARY_MAX_CHARS']);
         $this->assertEquals(5, $js['AI_MAX_FOLLOWUPS']);
         $this->assertEquals(0.6, $js['EXPAND_PRIMARY_WEIGHT']);
-    }
-
-    public function testToJsScoringConfigIncidentalMatchWeight(): void
-    {
-        $default = (new ScoltaConfig())->toJsScoringConfig();
-        $this->assertEquals(0.3, $default['INCIDENTAL_MATCH_WEIGHT']);
-
-        $config = ScoltaConfig::fromArray(['incidental_match_weight' => 0.5]);
-        $this->assertEquals(0.5, $config->toJsScoringConfig()['INCIDENTAL_MATCH_WEIGHT']);
     }
 
     public function testToJsScoringConfigPhraseProximityFields(): void
