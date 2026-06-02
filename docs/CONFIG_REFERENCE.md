@@ -54,6 +54,7 @@ All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Platfo
 | `titleAllTermsMultiplier` | float | `1.5` | Multiplier when all search terms appear in title |
 | `exactTitleMatchBoost` | float | `5.0` | Multiplicative boost when the result's title exactly matches the query (case-insensitive). Applied after all other scoring so an article titled "DNA" always ranks #1 for the search "DNA" regardless of BM25 scores. Set to 1.0 to disable. |
 | `contentMatchBoost` | float | `0.4` | Boost for content/excerpt keyword matches |
+| `incidentalMatchWeight` | float | `0.3` | Weight applied to a query word's title/content match contribution when the expansion endpoint labels it `incidental` (generic framing/modifiers like `grilled` in `grilled vegetables`). `content` words and any word absent from the per-query-word importance map keep weight `1.0`, so a result matching only an incidental query word ranks below one matching the content word. This is a re-ranking knob — result counts are unchanged. Gated by `aiQueryWordImportance`: when that flag is off the importance map is not sent to the scorer, so this weight has no effect. `1.0` reproduces equal weighting. Range `0.0–1.0`. |
 
 ### Scoring: Phrase Proximity
 
