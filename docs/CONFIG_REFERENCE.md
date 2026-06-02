@@ -111,6 +111,7 @@ factor before being added to the final score; the title boost is unaffected.
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `aiExpandQuery` | bool | `true` | Enable AI query expansion |
+| `aiQueryWordImportance` | bool | `true` | Gate the sub-word typed-word exemption on the expansion endpoint's per-query-word importance classification. When `true`, a typed query word keeps its exemption from `expandSubwordMaxFrequency` only if the LLM labels it `content`; words labeled `incidental` (generic framing/modifiers like `recipe` or `grilled`) fall back to the frequency check so they cannot broaden results on their own. Set to `false` to exempt every typed word (exact pre-classification behavior). Browser-side only; absent/empty classifications fall back to the all-content behavior regardless of this flag. |
 | `aiSummarize` | bool | `true` | Enable AI result summarization |
 | `aiSummaryTopN` | int | `10` | Number of top results sent to AI for summarization |
 | `aiSummaryMaxChars` | int | `4000` | Maximum characters of content sent to AI for summarization |
@@ -241,6 +242,7 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 | ScoltaConfig Property | Drupal | Laravel | WordPress |
 |----------------------|--------|---------|-----------|
 | `aiExpandQuery` | `ai_expand_query` | `ai_expand_query` / `SCOLTA_AI_EXPAND` | `ai_expand_query` |
+| `aiQueryWordImportance` | `ai_query_word_importance` | `ai_query_word_importance` | `ai_query_word_importance` |
 | `aiSummarize` | `ai_summarize` | `ai_summarize` / `SCOLTA_AI_SUMMARIZE` | `ai_summarize` |
 | `aiSummaryTopN` | `ai_summary_top_n` | `ai_summary_top_n` | `ai_summary_top_n` |
 | `aiSummaryMaxChars` | `ai_summary_max_chars` | `ai_summary_max_chars` | `ai_summary_max_chars` |

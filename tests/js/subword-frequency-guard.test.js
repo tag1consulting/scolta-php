@@ -192,7 +192,7 @@ describe('sub-word frequency guard (relevance path)', () => {
 // is NOT a query token stays frequency-blocked.
 // ---------------------------------------------------------------------------
 
-function createWindowEx({ subwordMaxFreq, denylist, expansionTerms, loadedQueries }) {
+function createWindowEx({ subwordMaxFreq, denylist, expansionTerms, loadedQueries, importance, importanceFlag }) {
     const dom = new JSDOM(
         `<!DOCTYPE html><html><body><div id="scolta-search"></div></body></html>`,
         { url: 'https://example.com', runScripts: 'dangerously' }
@@ -216,9 +216,11 @@ function createWindowEx({ subwordMaxFreq, denylist, expansionTerms, loadedQuerie
             });
         }
         if (u === '/e') {
+            const body = { terms: expansionTerms };
+            if (importance !== undefined) body.query_word_importance = importance;
             return Promise.resolve({
                 ok: true, status: 200,
-                json: () => Promise.resolve({ terms: expansionTerms }),
+                json: () => Promise.resolve(body),
                 text: () => Promise.resolve('{}'),
             });
         }
@@ -235,13 +237,16 @@ function createWindowEx({ subwordMaxFreq, denylist, expansionTerms, loadedQuerie
 
     window.eval(patchedSource);
 
+    const scoring = {
+        EXPAND_SUBWORD_MAX_FREQ: subwordMaxFreq,
+        EXPAND_SUBWORD_DENYLIST: denylist || [],
+        AI_EXPAND_QUERY: true,
+        AI_SUMMARIZE: false,
+    };
+    if (importanceFlag !== undefined) scoring.AI_QUERY_WORD_IMPORTANCE = importanceFlag;
+
     window.scolta = {
-        scoring: {
-            EXPAND_SUBWORD_MAX_FREQ: subwordMaxFreq,
-            EXPAND_SUBWORD_DENYLIST: denylist || [],
-            AI_EXPAND_QUERY: true,
-            AI_SUMMARIZE: false,
-        },
+        scoring,
         endpoints: { expand: '/e', summarize: '/s', followup: '/f' },
         pagefindPath: '/pf.js',
         wasmPath: '/wasm.js',
@@ -252,9 +257,9 @@ function createWindowEx({ subwordMaxFreq, denylist, expansionTerms, loadedQuerie
     return window;
 }
 
-async function runSearchEx({ subwordMaxFreq, query, denylist, expansionTerms }) {
+async function runSearchEx({ subwordMaxFreq, query, denylist, expansionTerms, importance, importanceFlag }) {
     const loadedQueries = [];
-    const window = createWindowEx({ subwordMaxFreq, denylist, expansionTerms, loadedQueries });
+    const window = createWindowEx({ subwordMaxFreq, denylist, expansionTerms, loadedQueries, importance, importanceFlag });
     for (let i = 0; i < 10; i++) await tick(0);
     const input = window.document.querySelector('#scolta-query');
     input.value = query;
@@ -285,6 +290,66 @@ describe('query-term exemption + guard denylist (Fix A+D)', () => {
     test('a high-frequency non-query sub-word stays frequency-blocked', async () => {
         const loaded = await runSearchEx({ ...OPTS });
         // 'dishes' is expansion-derived, not typed => still blocked (28% > 10%).
+        expect(loaded.has('dishes')).toBe(false);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Semantic typed-word gate (#156 follow-up): the exemption now requires the
+// query word to be classified "content" by the expansion endpoint. A typed
+// word labeled "incidental" (a generic modifier riding in via an expansion
+// term) falls back to the frequency guard; "content" words keep the exemption.
+// Absent classification or a disabled flag reproduces the all-content behavior.
+// ---------------------------------------------------------------------------
+
+describe('query-word-importance gate', () => {
+    // 'spicy' (20%) is above the 0.10 threshold and is a typed token. Whether it
+    // survives now depends on its content/incidental label.
+    const OPTS = { subwordMaxFreq: 0.10, query: 'spicy thai', expansionTerms: ['spicy dishes'] };
+
+    test('a content-labeled typed word keeps the exemption', async () => {
+        const loaded = await runSearchEx({
+            ...OPTS,
+            importance: { spicy: 'content', thai: 'content' },
+        });
+        expect(loaded.has('spicy')).toBe(true);
+    });
+
+    test('an incidental-labeled typed word is NOT exempted (falls back to frequency guard)', async () => {
+        const loaded = await runSearchEx({
+            ...OPTS,
+            importance: { spicy: 'incidental', thai: 'content' },
+        });
+        // 'spicy' is typed but incidental => frequency-blocked (20% > 10%).
+        expect(loaded.has('spicy')).toBe(false);
+    });
+
+    test('an empty importance map falls back to all-content (#162 behavior)', async () => {
+        const loaded = await runSearchEx({ ...OPTS, importance: {} });
+        expect(loaded.has('spicy')).toBe(true);
+    });
+
+    test('an absent importance map falls back to all-content (#162 behavior)', async () => {
+        const loaded = await runSearchEx({ ...OPTS });
+        expect(loaded.has('spicy')).toBe(true);
+    });
+
+    test('AI_QUERY_WORD_IMPORTANCE=false ignores the map and exempts all typed words', async () => {
+        const loaded = await runSearchEx({
+            ...OPTS,
+            importance: { spicy: 'incidental', thai: 'content' },
+            importanceFlag: false,
+        });
+        // Flag disabled => classification ignored => typed word exempted again.
+        expect(loaded.has('spicy')).toBe(true);
+    });
+
+    test('a non-typed sub-word stays frequency-blocked regardless of labels', async () => {
+        const loaded = await runSearchEx({
+            ...OPTS,
+            importance: { spicy: 'content', thai: 'content' },
+        });
+        // 'dishes' is expansion-derived, not typed, not in the map => blocked.
         expect(loaded.has('dishes')).toBe(false);
     });
 });

@@ -75,6 +75,7 @@
       CROSS_LIST_BONUS: s.CROSS_LIST_BONUS ?? 0.05,
       EXPAND_SUBWORD_MAX_FREQ: s.EXPAND_SUBWORD_MAX_FREQ ?? 0.05,
       EXPAND_SUBWORD_DENYLIST: s.EXPAND_SUBWORD_DENYLIST ?? [],
+      AI_QUERY_WORD_IMPORTANCE: s.AI_QUERY_WORD_IMPORTANCE ?? true,
       AI_MAX_FOLLOWUPS: s.AI_MAX_FOLLOWUPS ?? 3,
       AI_LANGUAGES: s.AI_LANGUAGES ?? ['en'],
       LANGUAGE: s.LANGUAGE ?? 'en',
@@ -294,6 +295,7 @@
       CROSS_LIST_BONUS: s.CROSS_LIST_BONUS ?? 0.05,
       EXPAND_SUBWORD_MAX_FREQ: s.EXPAND_SUBWORD_MAX_FREQ ?? 0.05,
       EXPAND_SUBWORD_DENYLIST: s.EXPAND_SUBWORD_DENYLIST ?? [],
+      AI_QUERY_WORD_IMPORTANCE: s.AI_QUERY_WORD_IMPORTANCE ?? true,
       AI_MAX_FOLLOWUPS: s.AI_MAX_FOLLOWUPS ?? 3,
       AI_LANGUAGES: s.AI_LANGUAGES ?? ['en'],
       AUTO_LANGUAGE_FILTER: s.AUTO_LANGUAGE_FILTER ?? false,
@@ -516,7 +518,7 @@
       const data = await resp.json();
       debugLog("[scolta:expand] response:", data);
       if (Array.isArray(data)) {
-        return { terms: data, sort_hint: null, subject_terms: null, filter_hint: null };
+        return { terms: data, sort_hint: null, subject_terms: null, filter_hint: null, query_word_importance: null };
       }
       const terms = Array.isArray(data?.terms) ? data.terms : null;
       if (!terms) return null;
@@ -528,7 +530,10 @@
       const fh = data.filter_hint;
       const filter_hint = (fh && typeof fh === 'object' && !Array.isArray(fh))
         ? fh : null;
-      return { terms, sort_hint, subject_terms, filter_hint };
+      const qwi = data.query_word_importance;
+      const query_word_importance = (qwi && typeof qwi === 'object' && !Array.isArray(qwi))
+        ? qwi : null;
+      return { terms, sort_hint, subject_terms, filter_hint, query_word_importance };
     } catch (e) {
       if (e.name === 'AbortError') return null;
       if (e instanceof TypeError) return null;
@@ -1430,7 +1435,7 @@
     return results;
   }
 
-  async function mergeExpandedSearchResults(expandedTerms, originalQuery, searchQuery, preserveFilters, version, sortOverride, subjectTerms) {
+  async function mergeExpandedSearchResults(expandedTerms, originalQuery, searchQuery, preserveFilters, version, sortOverride, subjectTerms, queryWordImportance) {
     const CONFIG = getInstanceConfig();
     const validTerms = expandedTerms
       ? expandedTerms.filter(t => t.toLowerCase() !== originalQuery.toLowerCase())
@@ -1471,6 +1476,28 @@
     const subwordDenylist = new Set(
       (CONFIG.EXPAND_SUBWORD_DENYLIST || []).map(w => String(w).toLowerCase())
     );
+    // Semantic refinement of Fix A (#156 follow-up): the typed-word exemption is
+    // correct for content-bearing words ("soft" in "crispy soft") but wrong for
+    // incidental ones ("grilled" in "grilled vegetables") that leak in via an
+    // expansion term and broaden results off-topic. Frequency can't separate
+    // these — the desired word can be MORE common than the flood word — so gate
+    // the exemption on the LLM's per-query-word "content"/"incidental" labels.
+    // contentWords === null means "no usable classification" (map absent/empty,
+    // or AI_QUERY_WORD_IMPORTANCE disabled): fall back to treating every query
+    // token as content, i.e. exact pre-classification behavior — no regression.
+    const importanceEnabled = CONFIG.AI_QUERY_WORD_IMPORTANCE !== false;
+    let contentWords = null;
+    if (importanceEnabled && queryWordImportance && typeof queryWordImportance === 'object') {
+      const labeled = Object.entries(queryWordImportance)
+        .filter(([, label]) => typeof label === 'string');
+      if (labeled.length > 0) {
+        contentWords = new Set(
+          labeled
+            .filter(([, label]) => label.toLowerCase() === 'content')
+            .map(([word]) => String(word).toLowerCase())
+        );
+      }
+    }
     const subwordFreqCache = new Map();
     let subwordCorpusTotal = null;
     async function subwordAllowed(word) {
@@ -1479,7 +1506,12 @@
       if (subwordMaxFreq >= 1) return true;    // pre-v1.0.0 behavior: all sub-words
       // Fix A: a sub-word the user literally typed is wanted by definition —
       // bypass the frequency check. Fix D: unless it's on the guard denylist.
-      if (queryTokens.has(word) && !subwordDenylist.has(word)) return true;
+      // Semantic gate: only content-bearing typed words keep the exemption;
+      // incidental ones (contentWords non-null and missing this word) fall through
+      // to the frequency check. contentWords === null preserves the all-content
+      // fallback (no classification / feature disabled).
+      const isContentWord = contentWords === null || contentWords.has(word);
+      if (queryTokens.has(word) && isContentWord && !subwordDenylist.has(word)) return true;
       if (subwordFreqCache.has(word)) return subwordFreqCache.get(word);
       let allowed = false;
       try {
@@ -1802,11 +1834,12 @@
     // the same ranking the user sees (expanded terms promote more relevant results).
     expandPromise.then(async expansion => {
       expansionInFlight = false;
-      // expansion is { terms, sort_hint, subject_terms, filter_hint } or null (or a plain array for legacy cache hits).
+      // expansion is { terms, sort_hint, subject_terms, filter_hint, query_word_importance } or null (or a plain array for legacy cache hits).
       const expandedTerms = Array.isArray(expansion) ? expansion : (expansion?.terms ?? null);
       const sortHint = Array.isArray(expansion) ? null : (expansion?.sort_hint ?? null);
       const subjectTerms = Array.isArray(expansion) ? null : (Array.isArray(expansion?.subject_terms) ? expansion.subject_terms : null);
       const filterHint = Array.isArray(expansion) ? null : (expansion?.filter_hint ?? null);
+      const queryWordImportance = Array.isArray(expansion) ? null : (expansion?.query_word_importance ?? null);
 
       if (!preserveFilters) {
         lastExpandedTerms = expansion;
@@ -1835,7 +1868,7 @@
         }
       }
       renderExpandedTerms(expandedTerms, query);
-      await mergeExpandedSearchResults(expandedTerms, query, searchQuery, preserveFilters, version, currentSortOverride, subjectTerms);
+      await mergeExpandedSearchResults(expandedTerms, query, searchQuery, preserveFilters, version, currentSortOverride, subjectTerms, queryWordImportance);
 
       if (version !== searchVersion) return;
 

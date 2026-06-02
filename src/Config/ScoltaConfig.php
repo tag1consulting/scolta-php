@@ -103,6 +103,19 @@ class ScoltaConfig
     // -- AI feature toggles --
     public bool $aiExpandQuery = true;
     public bool $aiSummarize = true;
+
+    /**
+     * Gate the sub-word query-term exemption on the LLM's per-query-word importance
+     * classification (#156 follow-up). When true (default), a typed query word keeps
+     * its exemption from the sub-word frequency guard only if the expansion endpoint
+     * labels it "content"; words labeled "incidental" (generic framing/modifiers like
+     * "recipe" or "grilled") fall back to the frequency check so they cannot broaden
+     * results on their own. When false, every typed word is exempted (exact #162
+     * behavior), letting ops disable just this refinement without turning off
+     * expansion. Browser-side only; absent/empty classifications fall back to the
+     * all-content #162 behavior regardless of this flag.
+     */
+    public bool $aiQueryWordImportance = true;
     public int $aiSummaryTopN = 10;
     public int $aiSummaryMaxChars = 4000;
     public int $aiSummaryMaxTokens = 512;
@@ -353,6 +366,7 @@ class ScoltaConfig
             'CROSS_LIST_BONUS' => $this->crossListBonus,
             'EXPAND_SUBWORD_MAX_FREQ' => $this->expandSubwordMaxFrequency,
             'EXPAND_SUBWORD_DENYLIST' => $this->expandSubwordDenyList,
+            'AI_QUERY_WORD_IMPORTANCE' => $this->aiQueryWordImportance,
             'AI_MAX_FOLLOWUPS' => $this->maxFollowUps,
             'AI_LANGUAGES' => $this->aiLanguages,
             'AUTO_LANGUAGE_FILTER' => $this->autoLanguageFilter,
