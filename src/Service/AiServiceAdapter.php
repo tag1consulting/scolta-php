@@ -56,12 +56,17 @@ class AiServiceAdapter
      */
     public function message(string $systemPrompt, string $userMessage, int $maxTokens = 512): string
     {
-        $result = $this->tryFrameworkAi($systemPrompt, $userMessage, $maxTokens);
-        if ($result !== null) {
-            return $result;
-        }
+        try {
+            $result = $this->tryFrameworkAi($systemPrompt, $userMessage, $maxTokens);
+            if ($result !== null) {
+                return $result;
+            }
 
-        return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens);
+            return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens);
+        } catch (\RuntimeException $e) {
+            $this->handlePossibleBudgetException($e);
+            throw $e;
+        }
     }
 
     /**
@@ -78,12 +83,17 @@ class AiServiceAdapter
      */
     public function conversation(string $systemPrompt, array $messages, int $maxTokens = 512): string
     {
-        $result = $this->tryFrameworkConversation($systemPrompt, $messages, $maxTokens);
-        if ($result !== null) {
-            return $result;
-        }
+        try {
+            $result = $this->tryFrameworkConversation($systemPrompt, $messages, $maxTokens);
+            if ($result !== null) {
+                return $result;
+            }
 
-        return $this->getClient()->conversation($systemPrompt, $messages, $maxTokens);
+            return $this->getClient()->conversation($systemPrompt, $messages, $maxTokens);
+        } catch (\RuntimeException $e) {
+            $this->handlePossibleBudgetException($e);
+            throw $e;
+        }
     }
 
     /**
@@ -105,16 +115,21 @@ class AiServiceAdapter
      */
     public function messageForOperation(string $operation, string $systemPrompt, string $userMessage, int $maxTokens = 512): string
     {
-        $result = $this->tryFrameworkAi($systemPrompt, $userMessage, $maxTokens);
-        if ($result !== null) {
-            return $result;
+        try {
+            $result = $this->tryFrameworkAi($systemPrompt, $userMessage, $maxTokens);
+            if ($result !== null) {
+                return $result;
+            }
+
+            $model = ($operation === 'expand_query' && $this->config->aiExpansionModel !== '')
+                ? $this->config->aiExpansionModel
+                : null;
+
+            return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens, $model);
+        } catch (\RuntimeException $e) {
+            $this->handlePossibleBudgetException($e);
+            throw $e;
         }
-
-        $model = ($operation === 'expand_query' && $this->config->aiExpansionModel !== '')
-            ? $this->config->aiExpansionModel
-            : null;
-
-        return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens, $model);
     }
 
     /**
@@ -216,5 +231,24 @@ class AiServiceAdapter
     protected function tryFrameworkConversation(string $systemPrompt, array $messages, int $maxTokens): ?string
     {
         return null;
+    }
+
+    /**
+     * Hook invoked when an AI call throws a RuntimeException.
+     *
+     * No-op by default. Platform adapters override this to convert or notify
+     * on budget-exhaustion errors before the original exception propagates.
+     * The base message(), conversation(), and messageForOperation() methods
+     * call this from a catch block, then re-throw the original exception.
+     *
+     * @param \RuntimeException $e The exception thrown by the AI call.
+     *
+     * @since 1.0.3
+     * @stability experimental
+     */
+    protected function handlePossibleBudgetException(\RuntimeException $e): void
+    {
+        // No-op by default. Platform adapters override to convert/notify on
+        // budget-exhaustion errors before the exception propagates.
     }
 }
