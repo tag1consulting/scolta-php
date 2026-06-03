@@ -46,7 +46,7 @@ class ScoltaConfigTest extends TestCase
         $this->assertTrue($config->aiSummarize);
         $this->assertEquals(10, $config->aiSummaryTopN);
         $this->assertEquals(4000, $config->aiSummaryMaxChars);
-        $this->assertSame(512, $config->aiSummaryMaxTokens);
+        $this->assertSame(1024, $config->aiSummaryMaxTokens);
         $this->assertFalse($config->autoLanguageFilter);
         $this->assertEquals('', $config->promptExpandQuery);
         $this->assertEquals('', $config->promptSummarize);
@@ -516,6 +516,24 @@ class ScoltaConfigTest extends TestCase
     public function testGetPresetValuesForUnknownReturnsEmpty(): void
     {
         $this->assertSame([], ScoltaConfig::getPresetValues('nonexistent'));
+    }
+
+    public function testNoPresetLowersAiSummaryMaxTokensBelowDefault(): void
+    {
+        // max_tokens is a hard ceiling — a low value truncates the summary
+        // mid-sentence (issue #168). No preset may resolve ai_summary_max_tokens
+        // below the global default.
+        $default = (new ScoltaConfig())->aiSummaryMaxTokens;
+        $this->assertSame(1024, $default);
+
+        foreach (array_keys(ScoltaConfig::getPresets()) as $name) {
+            $config = ScoltaConfig::fromArray(['preset' => $name]);
+            $this->assertGreaterThanOrEqual(
+                $default,
+                $config->aiSummaryMaxTokens,
+                "Preset '{$name}' must not set ai_summary_max_tokens below the default"
+            );
+        }
     }
 
     public function testContentCatalogPresetSetsExpectedDefaults(): void

@@ -68,6 +68,7 @@ FORMAT RULES:
 - Follow with a bulleted list. Each bullet: **Name** — one concise sentence. Include [link text](URL) only when the URL appears in the provided excerpts.
 - Use ONLY URLs from the provided excerpts. Never invent or guess a URL.
 - Use standard markdown: **bold**, bullets, [links](URL).
+- Keep the entire summary under ~150 words. Do not add section headers or sub-category headings — a single flat bulleted list only.
 
 LANGUAGE RULES:
 - Be direct and confident: "Here are 5 options:" not "There appear to be a few things you might want to consider."
