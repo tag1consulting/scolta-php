@@ -6,6 +6,8 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-06-02
+
 ### Removed
 - **Reverted the entire query-word-importance line (#163 exemption + #164 ranking).** Validation showed both layers were inert — the #164 `incidentalMatchWeight` re-ranking and the #163 semantic exemption gate changed result ordering on zero real queries. Removed: the `query_word_importance` plumbing into the WASM `score_results` input and the JS fallback weighting, the `incidentalMatchWeight` config, the `aiQueryWordImportance` flag, the expand-prompt classification instruction and its `query_word_importance` parsing in `AiEndpointHandler`, the `contentWords` exemption gate in `scolta.js`, and the bundled WASM that carried the scoring weight. The #156 frequency guard (#161) and the Fix A/D typed-query-term exemption + `expandSubwordDenyList` veto (#162) are unchanged — the browser tree is back to its #162 state, with the bundled WASM matching the reverted scolta-core.
 
