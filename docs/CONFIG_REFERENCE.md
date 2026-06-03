@@ -114,7 +114,7 @@ factor before being added to the final score; the title boost is unaffected.
 | `aiSummarize` | bool | `true` | Enable AI result summarization |
 | `aiSummaryTopN` | int | `10` | Number of top results sent to AI for summarization |
 | `aiSummaryMaxChars` | int | `4000` | Maximum characters of content sent to AI for summarization |
-| `aiSummaryMaxTokens` | int | `512` | Maximum tokens the AI may use for a summary response |
+| `aiSummaryMaxTokens` | int | `1024` | Hard ceiling on tokens the AI may use for a summary response. Sits comfortably above the prompt's natural output length so summaries are never cut off mid-sentence |
 
 ### Multilingual
 

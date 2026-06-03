@@ -323,6 +323,32 @@ class DefaultPromptsTest extends TestCase
         );
     }
 
+    // -------------------------------------------------------------------------
+    // Issue #168 — explicit output-length budget prevents mid-sentence truncation
+    // -------------------------------------------------------------------------
+
+    public function testSummarizeTemplateStatesOutputLengthBudget(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
+
+        $this->assertMatchesRegularExpression(
+            '/under ~?150 words/i',
+            $template,
+            'summarize template must state an explicit output-length budget (issue #168)'
+        );
+    }
+
+    public function testSummarizeTemplateForbidsSubCategoryHeaders(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
+
+        $this->assertMatchesRegularExpression(
+            '/single flat bulleted list|no section headers|do not add section headers/i',
+            $template,
+            'summarize template must forbid ad-hoc sub-category headers and require a flat list (issue #168)'
+        );
+    }
+
     /**
      * Both CMS adapter tests delegate to this class.  Verify the templates are
      * non-empty and contain placeholder markers so adapters can substitute
