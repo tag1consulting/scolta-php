@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Fixed
+- **Removed the Wikipedia-specific corpus statistic from the default `summarize` prompt.** The `CORPUS AWARENESS` rule in the `'summarize'` template shipped a hard-coded "~6,900 Featured Articles" example that described only the Wikipedia demo, reached every site using the default prompt (the server resolves this template for the AI overview), and taught the model to fabricate corpus counts. The example is now count-free and frames gaps via the site description's scope, and the rule explicitly forbids inventing statistics (counts, totals, sizes). Matches the same change in scolta-core's `SUMMARIZE` constant ([tag1consulting/scolta-core#33](https://github.com/tag1consulting/scolta-core/issues/33)).
+
 ### Changed
 - Opened 1.0.3-dev development cycle.
 
