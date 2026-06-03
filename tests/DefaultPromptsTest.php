@@ -282,6 +282,47 @@ class DefaultPromptsTest extends TestCase
         );
     }
 
+    // -------------------------------------------------------------------------
+    // PR fix/summarize-corpus-awareness-no-stat — drop Wikipedia-specific count
+    // -------------------------------------------------------------------------
+
+    public function testSummarizeTemplateHasNoFabricatedCorpusStatistic(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
+
+        $this->assertStringNotContainsString(
+            '6,900',
+            $template,
+            'summarize template must not ship the Wikipedia-specific "6,900" count'
+        );
+        $this->assertStringNotContainsString(
+            '6900',
+            $template,
+            'summarize template must not ship a hard-coded corpus count'
+        );
+        $this->assertStringNotContainsString(
+            'Featured Articles',
+            $template,
+            'summarize template must not reference "Featured Articles" (Wikipedia-specific)'
+        );
+    }
+
+    public function testSummarizeTemplateForbidsInventingStatistics(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
+
+        $this->assertStringContainsString(
+            'CORPUS AWARENESS',
+            $template,
+            'summarize template must retain the CORPUS AWARENESS rule'
+        );
+        $this->assertStringContainsString(
+            'Do NOT invent statistics about the collection',
+            $template,
+            'CORPUS AWARENESS must explicitly forbid inventing corpus statistics'
+        );
+    }
+
     /**
      * Both CMS adapter tests delegate to this class.  Verify the templates are
      * non-empty and contain placeholder markers so adapters can substitute
