@@ -466,6 +466,44 @@ class ScoltaConfigTest extends TestCase
         $this->assertSame('round_robin', $config->expansionCombineMode);
     }
 
+    /**
+     * null = "not set" → fall through to the preset/base default. This is the
+     * explicit unset contract adapters (e.g. Laravel) rely on when their config
+     * layer always emits a key for every preset-overridable field. An explicit
+     * non-null value still overrides; null with no preset falls to the base
+     * default. Not combine_mode-specific — proven on a numeric field too.
+     */
+    public function testNullValueFallsThroughToPreset(): void
+    {
+        // null does NOT override the preset's value.
+        $config = ScoltaConfig::fromArray([
+            'preset' => 'content_catalog',
+            'expansion_combine_mode' => null,
+        ]);
+        $this->assertSame('round_robin', $config->expansionCombineMode);
+
+        // A non-null explicit value still overrides the preset.
+        $config = ScoltaConfig::fromArray([
+            'preset' => 'content_catalog',
+            'expansion_combine_mode' => 'relevance_union',
+        ]);
+        $this->assertSame('relevance_union', $config->expansionCombineMode);
+
+        // null with no preset falls through to the base default.
+        $config = ScoltaConfig::fromArray([
+            'expansion_combine_mode' => null,
+        ]);
+        $this->assertSame('relevance_union', $config->expansionCombineMode);
+
+        // General across types, not just combine_mode: a numeric preset field.
+        // reference sets recency_boost_max to 0.0; null must not override it.
+        $config = ScoltaConfig::fromArray([
+            'preset' => 'reference',
+            'recency_boost_max' => null,
+        ]);
+        $this->assertSame(0.0, $config->recencyBoostMax);
+    }
+
     public function testExpansionCombineModeExportedToJsScoringConfig(): void
     {
         $config = ScoltaConfig::fromArray([
