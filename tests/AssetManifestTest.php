@@ -72,4 +72,64 @@ class AssetManifestTest extends TestCase
             'assets/ASSETS.sha256 is stale. Run: composer update-asset-manifest'
         );
     }
+
+    /**
+     * The standalone scolta.js.sha256 is a projection of the manifest, not an
+     * independent hash. It MUST equal the manifest's js/scolta.js line so the
+     * JS hash can only ever come from one computation.
+     */
+    public function testStandaloneJsChecksumMatchesManifest(): void
+    {
+        $standalonePath = $this->assetsDir . '/js/scolta.js.sha256';
+        $this->assertFileExists(
+            $standalonePath,
+            'assets/js/scolta.js.sha256 is missing. Run: composer update-js-checksum'
+        );
+
+        $manifestHash = $this->manifestHashFor('js/scolta.js');
+        $this->assertNotNull(
+            $manifestHash,
+            'assets/ASSETS.sha256 has no js/scolta.js line to derive the standalone checksum from.'
+        );
+
+        $standalone = trim(file_get_contents($standalonePath));
+        $this->assertSame(
+            $manifestHash,
+            $standalone,
+            'assets/js/scolta.js.sha256 has drifted from the manifest. Run: composer update-js-checksum'
+        );
+    }
+
+    /**
+     * scolta-laravel's HealthController and StatusCommand trim() this file and
+     * compare it to hash_file('sha256', ...), so it must stay a bare 64-hex
+     * hash with no path or sha256sum two-column format. This contract assertion
+     * makes a switch to a different format fail loudly here.
+     */
+    public function testStandaloneJsChecksumIsBareHash(): void
+    {
+        $raw = file_get_contents($this->assetsDir . '/js/scolta.js.sha256');
+        $this->assertMatchesRegularExpression(
+            '/^[0-9a-f]{64}\n$/',
+            $raw,
+            'assets/js/scolta.js.sha256 must be a bare 64-hex-char hash followed by a single newline (the format scolta-laravel reads).'
+        );
+    }
+
+    /**
+     * Returns the hash on the manifest line for the given relative path, or
+     * null if no such line exists. Parses the standard sha256sum format:
+     * "<hash><space><space><relative-path>".
+     */
+    private function manifestHashFor(string $relativePath): ?string
+    {
+        $lines = file($this->assetsDir . '/ASSETS.sha256', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        foreach ($lines as $line) {
+            $parts = preg_split('/\s+/', trim($line));
+            if (count($parts) === 2 && $parts[1] === $relativePath) {
+                return $parts[0];
+            }
+        }
+        return null;
+    }
 }

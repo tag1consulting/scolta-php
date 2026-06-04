@@ -69,7 +69,7 @@ The `version` field in `composer.json` is always either a tagged release (`0.2.0
 `assets/js/scolta.js` in this repo is the **single canonical source** for the browser-side JavaScript. scolta-drupal and scolta-wp commit copies (for non-Composer installation paths), but those copies MUST be byte-identical to this file.
 
 - **Never edit scolta.js in scolta-drupal or scolta-wp directly.** All changes go here first, then copies are updated.
-- `assets/js/scolta.js.sha256` contains the checksum of the canonical file. Update it whenever scolta.js changes: `sha256sum assets/js/scolta.js | awk '{print $1}' > assets/js/scolta.js.sha256`
+- `assets/js/scolta.js.sha256` contains the checksum of the canonical file (a bare hash that scolta-laravel reads at runtime). It is **derived** from `assets/ASSETS.sha256`, not hashed independently — regenerate both whenever scolta.js changes with `composer update-js-checksum` (which refreshes the manifest, then extracts the scolta.js line into the standalone file). Never re-hash scolta.js into that file by hand; the manifest is the single source of every asset SHA-256.
 - After updating scolta.js, copy it to `packages/scolta-drupal/js/scolta.js` and `packages/scolta-wp/assets/js/scolta.js`, then open PRs in those repos.
 - Drupal and WP CI will fail if their copy doesn't match the checksum from scolta-php.
 
