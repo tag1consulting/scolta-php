@@ -201,6 +201,80 @@ class ConfigReferenceDocTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+    // TUNING.md default restatements
+    // ------------------------------------------------------------------
+
+    /**
+     * docs/TUNING.md is the *evidence* behind the presets and deliberately does
+     * not repeat the property tables — but it does restate the current global
+     * default for each scoring parameter it discusses, in its
+     * `**Config:** ... — **Default: X**` lines (e.g. "titleMatchBoost ...
+     * Default: 2.0"). CONFIG_REFERENCE.md is the canonical defaults table, but
+     * these restatements can drift independently of it, so this guard pins each
+     * one to the live ScoltaConfig default too.
+     *
+     * The parse is strict: a `**Default:**` line from which no property can be
+     * read fails loudly, and the "found at least N" assertion catches a reformat
+     * that stops the parser matching, rather than silently passing with 0 checks.
+     */
+    public function test_documented_tuning_guide_defaults_match_live_config(): void
+    {
+        $doc = file_get_contents(dirname(__DIR__, 2) . '/docs/TUNING.md');
+        $this->assertNotFalse($doc, 'Unable to read docs/TUNING.md');
+
+        $config  = new ScoltaConfig();
+        $checked = 0;
+
+        foreach (explode("\n", $doc) as $line) {
+            // Only lines that restate a current global default.
+            if (!str_contains($line, '**Default:')) {
+                continue;
+            }
+            // The documented default is the first number after "**Default:".
+            // A trailing preset note (e.g. "; **0** on `reference`") is ignored.
+            if (!preg_match('/\*\*Default:\s*`?([0-9]+(?:\.[0-9]+)?)`?/', $line, $valueMatch)) {
+                continue;
+            }
+            // The property is the first camelCase backticked token on the line.
+            // The SCREAMING_SNAKE alias and the `[ADOPTED]` tag never match this,
+            // and preset names appear only after the default value.
+            if (!preg_match('/`([a-z][a-zA-Z0-9]*)`/', $line, $propMatch)) {
+                $this->fail(
+                    'A TUNING.md line restates a **Default:** but no camelCase config '
+                    . "property could be parsed from it:\n" . trim($line)
+                );
+            }
+
+            $property   = $propMatch[1];
+            $documented = $valueMatch[1];
+
+            $this->assertTrue(
+                property_exists($config, $property),
+                "docs/TUNING.md documents a default for `$property`, but no such "
+                . 'property exists on ScoltaConfig (renamed or removed?).'
+            );
+            $this->assertTrue(
+                $this->valuesMatch($config->$property, $documented),
+                sprintf(
+                    'Default drift for `%s` in docs/TUNING.md: it states `%s` but '
+                    . 'ScoltaConfig has `%s`. Update TUNING.md to the live default.',
+                    $property,
+                    $documented,
+                    var_export($config->$property, true)
+                )
+            );
+            $checked++;
+        }
+
+        $this->assertGreaterThanOrEqual(
+            5,
+            $checked,
+            'Parsed too few `**Default:**` restatements from docs/TUNING.md — the '
+            . 'format may have changed. Update the parser in ' . __CLASS__ . '.'
+        );
+    }
+
+    // ------------------------------------------------------------------
     // Parsing helpers
     // ------------------------------------------------------------------
 
