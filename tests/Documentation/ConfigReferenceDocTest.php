@@ -200,6 +200,82 @@ class ConfigReferenceDocTest extends TestCase
         }
     }
 
+    /**
+     * The faceted-corpus presets must document `expansionCombineMode: round_robin`
+     * and the others `relevance_union`, matching the live preset defaults. This
+     * pins the per-preset combine-mode overrides specifically (the generic preset
+     * guard above would also catch a round_robin drift, but a relevance_union
+     * override equals the base default and would be silently allowed to vanish
+     * from the doc — this guard keeps every preset's mode explicitly documented).
+     */
+    public function test_preset_combine_mode_overrides_documented(): void
+    {
+        $docPresets = $this->parsePresetValues(self::docContent());
+
+        $expected = [
+            'none'            => 'relevance_union',
+            'reference'       => 'relevance_union',
+            'content_catalog' => 'round_robin',
+            'ecommerce'       => 'round_robin',
+            'blog'            => 'round_robin',
+        ];
+
+        foreach ($expected as $preset => $mode) {
+            $this->assertArrayHasKey(
+                $preset,
+                $docPresets,
+                "Preset `$preset` is not documented in CONFIG_REFERENCE.md."
+            );
+            $this->assertArrayHasKey(
+                'expansionCombineMode',
+                $docPresets[$preset],
+                "Preset `$preset` must document `expansionCombineMode` in its Key `values` column."
+            );
+            $this->assertSame(
+                $mode,
+                trim($docPresets[$preset]['expansionCombineMode'], ' `'),
+                "Preset `$preset` should document expansionCombineMode `$mode`."
+            );
+            // And the doc must agree with the live preset resolution.
+            $this->assertSame(
+                $mode,
+                ScoltaConfig::fromArray(['preset' => $preset])->expansionCombineMode,
+                "Live preset `$preset` resolves a different expansionCombineMode than documented."
+            );
+        }
+    }
+
+    /**
+     * expansionPerTermTopK is locked at 3 and is no longer a user-tunable
+     * setting. Its property row must say so, and it must no longer appear as a
+     * platform config key (adapters dropped the `expansion_per_term_top_k` key).
+     */
+    public function test_per_term_top_k_documented_as_internal_constant(): void
+    {
+        $doc = self::docContent();
+
+        // Default still 3 and still documented as a property (it remains a
+        // public scalar on ScoltaConfig), but flagged internal/non-configurable.
+        $documented = $this->parsePropertyDefaults($doc);
+        $this->assertArrayHasKey('expansionPerTermTopK', $documented);
+        $this->assertSame('3', trim($documented['expansionPerTermTopK']['raw'], ' `'));
+        $this->assertSame(3, (new ScoltaConfig())->expansionPerTermTopK);
+
+        $this->assertMatchesRegularExpression(
+            '/`expansionPerTermTopK`.*(internal constant|not user-configurable)/i',
+            $doc,
+            'The expansionPerTermTopK row must state it is an internal constant / not user-configurable.'
+        );
+
+        // The platform config-mapping table must no longer expose the removed key.
+        $this->assertStringNotContainsString(
+            'expansion_per_term_top_k',
+            $this->sliceBetween($doc, '## Platform Config Mapping', '## Methods'),
+            'expansion_per_term_top_k must be removed from the Platform Config Mapping table — '
+            . 'adapters no longer expose it as a setting.'
+        );
+    }
+
     // ------------------------------------------------------------------
     // TUNING.md default restatements
     // ------------------------------------------------------------------
