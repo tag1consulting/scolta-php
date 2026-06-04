@@ -15,26 +15,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.3'
-          extensions: intl
-          coverage: none
-
-      - name: Install dependencies (no dev)
-        run: composer install --no-dev --prefer-dist --no-interaction
-
-      - name: Create release archive
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          zip -r scolta-php-${VERSION}.zip . \
-            --exclude "*.git*" \
-            --exclude "tests/*" \
-            --exclude ".e2e-output*" \
-            --exclude "node_modules/*" \
-            --exclude ".claude/*"
-
       - name: Extract CHANGELOG entry
         run: |
           VERSION=${GITHUB_REF_NAME#v}
@@ -46,5 +26,3 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           body_path: release-notes.txt
-          files: scolta-php-*.zip
-          fail_on_unmatched_files: true
