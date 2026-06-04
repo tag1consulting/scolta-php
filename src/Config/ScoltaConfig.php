@@ -321,6 +321,15 @@ class ScoltaConfig
             if ($key === 'expansion_per_term_top_k') {
                 continue;
             }
+            // null = "not set" → fall through to the preset/base default. This
+            // is the explicit unset contract every adapter relies on: a CMS
+            // layer (e.g. Laravel's config/scolta.php) that always emits a key
+            // for every field passes null to mean "use the Site Type preset's
+            // value." A non-null value still overrides. Skipping also avoids a
+            // TypeError from assigning null to a typed property below.
+            if ($value === null) {
+                continue;
+            }
             // Convert snake_case keys to camelCase property names.
             $property = lcfirst(str_replace('_', '', ucwords($key, '_')));
             if (property_exists($config, $property)) {

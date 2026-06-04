@@ -4,6 +4,8 @@ All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Platfo
 
 `fromArray()` coerces incoming values to the declared PHP type of each property before assignment. This means CMS config layers that store all values as strings — for example, Drupal's `drush config:set` or WP-CLI's `wp option update` — are handled safely: `"1"` is cast to `true` for `bool` properties, `"42"` to `42` for `int`, and `"3.14"` to `3.14` for `float`. String and array properties pass through unchanged.
 
+Passing `null` for any preset-overridable field means **"use the Site Type preset's value"**: `fromArray()` treats a `null` value as "not set" and skips it, so the named preset's value (or, with no preset, the base default) stays in place. An explicit non-null value still overrides the preset. This is the contract that lets an adapter whose config layer always emits a key for every field — such as Laravel's `config/scolta.php` — genuinely fall through to a preset by leaving that field at `null`, rather than having its concrete config default silently override every preset choice.
+
 ## Configuration Properties
 
 ### AI Provider
