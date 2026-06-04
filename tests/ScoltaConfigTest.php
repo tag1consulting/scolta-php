@@ -386,6 +386,46 @@ class ScoltaConfigTest extends TestCase
     }
 
     // -------------------------------------------------------------------
+    // expansionCombineMode / expansionPerTermTopK (issue #170) — AI summary
+    // candidate selection (round-robin across expansion sub-queries)
+    // -------------------------------------------------------------------
+
+    public function testExpansionCombineModeDefaults(): void
+    {
+        $config = new ScoltaConfig();
+        $this->assertEquals('relevance_union', $config->expansionCombineMode);
+        $this->assertEquals(3, $config->expansionPerTermTopK);
+    }
+
+    public function testExpansionCombineModeThreadsThroughFromArray(): void
+    {
+        $config = ScoltaConfig::fromArray([
+            'expansion_combine_mode' => 'round_robin',
+            'expansion_per_term_top_k' => 5,
+        ]);
+        $this->assertEquals('round_robin', $config->expansionCombineMode);
+        $this->assertEquals(5, $config->expansionPerTermTopK);
+    }
+
+    public function testExpansionPerTermTopKCoercesStringToInt(): void
+    {
+        // CMS config layers store everything as strings.
+        $config = ScoltaConfig::fromArray(['expansion_per_term_top_k' => '4']);
+        $this->assertSame(4, $config->expansionPerTermTopK);
+    }
+
+    public function testExpansionCombineModeExportedToJsScoringConfig(): void
+    {
+        $config = ScoltaConfig::fromArray([
+            'expansion_combine_mode' => 'round_robin',
+            'expansion_per_term_top_k' => 2,
+        ]);
+        $js = $config->toJsScoringConfig();
+        $this->assertEquals('round_robin', $js['EXPANSION_COMBINE_MODE']);
+        $this->assertEquals(2, $js['EXPANSION_PER_TERM_TOP_K']);
+    }
+
+    // -------------------------------------------------------------------
     // toJsScoringConfig — completeness and correctness
     // -------------------------------------------------------------------
 
@@ -401,7 +441,7 @@ class ScoltaConfigTest extends TestCase
             'PHRASE_NEAR_WINDOW', 'PHRASE_WINDOW', 'EXCERPT_LENGTH', 'RESULTS_PER_PAGE',
             'MAX_PAGEFIND_RESULTS', 'AI_EXPAND_QUERY', 'AI_SUMMARIZE', 'AI_SUMMARY_TOP_N',
             'AI_SUMMARY_MAX_CHARS', 'EXPAND_PRIMARY_WEIGHT', 'CROSS_LIST_BONUS', 'EXPAND_SUBWORD_MAX_FREQ',
-            'EXPAND_SUBWORD_DENYLIST',
+            'EXPAND_SUBWORD_DENYLIST', 'EXPANSION_COMBINE_MODE', 'EXPANSION_PER_TERM_TOP_K',
             'AI_MAX_FOLLOWUPS',
             'AI_LANGUAGES', 'AUTO_LANGUAGE_FILTER', 'LANGUAGE', 'CUSTOM_STOP_WORDS', 'RECENCY_STRATEGY', 'RECENCY_CURVE',
         ];
@@ -410,7 +450,7 @@ class ScoltaConfigTest extends TestCase
             $this->assertArrayHasKey($key, $js, "Missing key: {$key}");
         }
 
-        $this->assertCount(30, $js, 'Expected exactly 30 keys in toJsScoringConfig()');
+        $this->assertCount(32, $js, 'Expected exactly 32 keys in toJsScoringConfig()');
     }
 
     public function testToJsScoringConfigValuesMatchConfig(): void

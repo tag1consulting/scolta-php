@@ -80,6 +80,31 @@ class ScoltaConfig
      */
     public array $expandSubwordDenyList = [];
 
+    /**
+     * How the per-sub-query result sets from a multi-term expansion are combined
+     * into the candidate set shown to the AI summarizer (issue #170).
+     *
+     * - `relevance_union` (default): merge every sub-query's results into one
+     *   relevance-sorted, URL-deduplicated pool and take the top-N off it. This
+     *   reproduces the historical behavior exactly.
+     * - `round_robin`: group results by the expansion sub-query that produced
+     *   them and deal the top-K from each sub-query in turn until the summary
+     *   budget is filled, so the summarizer sees breadth across distinct
+     *   sub-topics instead of only the single largest sub-query.
+     *
+     * Only affects the summary candidate set — the visible ranked result list is
+     * always relevance-sorted regardless of this setting.
+     */
+    public string $expansionCombineMode = 'relevance_union';
+
+    /**
+     * Number of results taken from each expansion sub-query per round when
+     * `expansionCombineMode` is `round_robin` (issue #170). Ignored under
+     * `relevance_union`. Reallocates within `aiSummaryTopN` / `aiSummaryMaxChars`;
+     * it never raises those budgets.
+     */
+    public int $expansionPerTermTopK = 3;
+
     // -- Scoring: Language and stop words --
     public string $language = 'en';
     /** @var string[] */
@@ -353,6 +378,8 @@ class ScoltaConfig
             'CROSS_LIST_BONUS' => $this->crossListBonus,
             'EXPAND_SUBWORD_MAX_FREQ' => $this->expandSubwordMaxFrequency,
             'EXPAND_SUBWORD_DENYLIST' => $this->expandSubwordDenyList,
+            'EXPANSION_COMBINE_MODE' => $this->expansionCombineMode,
+            'EXPANSION_PER_TERM_TOP_K' => $this->expansionPerTermTopK,
             'AI_MAX_FOLLOWUPS' => $this->maxFollowUps,
             'AI_LANGUAGES' => $this->aiLanguages,
             'AUTO_LANGUAGE_FILTER' => $this->autoLanguageFilter,
