@@ -94,6 +94,13 @@ class ScoltaConfig
      *
      * Only affects the summary candidate set — the visible ranked result list is
      * always relevance-sorted regardless of this setting.
+     *
+     * Per-Site-Type preset default (resolved like the other preset-overridable
+     * scoring fields — explicit site value > preset default > base default):
+     * `content_catalog`, `blog`, and `ecommerce` default to `round_robin`
+     * (faceted corpora benefit from breadth across sub-topics); `reference`,
+     * `none`, and the base default stay `relevance_union`. A site may still
+     * override the mode explicitly.
      */
     public string $expansionCombineMode = 'relevance_union';
 
@@ -102,6 +109,11 @@ class ScoltaConfig
      * `expansionCombineMode` is `round_robin` (issue #170). Ignored under
      * `relevance_union`. Reallocates within `aiSummaryTopN` / `aiSummaryMaxChars`;
      * it never raises those budgets.
+     *
+     * Locked at 3 — evaluation found no benefit above this value and over-reach
+     * below it. This is an internal constant, not a user-tunable setting:
+     * `fromArray()` ignores any `expansion_per_term_top_k` input and it is always
+     * emitted to the JS config as 3.
      */
     public int $expansionPerTermTopK = 3;
 
@@ -201,6 +213,7 @@ class ScoltaConfig
             'description' => 'No preset applied. All scoring parameters use Scolta defaults, except sub-word expansion is slightly broadened (10%) since an uncategorized corpus benefits from wider recall. This is your starting point for fully custom configuration — select this as your starting point — or leave it as-is. You can optionally adjust any individual setting below.',
             'values' => [
                 'expand_subword_max_frequency' => 0.10,
+                'expansion_combine_mode' => 'relevance_union',
             ],
         ],
         'content_catalog' => [
@@ -215,6 +228,7 @@ class ScoltaConfig
                 'content_match_boost' => 0.5,
                 'expand_primary_weight' => 0.9,
                 'expand_subword_max_frequency' => 0.10,
+                'expansion_combine_mode' => 'round_robin',
                 'ai_summary_top_n' => 15,
                 'max_pagefind_results' => 75,
                 'results_per_page' => 12,
@@ -231,6 +245,7 @@ class ScoltaConfig
                 'exact_title_match_boost' => 5.0,
                 'content_match_boost' => 0.5,
                 'expand_primary_weight' => 0.6,
+                'expansion_combine_mode' => 'relevance_union',
                 'ai_summary_top_n' => 15,
                 'max_pagefind_results' => 75,
                 'results_per_page' => 12,
@@ -246,6 +261,7 @@ class ScoltaConfig
                 'title_all_terms_multiplier' => 2.0,
                 'content_match_boost' => 0.6,
                 'expand_primary_weight' => 0.8,
+                'expansion_combine_mode' => 'round_robin',
                 'ai_summary_top_n' => 12,
                 'max_pagefind_results' => 75,
                 'results_per_page' => 12,
@@ -263,6 +279,7 @@ class ScoltaConfig
                 'title_all_terms_multiplier' => 2.0,
                 'content_match_boost' => 0.5,
                 'expand_primary_weight' => 0.7,
+                'expansion_combine_mode' => 'round_robin',
                 'ai_summary_top_n' => 12,
                 'max_pagefind_results' => 60,
                 'results_per_page' => 10,
@@ -297,6 +314,11 @@ class ScoltaConfig
 
         foreach ($values as $key => $value) {
             if ($key === 'preset') {
+                continue;
+            }
+            // expansionPerTermTopK is locked at 3 (internal constant); never
+            // settable from config even if a stale adapter still passes it.
+            if ($key === 'expansion_per_term_top_k') {
                 continue;
             }
             // Convert snake_case keys to camelCase property names.

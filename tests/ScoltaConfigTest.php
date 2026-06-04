@@ -401,17 +401,69 @@ class ScoltaConfigTest extends TestCase
     {
         $config = ScoltaConfig::fromArray([
             'expansion_combine_mode' => 'round_robin',
-            'expansion_per_term_top_k' => 5,
         ]);
         $this->assertEquals('round_robin', $config->expansionCombineMode);
-        $this->assertEquals(5, $config->expansionPerTermTopK);
     }
 
-    public function testExpansionPerTermTopKCoercesStringToInt(): void
+    /**
+     * expansionPerTermTopK is locked at 3 (internal constant): fromArray() must
+     * ignore any expansion_per_term_top_k input rather than honoring it.
+     */
+    public function testExpansionPerTermTopKIsLockedAtThree(): void
     {
-        // CMS config layers store everything as strings.
-        $config = ScoltaConfig::fromArray(['expansion_per_term_top_k' => '4']);
-        $this->assertSame(4, $config->expansionPerTermTopK);
+        $this->assertSame(3, (new ScoltaConfig())->expansionPerTermTopK);
+
+        // Stale adapter input — int or string — is ignored, not applied.
+        $this->assertSame(3, ScoltaConfig::fromArray(['expansion_per_term_top_k' => 5])->expansionPerTermTopK);
+        $this->assertSame(3, ScoltaConfig::fromArray(['expansion_per_term_top_k' => '4'])->expansionPerTermTopK);
+    }
+
+    /**
+     * expansionCombineMode resolves as a per-preset default: round_robin for the
+     * faceted-corpus presets, relevance_union elsewhere (base default).
+     */
+    public function testExpansionCombineModePresetDefaults(): void
+    {
+        $expected = [
+            'none'            => 'relevance_union',
+            'reference'       => 'relevance_union',
+            'content_catalog' => 'round_robin',
+            'ecommerce'       => 'round_robin',
+            'blog'            => 'round_robin',
+        ];
+        foreach ($expected as $preset => $mode) {
+            $config = ScoltaConfig::fromArray(['preset' => $preset]);
+            $this->assertSame(
+                $mode,
+                $config->expansionCombineMode,
+                "preset `$preset` should default expansionCombineMode to `$mode`"
+            );
+        }
+
+        // No preset → base default.
+        $this->assertSame('relevance_union', ScoltaConfig::fromArray([])->expansionCombineMode);
+    }
+
+    /**
+     * An explicit per-site expansion_combine_mode overrides the preset default
+     * (explicit > preset > base), exactly like the other preset-overridable
+     * scoring fields.
+     */
+    public function testExplicitCombineModeOverridesPreset(): void
+    {
+        // content_catalog defaults to round_robin; explicit value wins.
+        $config = ScoltaConfig::fromArray([
+            'preset' => 'content_catalog',
+            'expansion_combine_mode' => 'relevance_union',
+        ]);
+        $this->assertSame('relevance_union', $config->expansionCombineMode);
+
+        // reference defaults to relevance_union; explicit round_robin wins.
+        $config = ScoltaConfig::fromArray([
+            'preset' => 'reference',
+            'expansion_combine_mode' => 'round_robin',
+        ]);
+        $this->assertSame('round_robin', $config->expansionCombineMode);
     }
 
     public function testExpansionCombineModeExportedToJsScoringConfig(): void
@@ -422,7 +474,8 @@ class ScoltaConfigTest extends TestCase
         ]);
         $js = $config->toJsScoringConfig();
         $this->assertEquals('round_robin', $js['EXPANSION_COMBINE_MODE']);
-        $this->assertEquals(2, $js['EXPANSION_PER_TERM_TOP_K']);
+        // K is locked at 3 regardless of input.
+        $this->assertEquals(3, $js['EXPANSION_PER_TERM_TOP_K']);
     }
 
     // -------------------------------------------------------------------
@@ -542,13 +595,18 @@ class ScoltaConfigTest extends TestCase
         $this->assertArrayNotHasKey('values', $values);
     }
 
-    public function testGetPresetValuesForNoneSetsSubwordFrequencyOnly(): void
+    public function testGetPresetValuesForNoneSetsSubwordFrequencyAndCombineMode(): void
     {
         // 'none' is "start from scratch" but deliberately ships a broadened
         // sub-word frequency (10%) since an uncategorized corpus benefits from
         // wider recall — it must not fall through to the 0.05 global default.
+        // It also pins the combine mode to the base default explicitly so each
+        // preset documents its own expansion_combine_mode.
         $this->assertSame(
-            ['expand_subword_max_frequency' => 0.10],
+            [
+                'expand_subword_max_frequency' => 0.10,
+                'expansion_combine_mode' => 'relevance_union',
+            ],
             ScoltaConfig::getPresetValues('none')
         );
     }
