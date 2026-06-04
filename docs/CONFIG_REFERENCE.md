@@ -154,6 +154,8 @@ factor before being added to the final score; the title boost is unaffected.
 
 Each preset entry has three keys: `label` (human-readable name for UI dropdowns), `description` (one-paragraph explanation for admins), and `values` (scoring parameters). Adapter UIs read from `getPresets()` to build pickers without hardcoding any of these strings.
 
+For the evidence behind these presets — the scoring sweep, the precision-cliff data, and which defaults are still open findings — see [`TUNING.md`](TUNING.md) in this directory.
+
 Available presets:
 
 | Preset | Label | Purpose | Key `values` |
