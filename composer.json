@@ -38,8 +38,15 @@
         "test": "phpunit --no-coverage",
         "lint": "php-cs-fixer fix --dry-run --diff",
         "format": "php-cs-fixer fix",
-        "update-browser-wasm": "cp ../scolta-core/pkg/scolta_core_bg.wasm assets/wasm/ && cp ../scolta-core/pkg/scolta_core.js assets/wasm/",
-        "update-js-checksum": "sha256sum assets/js/scolta.js | awk '{print $1}' > assets/js/scolta.js.sha256",
+        "update-browser-wasm": [
+            "cp ../scolta-core/pkg/scolta_core_bg.wasm assets/wasm/ && cp ../scolta-core/pkg/scolta_core.js assets/wasm/",
+            "@update-js-checksum"
+        ],
+        "update-asset-manifest": "cd assets && sha256sum js/scolta.js css/scolta.css wasm/scolta_core.js wasm/scolta_core_bg.wasm > ASSETS.sha256",
+        "update-js-checksum": [
+            "@update-asset-manifest",
+            "awk '$2==\"js/scolta.js\"{print $1}' assets/ASSETS.sha256 > assets/js/scolta.js.sha256"
+        ],
         "validate-release": "php scripts/validate-release.php",
         "check-version-sync": "php scripts/check-version-sync.php"
     },
