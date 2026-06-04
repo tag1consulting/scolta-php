@@ -136,6 +136,20 @@ describe('faceting: source structure', () => {
         expect(scoltaSource).toContain('filterCounts = computeFilterCounts(allScoredResults);');
     });
 
+    test('computeDropSelfFacets is defined for active-dimension faceting', () => {
+        expect(scoltaSource).toContain('async function computeDropSelfFacets(query, baseFilters)');
+        // Drops the dimension's own filter so the facet does not collapse to its
+        // single selected value.
+        expect(scoltaSource).toContain("if (d !== dim) others[d] = v;");
+        // Reads Pagefind's per-value counts from the drop-self search.
+        expect(scoltaSource).toContain('search.filters[dim]');
+    });
+
+    test('doSearch overlays drop-self facet counts onto filterCounts', () => {
+        expect(scoltaSource).toContain('computeDropSelfFacets(searchQuery, activeFilters)');
+        expect(scoltaSource).toContain('filterCounts[dim] = dropSelfFacets[dim];');
+    });
+
     test('initPagefind merges all non-primary language instances via absolute URL', () => {
         // pagefind.mergeIndex skips calls where indexPath is a string-prefix of
         // the primary basePath. Passing an absolute URL bypasses the check.
@@ -563,6 +577,75 @@ describe('faceting: filter sidebar rendered from scored results', () => {
         await inst.toggleFilter('era', 'Ancient');
         const filterContainer = window.document.querySelector('#scolta-filters');
         expect(filterContainer.innerHTML).toContain('Ancient');
+    });
+});
+
+describe('faceting: drop-self counts keep a filtered dimension from collapsing', () => {
+    // Reproduces the bug: applying f_language=en on a multilingual index made the
+    // Language facet show only "English", because facet values were derived from
+    // the already-language-filtered result set. The fix runs a drop-self search
+    // (all active filters EXCEPT the dimension itself) and reads Pagefind's
+    // per-value `.filters` counts, so every language stays switchable.
+    function buildLanguageAwareMock() {
+        // Pagefind stub whose result set AND .filters vary by whether a language
+        // filter is applied: language-filtered → English-only; unfiltered → all
+        // three languages (this is what the drop-self search sees).
+        const search = jest.fn((query, opts) => {
+            const hasLang = !!(opts && opts.filters && opts.filters.language);
+            if (hasLang) {
+                return Promise.resolve({
+                    results: [makeResult({ language: 'en' }, { title: 'EN', url: '/en' })],
+                    filters: { language: { en: 10 } },
+                });
+            }
+            return Promise.resolve({
+                results: [
+                    makeResult({ language: 'en' }, { title: 'EN', url: '/en' }),
+                    makeResult({ language: 'de' }, { title: 'DE', url: '/de' }),
+                    makeResult({ language: 'fr' }, { title: 'FR', url: '/fr' }),
+                ],
+                filters: { language: { en: 10, de: 4, fr: 2 } },
+            });
+        });
+        return { init: () => Promise.resolve(), search };
+    }
+
+    test('active language=en facet still lists all languages with counts', async () => {
+        const mock = buildLanguageAwareMock();
+        const { window } = createWindow(mock);
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'undo a commit';
+        await inst.doSearch();
+
+        // Apply the language filter — without the fix this collapses to English.
+        await inst.toggleFilter('language', 'en');
+
+        const filterContainer = window.document.querySelector('#scolta-filters');
+        expect(filterContainer.innerHTML).toContain('English');
+        expect(filterContainer.innerHTML).toContain('German');
+        expect(filterContainer.innerHTML).toContain('French');
+    });
+
+    test('filterCounts for the active dimension contains all values, not just the selected one', async () => {
+        const mock = buildLanguageAwareMock();
+        const { window } = createWindow(mock);
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'undo a commit';
+        await inst.doSearch();
+        await inst.toggleFilter('language', 'en');
+
+        const counts = window.Scolta.defaultInstance.getFilterCounts
+            ? window.Scolta.defaultInstance.getFilterCounts()
+            : null;
+        if (counts) {
+            expect(Object.keys(counts.language).sort()).toEqual(['de', 'en', 'fr']);
+        } else {
+            // No introspection hook — assert via rendered facet inputs instead.
+            const dims = [...window.document.querySelectorAll('input[data-scolta-filter-dim="language"]')]
+                .map(el => el.getAttribute('data-scolta-filter-val'))
+                .sort();
+            expect(dims).toEqual(['de', 'en', 'fr']);
+        }
     });
 });
 
