@@ -82,24 +82,13 @@ describe('faceting: source structure', () => {
 
     test('computeQueryFacetCounts derives counts from a single typed-query search', () => {
         expect(scoltaSource).toContain('async function computeQueryFacetCounts(query, baseFilters)');
-        expect(scoltaSource).toContain('await pagefindSearch(query, structuralFiltersOnly(baseFilters))');
+        expect(scoltaSource).toContain('const search = await pagefindSearch(query, structuralFilters);');
     });
 
-    test('structuralFiltersOnly keeps only structural filter dimensions', () => {
+    test('computeQueryFacetCounts keeps only structural filter dimensions', () => {
         // User-facing facet selections are dropped so counts never move on click.
-        expect(scoltaSource).toContain('function structuralFiltersOnly(baseFilters)');
         expect(scoltaSource).toContain('if (SKIP_FILTER_DIMENSIONS.has(dim.toLowerCase())) {');
         expect(scoltaSource).toContain('structuralFilters[dim] = vals;');
-    });
-
-    test('expansion re-sums facet counts across the expansion term set', () => {
-        // After expansion, counts grow: a dedicated pass keyed off the term set
-        // (typed term + expanded terms + sub-words) re-sums .filters with
-        // structural-only filters, independent of the sort/relevance branch.
-        expect(scoltaSource).toContain('const countTermSet = new Set([searchQuery]);');
-        expect(scoltaSource).toContain('const structuralFilters = structuralFiltersOnly(activeFilters);');
-        expect(scoltaSource).toContain('[...countTermSet].map(t => pagefindSearch(t, structuralFilters))');
-        expect(scoltaSource).toContain('queryFacetCounts = summed;');
     });
 
     test('result-derived facet helpers are removed', () => {
@@ -539,10 +528,10 @@ describe('faceting: index-driven static panel', () => {
         expect(get(second, 'Europe')).toBe('(99)');
     });
 
-    test('panel stays stable when expansion is unavailable (expand endpoint fails)', async () => {
-        // createWindow's fetch returns 503, so expansion never lands. With no
-        // expansion the result universe never grows, so the primary counts stand —
-        // nothing (taxonomy-driven dims/values OR counts) may move the panel.
+    test('panel stays stable across post-render async (expansion / auto-search)', async () => {
+        // After the primary render, more async lands (AI expansion microtask, the
+        // URL-driven auto-search). Because the panel is taxonomy-driven and counts
+        // come from the deterministic typed query, none of it may move the panel.
         const mock = buildMockPagefind([makeResult({})], QUERY_FILTERS, TAXONOMY);
         const { window } = createWindow(mock);
         const inst = window.Scolta.defaultInstance;
@@ -558,17 +547,20 @@ describe('faceting: index-driven static panel', () => {
 });
 
 // ===========================================================================
-// Expansion-aware facet counts
+// Counts stable across expansion (the deliberate Option A consequence)
 //
-// Counts reflect the search (typed query + AI expansion), excluding the user's
-// facet selections. Two independent axes:
-//   - they UPDATE primary -> expanded (expansion grows the result universe), and
-//   - they NEVER change on a facet click (user facets are dropped from the
-//     count search).
+// Facet counts are the exact breakdown of the TYPED query, read once from
+// Pagefind's native `.filters`. AI expansion enlarges the result list and the
+// header "N results", but the facet counts must NOT move: Pagefind has no way
+// to count a union of multiple search terms, and summing per-term `.filters`
+// overcounts any doc matching more than one term. We therefore keep counts
+// pinned to the typed query. This locks in that decision — it is the inverse of
+// the (reverted) expansion-aware summing pass, which made the counts grow.
 // ===========================================================================
 
-// Per-term .filters the mock returns. The expanded pass SUMS these across the
-// term set, so expanded counts = history + warfare per value.
+// Per-term `.filters` the mock returns. If the code ever summed these across the
+// expansion term set, the counts would GROW (history + warfare per value). The
+// typed-query-only model must keep them at history's values.
 const EXPAND_PER_TERM_FILTERS = {
     history: { region: { Asia: 40, Europe: 25 }, era: { Ancient: 0, Modern: 18 } },
     warfare: { region: { Asia: 10, Europe: 5 }, era: { Ancient: 4, Modern: 2 } },
@@ -581,9 +573,9 @@ const EXPAND_TAXONOMY = {
 };
 
 // Build a window whose expand endpoint returns a real expansion term so the
-// expansion-aware count pass actually runs. The expand response is gated behind
-// `release()`, so a test can let the taxonomy + primary counts render first,
-// capture them, then release expansion and observe the counts grow.
+// post-expansion merge actually runs. The expand response is gated behind
+// `release()`, so a test can let the taxonomy + typed-query counts render first,
+// capture them, then release expansion and confirm the counts did NOT move.
 function createWindowWithExpansion(mock, expandTerms) {
     const { window } = createWindow(mock);
     let release;
@@ -617,81 +609,39 @@ const facetCount = (tuples, dim, val) => {
     return t ? t.count : null;
 };
 
-describe('faceting: expansion-aware counts', () => {
-    test('counts grow from primary to expanded once expansion settles', async () => {
+describe('faceting: counts stable across expansion', () => {
+    test('facet counts do NOT grow when AI expansion settles', async () => {
         const mock = expandCountMock(EXPAND_PER_TERM_FILTERS, EXPAND_TAXONOMY);
         const { window, release } = createWindowWithExpansion(mock, ['warfare']);
         const inst = window.Scolta.defaultInstance;
         window.document.querySelector('#scolta-query').value = 'history';
 
-        // Expansion is gated: settle renders the taxonomy + primary (typed-query)
-        // counts while the expand request is still pending.
+        // Expansion is gated: settle renders the taxonomy + typed-query counts
+        // while the expand request is still pending.
         await inst.doSearch();
         await settle(window);
         const primary = captureFacetTuples(window);
 
-        // Release expansion; the expanded pass re-sums .filters and re-renders.
+        // Release expansion; the result list/header change, but the facet counts
+        // stay pinned to the typed query — no summed second pass exists.
         release();
         await settle(window);
         const expanded = captureFacetTuples(window);
 
-        // Primary: history only. Expanded: history + warfare summed.
+        // Counts are the typed query 'history' breakdown, unchanged by expansion.
+        // (Had warfare's `.filters` been summed in, Asia would read 50, not 40.)
         expect(facetCount(primary, 'region', 'Asia')).toBe('(40)');
-        expect(facetCount(expanded, 'region', 'Asia')).toBe('(50)');
+        expect(facetCount(expanded, 'region', 'Asia')).toBe('(40)');
         expect(facetCount(primary, 'region', 'Europe')).toBe('(25)');
-        expect(facetCount(expanded, 'region', 'Europe')).toBe('(30)');
-        // A value that was zero on the typed query gains matches via expansion.
+        expect(facetCount(expanded, 'region', 'Europe')).toBe('(25)');
+        // A value zero on the typed query stays zero — expansion does not pull
+        // warfare's matches into the count.
         expect(facetCount(primary, 'era', 'Ancient')).toBe('(0)');
-        expect(facetCount(expanded, 'era', 'Ancient')).toBe('(4)');
+        expect(facetCount(expanded, 'era', 'Ancient')).toBe('(0)');
 
-        // The dimension/value SET and ORDER are identical across the two passes —
-        // only the numbers grew.
-        const strip = t => t.map(({ dim, val }) => ({ dim, val }));
-        expect(strip(expanded)).toEqual(strip(primary));
-    });
-
-    test('a facet toggle after expansion does NOT change any count', async () => {
-        const mock = expandCountMock(EXPAND_PER_TERM_FILTERS, EXPAND_TAXONOMY);
-        const { window, release } = createWindowWithExpansion(mock, ['warfare']);
-        const inst = window.Scolta.defaultInstance;
-        window.document.querySelector('#scolta-query').value = 'history';
-        await inst.doSearch();
-        release();
-        await settle(window);
-
-        // Capture AFTER the expanded pass — these are the summed counts.
-        const afterExpansion = captureFacetTuples(window);
-        expect(facetCount(afterExpansion, 'region', 'Asia')).toBe('(50)');
-
-        await inst.toggleFilter('region', 'Asia');
-        await settle(window);
-        const afterToggle = captureFacetTuples(window);
-
-        // Same dimensions, values, counts, order — only checked state differs.
-        expect(afterToggle).toEqual(afterExpansion);
-        expect(window.document.querySelector(
-            'input[data-scolta-filter-dim="region"][data-scolta-filter-val="Asia"]').checked).toBe(true);
-    });
-
-    test('counts include all values of a dimension even when a user facet is active', async () => {
-        // A user facet on `region` is dropped from the count search (structural
-        // filters only), so every region value still gets a count — the active
-        // selection does not collapse the dimension to its one chosen value.
-        const mock = expandCountMock(EXPAND_PER_TERM_FILTERS, EXPAND_TAXONOMY);
-        const { window, release } = createWindowWithExpansion(mock, ['warfare']);
-        const inst = window.Scolta.defaultInstance;
-        window.document.querySelector('#scolta-query').value = 'history';
-        await inst.doSearch();
-        release();
-        await settle(window);
-        await inst.toggleFilter('region', 'Asia');
-        await settle(window);
-
-        const tuples = captureFacetTuples(window);
-        // All three region values present with their (summed) counts, not just Asia.
-        expect(facetCount(tuples, 'region', 'Asia')).toBe('(50)');
-        expect(facetCount(tuples, 'region', 'Europe')).toBe('(30)');
-        expect(facetCount(tuples, 'region', 'North America')).toBe('(0)');
+        // The entire panel — dims, values, counts, order — is byte-identical
+        // before and after expansion settles.
+        expect(expanded).toEqual(primary);
     });
 });
 
