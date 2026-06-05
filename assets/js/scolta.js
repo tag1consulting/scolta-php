@@ -1297,28 +1297,35 @@
     }
   }
 
-  // Compute the query-fixed facet counts for a typed query.
-  //
-  // Counts are a fixed property of the typed query: computed once when the query
-  // is submitted, never recomputed on a facet toggle or after AI expansion. A
-  // single Pagefind search returns per-value counts for every dimension in one
-  // shot (`.filters`); the count next to a value means "N of the results for
-  // your search are tagged this." To keep counts stable yet correctly scoped,
-  // the search keeps only STRUCTURAL filter dimensions (language/site/etc. in
-  // SKIP_FILTER_DIMENSIONS — typically the auto-language default) and drops
-  // every user-facing facet selection, so the numbers are independent of which
-  // facets the user has clicked. Expansion is LLM-driven and nondeterministic,
-  // so deriving counts from the deterministic typed query keeps them stable
-  // run-to-run. Returns { dimension: { value: count } }.
-  async function computeQueryFacetCounts(query, baseFilters) {
+  // Keep only STRUCTURAL filter dimensions (language/site/etc. in
+  // SKIP_FILTER_DIMENSIONS — typically the auto-language default). Every
+  // user-facing facet selection is dropped, whether the user clicked it or the
+  // LLM filter_hint auto-applied it. Facet counts computed against these filters
+  // are therefore independent of which facets are selected, so a facet click
+  // can never move the numbers.
+  function structuralFiltersOnly(baseFilters) {
     const structuralFilters = {};
     for (const [dim, vals] of Object.entries(baseFilters || {})) {
       if (SKIP_FILTER_DIMENSIONS.has(dim.toLowerCase())) {
         structuralFilters[dim] = vals;
       }
     }
+    return structuralFilters;
+  }
+
+  // Compute the primary facet counts for a typed query (before AI expansion).
+  //
+  // A single Pagefind search returns per-value counts for every dimension in one
+  // shot (`.filters`, full-universe per search — not capped by
+  // MAX_PAGEFIND_RESULTS, which only limits loaded result handles); the count
+  // next to a value means "N of the results for your search are tagged this."
+  // The search uses structural-only filters (see structuralFiltersOnly), so the
+  // counts exclude the user's facet selections. This is the PRIMARY pass; once
+  // expansion settles, mergeExpandedSearchResults re-sums counts across the
+  // expansion term set and overwrites the result. Returns { dimension: { value: count } }.
+  async function computeQueryFacetCounts(query, baseFilters) {
     try {
-      const search = await pagefindSearch(query, structuralFilters);
+      const search = await pagefindSearch(query, structuralFiltersOnly(baseFilters));
       return (search && search.filters) ? search.filters : {};
     } catch (_) {
       return {};   // facet counts are best-effort — never block render
@@ -1758,14 +1765,63 @@
 
     displayedCount = 0;
 
-    // queryFacetCounts is fixed for the typed query — computed once in doSearch's
-    // primary pass and deliberately NOT recomputed here. The panel (dimensions,
-    // values, counts, order) is therefore byte-identical before and after AI
-    // expansion; only the result list and header count change.
+    // Render the panel with the primary (typed-query) counts first; the
+    // expansion-aware pass below overwrites them and re-renders, so the numbers
+    // visibly grow once expansion settles. The panel's dimension/value set and
+    // order never change — only the count numbers do.
     renderFilters();
 
     renderResults(true);
     debugLog(`[scolta:expand] ${sortOverride ? 'Native sort' : 'Merged'}: ${allScoredResults.length} results`);
+
+    // Expansion-aware facet count pass. The primary pass in doSearch() counted
+    // only the typed query; expansion grows the result universe (it searches the
+    // typed term plus each expanded term), so the counts must grow with it. Keyed
+    // off the full expansion term set (typed term + expanded terms + frequency-
+    // allowed sub-words) so it is independent of the sort vs relevance branch
+    // above. Counts use STRUCTURAL-only filters (structuralFiltersOnly), so the
+    // user's facet selections stay excluded — expansion moves the numbers, a
+    // facet click never does. Skipped when preserveFilters (facet toggle / sort /
+    // load-more): those reuse the stored counts so the panel never moves on click.
+    //
+    // KNOWN IMPERFECTION: summing `.filters` across the per-term searches
+    // double-counts a document that matches more than one expanded term, so a
+    // value's count can exceed the deduped result total. Exact dedup-aware counts
+    // would require loading every matching document to dedup before counting —
+    // too expensive for an already-approximate AI-expanded search. The summed
+    // counts are intentionally approximate.
+    if (!preserveFilters) {
+      const countTermSet = new Set([searchQuery]);
+      for (const term of validTerms) {
+        countTermSet.add(term);
+        const words = extractSearchTerms(term);
+        if (words.length > 1) {
+          for (const word of words) {
+            if (!countTermSet.has(word) && await subwordAllowed(word)) {
+              countTermSet.add(word);
+            }
+          }
+        }
+      }
+      const structuralFilters = structuralFiltersOnly(activeFilters);
+      const countSearches = await Promise.all(
+        [...countTermSet].map(t => pagefindSearch(t, structuralFilters))
+      );
+      if (version === searchVersion) {
+        const summed = {};
+        for (const search of countSearches) {
+          const filters = (search && search.filters) || {};
+          for (const [dim, values] of Object.entries(filters)) {
+            if (!summed[dim]) summed[dim] = {};
+            for (const [val, count] of Object.entries(values)) {
+              summed[dim][val] = (summed[dim][val] || 0) + count;
+            }
+          }
+        }
+        queryFacetCounts = summed;
+        renderFilters();
+      }
+    }
   }
 
   // --- Main search ---
