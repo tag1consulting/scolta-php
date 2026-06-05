@@ -349,6 +349,75 @@ class DefaultPromptsTest extends TestCase
         );
     }
 
+    // -------------------------------------------------------------------------
+    // Issue #36 — category-member and context decomposition rules
+    // -------------------------------------------------------------------------
+
+    public function testExpandQueryTemplateContainsCategoryMemberRule(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
+
+        $this->assertStringContainsString(
+            'CATEGORY → MEMBERS',
+            $template,
+            'expand_query must contain rule 13 (CATEGORY → MEMBERS)'
+        );
+        $this->assertStringContainsString(
+            'Mercurial',
+            $template,
+            'rule 13 must lead with the non-food version-control example'
+        );
+    }
+
+    public function testExpandQueryTemplateContainsContextDecompositionRule(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
+
+        $this->assertStringContainsString(
+            'CONTEXT / USE-CASE → CONCRETE ITEMS',
+            $template,
+            'expand_query must contain rule 14 (CONTEXT / USE-CASE → CONCRETE ITEMS)'
+        );
+        $this->assertStringContainsString(
+            'standing desk',
+            $template,
+            'rule 14 must lead with the non-food home-office example'
+        );
+    }
+
+    public function testExpandQueryTemplateForbidsFabricatingMembers(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
+
+        $this->assertStringContainsString(
+            'never invent members',
+            $template,
+            'rule 13 must forbid fabricating members for unknown categories'
+        );
+    }
+
+    public function testExpandQueryTemplateReconcilesTermCapForDecomposition(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
+
+        $this->assertStringContainsString(
+            'up to 6 concrete members',
+            $template,
+            'expand_query must reconcile the 2-4 term cap with decomposition'
+        );
+    }
+
+    public function testExpandQueryTemplateRuleSevenNarrowedToFilterLabels(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
+
+        $this->assertStringContainsString(
+            'taxonomy term or filter label',
+            $template,
+            'rule 7 must be narrowed to taxonomy/filter-label matching so it no longer contradicts rule 13'
+        );
+    }
+
     /**
      * Both CMS adapter tests delegate to this class.  Verify the templates are
      * non-empty and contain placeholder markers so adapters can substitute
