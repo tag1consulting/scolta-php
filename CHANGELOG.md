@@ -4,7 +4,7 @@ All notable changes to scolta-php will be documented in this file.
 
 This project uses [Semantic Versioning](https://semver.org/). Major versions are synchronized across all Scolta packages; minor and patch versions are released independently per package.
 
-## [Unreleased]
+## [1.0.3] - 2026-06-05
 
 ### Added
 - **Regression snapshot test pinning the `summarize` CORPUS AWARENESS prompt bullet.** A new test (`testSummarizeCorpusAwarenessMatchesCanonicalSnapshot`) reads `tests/fixtures/corpus-awareness-bullet.txt` and asserts the resolved `'summarize'` template (`DefaultPrompts::getTemplate()`) contains that exact bullet byte-for-byte, guarding against silent drift (follow-up to the [tag1consulting/scolta-core#33](https://github.com/tag1consulting/scolta-core/issues/33) corpus-statistic fix). The fixture is kept hand-identical to the matching bullet in scolta-core's `SUMMARIZE` constant. Test-only; no runtime change.
