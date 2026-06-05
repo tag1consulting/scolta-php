@@ -323,6 +323,31 @@ class DefaultPromptsTest extends TestCase
         );
     }
 
+    public function testSummarizeCorpusAwarenessMatchesCanonicalSnapshot(): void
+    {
+        // Snapshot guard: pin the exact CORPUS AWARENESS bullet so any future edit
+        // fails loudly and surfaces as an explicit diff in review. The fixture is
+        // seeded byte-for-byte from this bullet and is kept hand-identical to the
+        // matching bullet in scolta-core's SUMMARIZE constant. The PHP source escapes
+        // apostrophes as \' inside the single-quoted template literal; getTemplate()
+        // returns the resolved runtime string where those are already plain ', so the
+        // fixture (plain ') compares directly with no further un-escaping.
+        // This does NOT mechanically prevent the two repos from drifting apart — a
+        // cross-repo CI diff would be needed for that — but it makes any change here
+        // deliberate and visible. Follow-up to the #33 corpus-statistic fix.
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
+        $canonical = file_get_contents(__DIR__ . '/fixtures/corpus-awareness-bullet.txt');
+
+        $this->assertNotFalse($canonical, 'corpus-awareness snapshot fixture must be readable');
+        $this->assertStringContainsString(
+            $canonical,
+            $template,
+            'summarize CORPUS AWARENESS bullet drifted from the pinned snapshot '
+            . '(tests/fixtures/corpus-awareness-bullet.txt); review the diff and, if '
+            . 'intentional, update the fixture and the matching scolta-core bullet'
+        );
+    }
+
     // -------------------------------------------------------------------------
     // Issue #168 — explicit output-length budget prevents mid-sentence truncation
     // -------------------------------------------------------------------------
