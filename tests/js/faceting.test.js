@@ -80,14 +80,20 @@ describe('faceting: source structure', () => {
         expect(scoltaSource).not.toMatch(/let activeFilters = new Set\(\)/);
     });
 
-    test('computeFilterCounts reads r.data.filters not r.data.meta.site', () => {
-        expect(scoltaSource).toContain('const filters = r.data.filters || {};');
-        expect(scoltaSource).not.toMatch(/r\.data\.meta\?\.site/);
+    test('computeQueryFacetCounts derives counts from a single typed-query search', () => {
+        expect(scoltaSource).toContain('async function computeQueryFacetCounts(query, baseFilters)');
+        expect(scoltaSource).toContain('const search = await pagefindSearch(query, structuralFilters);');
     });
 
-    test('computeFilterCounts returns nested dimension structure', () => {
-        expect(scoltaSource).toContain('if (!counts[dim]) counts[dim] = {};');
-        expect(scoltaSource).toContain('counts[dim][v] = (counts[dim][v] || 0) + 1;');
+    test('computeQueryFacetCounts keeps only structural filter dimensions', () => {
+        // User-facing facet selections are dropped so counts never move on click.
+        expect(scoltaSource).toContain('if (SKIP_FILTER_DIMENSIONS.has(dim.toLowerCase())) {');
+        expect(scoltaSource).toContain('structuralFilters[dim] = vals;');
+    });
+
+    test('result-derived facet helpers are removed', () => {
+        expect(scoltaSource).not.toContain('function computeFilterCounts(');
+        expect(scoltaSource).not.toContain('computeDropSelfFacets');
     });
 
     test('toggleFilter accepts dimension and value parameters', () => {
@@ -104,8 +110,12 @@ describe('faceting: source structure', () => {
         expect(scoltaSource).toContain('scolta-filter-group');
     });
 
-    test('renderFilters orders language first, site second', () => {
-        expect(scoltaSource).toContain("const order = { language: 0, site: 1 };");
+    test('renderFilters orders dimensions alphabetically by display label', () => {
+        expect(scoltaSource).toContain('dims.sort((a, b) => filterDimLabel(a).localeCompare(filterDimLabel(b)));');
+    });
+
+    test('renderFilters sorts values alphabetically by display value', () => {
+        expect(scoltaSource).toContain('(a, b) => filterDisplayValue(dim, a).localeCompare(filterDisplayValue(dim, b))');
     });
 
     test('renderFilters calls filterDisplayValue for display names', () => {
@@ -132,22 +142,22 @@ describe('faceting: source structure', () => {
         expect(scoltaSource).toContain('activeFilters = effectiveFilters;');
     });
 
-    test('doSearch assigns filterCounts from computeFilterCounts(allScoredResults)', () => {
-        expect(scoltaSource).toContain('filterCounts = computeFilterCounts(allScoredResults);');
+    test('doSearch computes query-fixed counts only on a fresh typed query', () => {
+        // Gated on !preserveFilters so a facet toggle/sort/load-more never recomputes.
+        expect(scoltaSource).toContain('queryFacetCounts = await computeQueryFacetCounts(searchQuery, activeFilters);');
     });
 
-    test('computeDropSelfFacets is defined for active-dimension faceting', () => {
-        expect(scoltaSource).toContain('async function computeDropSelfFacets(query, baseFilters)');
-        // Drops the dimension's own filter so the facet does not collapse to its
-        // single selected value.
-        expect(scoltaSource).toContain("if (d !== dim) others[d] = v;");
-        // Reads Pagefind's per-value counts from the drop-self search.
-        expect(scoltaSource).toContain('search.filters[dim]');
+    test('renderFilters reads dimensions from the index taxonomy', () => {
+        expect(scoltaSource).toContain('const taxonomy = cachedPagefindFilters || {};');
+        expect(scoltaSource).toContain('Object.keys(taxonomy[dim]).length > 1');
     });
 
-    test('doSearch overlays drop-self facet counts onto filterCounts', () => {
-        expect(scoltaSource).toContain('computeDropSelfFacets(searchQuery, activeFilters)');
-        expect(scoltaSource).toContain('filterCounts[dim] = dropSelfFacets[dim];');
+    test('renderFilters skips infrastructure dimensions', () => {
+        expect(scoltaSource).toContain('!SKIP_FILTER_DIMENSIONS.has(dim.toLowerCase())');
+    });
+
+    test('renderFilters disables zero-count values unless active', () => {
+        expect(scoltaSource).toContain('const disabled = (count === 0 && !isActive) ? " disabled" : "";');
     });
 
     test('initPagefind merges all non-primary language instances via absolute URL', () => {
@@ -188,23 +198,6 @@ function filterDisplayValueTest(dimension, value) {
     return value;
 }
 
-function computeFilterCountsTest(results) {
-    const counts = {};
-    for (const r of results) {
-        const filters = r.data.filters || {};
-        for (const [dim, val] of Object.entries(filters)) {
-            if (!val) continue;
-            const values = Array.isArray(val) ? val : [val];
-            for (const v of values) {
-                if (!v) continue;
-                if (!counts[dim]) counts[dim] = {};
-                counts[dim][v] = (counts[dim][v] || 0) + 1;
-            }
-        }
-    }
-    return counts;
-}
-
 describe('faceting: filterDisplayValue logic', () => {
     test('maps known language code to full name', () => {
         expect(filterDisplayValueTest('language', 'en')).toBe('English');
@@ -232,98 +225,6 @@ describe('faceting: filterDisplayValue logic', () => {
     });
 });
 
-describe('faceting: computeFilterCounts logic', () => {
-    test('returns empty object for empty results', () => {
-        expect(computeFilterCountsTest([])).toEqual({});
-    });
-
-    test('returns empty object when results have no filters', () => {
-        const results = [
-            { data: { meta: { title: 'T1' }, filters: {} } },
-        ];
-        expect(computeFilterCountsTest(results)).toEqual({});
-    });
-
-    test('counts single dimension', () => {
-        const results = [
-            { data: { filters: { language: 'en' } } },
-            { data: { filters: { language: 'en' } } },
-            { data: { filters: { language: 'fr' } } },
-        ];
-        expect(computeFilterCountsTest(results)).toEqual({
-            language: { en: 2, fr: 1 },
-        });
-    });
-
-    test('counts multiple dimensions simultaneously', () => {
-        const results = [
-            { data: { filters: { language: 'en', site: 'Site A' } } },
-            { data: { filters: { language: 'es', site: 'Site B' } } },
-            { data: { filters: { language: 'en', site: 'Site A' } } },
-        ];
-        const counts = computeFilterCountsTest(results);
-        expect(counts.language).toEqual({ en: 2, es: 1 });
-        expect(counts.site).toEqual({ 'Site A': 2, 'Site B': 1 });
-    });
-
-    test('ignores falsy filter values', () => {
-        const results = [
-            { data: { filters: { language: '', site: 'Site A' } } },
-            { data: { filters: { language: null, site: 'Site B' } } },
-        ];
-        const counts = computeFilterCountsTest(results);
-        expect(counts.language).toBeUndefined();
-        expect(counts.site).toEqual({ 'Site A': 1, 'Site B': 1 });
-    });
-
-    test('handles single-element array filter values', () => {
-        const results = [
-            { data: { filters: { language: ['en'] } } },
-            { data: { filters: { language: ['en'] } } },
-        ];
-        expect(computeFilterCountsTest(results)).toEqual({
-            language: { en: 2 },
-        });
-    });
-
-    test('handles multi-value array filters by counting each value', () => {
-        const results = [
-            { data: { filters: { topics: ['Science', 'History'] } } },
-            { data: { filters: { topics: ['Science'] } } },
-            { data: { filters: { topics: ['Arts'] } } },
-        ];
-        expect(computeFilterCountsTest(results)).toEqual({
-            topics: { Science: 2, History: 1, Arts: 1 },
-        });
-    });
-
-    test('multi-value array with null elements skips nulls', () => {
-        const results = [
-            { data: { filters: { topics: ['Science', null, 'History'] } } },
-        ];
-        expect(computeFilterCountsTest(results)).toEqual({
-            topics: { Science: 1, History: 1 },
-        });
-    });
-
-    test('multi-value array with empty string elements skips empties', () => {
-        const results = [
-            { data: { filters: { topics: ['Science', '', 'History'] } } },
-        ];
-        expect(computeFilterCountsTest(results)).toEqual({
-            topics: { Science: 1, History: 1 },
-        });
-    });
-
-    test('results without filters field are skipped', () => {
-        const results = [
-            { data: { meta: { title: 'No filters' } } },
-            { data: { filters: { language: 'en' } } },
-        ];
-        expect(computeFilterCountsTest(results)).toEqual({ language: { en: 1 } });
-    });
-});
-
 // ===========================================================================
 // Behavioral tests (JSDOM)
 // ===========================================================================
@@ -333,11 +234,37 @@ const patchedSource = scoltaSource.replace(
     'pagefind = mockPagefind'
 );
 
-function buildMockPagefind(resultsList, searchFilters) {
+function buildMockPagefind(resultsList, searchFilters, taxonomy) {
     return {
         init: () => Promise.resolve(),
+        // The taxonomy (pagefind.filters()) drives which dimensions/values the
+        // panel renders. Tests that only assert search-call shape can omit it.
+        filters: () => Promise.resolve(taxonomy || {}),
         search: jest.fn(() => Promise.resolve({ results: resultsList, filters: searchFilters || {} })),
     };
+}
+
+// Let all pending async work settle: Pagefind init kicks off a URL-driven
+// auto-search (when the URL has ?q=) and AI expansion runs on a microtask, so a
+// single await is not enough to reach a stable final render.
+async function settle(window) {
+    for (let i = 0; i < 5; i++) {
+        await new Promise(r => window.setTimeout(r, 0));
+    }
+}
+
+// Capture the rendered facet panel as ordered (dimension, value, count) tuples.
+// This is the canonical "did the panel move?" snapshot used by the no-jump test.
+function captureFacetTuples(window) {
+    return [...window.document.querySelectorAll('#scolta-filters .scolta-filter-item')].map(item => {
+        const input = item.querySelector('input[data-scolta-filter-dim]');
+        const countEl = item.querySelector('.scolta-filter-count');
+        return {
+            dim: input.getAttribute('data-scolta-filter-dim'),
+            val: input.getAttribute('data-scolta-filter-val'),
+            count: countEl ? countEl.textContent.trim() : null,
+        };
+    });
 }
 
 function makeResult(filterObj, overrides) {
@@ -461,191 +388,260 @@ describe('faceting: URL encoding round-trip', () => {
     });
 });
 
-describe('faceting: filter sidebar rendered from scored results', () => {
-    test('renders language facets from scored result filters', async () => {
-        const mock = buildMockPagefind([
-            makeResult({ language: 'en' }, { title: 'English Article', url: '/en/article' }),
-            makeResult({ language: 'es' }, { title: 'Spanish Article', url: '/es/article' }),
-            makeResult({ language: 'fr' }, { title: 'French Article', url: '/fr/article' }),
-        ]);
+describe('faceting: index-driven static panel', () => {
+    // The taxonomy (pagefind.filters()) is the single source of truth for which
+    // dimensions and values exist. Counts come from a per-query search's .filters.
+    const TAXONOMY = {
+        language: { en: 50, es: 30 },                          // structural — never a user facet
+        region: { Asia: 12, Europe: 8, 'North America': 4 },
+        era: { Ancient: 6, Modern: 9 },
+        format: { article: 7 },                                // single value — never shown
+    };
+
+    // Per-query counts Pagefind returns for the typed query. 'North America' is
+    // absent (→ count 0) and era.Ancient is present but zero.
+    const QUERY_FILTERS = {
+        region: { Asia: 40, Europe: 25 },
+        era: { Ancient: 0, Modern: 18 },
+    };
+
+    test('shows every non-structural taxonomy dimension with >1 value, alphabetical', async () => {
+        const mock = buildMockPagefind([makeResult({})], QUERY_FILTERS, TAXONOMY);
         const { window } = createWindow(mock);
         const inst = window.Scolta.defaultInstance;
-        window.document.querySelector('#scolta-query').value = 'test';
+        window.document.querySelector('#scolta-query').value = 'history';
         await inst.doSearch();
+        await settle(window);
 
-        const filterContainer = window.document.querySelector('#scolta-filters');
-        expect(filterContainer.innerHTML).toContain('English');
-        expect(filterContainer.innerHTML).toContain('Spanish');
-        expect(filterContainer.innerHTML).toContain('French');
+        const groups = [...window.document.querySelectorAll('#scolta-filters .scolta-filter-group h3')]
+            .map(h => h.textContent);
+        // Era + Region shown (alphabetical). Language is structural; Format is single-value.
+        expect(groups).toEqual(['Era', 'Region']);
     });
 
-    test('hides filter sidebar when scored results have only one value per dimension', async () => {
-        const mock = buildMockPagefind([
-            makeResult({ language: 'en' }),
-        ]);
+    test('shows all taxonomy values per dimension, alphabetical, with query counts', async () => {
+        const mock = buildMockPagefind([makeResult({})], QUERY_FILTERS, TAXONOMY);
         const { window } = createWindow(mock);
         const inst = window.Scolta.defaultInstance;
-        window.document.querySelector('#scolta-query').value = 'test';
+        window.document.querySelector('#scolta-query').value = 'history';
         await inst.doSearch();
+        await settle(window);
 
-        const filterContainer = window.document.querySelector('#scolta-filters');
-        expect(filterContainer.innerHTML).toBe('');
+        expect(captureFacetTuples(window)).toEqual([
+            { dim: 'era', val: 'Ancient', count: '(0)' },
+            { dim: 'era', val: 'Modern', count: '(18)' },
+            { dim: 'region', val: 'Asia', count: '(40)' },
+            { dim: 'region', val: 'Europe', count: '(25)' },
+            { dim: 'region', val: 'North America', count: '(0)' },
+        ]);
     });
 
-    test('renders multiple dimensions from scored result filters', async () => {
-        const mock = buildMockPagefind([
-            makeResult({ language: 'en', content_type: 'article' }, { title: 'English Article', url: '/en/art' }),
-            makeResult({ language: 'es', content_type: 'page' }, { title: 'Spanish Page', url: '/es/page' }),
-        ]);
+    test('zero-count values are disabled, non-zero values enabled', async () => {
+        const mock = buildMockPagefind([makeResult({})], QUERY_FILTERS, TAXONOMY);
         const { window } = createWindow(mock);
         const inst = window.Scolta.defaultInstance;
-        window.document.querySelector('#scolta-query').value = 'test';
+        window.document.querySelector('#scolta-query').value = 'history';
         await inst.doSearch();
+        await settle(window);
 
-        const filterContainer = window.document.querySelector('#scolta-filters');
-        expect(filterContainer.innerHTML).toContain('Language');
-        expect(filterContainer.innerHTML).toContain('Content Type');
-        expect(filterContainer.innerHTML).toContain('English');
-        expect(filterContainer.innerHTML).toContain('Spanish');
-        expect(filterContainer.innerHTML).toContain('article');
-        expect(filterContainer.innerHTML).toContain('page');
+        const q = (dim, val) => window.document.querySelector(
+            `input[data-scolta-filter-dim="${dim}"][data-scolta-filter-val="${val}"]`);
+        expect(q('region', 'North America').disabled).toBe(true);
+        expect(q('era', 'Ancient').disabled).toBe(true);
+        expect(q('region', 'Asia').disabled).toBe(false);
+        expect(q('era', 'Modern').disabled).toBe(false);
     });
 
-    test('refreshes facet counts after filter toggle', async () => {
-        const mock = buildMockPagefind([
-            makeResult({ language: 'en' }, { title: 'English Doc', url: '/en/doc' }),
-            makeResult({ language: 'es' }, { title: 'Spanish Doc', url: '/es/doc' }),
-            makeResult({ language: 'fr' }, { title: 'French Doc', url: '/fr/doc' }),
-        ]);
+    // The core regression: clicking a facet must NOT move any count. This would
+    // have failed under the old result-derived / drop-self model, which re-queried
+    // and reshuffled every number on each toggle.
+    test('facet counts do NOT change when a facet is toggled', async () => {
+        // Mock returns DIFFERENT per-query filters once a facet is applied, to
+        // prove the panel ignores them on a toggle and reuses the query-fixed counts.
+        const search = jest.fn((query, opts) => {
+            const hasFacet = !!(opts && opts.filters && opts.filters.region);
+            return Promise.resolve({
+                results: [makeResult({})],
+                filters: hasFacet ? { region: { Asia: 99 }, era: { Modern: 1 } } : QUERY_FILTERS,
+            });
+        });
+        const mock = { init: () => Promise.resolve(), filters: () => Promise.resolve(TAXONOMY), search };
         const { window } = createWindow(mock);
         const inst = window.Scolta.defaultInstance;
-        window.document.querySelector('#scolta-query').value = 'test';
+        window.document.querySelector('#scolta-query').value = 'history';
         await inst.doSearch();
+        await settle(window);
+        const before = captureFacetTuples(window);
 
-        await inst.toggleFilter('language', 'en');
+        await inst.toggleFilter('region', 'Asia');
+        await settle(window);
+        const after = captureFacetTuples(window);
 
-        const filterContainer = window.document.querySelector('#scolta-filters');
-        // Counts are recomputed from the current result set after every toggle.
-        // The mock returns all results regardless of filters, so all three
-        // language values remain visible.
-        expect(filterContainer.innerHTML).toContain('English');
-        expect(filterContainer.innerHTML).toContain('Spanish');
-        expect(filterContainer.innerHTML).toContain('French');
+        // Same dimensions, values, counts, order — only the checked state differs.
+        expect(after).toEqual(before);
+        expect(window.document.querySelector(
+            'input[data-scolta-filter-dim="region"][data-scolta-filter-val="Asia"]').checked).toBe(true);
     });
 
-    test('active filter dimension stays visible when only one value remains', async () => {
-        // After filtering, the active dimension may have only one value.
-        // It must still be shown so the user can uncheck it.
-        const mock = buildMockPagefind([
-            makeResult({ language: 'en', era: 'Ancient' }, { title: 'Ancient Article', url: '/ancient' }),
-        ]);
+    test('an active zero-count value stays enabled and uncheckable', async () => {
+        const mock = buildMockPagefind([makeResult({})], QUERY_FILTERS, TAXONOMY);
         const { window } = createWindow(mock);
         const inst = window.Scolta.defaultInstance;
-        window.document.querySelector('#scolta-query').value = 'test';
+        window.document.querySelector('#scolta-query').value = 'history';
         await inst.doSearch();
+        await settle(window);
 
-        // After initial search, era has only one value — normally hidden.
-        let filterContainer = window.document.querySelector('#scolta-filters');
-        expect(filterContainer.innerHTML).not.toContain('Ancient');
-
-        // Now toggle the era filter. Even with one value, the dimension
-        // must remain visible because the filter is active.
+        // era=Ancient has count 0; activating it must keep it enabled + checked.
         await inst.toggleFilter('era', 'Ancient');
-        filterContainer = window.document.querySelector('#scolta-filters');
-        expect(filterContainer.innerHTML).toContain('Ancient');
-        expect(filterContainer.querySelector('input[data-scolta-filter-dim="era"]').checked).toBe(true);
+        await settle(window);
+        const ancient = window.document.querySelector(
+            'input[data-scolta-filter-dim="era"][data-scolta-filter-val="Ancient"]');
+        expect(ancient.disabled).toBe(false);
+        expect(ancient.checked).toBe(true);
     });
 
-    test('active filter value shown with zero count when absent from results', async () => {
-        // If the user selects a cross-dimension filter that excludes all
-        // results for another dimension's active value, the active value
-        // must still be rendered (with count 0) so it can be unchecked.
-        const mock = buildMockPagefind([
-            makeResult({ language: 'en', era: 'Modern' }, { title: 'Modern English', url: '/modern-en' }),
-            makeResult({ language: 'es', era: 'Ancient' }, { title: 'Ancient Spanish', url: '/ancient-es' }),
-        ]);
+    test('a brand-new typed query DOES update the counts', async () => {
+        const search = jest.fn((query) => Promise.resolve({
+            results: [makeResult({})],
+            filters: query === 'history'
+                ? { region: { Asia: 40, Europe: 25 } }
+                : { region: { Asia: 3, Europe: 99 } },
+        }));
+        const mock = { init: () => Promise.resolve(), filters: () => Promise.resolve(TAXONOMY), search };
         const { window } = createWindow(mock);
         const inst = window.Scolta.defaultInstance;
-        window.document.querySelector('#scolta-query').value = 'test';
-        await inst.doSearch();
 
-        // Activate era=Ancient and language=en. The mock doesn't filter,
-        // so both results come back. But simulate the scenario by manually
-        // setting activeFilters and a filterCounts that would result from
-        // real Pagefind filtering (only en results, so era only has Modern).
-        // We verify via toggleFilter which exercises the real code path.
-        await inst.toggleFilter('era', 'Ancient');
-        const filterContainer = window.document.querySelector('#scolta-filters');
-        expect(filterContainer.innerHTML).toContain('Ancient');
+        window.document.querySelector('#scolta-query').value = 'history';
+        await inst.doSearch();
+        await settle(window);
+        const first = captureFacetTuples(window);
+
+        // New typed query → fresh doSearch (preserveFilters falsy) → counts recompute.
+        window.document.querySelector('#scolta-query').value = 'science';
+        await inst.doSearch();
+        await settle(window);
+        const second = captureFacetTuples(window);
+
+        expect(second).not.toEqual(first);
+        const get = (tuples, val) => tuples.find(t => t.dim === 'region' && t.val === val).count;
+        expect(get(second, 'Asia')).toBe('(3)');
+        expect(get(second, 'Europe')).toBe('(99)');
+    });
+
+    test('panel stays stable across post-render async (expansion / auto-search)', async () => {
+        // After the primary render, more async lands (AI expansion microtask, the
+        // URL-driven auto-search). Because the panel is taxonomy-driven and counts
+        // come from the deterministic typed query, none of it may move the panel.
+        const mock = buildMockPagefind([makeResult({})], QUERY_FILTERS, TAXONOMY);
+        const { window } = createWindow(mock);
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'history';
+        await inst.doSearch();
+        await settle(window);
+        const first = captureFacetTuples(window);
+        await settle(window);
+        const second = captureFacetTuples(window);
+        expect(first.length).toBeGreaterThan(0);
+        expect(second).toEqual(first);
     });
 });
 
-describe('faceting: drop-self counts keep a filtered dimension from collapsing', () => {
-    // Reproduces the bug: applying f_language=en on a multilingual index made the
-    // Language facet show only "English", because facet values were derived from
-    // the already-language-filtered result set. The fix runs a drop-self search
-    // (all active filters EXCEPT the dimension itself) and reads Pagefind's
-    // per-value `.filters` counts, so every language stays switchable.
-    function buildLanguageAwareMock() {
-        // Pagefind stub whose result set AND .filters vary by whether a language
-        // filter is applied: language-filtered → English-only; unfiltered → all
-        // three languages (this is what the drop-self search sees).
-        const search = jest.fn((query, opts) => {
-            const hasLang = !!(opts && opts.filters && opts.filters.language);
-            if (hasLang) {
-                return Promise.resolve({
-                    results: [makeResult({ language: 'en' }, { title: 'EN', url: '/en' })],
-                    filters: { language: { en: 10 } },
-                });
-            }
-            return Promise.resolve({
-                results: [
-                    makeResult({ language: 'en' }, { title: 'EN', url: '/en' }),
-                    makeResult({ language: 'de' }, { title: 'DE', url: '/de' }),
-                    makeResult({ language: 'fr' }, { title: 'FR', url: '/fr' }),
-                ],
-                filters: { language: { en: 10, de: 4, fr: 2 } },
-            });
-        });
-        return { init: () => Promise.resolve(), search };
-    }
+// ===========================================================================
+// Counts stable across expansion (the deliberate Option A consequence)
+//
+// Facet counts are the exact breakdown of the TYPED query, read once from
+// Pagefind's native `.filters`. AI expansion enlarges the result list and the
+// header "N results", but the facet counts must NOT move: Pagefind has no way
+// to count a union of multiple search terms, and summing per-term `.filters`
+// overcounts any doc matching more than one term. We therefore keep counts
+// pinned to the typed query. This locks in that decision — it is the inverse of
+// the (reverted) expansion-aware summing pass, which made the counts grow.
+// ===========================================================================
 
-    test('active language=en facet still lists all languages with counts', async () => {
-        const mock = buildLanguageAwareMock();
-        const { window } = createWindow(mock);
-        const inst = window.Scolta.defaultInstance;
-        window.document.querySelector('#scolta-query').value = 'undo a commit';
-        await inst.doSearch();
+// Per-term `.filters` the mock returns. If the code ever summed these across the
+// expansion term set, the counts would GROW (history + warfare per value). The
+// typed-query-only model must keep them at history's values.
+const EXPAND_PER_TERM_FILTERS = {
+    history: { region: { Asia: 40, Europe: 25 }, era: { Ancient: 0, Modern: 18 } },
+    warfare: { region: { Asia: 10, Europe: 5 }, era: { Ancient: 4, Modern: 2 } },
+};
 
-        // Apply the language filter — without the fix this collapses to English.
-        await inst.toggleFilter('language', 'en');
+const EXPAND_TAXONOMY = {
+    language: { en: 50, es: 30 },
+    region: { Asia: 12, Europe: 8, 'North America': 4 },
+    era: { Ancient: 6, Modern: 9 },
+};
 
-        const filterContainer = window.document.querySelector('#scolta-filters');
-        expect(filterContainer.innerHTML).toContain('English');
-        expect(filterContainer.innerHTML).toContain('German');
-        expect(filterContainer.innerHTML).toContain('French');
-    });
-
-    test('filterCounts for the active dimension contains all values, not just the selected one', async () => {
-        const mock = buildLanguageAwareMock();
-        const { window } = createWindow(mock);
-        const inst = window.Scolta.defaultInstance;
-        window.document.querySelector('#scolta-query').value = 'undo a commit';
-        await inst.doSearch();
-        await inst.toggleFilter('language', 'en');
-
-        const counts = window.Scolta.defaultInstance.getFilterCounts
-            ? window.Scolta.defaultInstance.getFilterCounts()
-            : null;
-        if (counts) {
-            expect(Object.keys(counts.language).sort()).toEqual(['de', 'en', 'fr']);
-        } else {
-            // No introspection hook — assert via rendered facet inputs instead.
-            const dims = [...window.document.querySelectorAll('input[data-scolta-filter-dim="language"]')]
-                .map(el => el.getAttribute('data-scolta-filter-val'))
-                .sort();
-            expect(dims).toEqual(['de', 'en', 'fr']);
+// Build a window whose expand endpoint returns a real expansion term so the
+// post-expansion merge actually runs. The expand response is gated behind
+// `release()`, so a test can let the taxonomy + typed-query counts render first,
+// capture them, then release expansion and confirm the counts did NOT move.
+function createWindowWithExpansion(mock, expandTerms) {
+    const { window } = createWindow(mock);
+    let release;
+    const gate = new Promise(r => { release = r; });
+    window.fetch = jest.fn((url) => {
+        if (String(url).includes('/e')) {
+            return gate.then(() => ({
+                ok: true, status: 200,
+                json: () => Promise.resolve({ terms: expandTerms }),
+                text: () => Promise.resolve(''),
+            }));
         }
+        return Promise.resolve({
+            ok: false, status: 503,
+            json: () => Promise.resolve({}), text: () => Promise.resolve(''),
+        });
+    });
+    return { window, release };
+}
+
+function expandCountMock(perTermFilters, taxonomy) {
+    const search = jest.fn((query) => Promise.resolve({
+        results: [makeResult({})],
+        filters: perTermFilters[query] || {},
+    }));
+    return { init: () => Promise.resolve(), filters: () => Promise.resolve(taxonomy), search };
+}
+
+const facetCount = (tuples, dim, val) => {
+    const t = tuples.find(x => x.dim === dim && x.val === val);
+    return t ? t.count : null;
+};
+
+describe('faceting: counts stable across expansion', () => {
+    test('facet counts do NOT grow when AI expansion settles', async () => {
+        const mock = expandCountMock(EXPAND_PER_TERM_FILTERS, EXPAND_TAXONOMY);
+        const { window, release } = createWindowWithExpansion(mock, ['warfare']);
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'history';
+
+        // Expansion is gated: settle renders the taxonomy + typed-query counts
+        // while the expand request is still pending.
+        await inst.doSearch();
+        await settle(window);
+        const primary = captureFacetTuples(window);
+
+        // Release expansion; the result list/header change, but the facet counts
+        // stay pinned to the typed query — no summed second pass exists.
+        release();
+        await settle(window);
+        const expanded = captureFacetTuples(window);
+
+        // Counts are the typed query 'history' breakdown, unchanged by expansion.
+        // (Had warfare's `.filters` been summed in, Asia would read 50, not 40.)
+        expect(facetCount(primary, 'region', 'Asia')).toBe('(40)');
+        expect(facetCount(expanded, 'region', 'Asia')).toBe('(40)');
+        expect(facetCount(primary, 'region', 'Europe')).toBe('(25)');
+        expect(facetCount(expanded, 'region', 'Europe')).toBe('(25)');
+        // A value zero on the typed query stays zero — expansion does not pull
+        // warfare's matches into the count.
+        expect(facetCount(primary, 'era', 'Ancient')).toBe('(0)');
+        expect(facetCount(expanded, 'era', 'Ancient')).toBe('(0)');
+
+        // The entire panel — dims, values, counts, order — is byte-identical
+        // before and after expansion settles.
+        expect(expanded).toEqual(primary);
     });
 });
 
@@ -814,12 +810,15 @@ describe('auto-language filter: user can clear the filter', () => {
         const initialCall = mock.search.mock.calls.find(c => c[0] === 'test');
         expect(initialCall[1].filters).toEqual({ language: 'en' });
 
-        // User unchecks "English" — toggleFilter removes it.
+        // User unchecks "English" — toggleFilter removes it. Capture only the
+        // search that this toggle triggers (calls after the pre-toggle baseline),
+        // so a late init/expansion auto-search can't make the assertion flaky.
+        const before = mock.search.mock.calls.length;
         await inst.toggleFilter('language', 'en');
-        const afterToggle = mock.search.mock.calls.filter(c => c[0] === 'test');
-        const lastCall = afterToggle[afterToggle.length - 1];
-        // After unchecking, no language filter in this search.
-        expect(lastCall[1]).not.toHaveProperty('filters');
+        const toggleCall = mock.search.mock.calls.slice(before).find(c => c[0] === 'test');
+        expect(toggleCall).toBeDefined();
+        // After unchecking, no language filter in the toggle's search.
+        expect(toggleCall[1]).not.toHaveProperty('filters');
     });
 });
 
