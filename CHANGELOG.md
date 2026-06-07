@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Added
+- **Prompt-text identity gate (`tests/Prompt/PromptTextIdentityTest.php`).** A new PHPUnit test asserts that `DefaultPrompts`' three AI prompt templates (`expand_query`, `summarize`, `follow_up`) share the same base text, byte-for-byte, as the canonical constants in `scolta-core/src/prompts.rs` — closing the silent cross-implementation drift the suite was otherwise blind to (an edit to a prompt in one copy and not the other would change AI behavior depending on whether prompts resolve server-side or client-side, with every existing test still green). The comparison normalizes out two documented, intentional, path-specific differences before asserting equality: the `{DYNAMIC_ANCHORS}` injection line (per-site instructions reach the WASM/serverless path by filling that token in `resolve_template()`, but reach the CMS/PHP path through `PromptEnricherInterface::enrich()` hooks and the `prompt_*` override fields, so the token lives only in the Rust copy) and PHP single-quote escaping. The test skips cleanly when `scolta-core` is not checked out (it is not a Composer dependency of scolta-php), so it is inert in a published-package checkout and runs wherever the sibling source is present. Test-only; no runtime change. Also corrects the `DefaultPrompts` class docblock, which previously claimed the templates were simply "identical" to scolta-core, to state the precise normalized contract this test enforces.
+
 ## [1.0.3] - 2026-06-05
 
 ### Added
