@@ -7,10 +7,22 @@ namespace Tag1\Scolta\Prompt;
 /**
  * Prompt templates for Scolta AI features.
  *
- * Contains the canonical prompt text for expand_query, summarize, and
- * follow_up operations. These templates are identical to the ones in
- * scolta-core (Rust) — the same text is used whether prompts are
- * resolved server-side (PHP) or client-side (browser WASM).
+ * Contains the prompt text for expand_query, summarize, and follow_up
+ * operations, used to resolve prompts server-side on the CMS/PHP path.
+ *
+ * Relationship to scolta-core (Rust): the base text is identical to the
+ * matching constants in scolta-core/src/prompts.rs, EXCEPT for two
+ * intentional, path-specific differences:
+ *   - The `{DYNAMIC_ANCHORS}` injection line exists only in the Rust copy.
+ *     Per-site instructions reach the WASM/serverless path by filling that
+ *     token in resolve_template(); on this CMS/PHP path they arrive instead
+ *     through PromptEnricherInterface::enrich() hooks and the `prompt_*`
+ *     full-override config fields — so the token is deliberately absent here.
+ *   - PHP single-quote escaping (`'` written as `\'` in these single-quoted
+ *     literals); the runtime string returned by getTemplate() is unescaped.
+ * Tests\Prompt\PromptTextIdentityTest enforces this contract: it normalizes
+ * out those two differences and asserts the remaining base text is byte-for-
+ * byte identical across the two copies.
  *
  * Template placeholders:
  * - {SITE_NAME} — replaced with the site name
