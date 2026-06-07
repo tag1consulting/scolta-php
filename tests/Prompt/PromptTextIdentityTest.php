@@ -49,9 +49,25 @@ use Tag1\Scolta\Prompt\DefaultPrompts;
  * Everything else must be byte-for-byte identical.
  *
  * scolta-core is NOT a Composer dependency of scolta-php, so its source is absent
- * from a published-package checkout. When the file is missing the test skips
- * gracefully; scolta-php's own CI checks out the sibling repo, so the gate runs
- * there.
+ * from a published-package checkout. The canonical Rust source is located one of
+ * two ways:
+ *   - CI sets the SCOLTA_CORE_PROMPTS env var to an explicit path: ci.yml checks
+ *     out scolta-core `main` into the workspace (scolta-core-src/) and points the
+ *     var at scolta-core-src/src/prompts.rs, so the gate RUNS in CI.
+ *   - When the var is unset we fall back to the umbrella-checkout sibling path
+ *     (../../../scolta-core/src/prompts.rs), so the gate also runs in a local
+ *     monorepo checkout.
+ *
+ * Skip/fail behaviour:
+ *   - var unset AND the sibling path missing → SKIP. A published-package checkout
+ *     legitimately has no scolta-core; this is the unchanged graceful-skip path.
+ *   - var SET but the file missing → FAIL. Someone explicitly pointed at a path,
+ *     so a typo must surface loudly rather than silently disabling the gate.
+ *
+ * Deliberate cross-repo coupling: ci.yml pins scolta-core `main`, so a prompt edit
+ * landed on core main will turn scolta-php CI red until the PHP copy is reconciled.
+ * That red is the gate detecting cross-repo drift — it is working as designed, not
+ * a flaky test.
  */
 class PromptTextIdentityTest extends TestCase
 {
@@ -65,12 +81,19 @@ class PromptTextIdentityTest extends TestCase
     ];
 
     /**
-     * Resolve the canonical Rust source relative to this test file.
+     * Resolve the canonical Rust source.
      *
+     * Honours the SCOLTA_CORE_PROMPTS env override (set by CI) and otherwise falls
+     * back to the umbrella-checkout sibling path relative to this test file:
      * tests/Prompt/ -> tests/ -> scolta-php/ -> packages/ -> packages/scolta-core/...
      */
     private static function corePromptsPath(): string
     {
+        $override = getenv('SCOLTA_CORE_PROMPTS');
+        if ($override !== false && $override !== '') {
+            return $override;
+        }
+
         return __DIR__ . '/../../../scolta-core/src/prompts.rs';
     }
 
@@ -79,8 +102,20 @@ class PromptTextIdentityTest extends TestCase
      */
     public function testSharedBaseTextMatchesScoltaCore(string $phpName, string $rustConst): void
     {
+        $override = getenv('SCOLTA_CORE_PROMPTS');
+        $explicit = $override !== false && $override !== '';
         $path = self::corePromptsPath();
+
         if (!is_file($path)) {
+            if ($explicit) {
+                // SCOLTA_CORE_PROMPTS was set explicitly (CI, or a developer
+                // pointing at a checkout). A missing target is a real
+                // misconfiguration — fail so a typo cannot silently skip the gate.
+                self::fail('SCOLTA_CORE_PROMPTS is set but no file exists at ' . $path);
+            }
+
+            // Env unset and the sibling path is absent: published-package checkout
+            // with no scolta-core present. Skip gracefully (unchanged behaviour).
             $this->markTestSkipped('scolta-core source not checked out (' . $path . ')');
         }
 
