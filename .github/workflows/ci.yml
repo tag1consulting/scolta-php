@@ -9,6 +9,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # Point the prompt-text identity gate at the scolta-core source checked out
+      # below, so PromptTextIdentityTest actually runs in CI instead of skipping.
+      SCOLTA_CORE_PROMPTS: ${{ github.workspace }}/scolta-core-src/src/prompts.rs
     strategy:
       matrix:
         include:
@@ -20,6 +24,12 @@ jobs:
             lint: true
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: tag1consulting/scolta-core
+          ref: main
+          path: scolta-core-src
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -41,8 +51,17 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    env:
+      # Same prompt-text identity gate source as the test job (see above).
+      SCOLTA_CORE_PROMPTS: ${{ github.workspace }}/scolta-core-src/src/prompts.rs
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: tag1consulting/scolta-core
+          ref: main
+          path: scolta-core-src
 
       - name: Setup PHP with Xdebug
         uses: shivammathur/setup-php@v2
