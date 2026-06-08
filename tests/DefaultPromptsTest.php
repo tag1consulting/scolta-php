@@ -421,6 +421,22 @@ class DefaultPromptsTest extends TestCase
         );
     }
 
+    public function testExpandQueryForbidsFabricatingUnverifiedEntities(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
+
+        $this->assertStringContainsString(
+            'UNRECOGNIZED OR UNVERIFIABLE NAMED ENTITIES',
+            $template,
+            'expand_query must contain rule 15 (no-fabrication guard for unrecognized entities)'
+        );
+        $this->assertStringContainsString(
+            'do NOT manufacture',
+            $template,
+            'rule 15 must forbid manufacturing detail for unrecognized entities'
+        );
+    }
+
     public function testExpandQueryTemplateReconcilesTermCapForDecomposition(): void
     {
         $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
