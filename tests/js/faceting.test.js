@@ -80,9 +80,15 @@ describe('faceting: source structure', () => {
         expect(scoltaSource).not.toMatch(/let activeFilters = new Set\(\)/);
     });
 
-    test('computeQueryFacetCounts derives counts from a single typed-query search', () => {
-        expect(scoltaSource).toContain('async function computeQueryFacetCounts(query, baseFilters)');
+    test('computeQueryFacetCounts derives counts from the typed-query search and follows the OR-fallback mode', () => {
+        expect(scoltaSource).toContain('async function computeQueryFacetCounts(query, baseFilters, meaningfulTerms, isForcedPhrase)');
         expect(scoltaSource).toContain('const search = await pagefindSearch(query, structuralFilters);');
+        // Mode 1: AND search matched → native .filters. Mode 2: AND empty + fallback
+        // engages → union tally. The union helper exists and dedups by fragment id.
+        expect(scoltaSource).toContain('if (search && search.results && search.results.length > 0) {');
+        expect(scoltaSource).toContain('return await computeUnionFacetCounts(terms, structuralFilters);');
+        expect(scoltaSource).toContain('async function computeUnionFacetCounts(terms, structuralFilters)');
+        expect(scoltaSource).toContain('if (seenIds.has(r.id)) continue;');
     });
 
     test('computeQueryFacetCounts keeps only structural filter dimensions', () => {
@@ -144,7 +150,7 @@ describe('faceting: source structure', () => {
 
     test('doSearch computes query-fixed counts only on a fresh typed query', () => {
         // Gated on !preserveFilters so a facet toggle/sort/load-more never recomputes.
-        expect(scoltaSource).toContain('queryFacetCounts = await computeQueryFacetCounts(searchQuery, activeFilters);');
+        expect(scoltaSource).toContain('queryFacetCounts = await computeQueryFacetCounts(searchQuery, activeFilters, meaningfulTerms, isForcedPhrase);');
     });
 
     test('renderFilters reads dimensions from the index taxonomy', () => {
@@ -268,11 +274,16 @@ function captureFacetTuples(window) {
 }
 
 function makeResult(filterObj, overrides) {
+    const url = (overrides && overrides.url) || '/test';
     return {
+        // Pagefind result objects carry an `id` (the fragment hash); the OR-fallback
+        // count path unions per-term results by it so a doc matching several terms
+        // is counted once. Defaults to the url so single-result mocks stay distinct.
+        id: (overrides && overrides.id) || url,
         data: () => Promise.resolve({
             meta: {
                 title: (overrides && overrides.title) || 'Test Page',
-                url: (overrides && overrides.url) || '/test',
+                url,
                 site: filterObj.site || 'Site A',
             },
             filters: filterObj,
@@ -642,6 +653,184 @@ describe('faceting: counts stable across expansion', () => {
         // The entire panel — dims, values, counts, order — is byte-identical
         // before and after expansion settles.
         expect(expanded).toEqual(primary);
+    });
+});
+
+// ===========================================================================
+// OR-fallback facet counts (the AND-empty count path)
+//
+// Pagefind ANDs every word of a multi-word query, so a long conversational
+// query often returns ZERO AND matches; the result list then rebuilds from
+// per-term OR searches. The facet counts must follow the same mode decision:
+// reading the empty AND search's native `.filters` would report every count as
+// 0 (the bug). In fallback mode counts are the EXACT union of per-term matches —
+// each document counted once (by fragment id), capped per term — never a sum of
+// per-term `.filters`, which double-counts any doc matching more than one term.
+// ===========================================================================
+
+const OR_TAXONOMY = {
+    language: { en: 100, es: 40 },                 // structural — never a user facet
+    difficulty: { Beginner: 10, Intermediate: 20, Advanced: 8 },
+    section: { Tips: 5, Guides: 7 },
+};
+
+// Per-term result sets WITH OVERLAP: 'doc-2' is returned by both 'alpha' and
+// 'beta'; 'doc-3' by both 'beta' and 'gamma'. The strict AND query matches
+// nothing. Each fragment carries scalar filter values (as real Drupal fragments
+// do). If the count path summed per-term `.filters` (the rejected approach) or
+// failed to union by id, the overlapping docs would be counted twice.
+function buildOrFallbackMock(perTerm, taxonomy, andQuery) {
+    const search = jest.fn((query) => {
+        if (query === andQuery) {
+            // Strict AND returns nothing → OR fallback / union count path engages.
+            return Promise.resolve({ results: [], filters: {} });
+        }
+        return Promise.resolve({ results: perTerm[query] || [], filters: {} });
+    });
+    return { init: () => Promise.resolve(), filters: () => Promise.resolve(taxonomy), search };
+}
+
+describe('faceting: OR-fallback facet counts', () => {
+    test('AND-zero query tallies the exact union of per-term matches (overlap counted once)', async () => {
+        const r1 = makeResult({ difficulty: 'Beginner', language: 'en' }, { id: 'doc-1', url: '/1' });
+        const r2 = makeResult({ difficulty: 'Intermediate', language: 'en' }, { id: 'doc-2', url: '/2' });
+        const r3 = makeResult({ difficulty: 'Advanced', language: 'en' }, { id: 'doc-3', url: '/3' });
+        // doc-2 in both alpha+beta, doc-3 in both beta+gamma — fresh result
+        // objects with the SAME id, exactly as Pagefind returns across searches.
+        const r2b = makeResult({ difficulty: 'Intermediate', language: 'en' }, { id: 'doc-2', url: '/2' });
+        const r3b = makeResult({ difficulty: 'Advanced', language: 'en' }, { id: 'doc-3', url: '/3' });
+        const mock = buildOrFallbackMock(
+            { alpha: [r1, r2], beta: [r2b, r3], gamma: [r3b] },
+            OR_TAXONOMY,
+            'alpha beta gamma'
+        );
+        const { window } = createWindow(mock);
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'alpha beta gamma';
+        await inst.doSearch();
+        await settle(window);
+
+        const tuples = captureFacetTuples(window);
+        // Each unique doc contributes once: Beginner(doc-1), Intermediate(doc-2),
+        // Advanced(doc-3) — all 1, NOT 2. Intermediate==1 is the assertion that
+        // locks out the rejected per-term summing / non-deduped tally.
+        expect(facetCount(tuples, 'difficulty', 'Beginner')).toBe('(1)');
+        expect(facetCount(tuples, 'difficulty', 'Intermediate')).toBe('(1)');
+        expect(facetCount(tuples, 'difficulty', 'Advanced')).toBe('(1)');
+    });
+
+    test('fallback counts are structural-only: user dims dropped, structural filter applied to per-term searches', async () => {
+        const makeMock = () => {
+            const r1 = makeResult({ difficulty: 'Beginner', language: 'en' }, { id: 'doc-1', url: '/1' });
+            const r2 = makeResult({ difficulty: 'Intermediate', language: 'en' }, { id: 'doc-2', url: '/2' });
+            const r2b = makeResult({ difficulty: 'Intermediate', language: 'en' }, { id: 'doc-2', url: '/2' });
+            const r3 = makeResult({ difficulty: 'Advanced', language: 'en' }, { id: 'doc-3', url: '/3' });
+            return buildOrFallbackMock(
+                { alpha: [r1, r2], beta: [r2b, r3], gamma: [r3] },
+                OR_TAXONOMY,
+                'alpha beta gamma'
+            );
+        };
+
+        // Baseline: a structural language filter only. Sets must be built with
+        // the window's Set so `instanceof Set` holds inside scolta.js's realm.
+        const baseMock = makeMock();
+        const w1 = createWindow(baseMock);
+        w1.window.document.querySelector('#scolta-query').value = 'alpha beta gamma';
+        await w1.window.Scolta.defaultInstance.doSearch(false, { language: new w1.window.Set(['en']) });
+        await settle(w1.window);
+        const baseline = captureFacetTuples(w1.window);
+
+        // Same query, but with a user-facing difficulty facet ALSO selected.
+        const selMock = makeMock();
+        const w2 = createWindow(selMock);
+        w2.window.document.querySelector('#scolta-query').value = 'alpha beta gamma';
+        await w2.window.Scolta.defaultInstance.doSearch(false, {
+            language: new w2.window.Set(['en']),
+            difficulty: new w2.window.Set(['Beginner']),
+        });
+        await settle(w2.window);
+        const withSelection = captureFacetTuples(w2.window);
+
+        // Counts are identical — the user's difficulty selection was dropped from
+        // the count searches (invariant: counts independent of facet clicks).
+        const countsOnly = t => t.map(x => ({ dim: x.dim, val: x.val, count: x.count }));
+        expect(countsOnly(withSelection)).toEqual(countsOnly(baseline));
+
+        // The count path's per-term searches apply the STRUCTURAL language filter
+        // but NOT the user difficulty selection: among the 'alpha' searches there
+        // is one scoped to language alone (the result-path fallback also searches
+        // 'alpha', but carries the full activeFilters incl. difficulty).
+        const alphaCalls = selMock.search.mock.calls.filter(c => c[0] === 'alpha');
+        const structuralCall = alphaCalls.find(
+            c => c[1] && JSON.stringify(c[1].filters) === JSON.stringify({ language: 'en' })
+        );
+        expect(structuralCall).toBeDefined();
+    });
+
+    test('scalar AND array fragment filter values both tally correctly', async () => {
+        const taxonomy = {
+            language: { en: 100 },
+            topic: { git: 5, vcs: 4, mercurial: 2 },
+            difficulty: { Beginner: 3, Advanced: 2 },
+        };
+        // r1: array-valued `topic` + scalar `difficulty`; r2: scalar `topic`.
+        const r1 = makeResult({ topic: ['git', 'vcs'], difficulty: 'Beginner', language: 'en' }, { id: 'doc-1', url: '/1' });
+        const r2 = makeResult({ topic: 'git', difficulty: 'Advanced', language: 'en' }, { id: 'doc-2', url: '/2' });
+        const mock = buildOrFallbackMock(
+            { alpha: [r1], beta: [r2] },
+            taxonomy,
+            'alpha beta'
+        );
+        const { window } = createWindow(mock);
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'alpha beta';
+        await inst.doSearch();
+        await settle(window);
+
+        const tuples = captureFacetTuples(window);
+        // git: doc-1 (in array) + doc-2 (scalar) = 2; vcs: doc-1 only = 1.
+        expect(facetCount(tuples, 'topic', 'git')).toBe('(2)');
+        expect(facetCount(tuples, 'topic', 'vcs')).toBe('(1)');
+        expect(facetCount(tuples, 'topic', 'mercurial')).toBe('(0)');
+        expect(facetCount(tuples, 'difficulty', 'Beginner')).toBe('(1)');
+        expect(facetCount(tuples, 'difficulty', 'Advanced')).toBe('(1)');
+    });
+
+    test('forced-phrase query stays all-zero and triggers NO per-term count searches', async () => {
+        // A quoted query never falls back to OR — the user asked for the phrase.
+        const mock = buildOrFallbackMock({ alpha: [makeResult({ difficulty: 'Beginner' }, { id: 'd1' })] },
+            OR_TAXONOMY, 'alpha beta');
+        const { window } = createWindow(mock);
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = '"alpha beta"';
+        await inst.doSearch();
+        await settle(window);
+
+        const tuples = captureFacetTuples(window);
+        expect(facetCount(tuples, 'difficulty', 'Beginner')).toBe('(0)');
+        expect(facetCount(tuples, 'difficulty', 'Intermediate')).toBe('(0)');
+        // No per-term search ('alpha' or 'beta' alone) ran — neither the result
+        // OR fallback nor the count union engages for a forced phrase.
+        const perTerm = mock.search.mock.calls.filter(c => c[0] === 'alpha' || c[0] === 'beta');
+        expect(perTerm).toHaveLength(0);
+    });
+
+    test('single meaningful term whose search is empty stays all-zero', async () => {
+        // One meaningful term → no OR fallback → zeros are truthful (the list is
+        // empty too). The query 'solo' returns nothing.
+        const search = jest.fn(() => Promise.resolve({ results: [], filters: {} }));
+        const mock = { init: () => Promise.resolve(), filters: () => Promise.resolve(OR_TAXONOMY), search };
+        const { window } = createWindow(mock);
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'solo';
+        await inst.doSearch();
+        await settle(window);
+
+        const tuples = captureFacetTuples(window);
+        expect(facetCount(tuples, 'difficulty', 'Beginner')).toBe('(0)');
+        expect(facetCount(tuples, 'difficulty', 'Intermediate')).toBe('(0)');
+        expect(facetCount(tuples, 'difficulty', 'Advanced')).toBe('(0)');
     });
 });
 
