@@ -211,7 +211,11 @@ final class AmazeeClient
      */
     private function post(string $path, array $payload, ?string $bearerToken = null): array
     {
-        $headers = ['Content-Type' => 'application/json', 'Accept' => 'application/json'];
+        $headers = [
+            'Content-Type' => 'application/json',
+            'Accept' => 'application/json',
+            'Referer' => 'scolta-php',
+        ];
         if ($bearerToken !== null) {
             $headers['Authorization'] = 'Bearer ' . $bearerToken;
         }
@@ -242,7 +246,7 @@ final class AmazeeClient
      */
     private function get(string $path, ?string $bearerToken = null): array
     {
-        $headers = ['Accept' => 'application/json'];
+        $headers = ['Accept' => 'application/json', 'Referer' => 'scolta-php'];
         if ($bearerToken !== null) {
             $headers['Authorization'] = 'Bearer ' . $bearerToken;
         }
