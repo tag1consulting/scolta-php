@@ -139,22 +139,18 @@ class AiEndpointHandler
 
             return ['ok' => true, 'data' => $payload];
         } catch (ApiKeyMissingException $e) {
+            // AI is unconfigured — an expected state, degrade silently (no log).
             return ['ok' => true, 'data' => ['terms' => [$query], 'expand_primary_weight' => $this->expandPrimaryWeight]];
-        } catch (ApiKeyInvalidException $e) {
-            $this->logger->error('Scolta query expansion failed: invalid API key', ['exception' => $e]);
-
-            return ['ok' => false, 'status' => 401, 'error' => 'AI API key is invalid or expired'];
-        } catch (RateLimitException $e) {
-            $result = ['ok' => false, 'status' => 429, 'error' => 'AI API rate limit reached'];
-            if ($e->retryAfter !== null) {
-                $result['retry_after'] = $e->retryAfter;
-            }
-
-            return $result;
         } catch (\Exception $e) {
-            $this->logger->error('Scolta query expansion failed', ['exception' => $e]);
+            // Query expansion is a non-essential search enhancement. Any provider
+            // failure (invalid key, rate limit, transport error, malformed
+            // response, budget exceeded) degrades to unexpanded search (HTTP 200)
+            // rather than returning a 503 that blocks the search path and spams
+            // the client console. The distinct underlying error is preserved in
+            // the server log so genuine provider/config outages stay diagnosable.
+            $this->logger->error('Scolta query expansion failed, serving unexpanded results', ['exception' => $e]);
 
-            return ['ok' => false, 'status' => 503, 'error' => 'Query expansion unavailable'];
+            return ['ok' => true, 'data' => ['terms' => [$query], 'expand_primary_weight' => $this->expandPrimaryWeight]];
         }
     }
 
@@ -215,22 +211,17 @@ class AiEndpointHandler
 
             return ['ok' => true, 'data' => $result];
         } catch (ApiKeyMissingException $e) {
+            // AI is unconfigured — an expected state, degrade silently (no log).
             return ['ok' => true, 'data' => []];
-        } catch (ApiKeyInvalidException $e) {
-            $this->logger->error('Scolta summarization failed: invalid API key', ['exception' => $e]);
-
-            return ['ok' => false, 'status' => 401, 'error' => 'AI API key is invalid or expired'];
-        } catch (RateLimitException $e) {
-            $result = ['ok' => false, 'status' => 429, 'error' => 'AI API rate limit reached'];
-            if ($e->retryAfter !== null) {
-                $result['retry_after'] = $e->retryAfter;
-            }
-
-            return $result;
         } catch (\Exception $e) {
-            $this->logger->error('Scolta summarization failed', ['exception' => $e]);
+            // Summarization is a non-essential enhancement layered above the
+            // search results. Any provider failure degrades to "no summary"
+            // (HTTP 200) instead of a 503 that surfaces an error banner — the
+            // results themselves are unaffected. The distinct underlying error is
+            // preserved in the server log so genuine outages stay diagnosable.
+            $this->logger->error('Scolta summarization failed, serving results without a summary', ['exception' => $e]);
 
-            return ['ok' => false, 'status' => 503, 'error' => 'Summarization unavailable'];
+            return ['ok' => true, 'data' => []];
         }
     }
 
