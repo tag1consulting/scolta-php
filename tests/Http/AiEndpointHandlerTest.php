@@ -706,29 +706,56 @@ class AiEndpointHandlerTest extends TestCase
     }
 
     // ===================================================================
-    // Error paths
+    // Error paths: expand/summarize degrade, follow-up still 503
+    //
+    // Query expansion and summarization are non-essential search enhancements:
+    // any provider failure must degrade to HTTP 200 (unexpanded results / no
+    // summary) rather than a 503 that blocks the search path or surfaces an
+    // error banner. The underlying error is still logged server-side. Follow-up
+    // is the request's primary purpose, so it keeps its distinct 503.
     // ===================================================================
 
-    public function testExpandQueryReturns503OnAiException(): void
+    public function testExpandQueryDegradesToUnexpandedOnAiException(): void
     {
         $ai = new MockAiService('', throwOnMessage: true);
-        $handler = $this->makeHandler(aiService: $ai);
+        $logger = new SpyLogger();
+        $handler = new AiEndpointHandler(
+            aiService: $ai,
+            cache: new InMemoryCacheDriver(),
+            generation: 1,
+            cacheTtl: 0,
+            maxFollowUps: 3,
+            logger: $logger,
+        );
 
         $result = $handler->handleExpandQuery('test query');
 
-        $this->assertFalse($result['ok']);
-        $this->assertEquals(503, $result['status']);
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('status', $result);
+        $this->assertEquals(['test query'], $result['data']['terms']);
+        $this->assertArrayHasKey('expand_primary_weight', $result['data']);
+        $this->assertNotEmpty($logger->errors, 'Underlying failure should be logged for diagnosis');
     }
 
-    public function testSummarizeReturns503OnAiException(): void
+    public function testSummarizeDegradesToNoSummaryOnAiException(): void
     {
         $ai = new MockAiService('', throwOnMessage: true);
-        $handler = $this->makeHandler(aiService: $ai);
+        $logger = new SpyLogger();
+        $handler = new AiEndpointHandler(
+            aiService: $ai,
+            cache: new InMemoryCacheDriver(),
+            generation: 1,
+            cacheTtl: 0,
+            maxFollowUps: 3,
+            logger: $logger,
+        );
 
         $result = $handler->handleSummarize('test', 'some context');
 
-        $this->assertFalse($result['ok']);
-        $this->assertEquals(503, $result['status']);
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('status', $result);
+        $this->assertEquals([], $result['data']);
+        $this->assertNotEmpty($logger->errors, 'Underlying failure should be logged for diagnosis');
     }
 
     public function testFollowUpReturns503OnAiException(): void
@@ -747,30 +774,49 @@ class AiEndpointHandlerTest extends TestCase
     }
 
     // ===================================================================
-    // Invalid API key — 401
+    // Invalid API key: expand/summarize degrade, follow-up keeps 401
     // ===================================================================
 
-    public function testExpandQueryReturns401OnInvalidApiKey(): void
+    public function testExpandQueryDegradesToUnexpandedOnInvalidApiKey(): void
     {
         $ai = new MockAiService('', throwApiKeyInvalid: true);
-        $handler = $this->makeHandler(aiService: $ai);
+        $logger = new SpyLogger();
+        $handler = new AiEndpointHandler(
+            aiService: $ai,
+            cache: new InMemoryCacheDriver(),
+            generation: 1,
+            cacheTtl: 0,
+            maxFollowUps: 3,
+            logger: $logger,
+        );
 
         $result = $handler->handleExpandQuery('test query');
 
-        $this->assertFalse($result['ok']);
-        $this->assertEquals(401, $result['status']);
-        $this->assertStringContainsString('invalid', strtolower($result['error']));
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('status', $result);
+        $this->assertEquals(['test query'], $result['data']['terms']);
+        $this->assertNotEmpty($logger->errors, 'The 401 should be preserved in the server log');
     }
 
-    public function testSummarizeReturns401OnInvalidApiKey(): void
+    public function testSummarizeDegradesToNoSummaryOnInvalidApiKey(): void
     {
         $ai = new MockAiService('', throwApiKeyInvalid: true);
-        $handler = $this->makeHandler(aiService: $ai);
+        $logger = new SpyLogger();
+        $handler = new AiEndpointHandler(
+            aiService: $ai,
+            cache: new InMemoryCacheDriver(),
+            generation: 1,
+            cacheTtl: 0,
+            maxFollowUps: 3,
+            logger: $logger,
+        );
 
         $result = $handler->handleSummarize('test', 'some context');
 
-        $this->assertFalse($result['ok']);
-        $this->assertEquals(401, $result['status']);
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('status', $result);
+        $this->assertEquals([], $result['data']);
+        $this->assertNotEmpty($logger->errors, 'The 401 should be preserved in the server log');
     }
 
     public function testFollowUpReturns401OnInvalidApiKey(): void
@@ -784,9 +830,13 @@ class AiEndpointHandlerTest extends TestCase
         $this->assertEquals(401, $result['status']);
     }
 
-    public function testInvalidApiKeyLogsError(): void
+    // ===================================================================
+    // Rate limiting: expand/summarize degrade, follow-up keeps 429
+    // ===================================================================
+
+    public function testExpandQueryDegradesToUnexpandedOnRateLimit(): void
     {
-        $ai = new MockAiService('', throwApiKeyInvalid: true);
+        $ai = new MockAiService('', throwRateLimit: true);
         $logger = new SpyLogger();
         $handler = new AiEndpointHandler(
             aiService: $ai,
@@ -797,35 +847,33 @@ class AiEndpointHandlerTest extends TestCase
             logger: $logger,
         );
 
-        $handler->handleSummarize('test', 'context');
-
-        $this->assertNotEmpty($logger->errors, 'Invalid API key should be logged as an error');
-    }
-
-    // ===================================================================
-    // Rate limiting — 429
-    // ===================================================================
-
-    public function testExpandQueryReturns429OnRateLimit(): void
-    {
-        $ai = new MockAiService('', throwRateLimit: true);
-        $handler = $this->makeHandler(aiService: $ai);
-
         $result = $handler->handleExpandQuery('test query');
 
-        $this->assertFalse($result['ok']);
-        $this->assertEquals(429, $result['status']);
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('status', $result);
+        $this->assertEquals(['test query'], $result['data']['terms']);
+        $this->assertNotEmpty($logger->errors, 'The 429 should be preserved in the server log');
     }
 
-    public function testSummarizeReturns429OnRateLimit(): void
+    public function testSummarizeDegradesToNoSummaryOnRateLimit(): void
     {
         $ai = new MockAiService('', throwRateLimit: true);
-        $handler = $this->makeHandler(aiService: $ai);
+        $logger = new SpyLogger();
+        $handler = new AiEndpointHandler(
+            aiService: $ai,
+            cache: new InMemoryCacheDriver(),
+            generation: 1,
+            cacheTtl: 0,
+            maxFollowUps: 3,
+            logger: $logger,
+        );
 
         $result = $handler->handleSummarize('test', 'some context');
 
-        $this->assertFalse($result['ok']);
-        $this->assertEquals(429, $result['status']);
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('status', $result);
+        $this->assertEquals([], $result['data']);
+        $this->assertNotEmpty($logger->errors, 'The 429 should be preserved in the server log');
     }
 
     public function testFollowUpReturns429OnRateLimit(): void
@@ -839,24 +887,24 @@ class AiEndpointHandlerTest extends TestCase
         $this->assertEquals(429, $result['status']);
     }
 
-    public function testRateLimitResponseIncludesRetryAfterWhenPresent(): void
+    public function testFollowUpRateLimitIncludesRetryAfterWhenPresent(): void
     {
         $ai = new MockAiService('', throwRateLimit: true, rateLimitRetryAfter: '60');
         $handler = $this->makeHandler(aiService: $ai);
 
-        $result = $handler->handleExpandQuery('test query');
+        $result = $handler->handleFollowUp([['role' => 'user', 'content' => 'hello']]);
 
         $this->assertFalse($result['ok']);
         $this->assertEquals(429, $result['status']);
         $this->assertEquals('60', $result['retry_after']);
     }
 
-    public function testRateLimitResponseOmitsRetryAfterWhenAbsent(): void
+    public function testFollowUpRateLimitOmitsRetryAfterWhenAbsent(): void
     {
         $ai = new MockAiService('', throwRateLimit: true, rateLimitRetryAfter: null);
         $handler = $this->makeHandler(aiService: $ai);
 
-        $result = $handler->handleExpandQuery('test query');
+        $result = $handler->handleFollowUp([['role' => 'user', 'content' => 'hello']]);
 
         $this->assertFalse($result['ok']);
         $this->assertEquals(429, $result['status']);
