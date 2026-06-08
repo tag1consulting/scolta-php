@@ -760,6 +760,20 @@
     return div.innerHTML;
   }
 
+  // Prepare a raw query for display inside the results header, which wraps the
+  // query in its own pair of double-quotes. A quoted-phrase search ("merge
+  // conflict") already carries surrounding quotes, so without trimming a single
+  // matched pair the header would render the doubled ""merge conflict"".
+  // escapeHtml does not escape `"`, so the only quote level shown is the
+  // template's — strip at most one surrounding pair here so it isn't doubled.
+  function displayQuery(query) {
+    const q = query || "";
+    if (q.length >= 2 && q.startsWith('"') && q.endsWith('"')) {
+      return q.slice(1, -1);
+    }
+    return q;
+  }
+
   function stripHtml(text) {
     const div = document.createElement("div");
     div.innerHTML = text;
@@ -791,9 +805,22 @@
   // Top 2 results get full page content for depth; remaining get excerpts.
   function buildLLMContext(results, sortHint = null, filterHint = null) {
     const CONFIG = getInstanceConfig();
-    return results.map((r, i) => {
+    // Collapse results that resolve to the same destination URL before numbering.
+    // Two results sharing a URL would otherwise each get their own [n] block, so
+    // the model is handed duplicate sources and cites the same href repeatedly in
+    // its summary. Deduping here (the root layer) keeps the first — highest
+    // ranked — occurrence of each URL; results with no URL are never collapsed.
+    const seenUrls = new Set();
+    const unique = [];
+    for (const r of results) {
+      const _u = r.data.meta?.url || resolveUrl(r.data.url || "");
+      const url = _u.startsWith("/") ? window.location.origin + _u : _u;
+      if (url && seenUrls.has(url)) continue;
+      if (url) seenUrls.add(url);
+      unique.push({ r, url });
+    }
+    return unique.map(({ r, url }, i) => {
       const title = r.data.meta?.title || "Untitled";
-      const _u = r.data.meta?.url || resolveUrl(r.data.url || ""); const url = _u.startsWith("/") ? window.location.origin + _u : _u;
       const useFullContent = i < 2;
       const text = useFullContent
         ? stripHtml(r.data.content || r.data.excerpt || "")
@@ -2176,11 +2203,24 @@
     const filtered = allScoredResults;
 
     if (filtered.length === 0) {
-      container.innerHTML = "";
-      header.innerHTML = "";
       if (expansionInFlight) {
+        // Phase 1 found no matches, but the AI query-expansion request is still
+        // in flight and may yet surface results (e.g. "rama" expanding to terms
+        // that match). Show a neutral in-progress state rather than (a) blanking
+        // the panel — the previous behavior, which left it empty for the entire
+        // duration of the async expand round-trip (observed as a multi-second
+        // blank) — or (b) flashing "No results found." that then disappears once
+        // expansion adds hits. The terminal state (results or "No results
+        // found.") is rendered by the final renderResults() call after the
+        // expand promise settles.
+        container.innerHTML = '<p class="scolta-searching">Searching…</p>';
+        header.innerHTML = "";
+        noResults.style.display = "none";
+        loadMore.style.display = "none";
         return;
       }
+      container.innerHTML = "";
+      header.innerHTML = "";
       noResults.style.display = "block";
       loadMore.style.display = "none";
       return;
@@ -2196,7 +2236,8 @@
           .join('; ')
       : '';
     const orFallbackLabel = usedOrFallback ? ' — no exact matches found, showing partial matches' : '';
-    header.innerHTML = `<span>${filtered.length.toLocaleString()} results for "${escapeHtml(currentQuery)}"${filterLabel}${expandLabel}${orFallbackLabel}</span>
+    const resultNoun = filtered.length === 1 ? 'result' : 'results';
+    header.innerHTML = `<span>${filtered.length.toLocaleString()} ${resultNoun} for "${escapeHtml(displayQuery(currentQuery))}"${filterLabel}${expandLabel}${orFallbackLabel}</span>
                         <span>Showing ${showing}</span>`;
 
     let html = "";
