@@ -70,7 +70,7 @@ class StemmerPagefindParityTest extends TestCase
 
         $this->assertEmpty(
             $mismatches,
-            "Stemmer drifted off old Porter2 (Pagefind) — did wamania/php-stemmer move "
+            'Stemmer drifted off old Porter2 (Pagefind) — did wamania/php-stemmer move '
             . "to a new-Porter2 revision?\n" . implode("\n", $mismatches)
         );
     }
