@@ -9,15 +9,21 @@ namespace Tag1\Scolta\Index;
  */
 final class NullProgressReporter implements ProgressReporterInterface
 {
-    public function start(int $totalSteps, string $label): void
-    {
-    }
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
+    public function start(int $totalSteps, string $label): void {}
 
-    public function advance(int $steps = 1, ?string $detail = null): void
-    {
-    }
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
+    public function advance(int $steps = 1, ?string $detail = null): void {}
 
-    public function finish(?string $summary = null): void
-    {
-    }
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
+    public function finish(?string $summary = null): void {}
 }

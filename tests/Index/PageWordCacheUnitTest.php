@@ -84,7 +84,7 @@ class PageWordCacheUnitTest extends TestCase
         }
         $files = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($files as $file) {
             $file->isDir() ? rmdir($file->getRealPath()) : unlink($file->getRealPath());
@@ -186,7 +186,7 @@ class PageWordCacheUnitTest extends TestCase
         $cache->put('hash-1', $this->tokenData('item-1'));
         $this->assertFileExists(
             $this->chunkFile(0),
-            'Second put must flush via byte threshold before count threshold (100) is reached'
+            'Second put must flush via byte threshold before count threshold (100) is reached',
         );
     }
 
@@ -288,7 +288,7 @@ class PageWordCacheUnitTest extends TestCase
             $this->assertContains(
                 (int) $m[1],
                 $liveChunks,
-                'Orphaned chunk file must be deleted by pruneAndSave()'
+                'Orphaned chunk file must be deleted by pruneAndSave()',
             );
         }
     }
@@ -412,7 +412,7 @@ class PageWordCacheUnitTest extends TestCase
         ];
         file_put_contents(
             $this->stateDir . '/page-word-cache.php',
-            serialize($legacyData)
+            serialize($legacyData),
         );
 
         // Constructing PageWordCache must trigger migration.

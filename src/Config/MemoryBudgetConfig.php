@@ -21,9 +21,12 @@ final class MemoryBudgetConfig
         private readonly string $profile,
         private readonly ?int $customBytes = null,
         private readonly ?int $chunkSize = null,
-    ) {
-    }
+    ) {}
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public static function defaults(): self
     {
         return new self('conservative');
@@ -33,6 +36,8 @@ final class MemoryBudgetConfig
      * Hydrate from a raw config array (as stored by platform adapters).
      *
      * @param array{profile?: string, custom_bytes?: int|null, chunk_size?: int|null} $data
+     * @since 1.0.0
+     * @stability stable
      */
     public static function load(array $data): self
     {
@@ -54,6 +59,9 @@ final class MemoryBudgetConfig
      *
      * Uses MemoryBudget::fromOptions() so chunk_size and the memory string
      * are applied together via the shared, well-tested factory path.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function toMemoryBudget(): MemoryBudget
     {
@@ -69,6 +77,8 @@ final class MemoryBudgetConfig
      * Validate the config; returns an array of error messages (empty = valid).
      *
      * @return string[]
+     * @since 1.0.0
+     * @stability stable
      */
     public function validate(): array
     {
@@ -130,23 +140,38 @@ final class MemoryBudgetConfig
      * Return the advisory suggestion from MemoryBudgetSuggestion.
      *
      * @return array{profile: string, reason: string, detected_limit_bytes: int|null, confidence: string}
+     * @since 1.0.0
+     * @stability stable
      */
     public function suggest(): array
     {
         return MemoryBudgetSuggestion::suggest();
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public function profile(): string
     {
         return $this->profile;
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public function customBytes(): ?int
     {
         return $this->customBytes;
     }
 
-    /** Pages-per-chunk override, or null to use the profile default. */
+    /**
+     * Pages-per-chunk override, or null to use the profile default.
+     *
+     * @since 1.0.0
+     * @stability stable
+     */
     public function chunkSize(): ?int
     {
         return $this->chunkSize;
@@ -156,6 +181,8 @@ final class MemoryBudgetConfig
      * Serialize to array for platform config storage.
      *
      * @return array{profile: string, custom_bytes: int|null, chunk_size: int|null}
+     * @since 1.0.0
+     * @stability stable
      */
     public function toArray(): array
     {

@@ -1,0 +1,11 @@
+{
+    "input": "Raw markup like <script>alert(1)</script> and <b>tags</b> must be escaped.",
+    "mustContain": [
+        "&lt;script&gt;",
+        "&lt;b&gt;"
+    ],
+    "mustNotContain": [
+        "<script>",
+        "<b>"
+    ]
+}

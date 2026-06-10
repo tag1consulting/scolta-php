@@ -140,7 +140,7 @@ class PageWordCacheTest extends TestCase
         }
         $files = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($files as $file) {
             $file->isDir() ? rmdir($file->getRealPath()) : unlink($file->getRealPath());
@@ -253,7 +253,7 @@ class PageWordCacheTest extends TestCase
         $this->assertSame(
             $entry1['languages']['en']['page_count'] ?? null,
             $entry2['languages']['en']['page_count'] ?? null,
-            'Page count must be identical across cached rebuild'
+            'Page count must be identical across cached rebuild',
         );
     }
 
@@ -453,7 +453,7 @@ class PageWordCacheTest extends TestCase
         $this->assertSame(
             '__CORRUPTED__',
             $entry['cleanTitle'],
-            'Non-force build uses cached (corrupted) token data'
+            'Non-force build uses cached (corrupted) token data',
         );
 
         // Now force: must bypass cache and re-tokenize.
@@ -466,7 +466,7 @@ class PageWordCacheTest extends TestCase
         $this->assertNotSame(
             '__CORRUPTED__',
             $freshEntry['cleanTitle'],
-            'Force build must re-tokenize and overwrite corrupted cache'
+            'Force build must re-tokenize and overwrite corrupted cache',
         );
     }
 
@@ -487,7 +487,7 @@ class PageWordCacheTest extends TestCase
         $this->assertNotSame(
             '__CORRUPTED__',
             $freshEntry['cleanTitle'],
-            'Force build on orchestrator must re-tokenize and overwrite corrupted cache'
+            'Force build on orchestrator must re-tokenize and overwrite corrupted cache',
         );
     }
 
@@ -521,7 +521,7 @@ class PageWordCacheTest extends TestCase
         $this->assertSame(
             array_keys($cacheAfterForce),
             array_keys($cacheAfterNonForce),
-            'Non-force build after force build should use the same cache key'
+            'Non-force build after force build should use the same cache key',
         );
     }
 
@@ -652,7 +652,7 @@ class PageWordCacheTest extends TestCase
         $this->assertSame(
             array_keys($cache1),
             array_keys($cache2),
-            'Cache keys must persist across PhpIndexer instances'
+            'Cache keys must persist across PhpIndexer instances',
         );
     }
 
@@ -668,7 +668,7 @@ class PageWordCacheTest extends TestCase
         // Manifest must not exist (no items were processed, pruneAndSave not called).
         $this->assertFileDoesNotExist(
             $this->manifestFile(),
-            'Manifest must not be created when no items are processed'
+            'Manifest must not be created when no items are processed',
         );
     }
 }

@@ -106,7 +106,7 @@ class StemmerTest extends TestCase
             $this->assertSame(
                 $first,
                 $second,
-                "stem('{$word}') must return identical results on repeated calls"
+                "stem('{$word}') must return identical results on repeated calls",
             );
         }
     }

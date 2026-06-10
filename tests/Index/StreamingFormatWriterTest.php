@@ -298,7 +298,7 @@ class StreamingFormatWriterTest extends TestCase
         ];
 
         $partial  = $builder->buildFromTokenData(
-            array_map(fn (ContentItem $item) => [
+            array_map(fn(ContentItem $item) => [
                 'item'      => (object) [
                     'id'       => $item->id,
                     'url'      => $item->url,
@@ -363,11 +363,11 @@ class StreamingFormatWriterTest extends TestCase
         $pages = [
             0 => array_merge(
                 $this->makePage('/a', 'Article A'),
-                ['filters' => ['topic' => ['Science', 'History', 'Biography']]]
+                ['filters' => ['topic' => ['Science', 'History', 'Biography']]],
             ),
             1 => array_merge(
                 $this->makePage('/b', 'Article B'),
-                ['filters' => ['topic' => 'Science']]
+                ['filters' => ['topic' => 'Science']],
             ),
         ];
 
@@ -399,7 +399,7 @@ class StreamingFormatWriterTest extends TestCase
         $pages = [
             0 => array_merge(
                 $this->makePage('/x', 'Multi-Filter Page'),
-                ['filters' => ['color' => ['Red', 'Blue']]]
+                ['filters' => ['color' => ['Red', 'Blue']]],
             ),
         ];
 
@@ -421,7 +421,7 @@ class StreamingFormatWriterTest extends TestCase
         }
         $files = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($files as $file) {
             $file->isDir() ? rmdir($file->getRealPath()) : unlink($file->getRealPath());

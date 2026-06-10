@@ -23,7 +23,7 @@ class HygieneTest extends TestCase
             $this->assertDoesNotMatchRegularExpression(
                 '/@mkdir\s*\(/',
                 $source,
-                basename($file) . ' must not use @mkdir — use is_dir() fallback instead.'
+                basename($file) . ' must not use @mkdir — use is_dir() fallback instead.',
             );
         }
     }
@@ -39,7 +39,7 @@ class HygieneTest extends TestCase
             $this->assertDoesNotMatchRegularExpression(
                 '/@unlink\s*\(/',
                 $source,
-                basename($file) . ' must not use @unlink — only BuildState.php is exempted for lock cleanup.'
+                basename($file) . ' must not use @unlink — only BuildState.php is exempted for lock cleanup.',
             );
         }
     }
@@ -50,7 +50,7 @@ class HygieneTest extends TestCase
         $this->assertDoesNotMatchRegularExpression(
             '/uniqid\s*\([^)]*,\s*true\s*\)/i',
             $source,
-            'IndexMerger must not use uniqid(..., true) — periods in directory names can confuse cleanup scripts.'
+            'IndexMerger must not use uniqid(..., true) — periods in directory names can confuse cleanup scripts.',
         );
     }
 
@@ -58,7 +58,7 @@ class HygieneTest extends TestCase
     {
         $srcDir = __DIR__ . '/../src/';
         $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($srcDir, \FilesystemIterator::SKIP_DOTS)
+            new \RecursiveDirectoryIterator($srcDir, \FilesystemIterator::SKIP_DOTS),
         );
         foreach ($iterator as $file) {
             if ($file->getExtension() !== 'php') {
@@ -73,7 +73,7 @@ class HygieneTest extends TestCase
                 $this->assertStringContainsString(
                     'allowed_classes',
                     $call,
-                    basename($file->getPathname()) . ': unserialize() must specify [\'allowed_classes\' => false]'
+                    basename($file->getPathname()) . ': unserialize() must specify [\'allowed_classes\' => false]',
                 );
             }
         }
@@ -83,7 +83,7 @@ class HygieneTest extends TestCase
     {
         $srcDir = __DIR__ . '/../src/';
         $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($srcDir, \FilesystemIterator::SKIP_DOTS)
+            new \RecursiveDirectoryIterator($srcDir, \FilesystemIterator::SKIP_DOTS),
         );
         $scanned = 0;
         foreach ($iterator as $file) {
@@ -98,7 +98,7 @@ class HygieneTest extends TestCase
                 $this->assertMatchesRegularExpression(
                     '/(?:if\s*\(|return\s)/',
                     $preceding,
-                    basename($file->getPathname()) . ': file_put_contents at offset ' . $offset . ' must be wrapped in an error check.'
+                    basename($file->getPathname()) . ': file_put_contents at offset ' . $offset . ' must be wrapped in an error check.',
                 );
             }
         }
@@ -116,7 +116,7 @@ class HygieneTest extends TestCase
         $this->assertStringContainsString(
             'data.meta?.url',
             $js,
-            'scolta.js must prefer data.meta?.url (verbatim from data-pagefind-meta) over the Pagefind-resolved data.url for display links'
+            'scolta.js must prefer data.meta?.url (verbatim from data-pagefind-meta) over the Pagefind-resolved data.url for display links',
         );
     }
 
@@ -127,7 +127,7 @@ class HygieneTest extends TestCase
         $this->assertMatchesRegularExpression(
             '/data\.meta\?\.url\s*\|\|\s*resolveUrl\(/',
             $js,
-            'scolta.js must use data.meta?.url || resolveUrl() so the verbatim meta URL takes precedence over Pagefind\'s resolved data.url (prevents path doubling on subdirectory installs)'
+            'scolta.js must use data.meta?.url || resolveUrl() so the verbatim meta URL takes precedence over Pagefind\'s resolved data.url (prevents path doubling on subdirectory installs)',
         );
     }
 }

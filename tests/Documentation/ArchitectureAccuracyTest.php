@@ -44,8 +44,8 @@ class ArchitectureAccuracyTest extends TestCase
                         . 'ScoltaWasm and ExtismCheck were removed. '
                         . 'Build target is wasm32-unknown-unknown, not wasm32-wasip1.',
                         basename($file),
-                        $term
-                    )
+                        $term,
+                    ),
                 );
             }
         }
@@ -80,7 +80,7 @@ class ArchitectureAccuracyTest extends TestCase
             $violations,
             'CI workflows must not use continue-on-error: true. '
             . "Fix the underlying failure instead of muting it.\n"
-            . implode("\n", $violations)
+            . implode("\n", $violations),
         );
     }
 }

@@ -37,14 +37,15 @@ class InvertedIndexBuilder
     public function __construct(
         private readonly Tokenizer $tokenizer,
         private readonly Stemmer $stemmer,
-    ) {
-    }
+    ) {}
 
     /**
      * Build a partial inverted index from content items.
      *
      * @param ContentItem[] $items Content items to index.
      * @return array{index: array, pages: array}
+     * @since 1.0.0
+     * @stability stable
      */
     public function build(array $items, int $pageOffset = 0): array
     {
@@ -79,6 +80,9 @@ class InvertedIndexBuilder
      *
      * @return array{titleTokens: Token[], bodyTokens: Token[], urlTokens: Token[],
      *               wordCount: int, cleanTitle: string, content: string}|null
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function tokenizeItem(ContentItem $item): ?array
     {
@@ -101,7 +105,7 @@ class InvertedIndexBuilder
         // Tokenize URL path segments for search discovery.
         $urlPath     = parse_url($item->url, PHP_URL_PATH) ?? '';
         $urlPath     = preg_replace('/\.\w+$/', '', $urlPath);
-        $urlSegments = array_filter(explode('/', $urlPath), fn ($s) => strlen($s) > 0);
+        $urlSegments = array_filter(explode('/', $urlPath), fn($s) => strlen($s) > 0);
         $urlText     = implode(' ', $urlSegments);
         $rawUrlTokens = $this->tokenizer->tokenize($urlText);
         $urlResult   = $this->reindexToWordPositions($rawUrlTokens, $bodyResult['nextIndex']);
@@ -142,6 +146,8 @@ class InvertedIndexBuilder
      *
      * @param iterable<array{item: object, tokenData: array}> $items
      * @return array{index: array, pages: array}
+     * @since 1.0.0
+     * @stability stable
      */
     public function buildFromItemStream(iterable $items, int $pageOffset = 0): array
     {
@@ -170,7 +176,7 @@ class InvertedIndexBuilder
                 'meta'      => array_filter([
                     'title' => $tokenData['cleanTitle'],
                     'date'  => $item->date,
-                ] + $itemSortable, fn ($v) => $v !== null && $v !== ''),
+                ] + $itemSortable, fn($v) => $v !== null && $v !== ''),
                 'sortable'  => $itemSortable,
                 'hash'      => hash('sha256', $tokenData['content']),
             ];
@@ -200,6 +206,8 @@ class InvertedIndexBuilder
      *
      * @param array<int, array{item: object, tokenData: array}> $tokenDataList
      * @return array{index: array, pages: array}
+     * @since 1.0.0
+     * @stability stable
      */
     public function buildFromTokenData(array $tokenDataList, int $pageOffset = 0): array
     {
@@ -228,7 +236,7 @@ class InvertedIndexBuilder
                 'meta'      => array_filter([
                     'title' => $tokenData['cleanTitle'],
                     'date'  => $item->date,
-                ] + $itemSortable, fn ($v) => $v !== null && $v !== ''),
+                ] + $itemSortable, fn($v) => $v !== null && $v !== ''),
                 'sortable'  => $itemSortable,
                 'hash'      => hash('sha256', $tokenData['content']),
             ];

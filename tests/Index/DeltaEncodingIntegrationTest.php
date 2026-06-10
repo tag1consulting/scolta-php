@@ -114,25 +114,25 @@ class DeltaEncodingIntegrationTest extends TestCase
         $this->assertSame(
             [3, 2, 3, 5, 8],
             DeltaEncoder::deltaEncode([3, 5, 8, 13, 21]),
-            'deltaEncode([3, 5, 8, 13, 21]) must return [3, 2, 3, 5, 8]'
+            'deltaEncode([3, 5, 8, 13, 21]) must return [3, 2, 3, 5, 8]',
         );
 
         $this->assertSame(
             [0, 1, 1],
             DeltaEncoder::deltaEncode([0, 1, 2]),
-            'deltaEncode([0, 1, 2]) must return [0, 1, 1]'
+            'deltaEncode([0, 1, 2]) must return [0, 1, 1]',
         );
 
         $this->assertSame(
             [],
             DeltaEncoder::deltaEncode([]),
-            'deltaEncode([]) must return []'
+            'deltaEncode([]) must return []',
         );
 
         $this->assertSame(
             [7],
             DeltaEncoder::deltaEncode([7]),
-            'deltaEncode([7]) must return [7]'
+            'deltaEncode([7]) must return [7]',
         );
     }
 
@@ -147,7 +147,7 @@ class DeltaEncodingIntegrationTest extends TestCase
         }
         $items = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($items as $item) {
             $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());

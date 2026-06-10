@@ -31,14 +31,16 @@ class PagefindBinary
     public function __construct(
         private readonly ?string $configuredPath = null,
         private readonly ?string $projectDir = null,
-    ) {
-    }
+    ) {}
 
     /**
      * Resolve the Pagefind binary command string.
      *
      * Returns the full command to execute (may be a path or "npx pagefind").
      * Returns null if no working binary can be found.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function resolve(): ?string
     {
@@ -90,6 +92,9 @@ class PagefindBinary
      * How the binary was resolved.
      *
      * One of: 'configured', 'local', 'npx', 'path', 'none'.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function resolvedVia(): string
     {
@@ -101,6 +106,9 @@ class PagefindBinary
 
     /**
      * Get the version string from the resolved binary, or null.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function version(): ?string
     {
@@ -123,6 +131,8 @@ class PagefindBinary
      * Structured status report for CLI status commands and admin forms.
      *
      * @return array{available: bool, binary: ?string, version: ?string, via: string, message: string}
+     * @since 1.0.0
+     * @stability stable
      */
     public function status(): array
     {
@@ -172,6 +182,9 @@ class PagefindBinary
      *
      * Returns the project-local .scolta/bin/ directory, creating it if needed.
      * Falls back to system temp if projectDir is not set.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function downloadTargetDir(): string
     {
@@ -199,7 +212,12 @@ class PagefindBinary
     public static function escapeShellCommand(string $cmd): string
     {
         if (preg_match('/^npx\s+/', $cmd)) {
-            return implode(' ', array_map('escapeshellarg', preg_split('/\s+/', trim($cmd))));
+            $tokens = preg_split('/\s+/', trim($cmd));
+            if ($tokens !== false) {
+                return implode(' ', array_map('escapeshellarg', $tokens));
+            }
+            // preg_split can only fail on engine error — fall through to
+            // whole-string escaping, which is still injection-safe.
         }
         return escapeshellarg($cmd);
     }

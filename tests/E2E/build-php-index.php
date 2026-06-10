@@ -49,7 +49,7 @@ foreach (glob($corpusDir . '/*.html') as $file) {
         $body,
         '/' . $filename . '.html',
         $date,
-        $siteName
+        $siteName,
     );
 }
 

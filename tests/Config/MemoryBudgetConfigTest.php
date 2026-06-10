@@ -161,7 +161,7 @@ class MemoryBudgetConfigTest extends TestCase
         $budget = MemoryBudgetConfig::fromCliAndConfig(
             'aggressive',
             '75',
-            fn () => ['profile' => 'conservative', 'chunk_size' => 50],
+            fn() => ['profile' => 'conservative', 'chunk_size' => 50],
         );
 
         $this->assertSame('aggressive', $budget->profile());
@@ -173,7 +173,7 @@ class MemoryBudgetConfigTest extends TestCase
         $budget = MemoryBudgetConfig::fromCliAndConfig(
             null,
             null,
-            fn () => ['profile' => 'balanced', 'chunk_size' => null],
+            fn() => ['profile' => 'balanced', 'chunk_size' => null],
         );
 
         $this->assertSame('balanced', $budget->profile());
@@ -181,7 +181,7 @@ class MemoryBudgetConfigTest extends TestCase
 
     public function testFromCliAndConfigFallsBackToConservativeWhenConfigEmpty(): void
     {
-        $budget = MemoryBudgetConfig::fromCliAndConfig(null, null, fn () => []);
+        $budget = MemoryBudgetConfig::fromCliAndConfig(null, null, fn() => []);
 
         $this->assertSame('conservative', $budget->profile());
     }
@@ -191,7 +191,7 @@ class MemoryBudgetConfigTest extends TestCase
         $budget = MemoryBudgetConfig::fromCliAndConfig(
             null,
             '200',
-            fn () => ['profile' => 'conservative', 'chunk_size' => 50],
+            fn() => ['profile' => 'conservative', 'chunk_size' => 50],
         );
 
         $this->assertSame(200, $budget->chunkSize());
@@ -199,7 +199,7 @@ class MemoryBudgetConfigTest extends TestCase
 
     public function testFromCliAndConfigZeroChunkUsesProfileDefault(): void
     {
-        $budget = MemoryBudgetConfig::fromCliAndConfig(null, '0', fn () => []);
+        $budget = MemoryBudgetConfig::fromCliAndConfig(null, '0', fn() => []);
 
         // '0' is not a valid chunk size; fromCliAndConfig passes null to fromOptions(),
         // which falls back to the conservative profile default of 50.
@@ -208,7 +208,7 @@ class MemoryBudgetConfigTest extends TestCase
 
     public function testFromCliAndConfigAcceptsByteStringBudget(): void
     {
-        $budget = MemoryBudgetConfig::fromCliAndConfig('256M', null, fn () => []);
+        $budget = MemoryBudgetConfig::fromCliAndConfig('256M', null, fn() => []);
 
         $this->assertInstanceOf(MemoryBudget::class, $budget);
     }

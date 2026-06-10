@@ -106,7 +106,7 @@ class InvertedIndexBuilderTest extends TestCase
         $stemmed = (new Stemmer('en'))->stem('apple');
         if (isset($result['index'][$stemmed])) {
             $pageEntry = array_values(
-                array_filter($result['index'][$stemmed], fn ($k) => is_int($k), ARRAY_FILTER_USE_KEY)
+                array_filter($result['index'][$stemmed], fn($k) => is_int($k), ARRAY_FILTER_USE_KEY),
             );
             if (!empty($pageEntry)) {
                 $positions = $pageEntry[0]['positions'];
@@ -124,7 +124,7 @@ class InvertedIndexBuilderTest extends TestCase
 
         $stemmed = (new Stemmer('en'))->stem('apple');
         if (isset($result['index'][$stemmed])) {
-            $pageEntries = array_filter($result['index'][$stemmed], fn ($k) => is_int($k), ARRAY_FILTER_USE_KEY);
+            $pageEntries = array_filter($result['index'][$stemmed], fn($k) => is_int($k), ARRAY_FILTER_USE_KEY);
             $entry = array_values($pageEntries)[0] ?? null;
             if ($entry !== null) {
                 // Title tokens go to meta_positions (for pagefind meta_locs).
@@ -148,7 +148,7 @@ class InvertedIndexBuilderTest extends TestCase
         $stemmed = (new Stemmer('en'))->stem('zirconium');
         $this->assertArrayHasKey($stemmed, $result['index'], 'Title word should be in index');
 
-        $pageEntries = array_filter($result['index'][$stemmed], fn ($k) => is_int($k), ARRAY_FILTER_USE_KEY);
+        $pageEntries = array_filter($result['index'][$stemmed], fn($k) => is_int($k), ARRAY_FILTER_USE_KEY);
         $entry = array_values($pageEntries)[0] ?? null;
         $this->assertNotNull($entry, 'Should have at least one page entry');
 
@@ -168,7 +168,7 @@ class InvertedIndexBuilderTest extends TestCase
         $stemmed = (new Stemmer('en'))->stem('apple');
         $this->assertArrayHasKey($stemmed, $result['index'], "'apple' must be in index");
 
-        $pageEntries = array_filter($result['index'][$stemmed], fn ($k) => is_int($k), ARRAY_FILTER_USE_KEY);
+        $pageEntries = array_filter($result['index'][$stemmed], fn($k) => is_int($k), ARRAY_FILTER_USE_KEY);
         $entry = array_values($pageEntries)[0] ?? null;
         $this->assertNotNull($entry);
 

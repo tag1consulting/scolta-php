@@ -27,6 +27,8 @@ interface ContentSourceInterface
      *   post types, model classes, etc.)
      *
      * @return iterable<ContentItem>
+     * @since 1.0.0
+     * @stability stable
      */
     public function getPublishedContent(array $options = []): iterable;
 
@@ -39,6 +41,8 @@ interface ContentSourceInterface
      *   - Laravel: scolta_tracker table (populated by model observers)
      *
      * @return iterable<ContentItem>
+     * @since 1.0.0
+     * @stability stable
      */
     public function getChangedContent(): iterable;
 
@@ -46,21 +50,32 @@ interface ContentSourceInterface
      * Get IDs of content that has been deleted since the last index.
      *
      * @return string[] Content IDs to remove from the index.
+     * @since 1.0.0
+     * @stability stable
      */
     public function getDeletedIds(): array;
 
     /**
      * Mark all tracked changes as processed after a successful build.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function clearTracker(): void;
 
     /**
      * Get the total count of published content items.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function getTotalCount(array $options = []): int;
 
     /**
      * Get the count of items pending reindexing.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function getPendingCount(): int;
 }

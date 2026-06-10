@@ -111,7 +111,7 @@ class CjkBigramTest extends TestCase
             $this->assertGreaterThan(
                 1,
                 mb_strlen($stem),
-                'Cyrillic word should not produce single-char tokens via bigram logic.'
+                'Cyrillic word should not produce single-char tokens via bigram logic.',
             );
         }
     }

@@ -864,7 +864,11 @@
   }
 
   // Repair markdown truncated by the AI hitting max_tokens mid-output.
-  // Mirrors PHP MarkdownRenderer::cleanBrokenLinks() logic.
+  // Superset of PHP MarkdownRenderer::cleanBrokenLinks(): both repair a
+  // truncated [text](url link; this side also salvages a bare trailing
+  // "[label" and closes unbalanced bold/italic/backtick markers. The shared
+  // rendering contract between the two renderers is pinned by the fixtures
+  // in tests/fixtures/render-parity/ (asserted by Jest and PHPUnit).
   function cleanBrokenMarkdown(text) {
     if (!text) return text;
 

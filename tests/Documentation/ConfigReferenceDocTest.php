@@ -55,7 +55,7 @@ class ConfigReferenceDocTest extends TestCase
             count($documented),
             'Parsed too few property rows from CONFIG_REFERENCE.md — the property '
             . 'tables may have been reformatted. Update the parser in '
-            . __CLASS__ . ' so the guard keeps working.'
+            . __CLASS__ . ' so the guard keeps working.',
         );
 
         $config = new ScoltaConfig();
@@ -73,7 +73,7 @@ class ConfigReferenceDocTest extends TestCase
             $this->assertArrayHasKey(
                 $name,
                 $documented,
-                "Required scalar property `$name` is missing from CONFIG_REFERENCE.md."
+                "Required scalar property `$name` is missing from CONFIG_REFERENCE.md.",
             );
         }
 
@@ -86,7 +86,7 @@ class ConfigReferenceDocTest extends TestCase
             $this->assertTrue(
                 property_exists($config, $property),
                 "CONFIG_REFERENCE.md documents `$property` with a scalar default, "
-                . 'but no such property exists on ScoltaConfig (renamed or removed?).'
+                . 'but no such property exists on ScoltaConfig (renamed or removed?).',
             );
 
             $live = $config->$property;
@@ -97,8 +97,8 @@ class ConfigReferenceDocTest extends TestCase
                     . 'ScoltaConfig has `%s`. Update CONFIG_REFERENCE.md (the source of truth).',
                     $property,
                     $docDefault['raw'],
-                    var_export($live, true)
-                )
+                    var_export($live, true),
+                ),
             );
         }
     }
@@ -129,8 +129,8 @@ class ConfigReferenceDocTest extends TestCase
                     'ScoltaConfig::$%s (%s) is not documented in CONFIG_REFERENCE.md. '
                     . 'Add it to the property tables.',
                     $prop->getName(),
-                    $type
-                )
+                    $type,
+                ),
             );
         }
     }
@@ -152,7 +152,7 @@ class ConfigReferenceDocTest extends TestCase
         $this->assertNotEmpty(
             $docPresets,
             'Parsed no presets from CONFIG_REFERENCE.md — the preset table may '
-            . 'have been reformatted. Update the parser in ' . __CLASS__ . '.'
+            . 'have been reformatted. Update the parser in ' . __CLASS__ . '.',
         );
 
         $defaults = new ScoltaConfig();
@@ -161,7 +161,7 @@ class ConfigReferenceDocTest extends TestCase
             $this->assertArrayHasKey(
                 $name,
                 $docPresets,
-                "Preset `$name` exists in ScoltaConfig::PRESETS but is not documented in CONFIG_REFERENCE.md."
+                "Preset `$name` exists in ScoltaConfig::PRESETS but is not documented in CONFIG_REFERENCE.md.",
             );
 
             $documentedCell = $docPresets[$name];
@@ -179,8 +179,8 @@ class ConfigReferenceDocTest extends TestCase
                             $name,
                             $camelKey,
                             $documentedCell[$camelKey],
-                            var_export($value, true)
-                        )
+                            var_export($value, true),
+                        ),
                     );
                     continue;
                 }
@@ -193,8 +193,8 @@ class ConfigReferenceDocTest extends TestCase
                         'Preset `%s` sets `%s` to a non-default value but it is not '
                         . 'documented in CONFIG_REFERENCE.md.',
                         $name,
-                        $camelKey
-                    )
+                        $camelKey,
+                    ),
                 );
             }
         }
@@ -224,23 +224,23 @@ class ConfigReferenceDocTest extends TestCase
             $this->assertArrayHasKey(
                 $preset,
                 $docPresets,
-                "Preset `$preset` is not documented in CONFIG_REFERENCE.md."
+                "Preset `$preset` is not documented in CONFIG_REFERENCE.md.",
             );
             $this->assertArrayHasKey(
                 'expansionCombineMode',
                 $docPresets[$preset],
-                "Preset `$preset` must document `expansionCombineMode` in its Key `values` column."
+                "Preset `$preset` must document `expansionCombineMode` in its Key `values` column.",
             );
             $this->assertSame(
                 $mode,
                 trim($docPresets[$preset]['expansionCombineMode'], ' `'),
-                "Preset `$preset` should document expansionCombineMode `$mode`."
+                "Preset `$preset` should document expansionCombineMode `$mode`.",
             );
             // And the doc must agree with the live preset resolution.
             $this->assertSame(
                 $mode,
                 ScoltaConfig::fromArray(['preset' => $preset])->expansionCombineMode,
-                "Live preset `$preset` resolves a different expansionCombineMode than documented."
+                "Live preset `$preset` resolves a different expansionCombineMode than documented.",
             );
         }
     }
@@ -264,7 +264,7 @@ class ConfigReferenceDocTest extends TestCase
         $this->assertMatchesRegularExpression(
             '/`expansionPerTermTopK`.*(internal constant|not user-configurable)/i',
             $doc,
-            'The expansionPerTermTopK row must state it is an internal constant / not user-configurable.'
+            'The expansionPerTermTopK row must state it is an internal constant / not user-configurable.',
         );
 
         // The platform config-mapping table must no longer expose the removed key.
@@ -272,7 +272,7 @@ class ConfigReferenceDocTest extends TestCase
             'expansion_per_term_top_k',
             $this->sliceBetween($doc, '## Platform Config Mapping', '## Methods'),
             'expansion_per_term_top_k must be removed from the Platform Config Mapping table — '
-            . 'adapters no longer expose it as a setting.'
+            . 'adapters no longer expose it as a setting.',
         );
     }
 
@@ -317,7 +317,7 @@ class ConfigReferenceDocTest extends TestCase
             if (!preg_match('/`([a-z][a-zA-Z0-9]*)`/', $line, $propMatch)) {
                 $this->fail(
                     'A TUNING.md line restates a **Default:** but no camelCase config '
-                    . "property could be parsed from it:\n" . trim($line)
+                    . "property could be parsed from it:\n" . trim($line),
                 );
             }
 
@@ -327,7 +327,7 @@ class ConfigReferenceDocTest extends TestCase
             $this->assertTrue(
                 property_exists($config, $property),
                 "docs/TUNING.md documents a default for `$property`, but no such "
-                . 'property exists on ScoltaConfig (renamed or removed?).'
+                . 'property exists on ScoltaConfig (renamed or removed?).',
             );
             $this->assertTrue(
                 $this->valuesMatch($config->$property, $documented),
@@ -336,8 +336,8 @@ class ConfigReferenceDocTest extends TestCase
                     . 'ScoltaConfig has `%s`. Update TUNING.md to the live default.',
                     $property,
                     $documented,
-                    var_export($config->$property, true)
-                )
+                    var_export($config->$property, true),
+                ),
             );
             $checked++;
         }
@@ -346,7 +346,7 @@ class ConfigReferenceDocTest extends TestCase
             5,
             $checked,
             'Parsed too few `**Default:**` restatements from docs/TUNING.md — the '
-            . 'format may have changed. Update the parser in ' . __CLASS__ . '.'
+            . 'format may have changed. Update the parser in ' . __CLASS__ . '.',
         );
     }
 
@@ -369,7 +369,7 @@ class ConfigReferenceDocTest extends TestCase
         $section = $this->sliceBetween(
             $doc,
             '## Configuration Properties',
-            '## Platform Config Mapping'
+            '## Platform Config Mapping',
         );
         $this->assertNotSame('', $section, 'Could not locate the Configuration Properties section.');
 
@@ -433,7 +433,7 @@ class ConfigReferenceDocTest extends TestCase
             }
             // The last non-empty cell is the "Key `values`" column (a row that
             // ends with `|` produces a trailing empty cell we must skip).
-            $nonEmpty = array_values(array_filter($cells, static fn ($c) => $c !== ''));
+            $nonEmpty = array_values(array_filter($cells, static fn($c) => $c !== ''));
             $valuesCell = end($nonEmpty);
             $pairs = [];
             if (preg_match_all('/`([a-zA-Z]+):\s*([^`]+)`/', $valuesCell, $mm, PREG_SET_ORDER)) {
@@ -443,7 +443,7 @@ class ConfigReferenceDocTest extends TestCase
             }
             $this->assertNotEmpty(
                 $pairs,
-                "Preset row `$name` in CONFIG_REFERENCE.md has no parseable `key: value` overrides."
+                "Preset row `$name` in CONFIG_REFERENCE.md has no parseable `key: value` overrides.",
             );
             $result[$name] = $pairs;
         }

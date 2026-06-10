@@ -25,8 +25,7 @@ class PagefindFormatWriter
     public function __construct(
         private readonly CborEncoder $cbor,
         private readonly string $pagefindVersion = '',
-    ) {
-    }
+    ) {}
 
     private function getVersion(): string
     {
@@ -41,6 +40,8 @@ class PagefindFormatWriter
      * @param array $mergedIndex From IndexMerger.
      * @param array $pages       Page metadata.
      * @param string $outputDir  Destination directory.
+     * @since 1.0.0
+     * @stability stable
      */
     public function write(array $mergedIndex, array $pages, string $outputDir): void
     {
@@ -355,7 +356,7 @@ class PagefindFormatWriter
                 $valueTuples[] = $this->cbor->encodeArray([
                     $this->cbor->encodeString((string) $value),
                     $this->cbor->encodeArray(
-                        array_map(fn (int $p) => $this->cbor->encodeUint($p), $pageNums)
+                        array_map(fn(int $p) => $this->cbor->encodeUint($p), $pageNums),
                     ),
                 ]);
             }
@@ -396,7 +397,7 @@ class PagefindFormatWriter
         foreach ($sortFields as $field => $pageValues) {
             $allNumeric = array_reduce(
                 $pageValues,
-                fn (bool $carry, string $v) => $carry && is_numeric($v),
+                fn(bool $carry, string $v) => $carry && is_numeric($v),
                 true,
             );
 
@@ -407,7 +408,7 @@ class PagefindFormatWriter
             }
 
             $sortedPageIndices = array_map(
-                fn (int $p) => $this->cbor->encodeUint($p),
+                fn(int $p) => $this->cbor->encodeUint($p),
                 array_keys($pageValues),
             );
 
@@ -517,8 +518,8 @@ class PagefindFormatWriter
                 $newVariants = [];
                 foreach ($entries['_variants'] as $variant => $variantPages) {
                     $newVariants[$variant] = array_map(
-                        fn (int $p) => $map[$p] ?? $p,
-                        $variantPages
+                        fn(int $p) => $map[$p] ?? $p,
+                        $variantPages,
                     );
                 }
                 $newIndex[$word]['_variants'] = $newVariants;

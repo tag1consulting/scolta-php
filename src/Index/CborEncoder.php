@@ -37,6 +37,9 @@ class CborEncoder
 
     /**
      * Encode an unsigned integer (CBOR major type 0).
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function encodeUint(int $n): string
     {
@@ -51,6 +54,9 @@ class CborEncoder
      * Encode a negative integer (CBOR major type 1).
      *
      * CBOR encodes -1 as value 0, -2 as value 1, etc.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function encodeNegInt(int $n): string
     {
@@ -63,6 +69,9 @@ class CborEncoder
 
     /**
      * Encode a UTF-8 text string (CBOR major type 3).
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function encodeString(string $s): string
     {
@@ -73,6 +82,8 @@ class CborEncoder
      * Encode an array of pre-encoded CBOR items (CBOR major type 4).
      *
      * @param string[] $items Already-encoded CBOR byte strings.
+     * @since 1.0.0
+     * @stability stable
      */
     public function encodeArray(array $items): string
     {

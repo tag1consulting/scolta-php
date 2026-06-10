@@ -13,6 +13,9 @@ class PagefindHtmlBuilder
 {
     /**
      * Build a Pagefind-compatible HTML document.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function build(
         string $id,
@@ -71,7 +74,7 @@ class PagefindHtmlBuilder
         if ($date !== '' && !isset($sortable['date'])) {
             $sortAttrs .= sprintf(
                 '<p data-pagefind-sort="date:%s" hidden></p>' . "\n",
-                htmlspecialchars($date, ENT_QUOTES | ENT_HTML5, 'UTF-8')
+                htmlspecialchars($date, ENT_QUOTES | ENT_HTML5, 'UTF-8'),
             );
         }
 
@@ -99,7 +102,7 @@ class PagefindHtmlBuilder
             $extraFilters,
             $extraMeta,
             $sortAttrs,
-            $escapedBody
+            $escapedBody,
         );
     }
 }

@@ -41,7 +41,7 @@ class AssetManifestTest extends TestCase
     {
         $this->assertFileExists(
             $this->assetsDir . '/ASSETS.sha256',
-            'assets/ASSETS.sha256 is missing. Run: composer update-asset-manifest'
+            'assets/ASSETS.sha256 is missing. Run: composer update-asset-manifest',
         );
     }
 
@@ -50,7 +50,7 @@ class AssetManifestTest extends TestCase
         foreach (self::ASSETS as $rel) {
             $this->assertFileExists(
                 $this->assetsDir . '/' . $rel,
-                "Canonical asset assets/{$rel} is missing."
+                "Canonical asset assets/{$rel} is missing.",
             );
         }
     }
@@ -69,7 +69,7 @@ class AssetManifestTest extends TestCase
         $this->assertSame(
             $expected,
             $committed,
-            'assets/ASSETS.sha256 is stale. Run: composer update-asset-manifest'
+            'assets/ASSETS.sha256 is stale. Run: composer update-asset-manifest',
         );
     }
 
@@ -83,20 +83,20 @@ class AssetManifestTest extends TestCase
         $standalonePath = $this->assetsDir . '/js/scolta.js.sha256';
         $this->assertFileExists(
             $standalonePath,
-            'assets/js/scolta.js.sha256 is missing. Run: composer update-js-checksum'
+            'assets/js/scolta.js.sha256 is missing. Run: composer update-js-checksum',
         );
 
         $manifestHash = $this->manifestHashFor('js/scolta.js');
         $this->assertNotNull(
             $manifestHash,
-            'assets/ASSETS.sha256 has no js/scolta.js line to derive the standalone checksum from.'
+            'assets/ASSETS.sha256 has no js/scolta.js line to derive the standalone checksum from.',
         );
 
         $standalone = trim(file_get_contents($standalonePath));
         $this->assertSame(
             $manifestHash,
             $standalone,
-            'assets/js/scolta.js.sha256 has drifted from the manifest. Run: composer update-js-checksum'
+            'assets/js/scolta.js.sha256 has drifted from the manifest. Run: composer update-js-checksum',
         );
     }
 
@@ -112,7 +112,7 @@ class AssetManifestTest extends TestCase
         $this->assertMatchesRegularExpression(
             '/^[0-9a-f]{64}\n$/',
             $raw,
-            'assets/js/scolta.js.sha256 must be a bare 64-hex-char hash followed by a single newline (the format scolta-laravel reads).'
+            'assets/js/scolta.js.sha256 must be a bare 64-hex-char hash followed by a single newline (the format scolta-laravel reads).',
         );
     }
 

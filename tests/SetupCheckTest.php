@@ -33,12 +33,12 @@ class SetupCheckTest extends TestCase
             $this->assertContains(
                 $result['status'],
                 ['pass', 'fail', 'warn'],
-                "Status must be pass, fail, or warn, got: {$result['status']}"
+                "Status must be pass, fail, or warn, got: {$result['status']}",
             );
             $this->assertContains(
                 $result['category'],
                 ['runtime', 'build'],
-                "Category must be runtime or build, got: {$result['category']}"
+                "Category must be runtime or build, got: {$result['category']}",
             );
         }
     }
@@ -51,7 +51,7 @@ class SetupCheckTest extends TestCase
         $this->assertEquals(
             'pass',
             $phpCheck['status'],
-            'PHP version check should pass on PHP 8.1+'
+            'PHP version check should pass on PHP 8.1+',
         );
         $this->assertEquals('runtime', $phpCheck['category']);
     }
@@ -122,17 +122,17 @@ class SetupCheckTest extends TestCase
             $this->assertStringNotContainsString(
                 'FFI',
                 $name,
-                'FFI checks should no longer exist'
+                'FFI checks should no longer exist',
             );
             $this->assertStringNotContainsString(
                 'Extism',
                 $name,
-                'Extism checks should no longer exist'
+                'Extism checks should no longer exist',
             );
             $this->assertStringNotContainsString(
                 'Server WASM',
                 $name,
-                'Server WASM checks should no longer exist'
+                'Server WASM checks should no longer exist',
             );
         }
     }

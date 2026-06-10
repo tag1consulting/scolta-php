@@ -41,7 +41,7 @@ class MemoryTelemetryTest extends TestCase
         $this->assertStringContainsString(
             '{elapsed_s}',
             $message,
-            'Log message template must contain {elapsed_s} placeholder'
+            'Log message template must contain {elapsed_s} placeholder',
         );
     }
 
@@ -88,7 +88,7 @@ class MemoryTelemetryTest extends TestCase
         $this->assertContains(
             $ctx['source'],
             ['rss', 'php'],
-            'source must be either "rss" (Linux /proc) or "php" (fallback)'
+            'source must be either "rss" (Linux /proc) or "php" (fallback)',
         );
     }
 
@@ -135,8 +135,8 @@ class MemoryTelemetryTest extends TestCase
             $telemetry = new MemoryTelemetry(
                 $log,
                 MemoryBudget::conservative(),
-                static fn () => $current,
-                static fn () => $peak,
+                static fn() => $current,
+                static fn() => $peak,
             );
             $telemetry->emit('chunk_start');
         } finally {
@@ -148,7 +148,7 @@ class MemoryTelemetryTest extends TestCase
         $this->assertNotSame(
             'error',
             $log->records[0]['level'],
-            'Abort threshold must use current live memory, not monotonic peak'
+            'Abort threshold must use current live memory, not monotonic peak',
         );
     }
 
@@ -171,8 +171,8 @@ class MemoryTelemetryTest extends TestCase
             $telemetry = new MemoryTelemetry(
                 $log,
                 MemoryBudget::conservative(),
-                static fn () => $current,
-                static fn () => $current,
+                static fn() => $current,
+                static fn() => $current,
             );
             $telemetry->emit('chunk_start');
         } finally {
@@ -199,7 +199,7 @@ class MemoryTelemetryTest extends TestCase
         $this->assertGreaterThanOrEqual(
             $current,
             $peak,
-            'getPeakRssBytes() must be >= getCurrentRssBytes()'
+            'getPeakRssBytes() must be >= getCurrentRssBytes()',
         );
     }
 
@@ -209,7 +209,7 @@ class MemoryTelemetryTest extends TestCase
         $telemetry = new MemoryTelemetry(
             new NullLogger(),
             MemoryBudget::conservative(),
-            static fn () => $injected,
+            static fn() => $injected,
         );
         $this->assertSame($injected, $telemetry->getCurrentRssBytes());
     }
@@ -221,7 +221,7 @@ class MemoryTelemetryTest extends TestCase
             new NullLogger(),
             MemoryBudget::conservative(),
             null,
-            static fn () => $injected,
+            static fn() => $injected,
         );
         $this->assertSame($injected, $telemetry->getPeakRssBytes());
     }

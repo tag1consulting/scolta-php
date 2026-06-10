@@ -12,6 +12,10 @@ namespace Tag1\Scolta\Environment;
  */
 class HostingDetector
 {
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public static function detect(): HostingEnvironment
     {
         // WordPress managed hosts.
@@ -52,6 +56,10 @@ class HostingDetector
         return HostingEnvironment::STANDARD;
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public static function constraints(): HostingConstraints
     {
         return match (self::detect()) {
@@ -85,6 +93,9 @@ class HostingDetector
 
     /**
      * Get a human-readable description of the detected environment.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function describe(): string
     {

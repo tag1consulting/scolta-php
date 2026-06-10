@@ -21,7 +21,7 @@ class BudgetAwareProviderDecoratorTest extends TestCase
         $httpClient = new Client(['handler' => HandlerStack::create($mock)]);
         $client = new AiClient(
             ['provider' => 'openai', 'api_key' => 'test-key', 'model' => 'gpt-4o'],
-            $httpClient
+            $httpClient,
         );
         return new BudgetAwareProviderDecorator($client);
     }

@@ -109,7 +109,7 @@ class PostingListValidityTest extends TestCase
 
                     // Also include URL-path stems (the indexer indexes these too).
                     $urlPath = preg_replace('/\.\w+$/', '', parse_url($url, PHP_URL_PATH) ?? '');
-                    $urlSegments = array_filter(explode('/', $urlPath), fn ($s) => strlen($s) > 0);
+                    $urlSegments = array_filter(explode('/', $urlPath), fn($s) => strlen($s) > 0);
                     $stemmedTokens = array_merge($stemmedTokens, $this->tokenizeAndStem(implode(' ', $urlSegments)));
 
                     if (!in_array($word, array_unique($stemmedTokens), true)) {
@@ -122,7 +122,7 @@ class PostingListValidityTest extends TestCase
         $this->assertEmpty(
             $failures,
             "Posting list semantic failures:\n" . implode("\n", array_slice($failures, 0, 20))
-            . (count($failures) > 20 ? "\n... and " . (count($failures) - 20) . ' more' : '')
+            . (count($failures) > 20 ? "\n... and " . (count($failures) - 20) . ' more' : ''),
         );
     }
 
@@ -177,7 +177,7 @@ class PostingListValidityTest extends TestCase
         $this->assertEmpty(
             $failures,
             "Fragment→posting list failures:\n" . implode("\n", array_slice($failures, 0, 20))
-            . (count($failures) > 20 ? "\n... and " . (count($failures) - 20) . ' more' : '')
+            . (count($failures) > 20 ? "\n... and " . (count($failures) - 20) . ' more' : ''),
         );
     }
 
@@ -348,7 +348,7 @@ class PostingListValidityTest extends TestCase
         }
         $items = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($items as $item) {
             $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());

@@ -52,7 +52,7 @@ class StructuralIntegrityTest extends TestCase
         $stale = $this->grepSourceFiles('/scolta[-_]core[-_]wasm/i');
         $this->assertEmpty(
             $stale,
-            "Files still reference scolta-core-wasm:\n" . implode("\n", $stale)
+            "Files still reference scolta-core-wasm:\n" . implode("\n", $stale),
         );
     }
 
@@ -61,7 +61,7 @@ class StructuralIntegrityTest extends TestCase
         $stale = $this->grepSourceFiles('/"tag1\/scolta"/');
         $this->assertEmpty(
             $stale,
-            "Files still reference old package name:\n" . implode("\n", $stale)
+            "Files still reference old package name:\n" . implode("\n", $stale),
         );
     }
 
@@ -69,7 +69,7 @@ class StructuralIntegrityTest extends TestCase
     {
         $this->assertFileDoesNotExist(
             $this->root . '/src/Wasm/ScoltaWasm.php',
-            'ScoltaWasm should be removed (HTML processing ported to pure PHP)'
+            'ScoltaWasm should be removed (HTML processing ported to pure PHP)',
         );
     }
 
@@ -86,7 +86,7 @@ class StructuralIntegrityTest extends TestCase
     {
         $this->assertFalse(
             file_exists(dirname(__DIR__) . '/src/Scorer/DefaultScorer.php'),
-            'DefaultScorer should be removed (scoring moved out of WASM)'
+            'DefaultScorer should be removed (scoring moved out of WASM)',
         );
     }
 
@@ -94,11 +94,11 @@ class StructuralIntegrityTest extends TestCase
     {
         $this->assertFalse(
             file_exists(dirname(__DIR__) . '/src/Provider/AiProviderInterface.php'),
-            'AiProviderInterface should be removed (dead code)'
+            'AiProviderInterface should be removed (dead code)',
         );
         $this->assertFalse(
             file_exists(dirname(__DIR__) . '/src/Scorer/ScorerInterface.php'),
-            'ScorerInterface should be removed (dead code)'
+            'ScorerInterface should be removed (dead code)',
         );
     }
 
@@ -140,7 +140,7 @@ class StructuralIntegrityTest extends TestCase
     {
         $hits = [];
         $it = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($this->root, \FilesystemIterator::SKIP_DOTS)
+            new \RecursiveDirectoryIterator($this->root, \FilesystemIterator::SKIP_DOTS),
         );
         $exclude = ['vendor', '.git', 'node_modules', '.phpunit.cache', 'tests'];
 

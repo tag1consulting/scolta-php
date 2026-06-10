@@ -25,9 +25,12 @@ final class ProvisioningResult
         public readonly string $status = self::STATUS_PROVISIONED,
         public readonly ?string $aiModel = null,
         public readonly ?string $aiExpansionModel = null,
-    ) {
-    }
+    ) {}
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public static function success(
         string $litellmToken,
         string $litellmApiUrl,
@@ -46,6 +49,10 @@ final class ProvisioningResult
         );
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public static function failure(string $error): self
     {
         return new self(
@@ -58,6 +65,10 @@ final class ProvisioningResult
         );
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public static function skippedExistingProvider(): self
     {
         return new self(

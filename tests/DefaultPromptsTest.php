@@ -82,7 +82,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertStringContainsString(
             'AUDIENCE QUALIFIERS',
             $template,
-            'expand_query template must contain an AUDIENCE QUALIFIERS rule'
+            'expand_query template must contain an AUDIENCE QUALIFIERS rule',
         );
     }
 
@@ -93,7 +93,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertStringContainsString(
             '"children"',
             $template,
-            'expand_query generic-terms prohibition list must include "children"'
+            'expand_query generic-terms prohibition list must include "children"',
         );
     }
 
@@ -108,7 +108,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertStringContainsString(
             'GROUNDING CHECK',
             $template,
-            'summarize template must contain a GROUNDING CHECK section'
+            'summarize template must contain a GROUNDING CHECK section',
         );
     }
 
@@ -119,7 +119,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertStringContainsString(
             'GROUNDING CHECK',
             $template,
-            'follow_up template must contain a GROUNDING CHECK section'
+            'follow_up template must contain a GROUNDING CHECK section',
         );
     }
 
@@ -134,7 +134,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertStringContainsString(
             'NUMBERED RESULT REFERENCES',
             $template,
-            'follow_up template must contain a NUMBERED RESULT REFERENCES section'
+            'follow_up template must contain a NUMBERED RESULT REFERENCES section',
         );
     }
 
@@ -145,7 +145,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertMatchesRegularExpression(
             '/#\d|number \d|item \d|result \d/i',
             $template,
-            'follow_up template must give examples of explicit number references (#3, number 4, etc.)'
+            'follow_up template must give examples of explicit number references (#3, number 4, etc.)',
         );
     }
 
@@ -156,7 +156,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertMatchesRegularExpression(
             '/the (first|second|third|last) (one|result|article|option)/i',
             $template,
-            'follow_up template must give examples of ordinal references (the third one, the last result, etc.)'
+            'follow_up template must give examples of ordinal references (the third one, the last result, etc.)',
         );
     }
 
@@ -167,7 +167,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertMatchesRegularExpression(
             '/first\s*=\s*\[1\]|second\s*=\s*\[2\]/i',
             $template,
-            'follow_up template must map ordinal positions to numeric labels (first = [1], second = [2])'
+            'follow_up template must map ordinal positions to numeric labels (first = [1], second = [2])',
         );
     }
 
@@ -178,7 +178,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertMatchesRegularExpression(
             '/whatever IS relevant|partial.{0,30}relevant|extract.{0,50}relevant/i',
             $template,
-            'summarize template must instruct extraction of partial relevance rather than binary yes/no'
+            'summarize template must instruct extraction of partial relevance rather than binary yes/no',
         );
     }
 
@@ -189,7 +189,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertStringNotContainsString(
             "The search results don't directly address this topic. You may want to try different search terms",
             $template,
-            'summarize template must not use the old binary fallback phrasing — use partial-relevance extraction instead'
+            'summarize template must not use the old binary fallback phrasing — use partial-relevance extraction instead',
         );
     }
 
@@ -204,7 +204,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertMatchesRegularExpression(
             '/at least [3-9]|minimum [3-9]|[3-9]-[5-9] bullets?|[3-9]\+ bullets?/i',
             $template,
-            'summarize template must specify a minimum bullet count for detail extraction'
+            'summarize template must specify a minimum bullet count for detail extraction',
         );
     }
 
@@ -215,7 +215,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertMatchesRegularExpression(
             '/each excerpt|per excerpt|every excerpt|from each result/i',
             $template,
-            'summarize template must instruct per-excerpt detail extraction'
+            'summarize template must instruct per-excerpt detail extraction',
         );
     }
 
@@ -230,7 +230,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertStringContainsString(
             'site topic',
             $template,
-            'expand_query rule 9 must instruct the model to use the site topic to disambiguate ambiguous queries'
+            'expand_query rule 9 must instruct the model to use the site topic to disambiguate ambiguous queries',
         );
     }
 
@@ -241,7 +241,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertMatchesRegularExpression(
             '/another language|common word.{0,50}language|language.{0,50}common word/i',
             $template,
-            'expand_query rule 9 must mention that a query word may be a common word in another language'
+            'expand_query rule 9 must mention that a query word may be a common word in another language',
         );
     }
 
@@ -252,7 +252,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertMatchesRegularExpression(
             '/domain of this site|interpreted in the domain|in the domain/i',
             $template,
-            'expand_query rule 9 must instruct interpretation within the site domain'
+            'expand_query rule 9 must instruct interpretation within the site domain',
         );
     }
 
@@ -267,7 +267,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertStringContainsString(
             'CATEGORY',
             $template,
-            'summarize template must contain a CATEGORY curation rule instructing the model to browse across a category rather than deep-dive on one result'
+            'summarize template must contain a CATEGORY curation rule instructing the model to browse across a category rather than deep-dive on one result',
         );
     }
 
@@ -278,7 +278,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertStringContainsString(
             'VARIETY',
             $template,
-            'summarize template must contain a VARIETY curation rule instructing the model to present multiple options rather than a single detailed result'
+            'summarize template must contain a VARIETY curation rule instructing the model to present multiple options rather than a single detailed result',
         );
     }
 
@@ -293,17 +293,17 @@ class DefaultPromptsTest extends TestCase
         $this->assertStringNotContainsString(
             '6,900',
             $template,
-            'summarize template must not ship the Wikipedia-specific "6,900" count'
+            'summarize template must not ship the Wikipedia-specific "6,900" count',
         );
         $this->assertStringNotContainsString(
             '6900',
             $template,
-            'summarize template must not ship a hard-coded corpus count'
+            'summarize template must not ship a hard-coded corpus count',
         );
         $this->assertStringNotContainsString(
             'Featured Articles',
             $template,
-            'summarize template must not reference "Featured Articles" (Wikipedia-specific)'
+            'summarize template must not reference "Featured Articles" (Wikipedia-specific)',
         );
     }
 
@@ -314,12 +314,12 @@ class DefaultPromptsTest extends TestCase
         $this->assertStringContainsString(
             'CORPUS AWARENESS',
             $template,
-            'summarize template must retain the CORPUS AWARENESS rule'
+            'summarize template must retain the CORPUS AWARENESS rule',
         );
         $this->assertStringContainsString(
             'Do NOT invent statistics about the collection',
             $template,
-            'CORPUS AWARENESS must explicitly forbid inventing corpus statistics'
+            'CORPUS AWARENESS must explicitly forbid inventing corpus statistics',
         );
     }
 
@@ -344,7 +344,7 @@ class DefaultPromptsTest extends TestCase
             $template,
             'summarize CORPUS AWARENESS bullet drifted from the pinned snapshot '
             . '(tests/fixtures/corpus-awareness-bullet.txt); review the diff and, if '
-            . 'intentional, update the fixture and the matching scolta-core bullet'
+            . 'intentional, update the fixture and the matching scolta-core bullet',
         );
     }
 
@@ -359,7 +359,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertMatchesRegularExpression(
             '/under ~?150 words/i',
             $template,
-            'summarize template must state an explicit output-length budget (issue #168)'
+            'summarize template must state an explicit output-length budget (issue #168)',
         );
     }
 
@@ -370,7 +370,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertMatchesRegularExpression(
             '/single flat bulleted list|no section headers|do not add section headers/i',
             $template,
-            'summarize template must forbid ad-hoc sub-category headers and require a flat list (issue #168)'
+            'summarize template must forbid ad-hoc sub-category headers and require a flat list (issue #168)',
         );
     }
 
@@ -385,12 +385,12 @@ class DefaultPromptsTest extends TestCase
         $this->assertStringContainsString(
             'CATEGORY → MEMBERS',
             $template,
-            'expand_query must contain rule 13 (CATEGORY → MEMBERS)'
+            'expand_query must contain rule 13 (CATEGORY → MEMBERS)',
         );
         $this->assertStringContainsString(
             'Mercurial',
             $template,
-            'rule 13 must lead with the non-food version-control example'
+            'rule 13 must lead with the non-food version-control example',
         );
     }
 
@@ -401,12 +401,12 @@ class DefaultPromptsTest extends TestCase
         $this->assertStringContainsString(
             'CONTEXT / USE-CASE → CONCRETE ITEMS',
             $template,
-            'expand_query must contain rule 14 (CONTEXT / USE-CASE → CONCRETE ITEMS)'
+            'expand_query must contain rule 14 (CONTEXT / USE-CASE → CONCRETE ITEMS)',
         );
         $this->assertStringContainsString(
             'standing desk',
             $template,
-            'rule 14 must lead with the non-food home-office example'
+            'rule 14 must lead with the non-food home-office example',
         );
     }
 
@@ -417,7 +417,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertStringContainsString(
             'never invent members',
             $template,
-            'rule 13 must forbid fabricating members for unknown categories'
+            'rule 13 must forbid fabricating members for unknown categories',
         );
     }
 
@@ -428,12 +428,12 @@ class DefaultPromptsTest extends TestCase
         $this->assertStringContainsString(
             'UNRECOGNIZED OR UNVERIFIABLE NAMED ENTITIES',
             $template,
-            'expand_query must contain rule 15 (no-fabrication guard for unrecognized entities)'
+            'expand_query must contain rule 15 (no-fabrication guard for unrecognized entities)',
         );
         $this->assertStringContainsString(
             'do NOT manufacture',
             $template,
-            'rule 15 must forbid manufacturing detail for unrecognized entities'
+            'rule 15 must forbid manufacturing detail for unrecognized entities',
         );
     }
 
@@ -444,7 +444,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertStringContainsString(
             'up to 6 concrete members',
             $template,
-            'expand_query must reconcile the 2-4 term cap with decomposition'
+            'expand_query must reconcile the 2-4 term cap with decomposition',
         );
     }
 
@@ -455,7 +455,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertStringContainsString(
             'taxonomy term or filter label',
             $template,
-            'rule 7 must be narrowed to taxonomy/filter-label matching so it no longer contradicts rule 13'
+            'rule 7 must be narrowed to taxonomy/filter-label matching so it no longer contradicts rule 13',
         );
     }
 
@@ -474,7 +474,7 @@ class DefaultPromptsTest extends TestCase
         $this->assertStringContainsString(
             '{SITE_NAME}',
             $template,
-            "Template '{$name}' must contain a {SITE_NAME} placeholder for per-site customisation"
+            "Template '{$name}' must contain a {SITE_NAME} placeholder for per-site customisation",
         );
     }
 

@@ -42,6 +42,8 @@ class BuildState
      *
      * @param array $manifest Initial manifest data (total_pages, chunk_size, language, etc.).
      * @return bool True if lock acquired, false if build already running.
+     * @since 1.0.0
+     * @stability stable
      */
     public function initiateBuild(array $manifest): bool
     {
@@ -107,6 +109,8 @@ class BuildState
      *
      * @param int   $chunkNumber Chunk number (0-based).
      * @param array $partialData Partial index data from InvertedIndexBuilder.
+     * @since 1.0.0
+     * @stability stable
      */
     public function recordChunk(int $chunkNumber, array $partialData): void
     {
@@ -130,6 +134,8 @@ class BuildState
      * @param int $chunkNumber Chunk number (0-based).
      * @return array The chunk data as {pages: ..., index: ...}.
      * @throws \RuntimeException If file missing, HMAC invalid, or data malformed.
+     * @since 1.0.0
+     * @stability stable
      */
     public function readChunk(int $chunkNumber): array
     {
@@ -140,22 +146,20 @@ class BuildState
             throw new \RuntimeException("Chunk file not found: {$filename}");
         }
 
-        if ($this->hmacSecret !== null) {
-            $reader = new ChunkReader($path);
-            if (!$reader->verifyHmac($this->hmacSecret)) {
-                throw new \RuntimeException("HMAC verification failed for chunk: {$filename}");
-            }
+        // Both footer digests are checked in a single pass over the file
+        // (previously two full reads via verifyHmac() + verifyCrc32()).
+        // HMAC: only when a secret is configured. CRC32: always written
+        // (0.3.3+); validates data integrity without a shared secret —
+        // detects disk corruption or partial writes. Pre-0.3.3 chunks have
+        // no CRC32 in the footer and report null (backward-compatible).
+        $digests = (new ChunkReader($path))->verifyFooterDigests($this->hmacSecret);
+        if ($this->hmacSecret !== null && $digests['hmac'] !== true) {
+            throw new \RuntimeException("HMAC verification failed for chunk: {$filename}");
         }
-
-        // CRC32 is always written (0.3.3+). Validates data integrity without
-        // a shared secret — detects disk corruption or partial writes.
-        // Pre-0.3.3 chunks have no CRC32 in the footer; verifyCrc32() returns
-        // true for those (backward-compatible).
-        $reader = new ChunkReader($path);
-        if (!$reader->verifyCrc32()) {
+        if ($digests['crc32'] === false) {
             throw new \RuntimeException(
                 "CRC32 validation failed for chunk: {$filename}. "
-                . 'The chunk may be corrupted — delete the state directory and re-run a fresh build.'
+                . 'The chunk may be corrupted — delete the state directory and re-run a fresh build.',
             );
         }
 
@@ -174,6 +178,9 @@ class BuildState
 
     /**
      * Release the build lock.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function releaseLock(): void
     {
@@ -189,6 +196,9 @@ class BuildState
     /**
      * Release the lock handle and delete the lock file without touching
      * the manifest status, leaving the build resumable.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function releaseLockOnly(): void
     {
@@ -214,6 +224,8 @@ class BuildState
      * Check if a partial build exists that can be resumed.
      *
      * @return array|null Manifest if resumable, null if fresh start needed.
+     * @since 1.0.0
+     * @stability stable
      */
     public function shouldResume(): ?array
     {
@@ -227,7 +239,8 @@ class BuildState
         if (file_exists($lockFile)) {
             $lockData = file_get_contents($lockFile);
             if ($lockData !== false && $this->isLockStale($lockData)) {
-                unlink($lockFile);
+                // Suppress: file may already be removed by concurrent process (TOCTOU-safe cleanup).
+                @unlink($lockFile);
             }
         }
 
@@ -238,6 +251,8 @@ class BuildState
      * Get paths to all chunk files written so far.
      *
      * @return string[]
+     * @since 1.0.0
+     * @stability stable
      */
     public function getChunkFiles(): array
     {
@@ -364,6 +379,9 @@ class BuildState
 
     /**
      * Clean up all state files.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function cleanup(): void
     {

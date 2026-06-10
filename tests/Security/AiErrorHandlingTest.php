@@ -51,7 +51,7 @@ class AiErrorHandlingTest extends TestCase
     {
         $client = $this->makeClient(
             [new Response(429, [], json_encode(['error' => ['message' => 'Rate limit exceeded']]))],
-            'openai'
+            'openai',
         );
 
         $this->expectException(\RuntimeException::class);
@@ -79,7 +79,7 @@ class AiErrorHandlingTest extends TestCase
     {
         $client = $this->makeClient(
             [new Response(500, [], '{"error": "Internal error"}')],
-            'openai'
+            'openai',
         );
 
         $this->expectException(\RuntimeException::class);
@@ -174,7 +174,7 @@ class AiErrorHandlingTest extends TestCase
     {
         $client = $this->makeClient(
             [new Response(200, [], json_encode(['choices' => []]))],
-            'openai'
+            'openai',
         );
 
         $result = $client->message('system', 'hello');
@@ -186,7 +186,7 @@ class AiErrorHandlingTest extends TestCase
     {
         $client = $this->makeClient(
             [new Response(200, [], json_encode(['id' => 'chatcmpl-123']))],
-            'openai'
+            'openai',
         );
 
         $result = $client->message('system', 'hello');
@@ -273,7 +273,7 @@ class AiErrorHandlingTest extends TestCase
 
         return new AiClient(
             ['provider' => $provider, 'api_key' => 'sk-test-key-12345', 'model' => 'test-model'],
-            new Client(['handler' => $stack])
+            new Client(['handler' => $stack]),
         );
     }
 }

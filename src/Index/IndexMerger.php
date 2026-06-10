@@ -18,6 +18,8 @@ class IndexMerger
      *
      * @param array $partials Array of partial index arrays (from InvertedIndexBuilder::build).
      * @return array{index: array, pages: array} Merged index and page metadata.
+     * @since 1.0.0
+     * @stability stable
      */
     public function merge(array $partials): array
     {
@@ -52,8 +54,8 @@ class IndexMerger
                             }
                             $mergedIndex[$word]['_variants'][$variant] = array_values(
                                 array_unique(
-                                    array_merge($mergedIndex[$word]['_variants'][$variant], $variantPages)
-                                )
+                                    array_merge($mergedIndex[$word]['_variants'][$variant], $variantPages),
+                                ),
                             );
                         }
 
@@ -70,8 +72,8 @@ class IndexMerger
                             }
                             $mergedIndex[$word][$pageNum]['positions'][$weight] = array_values(
                                 array_unique(
-                                    array_merge($mergedIndex[$word][$pageNum]['positions'][$weight], $positions)
-                                )
+                                    array_merge($mergedIndex[$word][$pageNum]['positions'][$weight], $positions),
+                                ),
                             );
                             sort($mergedIndex[$word][$pageNum]['positions'][$weight]);
                         }
@@ -82,8 +84,8 @@ class IndexMerger
                             }
                             $mergedIndex[$word][$pageNum]['meta_positions'] = array_values(
                                 array_unique(
-                                    array_merge($mergedIndex[$word][$pageNum]['meta_positions'], $data['meta_positions'])
-                                )
+                                    array_merge($mergedIndex[$word][$pageNum]['meta_positions'], $data['meta_positions']),
+                                ),
                             );
                             sort($mergedIndex[$word][$pageNum]['meta_positions']);
                         }
@@ -126,6 +128,8 @@ class IndexMerger
      * @param string[]              $chunkPaths Paths to v2 chunk files.
      * @param StreamingFormatWriter $writer     Writer positioned after beginWrite().
      * @param MemoryBudget|null     $budget     Controls file-handle soft cap.
+     * @since 1.0.0
+     * @stability stable
      */
     public function mergeStreaming(
         array $chunkPaths,
@@ -229,6 +233,8 @@ class IndexMerger
     /**
      * fwrite() the full buffer or throw — fwrite can silently write fewer
      * bytes (e.g. disk full), which would corrupt the chunk stream.
+     *
+     * @param resource $fp Open file handle.
      */
     private function writeAll($fp, string $data, string $path): void
     {
@@ -371,8 +377,8 @@ class IndexMerger
                         }
                         $merged['_variants'][$variant] = array_values(
                             array_unique(
-                                array_merge($merged['_variants'][$variant], $variantPages)
-                            )
+                                array_merge($merged['_variants'][$variant], $variantPages),
+                            ),
                         );
                     }
                 } else {

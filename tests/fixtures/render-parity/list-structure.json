@@ -1,0 +1,15 @@
+{
+    "input": "Intro line first.\n\n- first item with **bold**\n- second item\n\nClosing line.",
+    "mustContain": [
+        "<p>Intro line first.</p>",
+        "<ul>",
+        "<li>first item with <strong>bold</strong></li>",
+        "<li>second item</li>",
+        "</ul>",
+        "<p>Closing line.</p>"
+    ],
+    "mustNotContain": [
+        "<li>Intro",
+        "<li>Closing"
+    ]
+}

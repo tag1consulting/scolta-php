@@ -295,6 +295,9 @@ class ScoltaConfig
      *
      * If a `preset` key is present, the named preset's values are applied first.
      * Any other keys in `$values` override the preset.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function fromArray(array $values): self
     {
@@ -360,6 +363,8 @@ class ScoltaConfig
      * The 'none' entry represents "no preset — use defaults."
      *
      * @return array<string, array{label: string, description: string, values: array<string, mixed>}>
+     * @since 1.0.0
+     * @stability stable
      */
     public static function getPresets(): array
     {
@@ -373,6 +378,8 @@ class ScoltaConfig
      *
      * @param string $name Preset key (e.g., 'content_catalog').
      * @return array<string, mixed> Snake_case scoring parameters.
+     * @since 1.0.0
+     * @stability stable
      */
     public static function getPresetValues(string $name): array
     {
@@ -384,6 +391,9 @@ class ScoltaConfig
      *
      * Used to populate window.scolta.scoring in the search page.
      * Pure PHP — no WASM dependency at runtime.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function toJsScoringConfig(): array
     {
@@ -428,6 +438,9 @@ class ScoltaConfig
      *
      * Platform adapters use this to generate the client-side config.
      * They fill in the platform-specific paths (wasmPath, pagefindPath, endpoints).
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function toBrowserConfig(): array
     {
@@ -447,6 +460,9 @@ class ScoltaConfig
 
     /**
      * Get the AI client config array for constructing an AiClient.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function toAiClientConfig(): array
     {

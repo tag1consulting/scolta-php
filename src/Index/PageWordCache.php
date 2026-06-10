@@ -120,6 +120,9 @@ final class PageWordCache
      * Records the hash as "used" for pruning regardless of hit/miss.
      * On cache hit: loads the chunk file containing the entry (if not already
      * loaded), returns the token data, then releases the chunk.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function get(string $hash): ?array
     {
@@ -145,7 +148,7 @@ final class PageWordCache
                 // Chunk file corrupted or missing — remove stale manifest entries.
                 $this->logger->warning(
                     "[scolta] Token cache chunk {$chunkNumber} is corrupted or missing. "
-                    . 'Affected pages will be re-tokenized.'
+                    . 'Affected pages will be re-tokenized.',
                 );
                 $this->removeChunkFromManifest($chunkNumber);
                 return null;
@@ -165,6 +168,9 @@ final class PageWordCache
      * comes first. The byte limit prevents a single serialize() call from
      * allocating tens of megabytes when pages contain thousands of tokens
      * (e.g. long encyclopedia articles).
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function put(string $hash, array $tokenData): void
     {
@@ -191,6 +197,9 @@ final class PageWordCache
      * chunk files that no longer have any live entries.
      *
      * Call once at the end of the build (finalize path).
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function pruneAndSave(): void
     {
@@ -302,7 +311,7 @@ final class PageWordCache
 
         $totalEntries = count($this->manifest);
         $this->logger->info(
-            "[scolta] Migration complete: {$totalEntries} entries across {$chunkNum} chunks."
+            "[scolta] Migration complete: {$totalEntries} entries across {$chunkNum} chunks.",
         );
     }
 
@@ -400,7 +409,7 @@ final class PageWordCache
     {
         $this->manifest = array_filter(
             $this->manifest,
-            fn (int $num) => $num !== $chunkNumber,
+            fn(int $num) => $num !== $chunkNumber,
         );
     }
 }

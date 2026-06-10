@@ -188,7 +188,7 @@ class IndexerResolverTest extends TestCase
 
         $orchestrator->build($intent, $items, $logger);
 
-        $notices = array_filter($logger->records, fn ($r) => $r['level'] === 'notice');
+        $notices = array_filter($logger->records, fn($r) => $r['level'] === 'notice');
         $messages = array_column(array_values($notices), 'message');
         $this->assertTrue(
             in_array('[scolta] Using PHP indexer.', $messages, true),

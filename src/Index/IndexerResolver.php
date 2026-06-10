@@ -28,14 +28,15 @@ final class IndexerResolver
     public function __construct(
         private readonly PagefindBinary $binary,
         private readonly LoggerInterface $logger,
-    ) {
-    }
+    ) {}
 
     /**
      * Resolve the effective indexer backend and emit a notice-level log message.
      *
      * @param string $effectiveIndexer 'php', 'binary', or 'auto'.
      * @return string 'php' or 'binary'.
+     * @since 1.0.0
+     * @stability stable
      */
     public function resolve(string $effectiveIndexer): string
     {

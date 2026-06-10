@@ -235,7 +235,7 @@ class ByteParityTest extends TestCase
                     $this->assertLessThan(
                         $pageCount,
                         $pn,
-                        "Page num {$pn} out of range (0..{$pageCount}): {$basename}"
+                        "Page num {$pn} out of range (0..{$pageCount}): {$basename}",
                     );
                 }
             }
@@ -281,13 +281,13 @@ class ByteParityTest extends TestCase
                     $this->assertLessThan(
                         $uncompressedSize,
                         $compressedSize,
-                        "Compressed size ({$compressedSize}) must be less than uncompressed ({$uncompressedSize}) for: " . basename($file)
+                        "Compressed size ({$compressedSize}) must be less than uncompressed ({$uncompressedSize}) for: " . basename($file),
                     );
 
                     $this->assertLessThan(
                         0.99,
                         $ratio,
-                        sprintf('Compression ratio %.3f ≥ 0.99 for %s (must achieve at least 1%%)', $ratio, basename($file))
+                        sprintf('Compression ratio %.3f ≥ 0.99 for %s (must achieve at least 1%%)', $ratio, basename($file)),
                     );
                 }
 
@@ -299,8 +299,8 @@ class ByteParityTest extends TestCase
                         sprintf(
                             'Compression ratio %.3f ≥ 0.85 for %s (expected ≥15%% reduction on CBOR data)',
                             $ratio,
-                            basename($file)
-                        )
+                            basename($file),
+                        ),
                     );
                 }
 
@@ -361,7 +361,7 @@ class ByteParityTest extends TestCase
         }
         $items = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($items as $item) {
             $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());

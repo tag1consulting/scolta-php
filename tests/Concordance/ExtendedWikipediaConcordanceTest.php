@@ -58,7 +58,7 @@ class ExtendedWikipediaConcordanceTest extends TestCase
 
         if (!file_exists($this->referenceExtDir . '/pagefind-entry.json')) {
             $this->markTestSkipped(
-                'Extended Wikipedia reference fixtures not generated. Run: ./scripts/generate-concordance-fixtures-wiki-extended.sh'
+                'Extended Wikipedia reference fixtures not generated. Run: ./scripts/generate-concordance-fixtures-wiki-extended.sh',
             );
         }
 
@@ -97,8 +97,8 @@ class ExtendedWikipediaConcordanceTest extends TestCase
                 '[ext:%s] PHP indexed %d pages, Pagefind indexed %d. Allowed delta: 1.',
                 $lang,
                 count($phpFragments),
-                count($refFragments)
-            )
+                count($refFragments),
+            ),
         );
     }
 
@@ -149,8 +149,8 @@ class ExtendedWikipediaConcordanceTest extends TestCase
                 $lang,
                 $avg,
                 $threshold,
-                count($similarities)
-            )
+                count($similarities),
+            ),
         );
     }
 
@@ -221,7 +221,7 @@ class ExtendedWikipediaConcordanceTest extends TestCase
                     'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
                     'corpus' => 'corpus-wiki-extended',
                     'results' => $results,
-                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n"
+                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n",
             );
         }
 
@@ -379,7 +379,7 @@ class ExtendedWikipediaConcordanceTest extends TestCase
     {
         $words = preg_split('/[\s\p{P}]+/u', mb_strtolower($text));
 
-        return array_values(array_unique(array_filter($words, fn (string $w) => mb_strlen($w) >= 2)));
+        return array_values(array_unique(array_filter($words, fn(string $w) => mb_strlen($w) >= 2)));
     }
 
     private function removeDir(string $dir): void
@@ -389,7 +389,7 @@ class ExtendedWikipediaConcordanceTest extends TestCase
         }
         $items = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($items as $item) {
             $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());

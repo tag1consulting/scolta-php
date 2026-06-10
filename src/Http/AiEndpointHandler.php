@@ -84,14 +84,15 @@ class AiEndpointHandler
         private readonly array $sortableFieldDescriptions = [],
         private readonly array $filterFields = [],
         private readonly array $filterFieldDescriptions = [],
-    ) {
-    }
+    ) {}
 
     /**
      * Handle an expand-query request.
      *
      * @param string $query The search query to expand.
      * @return array{ok: bool, data?: mixed, status?: int, error?: string}
+     * @since 1.0.0
+     * @stability stable
      */
     public function handleExpandQuery(string $query): array
     {
@@ -177,6 +178,8 @@ class AiEndpointHandler
      * @param string $query   The search query.
      * @param string $context Search result excerpts.
      * @return array{ok: bool, data?: mixed, status?: int, error?: string}
+     * @since 1.0.0
+     * @stability stable
      */
     public function handleSummarize(string $query, string $context): array
     {
@@ -247,6 +250,8 @@ class AiEndpointHandler
      *
      * @param array $messages Conversation messages (role + content pairs).
      * @return array{ok: bool, data?: mixed, status?: int, error?: string}
+     * @since 1.0.0
+     * @stability stable
      */
     public function handleFollowUp(array $messages): array
     {
@@ -382,6 +387,8 @@ class AiEndpointHandler
      * @param string $response      Raw AI response text.
      * @param string $originalQuery The original query (used as fallback).
      * @return array The parsed list of search terms.
+     * @since 1.0.0
+     * @stability stable
      */
     public function parseExpansionResponse(string $response, string $originalQuery): array
     {
@@ -440,7 +447,7 @@ class AiEndpointHandler
             return null;
         }
 
-        $filtered = array_values(array_filter($raw, static fn ($v) => is_string($v) && $v !== ''));
+        $filtered = array_values(array_filter($raw, static fn($v) => is_string($v) && $v !== ''));
 
         return !empty($filtered) ? $filtered : null;
     }
@@ -688,6 +695,8 @@ ENDFILTERINSTR;
      * @param string $action The action name (expand, summarize).
      * @param string ...$parts Variable parts to hash.
      * @return string The cache key.
+     * @since 1.0.0
+     * @stability stable
      */
     public function cacheKey(string $action, string ...$parts): string
     {

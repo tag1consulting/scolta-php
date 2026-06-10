@@ -15,6 +15,4 @@ namespace Tag1\Scolta\Exception;
  * @since 1.0.4
  * @stability experimental
  */
-class MemoryThresholdExceededException extends \RuntimeException
-{
-}
+class MemoryThresholdExceededException extends \RuntimeException {}

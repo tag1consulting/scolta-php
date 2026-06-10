@@ -43,6 +43,8 @@ final class AmazeeTrialProvisioner
      *   string (the default) for anonymous provisioning.
      *
      * @throws AmazeeApiException If the API call fails.
+     * @since 1.0.0
+     * @stability stable
      */
     public function provision(string $email = ''): ProvisioningResult
     {

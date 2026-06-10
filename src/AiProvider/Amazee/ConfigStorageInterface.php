@@ -22,6 +22,8 @@ interface ConfigStorageInterface
      * @param string $litellmToken   The LiteLLM bearer token.
      * @param string $litellmApiUrl  The LiteLLM API base URL.
      * @param string $region         The selected region identifier.
+     * @since 1.0.0
+     * @stability stable
      */
     public function store(string $litellmToken, string $litellmApiUrl, string $region): void;
 
@@ -29,11 +31,16 @@ interface ConfigStorageInterface
      * Retrieve stored credentials, or null if none are stored.
      *
      * @return array{litellm_token: string, litellm_api_url: string, region: string}|null
+     * @since 1.0.0
+     * @stability stable
      */
     public function load(): ?array;
 
     /**
      * Remove stored credentials.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function clear(): void;
 }

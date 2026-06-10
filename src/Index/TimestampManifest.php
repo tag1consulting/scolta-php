@@ -52,6 +52,8 @@ final class TimestampManifest
      * Get the stored entry for an entity key.
      *
      * @return array{ts: int, items: list<array<string, mixed>>}|null
+     * @since 1.0.0
+     * @stability stable
      */
     public function get(string $entityKey): ?array
     {
@@ -64,6 +66,9 @@ final class TimestampManifest
      * @param list<array<string, mixed>> $items One entry per translation/variant:
      *   [['hash' => string, 'id' => string, 'url' => string, 'date' => string,
      *     'siteName' => string, 'language' => string, 'filters' => array], ...]
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function put(string $entityKey, int $ts, array $items): void
     {
@@ -77,6 +82,9 @@ final class TimestampManifest
      *
      * Called by the orchestrator when it successfully processes a
      * CachedContentReference (i.e. token cache hit).
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function markSeen(string $entityKey): void
     {
@@ -87,6 +95,9 @@ final class TimestampManifest
      * Remove entries for entities no longer present, then save atomically.
      *
      * Should be called in the same places as PageWordCache::pruneAndSave().
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function pruneAndSave(): void
     {
@@ -103,11 +114,19 @@ final class TimestampManifest
         }
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public function isEmpty(): bool
     {
         return empty($this->data);
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public function count(): int
     {
         return count($this->data);

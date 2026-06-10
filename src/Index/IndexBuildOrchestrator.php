@@ -82,6 +82,9 @@ final class IndexBuildOrchestrator
     /**
      * Expose the timestamp manifest so gatherers can check changed timestamps
      * before deciding whether to load entity bodies or yield CachedContentReferences.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function getTimestampManifest(): TimestampManifest
     {
@@ -101,6 +104,8 @@ final class IndexBuildOrchestrator
      * @param LoggerInterface                              $logger   PSR-3 logger (optional).
      * @param ProgressReporterInterface                    $progress Progress callback (optional).
      * @param bool                                         $force    Skip cache lookups (still populates cache).
+     * @since 1.0.0
+     * @stability stable
      */
     public function build(
         BuildIntent $intent,
@@ -147,15 +152,7 @@ final class IndexBuildOrchestrator
                     $tokenData = $this->cache->get($page->contentHash);
                     if ($tokenData !== null) {
                         $this->tsManifest->markSeen($page->entityKey);
-                        $chunk[] = ['item' => (object) [
-                            'id'       => $page->id,
-                            'url'      => $page->url,
-                            'date'     => $page->date,
-                            'siteName' => $page->siteName,
-                            'language' => $page->language,
-                            'filters'  => $page->filters,
-                            'sortable' => $page->sortable,
-                        ], 'tokenData' => $tokenData];
+                        $chunk[] = ['item' => $this->makeSlimProxy($page), 'tokenData' => $tokenData];
                     }
                     // On cache miss: skip markSeen → manifest entry is pruned →
                     // entity is treated as changed on the next build.
@@ -170,35 +167,14 @@ final class IndexBuildOrchestrator
                     }
 
                     if ($tokenData !== null) {
-                        // Slim proxy: drop bodyHtml so it's freed as soon as the
-                        // generator advances, not held for the full chunk duration.
-                        $chunk[] = ['item' => (object) [
-                            'id'       => $page->id,
-                            'url'      => $page->url,
-                            'date'     => $page->date,
-                            'siteName' => $page->siteName,
-                            'language' => $page->language,
-                            'filters'  => $page->filters,
-                            'sortable' => $page->sortable,
-                        ], 'tokenData' => $tokenData];
+                        $chunk[] = ['item' => $this->makeSlimProxy($page), 'tokenData' => $tokenData];
                     }
                 }
 
                 if (count($chunk) >= $chunkSize) {
-                    $telemetry->emit("chunk_start({$chunkNum})");
-                    $partial = $this->builder->buildFromTokenData($chunk, $currentOffset);
-                    $currentOffset += count($partial['pages']);
-                    $pagesInRun    += count($partial['pages']);
-                    $this->coordinator->commitChunk($chunkNum, $partial);
-                    $telemetry->emit("chunk_committed({$chunkNum})", ['pages' => count($partial['pages'])]);
-                    $progress->advance(1, "Chunk {$chunkNum} ({$pagesInRun} pages)");
+                    $this->flushChunk($chunk, $chunkNum, $currentOffset, $pagesInRun, $telemetry, $progress);
                     $chunkNum++;
                     $chunk = [];
-                    unset($partial);
-                    gc_collect_cycles();
-                    if (function_exists('gc_mem_caches')) {
-                        gc_mem_caches();
-                    }
 
                     // Voluntary yield: exit cleanly when heap pressure is high after cleanup.
                     // State is already committed; the next invocation resumes from here.
@@ -213,16 +189,12 @@ final class IndexBuildOrchestrator
                             $chunkNum - 1,
                             $committedPages,
                         ));
-                        return new StatusReport(
-                            version: self::VERSION,
-                            pagefindVersion: SupportedVersions::getVersionForMetadata(),
-                            resolvedIndexer: 'php',
+                        return $this->makeStatusReport(
+                            $telemetry,
+                            $budget,
+                            $startTime,
                             pagesProcessed: $committedPages,
                             chunksWritten: $committedChunks,
-                            peakMemoryBytes: $telemetry->getPeakRssBytes(),
-                            memoryBudgetBytes: $budget->totalBudgetBytes(),
-                            durationSeconds: round(microtime(true) - $startTime, 3),
-                            outputDir: $this->outputDir,
                             success: false,
                             error: 'memory_abort',
                         );
@@ -232,17 +204,8 @@ final class IndexBuildOrchestrator
 
             // Tail chunk.
             if (!empty($chunk)) {
-                $telemetry->emit("chunk_start({$chunkNum})");
-                $partial = $this->builder->buildFromTokenData($chunk, $currentOffset);
-                $pagesInRun += count($partial['pages']);
-                $this->coordinator->commitChunk($chunkNum, $partial);
-                $telemetry->emit("chunk_committed({$chunkNum})", ['pages' => count($partial['pages'])]);
-                $progress->advance(1, "Chunk {$chunkNum} ({$pagesInRun} pages)");
-                unset($partial, $chunk);
-                gc_collect_cycles();
-                if (function_exists('gc_mem_caches')) {
-                    gc_mem_caches();
-                }
+                $this->flushChunk($chunk, $chunkNum, $currentOffset, $pagesInRun, $telemetry, $progress);
+                $chunk = [];
             }
 
             $progress->finish("{$pagesInRun} pages indexed");
@@ -259,16 +222,12 @@ final class IndexBuildOrchestrator
                 $this->coordinator->releaseLockOnly();
                 $telemetry->emit('finalize_deferred', ['heap_pct' => round($segmentBytes / $limitBytes * 100, 1)]);
                 $logger->warning('[scolta] RSS at ' . round($segmentBytes / $limitBytes * 100, 1) . '% of memory limit after indexing. Merge deferred — run `drush scolta:finalize` to complete.');
-                return new StatusReport(
-                    version: self::VERSION,
-                    pagefindVersion: SupportedVersions::getVersionForMetadata(),
-                    resolvedIndexer: 'php',
+                return $this->makeStatusReport(
+                    $telemetry,
+                    $budget,
+                    $startTime,
                     pagesProcessed: $pagesInRun,
                     chunksWritten: $chunkNum,
-                    peakMemoryBytes: $telemetry->getPeakRssBytes(),
-                    memoryBudgetBytes: $budget->totalBudgetBytes(),
-                    durationSeconds: round(microtime(true) - $startTime, 3),
-                    outputDir: $this->outputDir,
                     success: false,
                     error: 'index_only_complete',
                 );
@@ -298,16 +257,12 @@ final class IndexBuildOrchestrator
             $this->cache->pruneAndSave();
             $this->tsManifest->pruneAndSave();
 
-            return new StatusReport(
-                version: self::VERSION,
-                pagefindVersion: SupportedVersions::getVersionForMetadata(),
-                resolvedIndexer: 'php',
+            return $this->makeStatusReport(
+                $telemetry,
+                $budget,
+                $startTime,
                 pagesProcessed: $pagesForReport,
                 chunksWritten: $chunksWritten,
-                peakMemoryBytes: $telemetry->getPeakRssBytes(),
-                memoryBudgetBytes: $budget->totalBudgetBytes(),
-                durationSeconds: round(microtime(true) - $startTime, 3),
-                outputDir: $this->outputDir,
                 success: true,
             );
         } catch (\Throwable $e) {
@@ -332,16 +287,12 @@ final class IndexBuildOrchestrator
                 }
             }
 
-            return new StatusReport(
-                version: self::VERSION,
-                pagefindVersion: SupportedVersions::getVersionForMetadata(),
-                resolvedIndexer: 'php',
+            return $this->makeStatusReport(
+                $telemetry,
+                $intent->memoryBudget(),
+                $startTime,
                 pagesProcessed: $committedPages,
                 chunksWritten: $committedChunks,
-                peakMemoryBytes: $telemetry->getPeakRssBytes(),
-                memoryBudgetBytes: $intent->memoryBudget()->totalBudgetBytes(),
-                durationSeconds: round(microtime(true) - $startTime, 3),
-                outputDir: $this->outputDir,
                 success: false,
                 error: $isMemoryAbort ? 'memory_abort' : $e->getMessage(),
             );
@@ -351,6 +302,9 @@ final class IndexBuildOrchestrator
     /**
      * Expose the coordinator for framework adapters that need per-chunk control
      * (e.g. Drupal Batch API, Laravel queue jobs).
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function coordinator(): BuildCoordinator
     {
@@ -358,9 +312,90 @@ final class IndexBuildOrchestrator
     }
 
     /**
+     * Slim proxy: only the fields the index builder needs, dropping bodyHtml
+     * so it's freed as soon as the source generator advances instead of being
+     * held for the full chunk duration.
+     */
+    private function makeSlimProxy(object $page): object
+    {
+        return (object) [
+            'id'       => $page->id,
+            'url'      => $page->url,
+            'date'     => $page->date,
+            'siteName' => $page->siteName,
+            'language' => $page->language,
+            'filters'  => $page->filters,
+            'sortable' => $page->sortable,
+        ];
+    }
+
+    /**
+     * Build, commit, and release one chunk of token data, advancing the page
+     * offset and run counter. GC runs after the partial is freed so
+     * chunk-sized allocations don't accumulate across the loop.
+     */
+    private function flushChunk(
+        array $chunk,
+        int $chunkNum,
+        int &$currentOffset,
+        int &$pagesInRun,
+        MemoryTelemetry $telemetry,
+        ProgressReporterInterface $progress,
+    ): void {
+        $telemetry->emit("chunk_start({$chunkNum})");
+        $partial = $this->builder->buildFromTokenData($chunk, $currentOffset);
+        $currentOffset += count($partial['pages']);
+        $pagesInRun    += count($partial['pages']);
+        $this->coordinator->commitChunk($chunkNum, $partial);
+        $telemetry->emit("chunk_committed({$chunkNum})", ['pages' => count($partial['pages'])]);
+        $progress->advance(1, "Chunk {$chunkNum} ({$pagesInRun} pages)");
+        unset($partial);
+        gc_collect_cycles();
+        if (function_exists('gc_mem_caches')) {
+            gc_mem_caches();
+        }
+    }
+
+    /**
+     * Assemble a StatusReport, filling in the fields that are identical for
+     * every report this orchestrator produces (version/indexer identity,
+     * memory figures, output dir).
+     *
+     * @param float|null $durationSeconds Explicit duration override; computed
+     *                                    from $startTime when null.
+     */
+    private function makeStatusReport(
+        MemoryTelemetry $telemetry,
+        MemoryBudget $budget,
+        float $startTime,
+        int $pagesProcessed,
+        int $chunksWritten,
+        bool $success,
+        ?string $error = null,
+        ?float $durationSeconds = null,
+    ): StatusReport {
+        return new StatusReport(
+            version: self::VERSION,
+            pagefindVersion: SupportedVersions::getVersionForMetadata(),
+            resolvedIndexer: 'php',
+            pagesProcessed: $pagesProcessed,
+            chunksWritten: $chunksWritten,
+            peakMemoryBytes: $telemetry->getPeakRssBytes(),
+            memoryBudgetBytes: $budget->totalBudgetBytes(),
+            durationSeconds: $durationSeconds ?? round(microtime(true) - $startTime, 3),
+            outputDir: $this->outputDir,
+            success: $success,
+            error: $error,
+        );
+    }
+
+    /**
      * Perform the merge + write + swap phases from pre-committed chunks.
      *
      * Called by framework adapters after all ProcessIndexChunk jobs complete.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function finalize(
         MemoryBudget $budget,
@@ -376,18 +411,15 @@ final class IndexBuildOrchestrator
         try {
             $chunkFiles = $this->coordinator->chunkFiles();
             if (count($chunkFiles) === 0) {
-                return new StatusReport(
-                    version: self::VERSION,
-                    pagefindVersion: SupportedVersions::getVersionForMetadata(),
-                    resolvedIndexer: 'php',
+                return $this->makeStatusReport(
+                    $telemetry,
+                    $budget,
+                    $startTime,
                     pagesProcessed: 0,
                     chunksWritten: 0,
-                    peakMemoryBytes: $telemetry->getPeakRssBytes(),
-                    memoryBudgetBytes: $budget->totalBudgetBytes(),
-                    durationSeconds: 0.0,
-                    outputDir: $this->outputDir,
                     success: false,
                     error: 'No chunk files found in state directory.',
+                    durationSeconds: 0.0,
                 );
             }
 
@@ -408,16 +440,12 @@ final class IndexBuildOrchestrator
 
             $this->coordinator->release();
 
-            return new StatusReport(
-                version: self::VERSION,
-                pagefindVersion: SupportedVersions::getVersionForMetadata(),
-                resolvedIndexer: 'php',
+            return $this->makeStatusReport(
+                $telemetry,
+                $budget,
+                $startTime,
                 pagesProcessed: $pagesProcessed,
                 chunksWritten: $chunksFinalized,
-                peakMemoryBytes: $telemetry->getPeakRssBytes(),
-                memoryBudgetBytes: $budget->totalBudgetBytes(),
-                durationSeconds: round(microtime(true) - $startTime, 3),
-                outputDir: $this->outputDir,
                 success: true,
             );
         } catch (\Throwable $e) {
@@ -426,16 +454,12 @@ final class IndexBuildOrchestrator
             } catch (\Throwable) {
             }
 
-            return new StatusReport(
-                version: self::VERSION,
-                pagefindVersion: SupportedVersions::getVersionForMetadata(),
-                resolvedIndexer: 'php',
+            return $this->makeStatusReport(
+                $telemetry,
+                $budget,
+                $startTime,
                 pagesProcessed: 0,
                 chunksWritten: 0,
-                peakMemoryBytes: $telemetry->getPeakRssBytes(),
-                memoryBudgetBytes: $budget->totalBudgetBytes(),
-                durationSeconds: round(microtime(true) - $startTime, 3),
-                outputDir: $this->outputDir,
                 success: false,
                 error: $e->getMessage(),
             );
@@ -517,7 +541,7 @@ final class IndexBuildOrchestrator
         if ($fragmentCount === 0) {
             throw new \RuntimeException(
                 "Build processed {$pagesProcessed} pages but the output index contains zero fragment files. "
-                . 'The write may have failed silently. Check filesystem permissions and available space.'
+                . 'The write may have failed silently. Check filesystem permissions and available space.',
             );
         }
 
@@ -533,6 +557,8 @@ final class IndexBuildOrchestrator
      *
      * @param string $outputDir The base output directory (pagefind/ will be appended).
      * @throws \RuntimeException If the index is missing or malformed.
+     * @since 1.0.0
+     * @stability stable
      */
     public static function verifyIndexComplete(string $outputDir): void
     {
@@ -540,14 +566,14 @@ final class IndexBuildOrchestrator
         if (!file_exists($entryPath)) {
             throw new \RuntimeException(
                 "Index verification failed: pagefind-entry.json not found at {$entryPath}. "
-                . 'The build did not produce a usable index. Do not exit 0.'
+                . 'The build did not produce a usable index. Do not exit 0.',
             );
         }
 
         $content = file_get_contents($entryPath);
         if ($content === false) {
             throw new \RuntimeException(
-                "Index verification failed: cannot read pagefind-entry.json at {$entryPath}."
+                "Index verification failed: cannot read pagefind-entry.json at {$entryPath}.",
             );
         }
 
@@ -555,7 +581,7 @@ final class IndexBuildOrchestrator
         if (!is_array($data) || !isset($data['version']) || !isset($data['languages'])) {
             throw new \RuntimeException(
                 "Index verification failed: pagefind-entry.json is malformed (missing 'version' or 'languages' key). "
-                . 'The index may be incomplete or corrupted.'
+                . 'The index may be incomplete or corrupted.',
             );
         }
     }

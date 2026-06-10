@@ -17,8 +17,7 @@ final class BuildIntent
         private readonly ?int $totalPages,
         private readonly MemoryBudget $memoryBudget,
         private readonly array $sourceMeta,
-    ) {
-    }
+    ) {}
 
     /**
      * Start a clean build, wiping any existing state directory.
@@ -26,6 +25,8 @@ final class BuildIntent
      * @param int          $totalPages Total pages that will be indexed.
      * @param MemoryBudget $budget     Memory profile for this build.
      * @param array        $sourceMeta Arbitrary per-build metadata (language, fingerprint, …).
+     * @since 1.0.0
+     * @stability stable
      */
     public static function fresh(int $totalPages, MemoryBudget $budget, array $sourceMeta = []): self
     {
@@ -36,6 +37,9 @@ final class BuildIntent
      * Resume an interrupted build from the last completed chunk.
      *
      * Total pages and source meta are read from the existing manifest.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function resume(MemoryBudget $budget): self
     {
@@ -44,36 +48,63 @@ final class BuildIntent
 
     /**
      * Restart with fresh content, preserving the source manifest if it exists.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function restart(int $totalPages, MemoryBudget $budget, array $sourceMeta = []): self
     {
         return new self('restart', $totalPages, $budget, $sourceMeta);
     }
 
-    /** "fresh" | "resume" | "restart" */
+    /**
+     * "fresh" | "resume" | "restart"
+     *
+     * @since 1.0.0
+     * @stability stable
+     */
     public function mode(): string
     {
         return $this->mode;
     }
 
-    /** Total pages to index, or null for resume (read from manifest). */
+    /**
+     * Total pages to index, or null for resume (read from manifest).
+     *
+     * @since 1.0.0
+     * @stability stable
+     */
     public function totalPages(): ?int
     {
         return $this->totalPages;
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public function memoryBudget(): MemoryBudget
     {
         return $this->memoryBudget;
     }
 
-    /** Arbitrary metadata stored in the build manifest. */
+    /**
+     * Arbitrary metadata stored in the build manifest.
+     *
+     * @since 1.0.0
+     * @stability stable
+     */
     public function sourceMeta(): array
     {
         return $this->sourceMeta;
     }
 
-    /** True for fresh and restart — both wipe existing state. */
+    /**
+     * True for fresh and restart — both wipe existing state.
+     *
+     * @since 1.0.0
+     * @stability stable
+     */
     public function isFresh(): bool
     {
         return $this->mode === 'fresh' || $this->mode === 'restart';

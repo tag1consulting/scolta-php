@@ -84,9 +84,7 @@ class IndexBuildOrchestratorTest extends TestCase
     {
         $calls        = ['start' => 0, 'advance' => 0, 'finish' => 0];
         $reporter     = new class ($calls) implements \Tag1\Scolta\Index\ProgressReporterInterface {
-            public function __construct(private array &$calls)
-            {
-            }
+            public function __construct(private array &$calls) {}
 
             public function start(int $totalSteps, string $label): void
             {
@@ -196,8 +194,7 @@ class IndexBuildOrchestratorTest extends TestCase
             public function __construct(
                 private readonly FilesystemDriver $inner,
                 private int &$moveCallCount,
-            ) {
-            }
+            ) {}
 
             public function move(string $from, string $to): bool
             {
@@ -254,8 +251,7 @@ class IndexBuildOrchestratorTest extends TestCase
             public function __construct(
                 private readonly FilesystemDriver $inner,
                 private readonly string $outputDir,
-            ) {
-            }
+            ) {}
 
             public function move(string $from, string $to): bool
             {
@@ -384,7 +380,7 @@ class IndexBuildOrchestratorTest extends TestCase
         $outputDirWithSuffix = $this->outputDir . '/pagefind';
         mkdir($outputDirWithSuffix, 0755, true);
 
-        $logger       = new class () extends \Psr\Log\AbstractLogger {
+        $logger       = new class extends \Psr\Log\AbstractLogger {
             public array $warnings = [];
             public function log($level, string|\Stringable $message, array $context = []): void
             {
@@ -405,7 +401,7 @@ class IndexBuildOrchestratorTest extends TestCase
 
     public function testOutputDirWithoutSuffixLogsNoWarning(): void
     {
-        $logger = new class () extends \Psr\Log\AbstractLogger {
+        $logger = new class extends \Psr\Log\AbstractLogger {
             public array $warnings = [];
             public function log($level, string|\Stringable $message, array $context = []): void
             {
@@ -420,7 +416,7 @@ class IndexBuildOrchestratorTest extends TestCase
 
         $orchestrator->build($intent, $items, $logger);
 
-        $pagefindWarnings = array_filter($logger->warnings, fn ($w) => str_contains($w, "'/pagefind'"));
+        $pagefindWarnings = array_filter($logger->warnings, fn($w) => str_contains($w, "'/pagefind'"));
         $this->assertEmpty($pagefindWarnings, 'No /pagefind normalization warning expected for a correct output_dir');
     }
 
@@ -473,7 +469,7 @@ class IndexBuildOrchestratorTest extends TestCase
         $orchestrator = new IndexBuildOrchestrator(
             $this->stateDir,
             $this->outputDir,
-            memoryPressureProbe: static fn () => true,
+            memoryPressureProbe: static fn() => true,
         );
 
         $budget = MemoryBudget::conservative()->withChunkSize(3);
@@ -642,7 +638,7 @@ class IndexBuildOrchestratorTest extends TestCase
         $orch = new IndexBuildOrchestrator(
             $this->stateDir,
             $this->outputDir,
-            memoryPressureProbe: static fn () => true,
+            memoryPressureProbe: static fn() => true,
         );
 
         $budget = MemoryBudget::conservative()->withChunkSize(2);
@@ -664,7 +660,7 @@ class IndexBuildOrchestratorTest extends TestCase
         }
         $files = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($files as $file) {
             $file->isDir() ? rmdir($file->getRealPath()) : unlink($file->getRealPath());

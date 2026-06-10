@@ -86,7 +86,7 @@ class AmazeeTrialProvisionerTest extends TestCase
         $provisioner = $this->makeProvisioner(
             [],
             $storage,
-            fn () => true,
+            fn() => true,
         );
 
         $result = $provisioner->provision('trial@example.com');
@@ -111,7 +111,7 @@ class AmazeeTrialProvisionerTest extends TestCase
                 new Response(200, [], json_encode(['user' => 'ok'])),
             ],
             $storage,
-            fn () => false,
+            fn() => false,
         );
 
         $result = $provisioner->provision('trial@example.com');

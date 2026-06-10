@@ -18,9 +18,12 @@ final class UpgradeResult
         public readonly string $litellmApiUrl,
         public readonly string $region,
         public readonly ?string $error = null,
-    ) {
-    }
+    ) {}
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public static function success(string $litellmToken, string $litellmApiUrl, string $region): self
     {
         return new self(
@@ -31,6 +34,10 @@ final class UpgradeResult
         );
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public static function failure(string $error): self
     {
         return new self(

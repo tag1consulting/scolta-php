@@ -26,7 +26,7 @@ class AiClientTest extends TestCase
         $mock = new MockHandler([]);
         $client = new AiClient(
             ['api_key' => 'test'],
-            new Client(['handler' => HandlerStack::create($mock)])
+            new Client(['handler' => HandlerStack::create($mock)]),
         );
         // If we could inspect the private field, we'd check. Instead we verify
         // indirectly through the request format (tested below).
@@ -91,7 +91,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['provider' => 'anthropic', 'api_key' => 'sk-ant-test', 'model' => 'claude-test'],
-            new Client(['handler' => $stack])
+            new Client(['handler' => $stack]),
         );
 
         $result = $client->message('You are helpful.', 'Hello', 256);
@@ -128,7 +128,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['api_key' => 'key'],
-            new Client(['handler' => $stack])
+            new Client(['handler' => $stack]),
         );
 
         $messages = [
@@ -158,7 +158,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['api_key' => 'key', 'model' => 'default-model'],
-            new Client(['handler' => $stack])
+            new Client(['handler' => $stack]),
         );
 
         $client->message('sys', 'msg', 100, 'override-model');
@@ -180,7 +180,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['api_key' => 'key'],
-            new Client(['handler' => $stack])
+            new Client(['handler' => $stack]),
         );
 
         $client->message('sys', 'msg');
@@ -205,7 +205,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['provider' => 'openai', 'api_key' => 'sk-openai', 'model' => 'gpt-4'],
-            new Client(['handler' => $stack])
+            new Client(['handler' => $stack]),
         );
 
         $result = $client->message('You are helpful.', 'Hello', 512);
@@ -238,7 +238,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['provider' => 'openai', 'api_key' => 'key'],
-            new Client(['handler' => $stack])
+            new Client(['handler' => $stack]),
         );
 
         $client->message('sys', 'msg');
@@ -259,7 +259,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['provider' => 'openai', 'api_key' => 'key'],
-            new Client(['handler' => $stack])
+            new Client(['handler' => $stack]),
         );
 
         $messages = [
@@ -293,7 +293,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['api_key' => 'key', 'base_url' => 'https://proxy.example.com/v1/messages'],
-            new Client(['handler' => $stack])
+            new Client(['handler' => $stack]),
         );
 
         $client->message('sys', 'msg');
@@ -313,7 +313,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['api_key' => 'key'],
-            new Client(['handler' => HandlerStack::create($mock)])
+            new Client(['handler' => HandlerStack::create($mock)]),
         );
 
         $this->expectException(\RuntimeException::class);
@@ -329,7 +329,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['api_key' => 'bad-key'],
-            new Client(['handler' => HandlerStack::create($mock)])
+            new Client(['handler' => HandlerStack::create($mock)]),
         );
 
         $this->expectException(ApiKeyInvalidException::class);
@@ -344,7 +344,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['api_key' => 'key'],
-            new Client(['handler' => HandlerStack::create($mock)])
+            new Client(['handler' => HandlerStack::create($mock)]),
         );
 
         $this->expectException(RateLimitException::class);
@@ -359,7 +359,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['api_key' => 'key'],
-            new Client(['handler' => HandlerStack::create($mock)])
+            new Client(['handler' => HandlerStack::create($mock)]),
         );
 
         try {
@@ -378,7 +378,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['api_key' => 'key'],
-            new Client(['handler' => HandlerStack::create($mock)])
+            new Client(['handler' => HandlerStack::create($mock)]),
         );
 
         try {
@@ -397,7 +397,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['api_key' => 'key'],
-            new Client(['handler' => HandlerStack::create($mock)])
+            new Client(['handler' => HandlerStack::create($mock)]),
         );
 
         $this->expectException(\RuntimeException::class);
@@ -413,7 +413,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['api_key' => 'key'],
-            new Client(['handler' => HandlerStack::create($mock)])
+            new Client(['handler' => HandlerStack::create($mock)]),
         );
 
         $result = $client->message('sys', 'msg');
@@ -438,7 +438,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['api_key' => 'test', 'timeout' => 60],
-            new Client(['handler' => $stack])
+            new Client(['handler' => $stack]),
         );
 
         $client->message('system prompt', 'user message');
@@ -462,7 +462,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['api_key' => 'test'],
-            new Client(['handler' => $stack])
+            new Client(['handler' => $stack]),
         );
 
         $client->message('sys', 'msg');
@@ -484,7 +484,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['api_key' => 'test', 'api_version' => '2024-10-01'],
-            new Client(['handler' => $stack])
+            new Client(['handler' => $stack]),
         );
 
         $client->message('sys', 'msg');
@@ -507,7 +507,7 @@ class AiClientTest extends TestCase
 
         $client = new AiClient(
             ['api_key' => 'test'],
-            new Client(['handler' => $stack])
+            new Client(['handler' => $stack]),
         );
 
         $client->message('sys', 'msg');

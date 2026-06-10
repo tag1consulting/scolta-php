@@ -72,6 +72,9 @@ class ContentExporter
 
     /**
      * Remove all files in the output directory and ensure it exists.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function prepareOutputDir(): void
     {
@@ -79,9 +82,9 @@ class ContentExporter
             $files = new \RecursiveIteratorIterator(
                 new \RecursiveDirectoryIterator(
                     $this->outputDir,
-                    \RecursiveDirectoryIterator::SKIP_DOTS
+                    \RecursiveDirectoryIterator::SKIP_DOTS,
                 ),
-                \RecursiveIteratorIterator::CHILD_FIRST
+                \RecursiveIteratorIterator::CHILD_FIRST,
             );
             foreach ($files as $file) {
                 $file->isDir()
@@ -91,7 +94,7 @@ class ContentExporter
         }
         if (!is_dir($this->outputDir) && !mkdir($this->outputDir, 0755, true)) {
             throw new \RuntimeException(
-                sprintf('Failed to create output directory: %s', $this->outputDir)
+                sprintf('Failed to create output directory: %s', $this->outputDir),
             );
         }
         $this->exportedPaths = [];
@@ -101,6 +104,8 @@ class ContentExporter
      * Export a single content item as a Pagefind-ready HTML file.
      *
      * @return bool True if exported, false if skipped (insufficient content).
+     * @since 1.0.0
+     * @stability stable
      */
     public function export(ContentItem $item): bool
     {
@@ -132,7 +137,7 @@ class ContentExporter
                 $this->exportedPaths[$relativePath],
                 $item->id,
                 $relativePath,
-                $item->url
+                $item->url,
             ));
         }
         $this->exportedPaths[$relativePath] = $item->id;
@@ -157,6 +162,8 @@ class ContentExporter
      *
      * @param ContentItem[] $items Raw content items from platform adapter.
      * @return ContentItem[] Items that pass the minimum content length filter.
+     * @since 1.0.0
+     * @stability stable
      */
     public function exportToItems(array $items): array
     {
@@ -220,7 +227,7 @@ class ContentExporter
 
         $count = 0;
         $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
+            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
         );
         foreach ($iterator as $file) {
             if ($file->isFile() && $file->getExtension() === 'html') {
@@ -329,6 +336,8 @@ class ContentExporter
      * Get export statistics.
      *
      * @return array{exported: int, skipped: int}
+     * @since 1.0.0
+     * @stability stable
      */
     public function getStats(): array
     {

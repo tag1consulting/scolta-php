@@ -37,6 +37,8 @@ final class BuildCoordinator
      * @throws \RuntimeException When a live build is already running.
      * @throws \RuntimeException When resume is requested but no resumable state exists.
      * @throws \RuntimeException When lock acquisition fails.
+     * @since 1.0.0
+     * @stability stable
      */
     public function prepare(BuildIntent $intent): array
     {
@@ -44,7 +46,7 @@ final class BuildCoordinator
             if ($this->state->isRunning()) {
                 throw new \RuntimeException(
                     'Another index build is already running. '
-                    . 'Wait for it to complete, or kill the process and retry with --restart.'
+                    . 'Wait for it to complete, or kill the process and retry with --restart.',
                 );
             }
 
@@ -59,7 +61,7 @@ final class BuildCoordinator
 
             if (!$this->state->initiateBuild($manifest)) {
                 throw new \RuntimeException(
-                    'Failed to acquire build lock — another process may have just started.'
+                    'Failed to acquire build lock — another process may have just started.',
                 );
             }
 
@@ -71,7 +73,7 @@ final class BuildCoordinator
         if ($manifest === null) {
             throw new \RuntimeException(
                 'No resumable build found in state directory. '
-                . 'Run without --resume to start a fresh build.'
+                . 'Run without --resume to start a fresh build.',
             );
         }
 
@@ -84,6 +86,9 @@ final class BuildCoordinator
 
     /**
      * Commit a completed chunk to the state directory.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function commitChunk(int $chunkNumber, array $partial): void
     {
@@ -94,6 +99,8 @@ final class BuildCoordinator
      * Return paths to all chunk files written so far.
      *
      * @return string[]
+     * @since 1.0.0
+     * @stability stable
      */
     public function chunkFiles(): array
     {
@@ -102,6 +109,9 @@ final class BuildCoordinator
 
     /**
      * Return total pages recorded in the manifest.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function pagesProcessed(): int
     {
@@ -110,6 +120,9 @@ final class BuildCoordinator
 
     /**
      * Access the underlying BuildState (for progress / status queries).
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function buildState(): BuildState
     {
@@ -121,6 +134,9 @@ final class BuildCoordinator
      *
      * Call this after a successful build. On failure, call releaseLockOnly()
      * to preserve chunk files for potential resume.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function release(): void
     {
@@ -133,6 +149,9 @@ final class BuildCoordinator
      *
      * Leaves the manifest status as 'building' so shouldResume() can detect
      * the interrupted build on next invocation.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function releaseLockOnly(): void
     {

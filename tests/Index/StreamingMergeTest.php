@@ -107,7 +107,7 @@ class StreamingMergeTest extends TestCase
 
             public function writeTerm(string $term, array $termData): void
             {
-                $this->seenTerms[] = [$term, array_keys(array_filter($termData, fn ($k) => $k !== '_variants', ARRAY_FILTER_USE_KEY))];
+                $this->seenTerms[] = [$term, array_keys(array_filter($termData, fn($k) => $k !== '_variants', ARRAY_FILTER_USE_KEY))];
                 parent::writeTerm($term, $termData);
             }
         };
@@ -117,7 +117,7 @@ class StreamingMergeTest extends TestCase
         $writerSpy->endWrite();
 
         // 'common' should appear exactly once with two page entries.
-        $commonEntries = array_filter($writerSpy->seenTerms, fn ($t) => $t[0] === 'common');
+        $commonEntries = array_filter($writerSpy->seenTerms, fn($t) => $t[0] === 'common');
         $this->assertCount(1, $commonEntries, "'common' should be merged into one term entry");
 
         $entry = array_values($commonEntries)[0];
@@ -285,7 +285,7 @@ class StreamingMergeTest extends TestCase
         $this->assertStringContainsString(
             '"crc32":"',
             file_get_contents($out),
-            'pre-merge footer must carry a crc32 digest'
+            'pre-merge footer must carry a crc32 digest',
         );
         $this->assertTrue((new ChunkReader($out))->verifyCrc32());
 
@@ -305,7 +305,7 @@ class StreamingMergeTest extends TestCase
         }
         $files = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($files as $file) {
             $file->isDir() ? rmdir($file->getRealPath()) : unlink($file->getRealPath());

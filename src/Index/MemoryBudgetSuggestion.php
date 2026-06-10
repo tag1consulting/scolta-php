@@ -21,6 +21,8 @@ final class MemoryBudgetSuggestion
      * Inspect the PHP memory_limit and return a recommendation.
      *
      * @return array{profile: string, reason: string, detected_limit_bytes: int|null, confidence: string}
+     * @since 1.0.0
+     * @stability stable
      */
     public static function suggest(): array
     {
@@ -91,6 +93,8 @@ final class MemoryBudgetSuggestion
      * @param int|null $limitBytes  PHP memory_limit in bytes, or null to read from ini_get.
      *                              Pass -1 to simulate unlimited. Pass null to auto-detect.
      * @return array{status: string, warning: string|null, profile_budget_bytes: int, limit_bytes: int|null}
+     * @since 1.0.0
+     * @stability stable
      */
     public static function checkProfileFit(string $profile, ?int $limitBytes = null): array
     {
@@ -138,6 +142,8 @@ final class MemoryBudgetSuggestion
      * Examples: "256 MB", "unlimited", "unknown (could not read ini_get)"
      *
      * @param int|null $limitBytes  Pre-resolved limit in bytes, or null to auto-detect.
+     * @since 1.0.0
+     * @stability stable
      */
     public static function getMemoryLimitText(?int $limitBytes = null): string
     {

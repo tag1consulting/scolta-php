@@ -24,6 +24,10 @@ class FilesystemDriver implements StorageDriverInterface
         }
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public function exists(string $path): bool
     {
         $this->validatePath($path);
@@ -31,6 +35,10 @@ class FilesystemDriver implements StorageDriverInterface
         return file_exists($path);
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public function get(string $path): string
     {
         $this->validatePath($path);
@@ -42,6 +50,10 @@ class FilesystemDriver implements StorageDriverInterface
         return $contents;
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public function put(string $path, string $contents): bool
     {
         $this->validatePath($path);
@@ -53,6 +65,10 @@ class FilesystemDriver implements StorageDriverInterface
         return file_put_contents($path, $contents) !== false;
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public function delete(string $path): bool
     {
         $this->validatePath($path);
@@ -63,6 +79,10 @@ class FilesystemDriver implements StorageDriverInterface
         return unlink($path);
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public function deleteDirectory(string $path): bool
     {
         $this->validatePath($path);
@@ -72,7 +92,7 @@ class FilesystemDriver implements StorageDriverInterface
 
         $items = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($path, \RecursiveDirectoryIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
 
         foreach ($items as $item) {
@@ -91,6 +111,10 @@ class FilesystemDriver implements StorageDriverInterface
         return rmdir($path);
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public function makeDirectory(string $path): bool
     {
         $this->validatePath($path);
@@ -101,6 +125,10 @@ class FilesystemDriver implements StorageDriverInterface
         return mkdir($path, 0755, true);
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public function move(string $from, string $to): bool
     {
         $this->validatePath($from);
@@ -109,6 +137,10 @@ class FilesystemDriver implements StorageDriverInterface
         return rename($from, $to);
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public function files(string $directory, string $pattern = '*'): array
     {
         $this->validatePath($directory);

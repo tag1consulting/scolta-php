@@ -36,7 +36,7 @@ class ContentExporterTest extends TestCase
         }
         $items = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($items as $item) {
             $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());
@@ -247,7 +247,7 @@ class ContentExporterTest extends TestCase
 
         $result = $exporter->exportToItems($items);
         $this->assertCount(2, $result);
-        $ids = array_map(fn ($item) => $item->id, $result);
+        $ids = array_map(fn($item) => $item->id, $result);
         $this->assertContains('a', $ids);
         $this->assertContains('b', $ids);
     }

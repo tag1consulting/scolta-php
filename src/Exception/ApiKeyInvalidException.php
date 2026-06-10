@@ -13,6 +13,4 @@ namespace Tag1\Scolta\Exception;
  * @since 1.0.0
  * @stability experimental
  */
-final class ApiKeyInvalidException extends \RuntimeException
-{
-}
+final class ApiKeyInvalidException extends \RuntimeException {}
