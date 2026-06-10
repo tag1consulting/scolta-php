@@ -93,13 +93,37 @@ final class MarkdownRenderer
         $text = preg_replace('/\*(.+?)\*/', '<em>$1</em>', $text);
 
         // Links: [text](url) -> <a href="url" target="_blank" rel="noopener">text</a>
-        $text = preg_replace(
+        // Only http(s) and scheme-less (relative) URLs become links; any other
+        // scheme (javascript:, data:, vbscript:, …) renders as plain text.
+        $text = preg_replace_callback(
             '/\[([^\]]+)\]\(([^)]+)\)/',
-            '<a href="$2" target="_blank" rel="noopener">$1</a>',
+            static function (array $m): string {
+                if (!self::isSafeLinkUrl($m[2])) {
+                    return $m[1];
+                }
+                return '<a href="' . $m[2] . '" target="_blank" rel="noopener">' . $m[1] . '</a>';
+            },
             $text,
         );
 
         return $text;
+    }
+
+    /**
+     * Whether a markdown link URL is safe to emit as an href.
+     *
+     * Allows absolute http(s) URLs and relative paths (no scheme). Control
+     * characters and whitespace are stripped before scheme detection because
+     * browsers ignore them when parsing a scheme ("jav\tascript:" executes).
+     */
+    private static function isSafeLinkUrl(string $url): bool
+    {
+        $cleaned = preg_replace('/[\x00-\x20\x7f]+/', '', $url) ?? '';
+        if (preg_match('#^https?://#i', $cleaned)) {
+            return true;
+        }
+        // Any other scheme is unsafe; scheme-less URLs are relative paths.
+        return preg_match('#^[a-z][a-z0-9+.\-]*:#i', $cleaned) !== 1;
     }
 
     /**

@@ -33,6 +33,22 @@ class AiClientTest extends TestCase
         $this->assertInstanceOf(AiClient::class, $client);
     }
 
+    public function testUnknownProviderThrows(): void
+    {
+        // Fail closed: 'claude', 'azure', a typo'd 'anthorpic' — none of these
+        // may silently fall through to the Anthropic request path.
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage("Unsupported AI provider 'claude'");
+        new AiClient(['provider' => 'claude', 'api_key' => 'test']);
+    }
+
+    public function testDefaultModelConstantMatchesConfigDefault(): void
+    {
+        // One shared constant — AiClient and ScoltaConfig must not drift.
+        $config = new \Tag1\Scolta\Config\ScoltaConfig();
+        $this->assertSame(AiClient::DEFAULT_MODEL, $config->aiModel);
+    }
+
     public function testThrowsWhenNoApiKey(): void
     {
         $client = new AiClient(['api_key' => '']);

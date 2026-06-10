@@ -111,7 +111,7 @@ class PagefindBinary
 
         $output = [];
         $exitCode = 0;
-        exec($binary . ' --version 2>/dev/null', $output, $exitCode);
+        exec(self::escapeShellCommand($binary) . ' --version 2>/dev/null', $output, $exitCode);
 
         if ($exitCode === 0 && !empty($output)) {
             return trim(implode(' ', $output));
@@ -177,12 +177,31 @@ class PagefindBinary
     {
         if ($this->projectDir !== null) {
             $dir = rtrim($this->projectDir, '/') . '/.scolta/bin';
-            if (!is_dir($dir)) {
-                mkdir($dir, 0755, true);
+            if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+                throw new \RuntimeException("Failed to create download directory: {$dir}");
             }
             return $dir;
         }
         return sys_get_temp_dir();
+    }
+
+    /**
+     * Shell-escape a binary command for use in exec().
+     *
+     * The configured path can come from platform settings (admin forms,
+     * config files), so it must never be interpolated into a shell command
+     * unescaped. Known multi-word commands ("npx pagefind") are split and
+     * escaped per token; everything else is escaped as a single argument.
+     *
+     * @since 1.0.4
+     * @stability experimental
+     */
+    public static function escapeShellCommand(string $cmd): string
+    {
+        if (preg_match('/^npx\s+/', $cmd)) {
+            return implode(' ', array_map('escapeshellarg', preg_split('/\s+/', trim($cmd))));
+        }
+        return escapeshellarg($cmd);
     }
 
     /**
@@ -192,7 +211,7 @@ class PagefindBinary
     {
         $output = [];
         $exitCode = 0;
-        exec($cmd . ' --version 2>/dev/null', $output, $exitCode);
+        exec(self::escapeShellCommand($cmd) . ' --version 2>/dev/null', $output, $exitCode);
         return $exitCode === 0;
     }
 }

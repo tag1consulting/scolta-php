@@ -33,6 +33,23 @@ use Tag1\Scolta\Prompt\PromptEnricherInterface;
 class AiEndpointHandler
 {
     /**
+     * Per-message content cap for follow-up conversations, in bytes.
+     *
+     * The first user turn legitimately embeds search-result context (the
+     * client trims each result to aiSummaryMaxChars, ~4000 default), so this
+     * mirrors handleSummarize()'s 100k context safety net.
+     */
+    private const FOLLOW_UP_MAX_MESSAGE_BYTES = 100000;
+
+    /**
+     * Total content cap across all follow-up messages, in bytes.
+     *
+     * A full default conversation (initial context turn + 3 follow-ups, each
+     * with fresh search context) stays well under this; it only stops abuse.
+     */
+    private const FOLLOW_UP_MAX_TOTAL_BYTES = 400000;
+
+    /**
      * @param object                    $aiService                  AI service (duck-typed).
      * @param CacheDriverInterface      $cache                      Cache driver.
      * @param int                       $generation                 Generation counter for cache invalidation.
@@ -238,14 +255,28 @@ class AiEndpointHandler
             return ['ok' => false, 'status' => 400, 'error' => 'Messages required'];
         }
 
-        // Validate each message has role and content.
+        // Validate each message has a string role and non-empty string content,
+        // within byte caps. Strict === '' comparison (not empty()) so the
+        // literal message "0" is not rejected. The sibling endpoints cap their
+        // inputs (query 500, summarize context 100k); without caps here a
+        // client could relay arbitrarily large payloads to the AI provider.
+        $totalBytes = 0;
         foreach ($messages as $msg) {
-            if (empty($msg['role']) || empty($msg['content'])) {
+            $role = is_array($msg) ? ($msg['role'] ?? null) : null;
+            $content = is_array($msg) ? ($msg['content'] ?? null) : null;
+            if (!is_string($role) || !is_string($content) || $content === '') {
                 return ['ok' => false, 'status' => 400, 'error' => 'Invalid message format'];
             }
-            if (!in_array($msg['role'], ['user', 'assistant'], true)) {
+            if (!in_array($role, ['user', 'assistant'], true)) {
                 return ['ok' => false, 'status' => 400, 'error' => 'Invalid role'];
             }
+            if (strlen($content) > self::FOLLOW_UP_MAX_MESSAGE_BYTES) {
+                return ['ok' => false, 'status' => 400, 'error' => 'Message too long'];
+            }
+            $totalBytes += strlen($content);
+        }
+        if ($totalBytes > self::FOLLOW_UP_MAX_TOTAL_BYTES) {
+            return ['ok' => false, 'status' => 400, 'error' => 'Conversation too long'];
         }
 
         // Last message must be from the user.

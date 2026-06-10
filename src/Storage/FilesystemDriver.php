@@ -26,6 +26,8 @@ class FilesystemDriver implements StorageDriverInterface
 
     public function exists(string $path): bool
     {
+        $this->validatePath($path);
+
         return file_exists($path);
     }
 
@@ -74,7 +76,16 @@ class FilesystemDriver implements StorageDriverInterface
         );
 
         foreach ($items as $item) {
-            $item->isDir() ? rmdir($item->getRealPath()) : unlink($item->getRealPath());
+            // getPathname(), never getRealPath(): realpath resolves symlinks,
+            // so deleting a tree containing a symlink would delete the link
+            // TARGET (potentially outside this tree). unlink() on the link
+            // path removes only the link itself; the target survives.
+            $itemPath = $item->getPathname();
+            if ($item->isDir() && !$item->isLink()) {
+                rmdir($itemPath);
+            } else {
+                unlink($itemPath);
+            }
         }
 
         return rmdir($path);

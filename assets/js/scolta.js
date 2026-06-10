@@ -760,6 +760,36 @@
     return div.innerHTML;
   }
 
+  // Escape a value for interpolation into an HTML attribute. escapeHtml (a
+  // textContent → innerHTML round-trip) does not escape quotes, so a value
+  // containing `"` could break out of the attribute and inject new ones.
+  // Use this for every `attr="${...}"` interpolation; escapeHtml stays for
+  // text nodes.
+  function escapeAttr(text) {
+    return String(text)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  // Whether a URL is safe to emit as an href: absolute http(s) or relative
+  // (scheme-less). Anything with another scheme (javascript:, data:, …) is
+  // not. Control characters and whitespace are stripped before scheme
+  // detection because browsers ignore them when parsing a scheme.
+  // Mirrors PHP MarkdownRenderer::isSafeLinkUrl().
+  function isSafeLinkUrl(url) {
+    const cleaned = String(url).replace(/[\u0000-\u0020\u007f]+/g, "");
+    if (/^https?:\/\//i.test(cleaned)) return true;
+    return !/^[a-z][a-z0-9+.\-]*:/i.test(cleaned);
+  }
+
+  // Attribute-escape a URL for use in href; unsafe schemes become inert "#".
+  function sanitizeUrlAttr(url) {
+    return isSafeLinkUrl(url) ? escapeAttr(url) : "#";
+  }
+
   // Prepare a raw query for display inside the results header, which wraps the
   // query in its own pair of double-quotes. A quoted-phrase search ("merge
   // conflict") already carries surrounding quotes, so without trimming a single
@@ -775,9 +805,11 @@
   }
 
   function stripHtml(text) {
-    const div = document.createElement("div");
-    div.innerHTML = text;
-    return div.textContent || div.innerText || "";
+    // DOMParser produces an inert document: scripts never run and resources
+    // (e.g. <img onerror>) never load, unlike innerHTML on a live detached
+    // div, whose subtree shares the page's document and loads eagerly.
+    const doc = new DOMParser().parseFromString(String(text ?? ""), "text/html");
+    return doc.body.textContent || "";
   }
 
   // Build a metadata annotation line from a result's meta fields.
@@ -893,14 +925,22 @@
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.+?)\*/g, '<em>$1</em>')
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, linkText, url) => {
+        // Scheme gate (mirrors PHP MarkdownRenderer): only http(s) and
+        // relative URLs may become links, even when no domain allowlist is
+        // configured. escapeAttr on the href: the summary was escaped with
+        // escapeHtml, which leaves `"` intact — unescaped it could break out
+        // of the href attribute.
+        if (!isSafeLinkUrl(url)) {
+          return linkText;
+        }
         if (allowedDomains.length === 0) {
-          return `<a href="${url}" target="_blank" rel="noopener">${linkText}</a>`;
+          return `<a href="${escapeAttr(url)}" target="_blank" rel="noopener">${linkText}</a>`;
         }
         try {
           const parsed = new URL(url);
           const host = parsed.hostname.replace(/^www\./, '');
           if (allowedDomains.some(d => host === d || host.endsWith('.' + d))) {
-            return `<a href="${url}" target="_blank" rel="noopener">${linkText}</a>`;
+            return `<a href="${escapeAttr(url)}" target="_blank" rel="noopener">${linkText}</a>`;
           }
         } catch {}
         // Non-allowed or invalid URL — show text only, no link
@@ -1057,7 +1097,7 @@
     container.style.display = "flex";
     container.innerHTML = '<span style="font-size:0.8rem;color:#666;margin-right:0.2rem;">Also try:</span>' +
       filtered
-        .map(t => `<span class="scolta-expanded-term" data-scolta-search-term="${escapeHtml(t)}">${escapeHtml(t)}</span>`)
+        .map(t => `<span class="scolta-expanded-term" data-scolta-search-term="${escapeAttr(t)}">${escapeHtml(t)}</span>`)
         .join("");
   }
 
@@ -1101,7 +1141,7 @@
     let html = '';
     for (const [dim, val] of Object.entries(llmAppliedFilters)) {
       html += '<span class="scolta-filter-badge">Filtered: ' + escapeHtml(dim) + ' = ' + escapeHtml(val) +
-        ' <button class="scolta-filter-dismiss" data-scolta-filter-dismiss="' + escapeHtml(dim) +
+        ' <button class="scolta-filter-dismiss" data-scolta-filter-dismiss="' + escapeAttr(dim) +
         '" aria-label="Remove filter">×</button></span> ';
     }
     el.innerHTML = html;
@@ -2147,8 +2187,8 @@
         const checked = isActive ? "checked" : "";
         const activeClass = isActive ? " active" : "";
         html += `<label class="scolta-filter-item${activeClass}">
-          <input type="checkbox" value="${escapeHtml(val)}" ${checked}${disabled}
-                 data-scolta-filter-dim="${escapeHtml(dim)}" data-scolta-filter-val="${escapeHtml(val)}">
+          <input type="checkbox" value="${escapeAttr(val)}" ${checked}${disabled}
+                 data-scolta-filter-dim="${escapeAttr(dim)}" data-scolta-filter-val="${escapeAttr(val)}">
           ${escapeHtml(filterDisplayValue(dim, val))} <span class="scolta-filter-count">(${count})</span>
         </label>`;
       }
@@ -2252,15 +2292,19 @@
 
       const safeTitle = escapeHtml(stripHtml(title));
       const displayTitle = safeTitle.length > 90 ? safeTitle.substring(0, 87) + "\u2026" : safeTitle;
+      // URLs come from index metadata; attribute-escape them and neutralize
+      // non-http(s) schemes so a poisoned document can't plant a
+      // javascript: link.
+      const safeUrl = sanitizeUrlAttr(url);
 
       html += `<div class="scolta-result-card">
-        <a class="scolta-result-title" href="${url}" target="_blank" rel="noopener"
-           title="${safeTitle.replace(/"/g, '&quot;')}">${highlightTerms(displayTitle)}</a>
+        <a class="scolta-result-title" href="${safeUrl}" target="_blank" rel="noopener"
+           title="${escapeAttr(stripHtml(title))}">${highlightTerms(displayTitle)}</a>
         <div class="scolta-result-meta">
           ${site ? `<span class="scolta-site-badge">${escapeHtml(site)}</span>` : ""}
           ${date ? `<span class="scolta-result-date">${escapeHtml(date)}</span>` : ""}
         </div>
-        <a class="scolta-result-url" href="${url}" target="_blank" rel="noopener">${escapeHtml(url)}</a>
+        <a class="scolta-result-url" href="${safeUrl}" target="_blank" rel="noopener">${escapeHtml(url)}</a>
         <div class="scolta-result-excerpt">${highlighted}</div>
       </div>`;
     }

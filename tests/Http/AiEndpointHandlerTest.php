@@ -125,6 +125,79 @@ class AiEndpointHandlerTest extends TestCase
         $this->assertEquals(1, $result['data']['remaining']);
     }
 
+    public function testFollowUpAcceptsLiteralZeroContent(): void
+    {
+        // empty('0') is true — the previous empty() check rejected the
+        // legitimate one-character message "0".
+        $ai = new MockAiService('zero is fine');
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleFollowUp([
+            ['role' => 'user', 'content' => '0'],
+        ]);
+
+        $this->assertTrue($result['ok']);
+    }
+
+    public function testFollowUpRejectsNonStringContent(): void
+    {
+        $handler = $this->makeHandler();
+
+        $result = $handler->handleFollowUp([
+            ['role' => 'user', 'content' => ['nested' => 'array']],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertEquals(400, $result['status']);
+    }
+
+    public function testFollowUpRejectsOversizedMessage(): void
+    {
+        $handler = $this->makeHandler();
+
+        $result = $handler->handleFollowUp([
+            ['role' => 'user', 'content' => str_repeat('x', 100001)],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertEquals(400, $result['status']);
+        $this->assertEquals('Message too long', $result['error']);
+    }
+
+    public function testFollowUpRejectsOversizedConversationTotal(): void
+    {
+        // Each message is under the per-message cap, but together they
+        // exceed the total cap (5 × 90k = 450k > 400k).
+        $handler = $this->makeHandler(maxFollowUps: 50);
+
+        $big = str_repeat('x', 90000);
+        $messages = [];
+        for ($i = 0; $i < 2; $i++) {
+            $messages[] = ['role' => 'user', 'content' => $big];
+            $messages[] = ['role' => 'assistant', 'content' => $big];
+        }
+        $messages[] = ['role' => 'user', 'content' => $big];
+
+        $result = $handler->handleFollowUp($messages);
+
+        $this->assertFalse($result['ok']);
+        $this->assertEquals(400, $result['status']);
+        $this->assertEquals('Conversation too long', $result['error']);
+    }
+
+    public function testFollowUpAcceptsLargeButLegitimateContextMessage(): void
+    {
+        // The first user turn legitimately embeds ~50k of search context.
+        $ai = new MockAiService('ok');
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleFollowUp([
+            ['role' => 'user', 'content' => str_repeat('c', 50000)],
+        ]);
+
+        $this->assertTrue($result['ok']);
+    }
+
     // ===================================================================
     // Caching
     // ===================================================================

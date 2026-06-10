@@ -82,7 +82,7 @@ After indexing, the `/var/www/html/pagefind/` directory contains a Pagefind-comp
 composer require tag1/scolta-php:^1.0
 ```
 
-**Requirements:** PHP 8.1+, `ext-intl` (Unicode tokenization).
+**Requirements:** PHP 8.2+, `ext-intl` (Unicode tokenization).
 
 Platform adapters install this package automatically. Install it directly only when building a custom adapter or a non-CMS integration.
 
@@ -207,7 +207,7 @@ For languages outside the 14 supported by Snowball, search works but inflected f
 
 ```bash
 # Debian/Ubuntu
-sudo apt-get install php8.1-intl
+sudo apt-get install php8.2-intl
 
 # macOS (Homebrew)
 brew install php

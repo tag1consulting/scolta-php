@@ -6,6 +6,7 @@ namespace Tag1\Scolta\Index;
 
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use Tag1\Scolta\Exception\MemoryThresholdExceededException;
 use Tag1\Scolta\Export\ContentItem;
 use Tag1\Scolta\Storage\FilesystemDriver;
 use Tag1\Scolta\Storage\StorageDriverInterface;
@@ -23,6 +24,13 @@ use Tag1\Scolta\Storage\StorageDriverInterface;
 final class IndexBuildOrchestrator
 {
     private const VERSION = '1.0.0';
+
+    /**
+     * Fraction of the effective memory limit at which the build voluntarily
+     * yields (defers the merge / pauses the chunk loop) to avoid OOM.
+     */
+    private const MEMORY_PRESSURE_RATIO = 0.75;
+
     private readonly BuildCoordinator $coordinator;
     private readonly InvertedIndexBuilder $builder;
     private readonly IndexMerger $merger;
@@ -245,7 +253,7 @@ final class IndexBuildOrchestrator
             // in a fresh process (e.g. via `drush scolta:finalize`).
             $limitBytes   = $telemetry->effectiveLimitBytes();
             $segmentBytes = $telemetry->getCurrentRssBytes();
-            if ($limitBytes > 0 && $segmentBytes >= (int) ($limitBytes * 0.75)) {
+            if ($limitBytes > 0 && $segmentBytes >= (int) ($limitBytes * self::MEMORY_PRESSURE_RATIO)) {
                 $this->cache->pruneAndSave();
                 $this->tsManifest->pruneAndSave();
                 $this->coordinator->releaseLockOnly();
@@ -308,12 +316,11 @@ final class IndexBuildOrchestrator
             } catch (\Throwable) {
             }
 
-            // MemoryTelemetry throws RuntimeException("...exceeds safe threshold...")
-            // when RSS crosses the abort percentage. Return a structured error so
+            // MemoryTelemetry throws MemoryThresholdExceededException when RSS
+            // crosses the abort percentage. Return a structured error so
             // framework adapters can spawn a fresh --resume process rather than
             // treating this as a hard failure.
-            $isMemoryAbort = $e instanceof \RuntimeException
-                && str_contains($e->getMessage(), 'exceeds safe threshold');
+            $isMemoryAbort = $e instanceof MemoryThresholdExceededException;
 
             $committedChunks = 0;
             $committedPages  = 0;
@@ -485,7 +492,7 @@ final class IndexBuildOrchestrator
             return false;
         }
 
-        return $telemetry->getCurrentRssBytes() >= (int) ($limit * 0.75);
+        return $telemetry->getCurrentRssBytes() >= (int) ($limit * self::MEMORY_PRESSURE_RATIO);
     }
 
     /**

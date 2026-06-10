@@ -6,8 +6,10 @@ namespace Tag1\Scolta\Tests\Index;
 
 use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\Index\CborEncoder;
+use Tag1\Scolta\Index\ChunkReader;
 use Tag1\Scolta\Index\ChunkWriter;
 use Tag1\Scolta\Index\IndexMerger;
+use Tag1\Scolta\Index\MemoryBudget;
 use Tag1\Scolta\Index\StreamingFormatWriter;
 
 /**
@@ -225,6 +227,75 @@ class StreamingMergeTest extends TestCase
         $entry    = json_decode(file_get_contents($buildDir . '/pagefind-entry.json'), true);
 
         $this->assertSame(10, $entry['languages']['en']['page_count']);
+    }
+
+    public function testPreMergeTempDirectoriesAreCleanedUpAfterMerge(): void
+    {
+        // 55 chunks > the conservative 50-handle cap forces the pre-merge
+        // path, which creates scolta-premerge-* batch dirs in the system
+        // temp dir. They used to be left behind forever ("process exit will
+        // collect any leaks" was never true for a directory on disk).
+        $chunkPaths = [];
+        for ($i = 0; $i < 55; $i++) {
+            $chunkPaths[] = $this->writeChunk($i, [
+                'pages' => [$i => ['url' => "/p{$i}", 'wordCount' => 1, 'content' => "term{$i}", 'meta' => ['title' => "P{$i}"], 'filters' => []]],
+                'index' => [sprintf('term%03d', $i) => [$i => ['positions' => [25 => [0]], 'meta_positions' => []]]],
+            ]);
+        }
+
+        $premergeGlob = sys_get_temp_dir() . '/scolta-premerge-*';
+        $before = glob($premergeGlob) ?: [];
+
+        $writer = new StreamingFormatWriter(new CborEncoder());
+        $writer->beginWrite($this->outputDir);
+        (new IndexMerger())->mergeStreaming($chunkPaths, $writer, MemoryBudget::conservative());
+        $writer->endWrite();
+
+        $after = glob($premergeGlob) ?: [];
+        $this->assertSame($before, $after, 'pre-merge temp dirs must be deleted once the n-way merge completes');
+
+        // The merge result itself is intact.
+        $fragments = glob($this->outputDir . '/.scolta-building/fragment/*.pf_fragment');
+        $this->assertCount(55, $fragments);
+    }
+
+    public function testPreMergeFilesCarryValidCrc32(): void
+    {
+        // Pre-merge batch files used to write an empty footer ({"hmac":""}),
+        // which ChunkReader::verifyCrc32() treats as "pre-crc32 format, skip"
+        // — so corruption in an intermediate file went undetected.
+        $path0 = $this->writeChunk(0, [
+            'pages' => [0 => ['url' => '/a', 'wordCount' => 2, 'content' => 'alpha beta', 'meta' => ['title' => 'A'], 'filters' => []]],
+            'index' => [
+                'alpha' => [0 => ['positions' => [25 => [0]], 'meta_positions' => []]],
+                'beta'  => [0 => ['positions' => [25 => [1]], 'meta_positions' => []]],
+            ],
+        ]);
+        $path1 = $this->writeChunk(1, [
+            'pages' => [1 => ['url' => '/b', 'wordCount' => 1, 'content' => 'beta', 'meta' => ['title' => 'B'], 'filters' => []]],
+            'index' => ['beta' => [1 => ['positions' => [25 => [0]], 'meta_positions' => []]]],
+        ]);
+
+        $out = $this->tmpDir . '/premerge-out.dat';
+        $method = new \ReflectionMethod(IndexMerger::class, 'streamMergeTermsToFile');
+        $method->invoke(new IndexMerger(), [$path0, $path1], $out);
+
+        // The footer JSON sits after binary records, so inspect raw bytes
+        // rather than line-splitting the file.
+        $this->assertStringContainsString(
+            '"crc32":"',
+            file_get_contents($out),
+            'pre-merge footer must carry a crc32 digest'
+        );
+        $this->assertTrue((new ChunkReader($out))->verifyCrc32());
+
+        // Flip a byte inside the first record's payload — verification must fail.
+        $bytes = file_get_contents($out);
+        $headerEnd = strpos($bytes, "\n");
+        $corruptAt = $headerEnd + 6;
+        $bytes[$corruptAt] = $bytes[$corruptAt] === 'x' ? 'y' : 'x';
+        file_put_contents($out, $bytes);
+        $this->assertFalse((new ChunkReader($out))->verifyCrc32());
     }
 
     private function removeDir(string $dir): void

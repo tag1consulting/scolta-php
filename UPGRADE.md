@@ -2,6 +2,16 @@
 
 This document describes breaking changes and migration steps between versions of scolta-php.
 
+## Unreleased
+
+### PHP requirement raised to 8.2
+
+`composer.json` now requires `php: ^8.2` (previously `>=8.1`). This documents existing reality rather than dropping working support: the package already uses PHP 8.2 syntax (`readonly class`), so it has never run on 8.1, and CI has only ever tested 8.2+. If you are on PHP 8.1, upgrade PHP before updating this package.
+
+### Unknown AI providers now fail closed
+
+`AiClient` previously treated any `provider` value other than `'openai'` as Anthropic. An unrecognized provider string (e.g. `'claude'`, or a typo) now throws `InvalidArgumentException` at construction instead of sending requests to the wrong endpoint. Set `provider` to `'anthropic'` or `'openai'`.
+
 ## Upgrading to 1.0.0 (from 0.3.x)
 
 ### Breaking Changes

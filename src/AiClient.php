@@ -24,6 +24,19 @@ use Tag1\Scolta\Exception\RateLimitException;
  */
 class AiClient
 {
+    /**
+     * Default model when none is configured.
+     *
+     * Single source of truth — ScoltaConfig::$aiModel uses this constant,
+     * so the two defaults can never drift apart.
+     *
+     * @since 1.0.4
+     * @stability experimental
+     */
+    public const DEFAULT_MODEL = 'claude-sonnet-4-5-20250929';
+
+    private const SUPPORTED_PROVIDERS = ['anthropic', 'openai'];
+
     private const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
     private const ANTHROPIC_API_VERSION = '2023-06-01';
 
@@ -50,8 +63,17 @@ class AiClient
     public function __construct(array $config, ?ClientInterface $httpClient = null)
     {
         $this->provider = $config['provider'] ?? 'anthropic';
+        // Fail closed: an unrecognized provider must not silently fall through
+        // to the Anthropic request path (wrong endpoint, wrong auth header).
+        if (!in_array($this->provider, self::SUPPORTED_PROVIDERS, true)) {
+            throw new \InvalidArgumentException(sprintf(
+                "Unsupported AI provider '%s'. Supported providers: %s.",
+                $this->provider,
+                implode(', ', self::SUPPORTED_PROVIDERS),
+            ));
+        }
         $this->apiKey = $config['api_key'] ?? '';
-        $this->model = $config['model'] ?? 'claude-sonnet-4-5-20250929';
+        $this->model = $config['model'] ?? self::DEFAULT_MODEL;
         $this->apiVersion = $config['api_version'] ?? self::ANTHROPIC_API_VERSION;
         $this->timeout = (int) ($config['timeout'] ?? 30);
 

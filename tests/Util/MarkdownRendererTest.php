@@ -242,4 +242,39 @@ class MarkdownRendererTest extends TestCase
         $this->assertStringContainsString('<li>', $result);
         $this->assertStringContainsString('<strong>the recipe</strong>', $result);
     }
+
+    public function testJavascriptSchemeLinkRendersAsPlainText(): void
+    {
+        $result = MarkdownRenderer::render('[click me](javascript:alert(1))');
+        $this->assertStringNotContainsString('<a ', $result);
+        $this->assertStringNotContainsString('javascript:', $result);
+        $this->assertStringContainsString('click me', $result);
+    }
+
+    public function testDataSchemeLinkRendersAsPlainText(): void
+    {
+        $result = MarkdownRenderer::render('[payload](data:text/html;base64,PHNjcmlwdD4=)');
+        $this->assertStringNotContainsString('<a ', $result);
+        $this->assertStringContainsString('payload', $result);
+    }
+
+    public function testSchemeWithEmbeddedControlCharactersIsStillBlocked(): void
+    {
+        // Browsers strip tabs/newlines when parsing a scheme, so
+        // "jav\tascript:" executes. The gate must do the same before matching.
+        $result = MarkdownRenderer::render("[x](jav\tascript:alert(1))");
+        $this->assertStringNotContainsString('<a ', $result);
+    }
+
+    public function testRelativeLinkStillRendersAsAnchor(): void
+    {
+        $result = MarkdownRenderer::render('[docs](/docs/setup)');
+        $this->assertStringContainsString('<a href="/docs/setup"', $result);
+    }
+
+    public function testHttpLinkStillRendersAsAnchor(): void
+    {
+        $result = MarkdownRenderer::render('[plain](http://example.com)');
+        $this->assertStringContainsString('<a href="http://example.com"', $result);
+    }
 }
