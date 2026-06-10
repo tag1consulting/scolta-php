@@ -40,6 +40,9 @@ class SupportedVersions
 
     /**
      * Check if a Pagefind version is supported.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function isSupported(string $version): bool
     {
@@ -48,6 +51,9 @@ class SupportedVersions
 
     /**
      * Check if a version is known to be incompatible.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function isIncompatible(string $version): bool
     {
@@ -58,6 +64,8 @@ class SupportedVersions
      * Generate a warning string if version is unsupported or incompatible.
      *
      * @return string|null Warning message, or null if version is supported.
+     * @since 1.0.0
+     * @stability stable
      */
     public static function warn(string $version): ?string
     {
@@ -84,6 +92,9 @@ class SupportedVersions
 
     /**
      * Get the version that should be written into index metadata.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function getVersionForMetadata(): string
     {
@@ -92,6 +103,9 @@ class SupportedVersions
 
     /**
      * Get human-readable version info for status commands.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function getVersionInfo(): string
     {

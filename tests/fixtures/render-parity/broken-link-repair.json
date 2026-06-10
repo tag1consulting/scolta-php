@@ -1,0 +1,10 @@
+{
+    "input": "Try [Chocolate Cake](https://example.com/recipe",
+    "mustContain": [
+        "<strong>Chocolate Cake</strong>"
+    ],
+    "mustNotContain": [
+        "<a ",
+        "https://example.com/recipe"
+    ]
+}

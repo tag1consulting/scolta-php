@@ -38,6 +38,8 @@ final class BudgetAwareProviderDecorator
      *
      * @throws AmazeeBudgetExceededException When the Amazee budget is exhausted.
      * @throws \RuntimeException             For all other API errors.
+     * @since 1.0.0
+     * @stability stable
      */
     public function message(
         string $systemPrompt,
@@ -58,6 +60,8 @@ final class BudgetAwareProviderDecorator
      *
      * @throws AmazeeBudgetExceededException When the Amazee budget is exhausted.
      * @throws \RuntimeException             For all other API errors.
+     * @since 1.0.0
+     * @stability stable
      */
     public function conversation(
         string $systemPrompt,
@@ -75,6 +79,9 @@ final class BudgetAwareProviderDecorator
 
     /**
      * Expose the underlying AiClient for direct use when needed.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function getClient(): AiClient
     {

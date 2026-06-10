@@ -72,6 +72,9 @@ class ContentExporter
 
     /**
      * Remove all files in the output directory and ensure it exists.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function prepareOutputDir(): void
     {
@@ -101,6 +104,8 @@ class ContentExporter
      * Export a single content item as a Pagefind-ready HTML file.
      *
      * @return bool True if exported, false if skipped (insufficient content).
+     * @since 1.0.0
+     * @stability stable
      */
     public function export(ContentItem $item): bool
     {
@@ -157,6 +162,8 @@ class ContentExporter
      *
      * @param ContentItem[] $items Raw content items from platform adapter.
      * @return ContentItem[] Items that pass the minimum content length filter.
+     * @since 1.0.0
+     * @stability stable
      */
     public function exportToItems(array $items): array
     {
@@ -329,6 +336,8 @@ class ContentExporter
      * Get export statistics.
      *
      * @return array{exported: int, skipped: int}
+     * @since 1.0.0
+     * @stability stable
      */
     public function getStats(): array
     {

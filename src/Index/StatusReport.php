@@ -30,6 +30,9 @@ final class StatusReport
 
     /**
      * Convert to a BuildResult for callers that still use the legacy return type.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function toBuildResult(): BuildResult
     {
@@ -48,7 +51,12 @@ final class StatusReport
         );
     }
 
-    /** Megabytes as a human-readable string, e.g. "42.3 MB". */
+    /**
+     * Megabytes as a human-readable string, e.g. "42.3 MB".
+     *
+     * @since 1.0.0
+     * @stability stable
+     */
     public function peakMemoryMb(): string
     {
         return round($this->peakMemoryBytes / 1_048_576, 1) . ' MB';

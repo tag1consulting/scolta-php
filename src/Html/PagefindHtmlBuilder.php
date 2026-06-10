@@ -13,6 +13,9 @@ class PagefindHtmlBuilder
 {
     /**
      * Build a Pagefind-compatible HTML document.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function build(
         string $id,

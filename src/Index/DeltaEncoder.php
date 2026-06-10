@@ -28,6 +28,8 @@ class DeltaEncoder
      *
      * @param int[] $values Sorted ascending integers.
      * @return int[] Delta-encoded values.
+     * @since 1.0.0
+     * @stability stable
      */
     public static function deltaEncode(array $values): array
     {
@@ -52,6 +54,8 @@ class DeltaEncoder
      *
      * @param array<int, int[]> $positionsByWeight Weight => sorted positions.
      * @return int[] Encoded positions with weight markers.
+     * @since 1.0.0
+     * @stability stable
      */
     public static function encodePositions(array $positionsByWeight): array
     {

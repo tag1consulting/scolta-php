@@ -71,6 +71,8 @@ final class MemoryTelemetry
      * Record a telemetry event for a named build phase.
      *
      * @throws MemoryThresholdExceededException When memory usage exceeds 90% of the effective limit.
+     * @since 1.0.0
+     * @stability stable
      */
     public function emit(string $phase, array $extra = []): void
     {
@@ -122,6 +124,9 @@ final class MemoryTelemetry
      * Uses the same measurement as emit() — actual RSS on Linux, PHP allocator
      * on macOS/Windows, or injected value when a closure was provided to the
      * constructor (test scenario). Suitable for StatusReport construction.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function getCurrentRssBytes(): int
     {
@@ -133,6 +138,9 @@ final class MemoryTelemetry
      *
      * Suitable for StatusReport construction — matches what emit() would report
      * for peak_mb.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function getPeakRssBytes(): int
     {
@@ -144,6 +152,9 @@ final class MemoryTelemetry
      *
      * This is the lower of PHP's memory_limit and any cgroup memory limit.
      * Returns 0 when no limit is detectable (unlimited or unknown).
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function effectiveLimitBytes(): int
     {

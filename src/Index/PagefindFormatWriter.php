@@ -41,6 +41,8 @@ class PagefindFormatWriter
      * @param array $mergedIndex From IndexMerger.
      * @param array $pages       Page metadata.
      * @param string $outputDir  Destination directory.
+     * @since 1.0.0
+     * @stability stable
      */
     public function write(array $mergedIndex, array $pages, string $outputDir): void
     {

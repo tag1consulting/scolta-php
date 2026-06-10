@@ -27,6 +27,8 @@ class ChunkWriter
      * @param array       $partial     Output of InvertedIndexBuilder::build().
      * @param string|null $hmacSecret  HMAC key; null disables integrity tagging.
      * @throws \RuntimeException on I/O failure.
+     * @since 1.0.0
+     * @stability stable
      */
     public function write(string $path, array $partial, ?string $hmacSecret = null): void
     {

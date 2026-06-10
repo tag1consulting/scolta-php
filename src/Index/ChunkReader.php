@@ -26,6 +26,8 @@ class ChunkReader
      * @return \Generator<int, array> Yields pageNum => pageData.
      * @throws \RuntimeException if the file is not in v2 format.
      * @throws \RuntimeException       on I/O failure.
+     * @since 1.0.0
+     * @stability stable
      */
     public function openPages(): \Generator
     {
@@ -55,6 +57,8 @@ class ChunkReader
      * @return \Generator<int, array{0: string, 1: array}> Yields [term, termData].
      * @throws \RuntimeException if the file is not in v2 format.
      * @throws \RuntimeException       on I/O failure.
+     * @since 1.0.0
+     * @stability stable
      */
     public function openIndex(): \Generator
     {
@@ -105,56 +109,102 @@ class ChunkReader
     }
 
     /**
-     * Verify the HMAC stored in the file footer.
+     * Verify both footer digests (HMAC and CRC32) in a single file read.
      *
-     * Requires reading the entire file. Returns false on any I/O or format
-     * error rather than throwing, so callers can treat it as a soft check.
+     * verifyHmac() and verifyCrc32() were near-identical full-file passes;
+     * callers needing both (BuildState::readChunk()) read every chunk twice.
+     * This computes both digests over one pass of the record stream.
+     *
+     * Returns per-digest verdicts rather than throwing, so callers can treat
+     * it as a soft check and report each failure distinctly:
+     *   true  = digest present and verified
+     *   false = mismatch (or any I/O/format error)
+     *   null  = not applicable (no $hmacSecret supplied; footer carries no
+     *           crc32 — pre-0.3.3 chunks, backward-compatible)
+     *
+     * @return array{hmac: bool|null, crc32: bool|null}
+     *
+     * @since 1.0.4
+     * @stability experimental
      */
-    public function verifyHmac(string $hmacSecret): bool
+    public function verifyFooterDigests(?string $hmacSecret = null): array
     {
+        $failure = ['hmac' => $hmacSecret !== null ? false : null, 'crc32' => false];
+
         $fp = fopen($this->path, 'rb');
         if ($fp === false) {
-            return false;
+            return $failure;
         }
 
         try {
             $this->readHeader($fp);
 
-            $hmacCtx = hash_init('sha256', HASH_HMAC, $hmacSecret);
+            $hmacCtx = $hmacSecret !== null ? hash_init('sha256', HASH_HMAC, $hmacSecret) : null;
+            $crcCtx  = hash_init('crc32b');
 
             while (true) {
                 $lenRaw = fread($fp, 4);
                 if ($lenRaw === false || strlen($lenRaw) < 4) {
-                    return false;
+                    return $failure;
                 }
                 $len = unpack('V', $lenRaw)[1];
                 if ($len === 0) {
-                    break; // Sentinel — not included in HMAC.
+                    break; // Sentinel — not included in the digests.
                 }
                 $payload = fread($fp, $len);
                 if ($payload === false || strlen($payload) < $len) {
-                    return false;
+                    return $failure;
                 }
-                hash_update($hmacCtx, pack('V', $len));
-                hash_update($hmacCtx, $payload);
+                if ($hmacCtx !== null) {
+                    hash_update($hmacCtx, $lenRaw);
+                    hash_update($hmacCtx, $payload);
+                }
+                hash_update($crcCtx, $lenRaw);
+                hash_update($crcCtx, $payload);
             }
-
-            $expected = hash_final($hmacCtx);
 
             $line = fgets($fp);
             if ($line === false) {
-                return false;
+                return $failure;
             }
             $footer = json_decode(trim($line), true);
+            if (!is_array($footer)) {
+                return $failure;
+            }
 
-            return is_array($footer)
-                && isset($footer['hmac'])
-                && hash_equals($expected, (string) $footer['hmac']);
+            $hmacOk = null;
+            if ($hmacCtx !== null) {
+                $hmacOk = isset($footer['hmac'])
+                    && hash_equals(hash_final($hmacCtx), (string) $footer['hmac']);
+            }
+
+            // No crc32 field → pre-0.3.3 chunk: not applicable, not a failure.
+            $crcOk = isset($footer['crc32'])
+                ? hash_equals(hash_final($crcCtx), (string) $footer['crc32'])
+                : null;
+
+            return ['hmac' => $hmacOk, 'crc32' => $crcOk];
         } catch (\Throwable) {
-            return false;
+            return $failure;
         } finally {
             fclose($fp);
         }
+    }
+
+    /**
+     * Verify the HMAC stored in the file footer.
+     *
+     * Requires reading the entire file. Returns false on any I/O or format
+     * error rather than throwing, so callers can treat it as a soft check.
+     * Delegates to verifyFooterDigests(); use that directly when you also
+     * need the CRC32 verdict, to avoid a second full-file read.
+     *
+     * @since 1.0.0
+     * @stability stable
+     */
+    public function verifyHmac(string $hmacSecret): bool
+    {
+        return $this->verifyFooterDigests($hmacSecret)['hmac'] === true;
     }
 
     /**
@@ -165,55 +215,15 @@ class ChunkReader
      * returns true for those (backward-compatible, no error).
      *
      * Returns false on any I/O or format error rather than throwing.
+     * Delegates to verifyFooterDigests(); use that directly when you also
+     * need the HMAC verdict, to avoid a second full-file read.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function verifyCrc32(): bool
     {
-        $fp = fopen($this->path, 'rb');
-        if ($fp === false) {
-            return false;
-        }
-
-        try {
-            $this->readHeader($fp);
-
-            $crcCtx = hash_init('crc32b');
-
-            while (true) {
-                $lenRaw = fread($fp, 4);
-                if ($lenRaw === false || strlen($lenRaw) < 4) {
-                    return false;
-                }
-                $len = unpack('V', $lenRaw)[1];
-                if ($len === 0) {
-                    break; // Sentinel — not included in checksum.
-                }
-                $payload = fread($fp, $len);
-                if ($payload === false || strlen($payload) < $len) {
-                    return false;
-                }
-                hash_update($crcCtx, pack('V', $len));
-                hash_update($crcCtx, $payload);
-            }
-
-            $expected = hash_final($crcCtx);
-
-            $line = fgets($fp);
-            if ($line === false) {
-                return false;
-            }
-            $footer = json_decode(trim($line), true);
-
-            // No crc32 field → pre-0.3.3 chunk, skip validation.
-            if (!is_array($footer) || !isset($footer['crc32'])) {
-                return true;
-            }
-
-            return hash_equals($expected, (string) $footer['crc32']);
-        } catch (\Throwable) {
-            return false;
-        } finally {
-            fclose($fp);
-        }
+        return $this->verifyFooterDigests()['crc32'] !== false;
     }
 
     /**

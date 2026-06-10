@@ -1,0 +1,12 @@
+{
+    "input": "This has **bold** and *italic* and ***both at once*** in one line.",
+    "mustContain": [
+        "<strong>bold</strong>",
+        "<em>italic</em>",
+        "<strong><em>both at once</em></strong>"
+    ],
+    "mustNotContain": [
+        "**",
+        "***"
+    ]
+}

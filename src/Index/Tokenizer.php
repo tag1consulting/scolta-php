@@ -50,6 +50,8 @@ class Tokenizer
      * @param string $text Input text (plain text, not HTML).
      * @param int $startPosition Character position offset for position tracking.
      * @return array<int, Token>
+     * @since 1.0.0
+     * @stability stable
      */
     public function tokenize(string $text, int $startPosition = 0): array
     {

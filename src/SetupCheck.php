@@ -17,6 +17,8 @@ final class SetupCheck
      * Run all checks and return results.
      *
      * @return array<array{name: string, status: string, message: string, category: string}>
+     * @since 1.0.0
+     * @stability stable
      */
     public static function run(
         ?string $configuredBinaryPath = null,
@@ -72,6 +74,8 @@ final class SetupCheck
      *
      * @param string $outputDir The directory where index files will be written.
      * @return array<int, array{level: string, message: string}>
+     * @since 1.0.0
+     * @stability stable
      */
     public static function runAll(string $outputDir): array
     {
@@ -88,6 +92,8 @@ final class SetupCheck
      * Check that the intl extension is loaded (required for Unicode tokenization).
      *
      * @return array{level: string, message: string}
+     * @since 1.0.0
+     * @stability stable
      */
     public static function checkIntlExtension(): array
     {
@@ -105,6 +111,8 @@ final class SetupCheck
      * Check that memory_limit is sufficient for indexing.
      *
      * @return array{level: string, message: string}
+     * @since 1.0.0
+     * @stability stable
      */
     public static function checkMemoryLimit(): array
     {
@@ -130,6 +138,8 @@ final class SetupCheck
      * Check that max_execution_time allows indexing to complete.
      *
      * @return array{level: string, message: string}
+     * @since 1.0.0
+     * @stability stable
      */
     public static function checkMaxExecutionTime(): array
     {
@@ -152,6 +162,8 @@ final class SetupCheck
      * Check that the output directory is writable.
      *
      * @return array{level: string, message: string}
+     * @since 1.0.0
+     * @stability stable
      */
     public static function checkOutputDirectoryWritable(string $outputDir): array
     {
@@ -173,6 +185,9 @@ final class SetupCheck
 
     /**
      * Determine exit code from check results.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function exitCode(array $results): int
     {

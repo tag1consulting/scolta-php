@@ -44,6 +44,8 @@ final class AmazeeClient
      *   string for anonymous provisioning (the API accepts it).
      *
      * @throws AmazeeApiException On API error or unexpected response shape.
+     * @since 1.0.0
+     * @stability stable
      */
     public function provisionTrial(string $email = ''): ProvisioningResult
     {
@@ -69,6 +71,8 @@ final class AmazeeClient
      * Request an email verification code to begin the upgrade flow.
      *
      * @throws AmazeeApiException On API error.
+     * @since 1.0.0
+     * @stability stable
      */
     public function requestVerificationCode(string $email): void
     {
@@ -81,6 +85,8 @@ final class AmazeeClient
      * Returns the session token string used in subsequent upgrade calls.
      *
      * @throws AmazeeApiException On API error or missing token in response.
+     * @since 1.0.0
+     * @stability stable
      */
     public function signIn(string $email, string $code): string
     {
@@ -105,6 +111,8 @@ final class AmazeeClient
      * @return array<int, array{id: string, name: string, url: string}>
      *
      * @throws AmazeeApiException On API error.
+     * @since 1.0.0
+     * @stability stable
      */
     public function listRegions(string $sessionToken): array
     {
@@ -118,6 +126,8 @@ final class AmazeeClient
      * Returns the LiteLLM credentials for the upgraded account.
      *
      * @throws AmazeeApiException On API error or missing credentials.
+     * @since 1.0.0
+     * @stability stable
      */
     public function createPrivateKey(string $sessionToken, string $regionId): UpgradeResult
     {
@@ -143,6 +153,8 @@ final class AmazeeClient
      * Returns an empty array on error so callers degrade gracefully.
      *
      * @return array<int, array<string, mixed>>
+     * @since 1.0.0
+     * @stability stable
      */
     public function getAvailableModels(string $litellmApiUrl, string $litellmToken): array
     {
@@ -172,6 +184,8 @@ final class AmazeeClient
      * Validate a LiteLLM token by calling the /auth/me endpoint on the API URL.
      *
      * @throws AmazeeApiException If the token is invalid or the request fails.
+     * @since 1.0.0
+     * @stability stable
      */
     public function validateToken(string $litellmToken, string $litellmApiUrl): void
     {

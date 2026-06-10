@@ -1,0 +1,12 @@
+{
+    "input": "Visit [Example Docs](https://example.com/docs) to learn more.",
+    "mustContain": [
+        "href=\"https://example.com/docs\"",
+        ">Example Docs</a>",
+        "target=\"_blank\"",
+        "rel=\"noopener\""
+    ],
+    "mustNotContain": [
+        "[Example Docs]"
+    ]
+}

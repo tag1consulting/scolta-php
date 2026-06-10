@@ -27,6 +27,8 @@ final class AmazeeModelResolver
      * Resolve the best models from the provisioned endpoint.
      *
      * @return array{ai_model: string|null, ai_expansion_model: string|null}
+     * @since 1.0.0
+     * @stability stable
      */
     public function resolve(string $litellmApiUrl, string $litellmToken): array
     {
@@ -54,6 +56,9 @@ final class AmazeeModelResolver
      * Version tuples are extracted by splitting on `-` and keeping only
      * purely-numeric segments: `claude-sonnet-4-6` → [4, 6];
      * `claude-3-5-sonnet-20241022` → [3, 5, 20241022].
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function pickHighestVersion(array $names, string $family): ?string
     {

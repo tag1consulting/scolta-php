@@ -138,6 +138,63 @@ class ChunkWriterReaderTest extends TestCase
         $this->assertFalse($reader->verifyHmac('wrong-secret'));
     }
 
+    public function testVerifyFooterDigestsChecksBothInOneCall(): void
+    {
+        $secret = 'combined-secret';
+        $writer = new ChunkWriter();
+        $path   = $this->tmpDir . '/chunk-both.dat';
+        $writer->write($path, $this->makePartial(0), $secret);
+
+        $digests = (new ChunkReader($path))->verifyFooterDigests($secret);
+        $this->assertTrue($digests['hmac']);
+        $this->assertTrue($digests['crc32']);
+
+        $wrong = (new ChunkReader($path))->verifyFooterDigests('wrong-secret');
+        $this->assertFalse($wrong['hmac']);
+        $this->assertTrue($wrong['crc32'], 'a wrong HMAC secret must not poison the CRC verdict');
+    }
+
+    public function testVerifyFooterDigestsWithoutSecretReportsHmacNotApplicable(): void
+    {
+        $writer = new ChunkWriter();
+        $path   = $this->tmpDir . '/chunk-no-secret.dat';
+        $writer->write($path, $this->makePartial(0));
+
+        $digests = (new ChunkReader($path))->verifyFooterDigests();
+        $this->assertNull($digests['hmac']);
+        $this->assertTrue($digests['crc32']);
+    }
+
+    public function testVerifyFooterDigestsReportsCrcNotApplicableOnPreV033Footer(): void
+    {
+        $path = $this->tmpDir . '/chunk-legacy-footer.dat';
+        $fp = fopen($path, 'wb');
+        fwrite($fp, json_encode(['v' => 2, 'page_count' => 0, 'term_count' => 0]) . "\n");
+        fwrite($fp, "\x00\x00\x00\x00");
+        fwrite($fp, json_encode(['hmac' => '']) . "\n");
+        fclose($fp);
+
+        $digests = (new ChunkReader($path))->verifyFooterDigests();
+        $this->assertNull($digests['crc32']);
+    }
+
+    public function testVerifyFooterDigestsFailsBothOnCorruption(): void
+    {
+        $secret = 'corrupt-secret';
+        $writer = new ChunkWriter();
+        $path   = $this->tmpDir . '/chunk-corrupt-both.dat';
+        $writer->write($path, $this->makePartial(0), $secret);
+
+        $raw = file_get_contents($path);
+        $mid = (int) (strlen($raw) / 2);
+        $raw[$mid] = chr(ord($raw[$mid]) ^ 0xFF);
+        file_put_contents($path, $raw);
+
+        $digests = (new ChunkReader($path))->verifyFooterDigests($secret);
+        $this->assertFalse($digests['hmac']);
+        $this->assertFalse($digests['crc32']);
+    }
+
     public function testOpenIndexSkipsPagesWithoutReadingThem(): void
     {
         // Write a chunk with many pages — if openIndex() loads all pages into

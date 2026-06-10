@@ -39,6 +39,9 @@ class PagefindBinary
      *
      * Returns the full command to execute (may be a path or "npx pagefind").
      * Returns null if no working binary can be found.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function resolve(): ?string
     {
@@ -90,6 +93,9 @@ class PagefindBinary
      * How the binary was resolved.
      *
      * One of: 'configured', 'local', 'npx', 'path', 'none'.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function resolvedVia(): string
     {
@@ -101,6 +107,9 @@ class PagefindBinary
 
     /**
      * Get the version string from the resolved binary, or null.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function version(): ?string
     {
@@ -123,6 +132,8 @@ class PagefindBinary
      * Structured status report for CLI status commands and admin forms.
      *
      * @return array{available: bool, binary: ?string, version: ?string, via: string, message: string}
+     * @since 1.0.0
+     * @stability stable
      */
     public function status(): array
     {
@@ -172,6 +183,9 @@ class PagefindBinary
      *
      * Returns the project-local .scolta/bin/ directory, creating it if needed.
      * Falls back to system temp if projectDir is not set.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function downloadTargetDir(): string
     {

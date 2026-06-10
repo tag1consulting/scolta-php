@@ -22,6 +22,9 @@ final class AmazeeApiException extends \RuntimeException
 
     /**
      * HTTP status code from the API response, or 0 for non-HTTP errors.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function getStatusCode(): int
     {

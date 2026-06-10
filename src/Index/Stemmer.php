@@ -80,6 +80,9 @@ class Stemmer
      * Returns the word unchanged for unsupported languages.
      * Results are memoized per instance — the Snowball algorithm is pure and
      * deterministic, and the same words recur heavily across pages in a chunk.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function stem(string $word): string
     {
@@ -100,6 +103,8 @@ class Stemmer
      * Get the list of supported language codes.
      *
      * @return string[] ISO 639-1 language codes with stemming support.
+     * @since 1.0.0
+     * @stability stable
      */
     public static function getSupportedLanguages(): array
     {

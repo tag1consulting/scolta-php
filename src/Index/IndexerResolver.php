@@ -36,6 +36,8 @@ final class IndexerResolver
      *
      * @param string $effectiveIndexer 'php', 'binary', or 'auto'.
      * @return string 'php' or 'binary'.
+     * @since 1.0.0
+     * @stability stable
      */
     public function resolve(string $effectiveIndexer): string
     {

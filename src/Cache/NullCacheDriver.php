@@ -12,11 +12,19 @@ namespace Tag1\Scolta\Cache;
  */
 class NullCacheDriver implements CacheDriverInterface
 {
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public function get(string $key): mixed
     {
         return null;
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public function set(string $key, mixed $value, int $ttlSeconds): void
     {
         // Intentionally empty.

@@ -45,6 +45,9 @@ final class MemoryBudget
      * platform (Laravel CLI ~60 MB, WordPress ~80 MB, Drupal ~130 MB) plus ~15 MB
      * I/O overhead. The 4 MB token-cache chunk limit prevents single serialize()
      * allocations from exhausting memory when pages contain thousands of tokens.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function conservative(): self
     {
@@ -61,6 +64,9 @@ final class MemoryBudget
 
     /**
      * Balanced: ~256–512 MB available. Larger chunks, bigger buffers.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function balanced(): self
     {
@@ -77,6 +83,9 @@ final class MemoryBudget
 
     /**
      * Aggressive: ≥ 1 GB available. Maximises throughput.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function aggressive(): self
     {
@@ -93,6 +102,9 @@ final class MemoryBudget
 
     /**
      * Build a budget from a raw byte value, routing to the nearest named profile.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function fromBytes(int $bytes): self
     {
@@ -111,6 +123,9 @@ final class MemoryBudget
      * "aggressive", or a byte value like "256M".
      *
      * Returns conservative() if the string is unrecognised.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function fromString(string $value): self
     {
@@ -127,6 +142,9 @@ final class MemoryBudget
     /**
      * The runtime default. Always conservative(). Framework adapters call this
      * when no --memory-budget flag is present.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function default(): self
     {
@@ -188,19 +206,34 @@ final class MemoryBudget
         );
     }
 
-    /** Pages per chunk. */
+    /**
+     * Pages per chunk.
+     *
+     * @since 1.0.0
+     * @stability stable
+     */
     public function chunkSize(): int
     {
         return $this->chunkSize;
     }
 
-    /** StreamingFormatWriter flush threshold (bytes). */
+    /**
+     * StreamingFormatWriter flush threshold (bytes).
+     *
+     * @since 1.0.0
+     * @stability stable
+     */
     public function fragmentFlushBytes(): int
     {
         return $this->fragmentFlushBytes;
     }
 
-    /** Word-index chunk size (bytes). */
+    /**
+     * Word-index chunk size (bytes).
+     *
+     * @since 1.0.0
+     * @stability stable
+     */
     public function wordIndexChunkBytes(): int
     {
         return $this->wordIndexChunkBytes;
@@ -211,13 +244,21 @@ final class MemoryBudget
      *
      * When chunk count exceeds this, IndexMerger::mergeStreaming() performs a
      * recursive pre-merge pass to reduce fan-in.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function mergeOpenFileHandles(): int
     {
         return $this->mergeOpenFileHandles;
     }
 
-    /** Total budget in bytes, used for diagnostics and telemetry warnings. */
+    /**
+     * Total budget in bytes, used for diagnostics and telemetry warnings.
+     *
+     * @since 1.0.0
+     * @stability stable
+     */
     public function totalBudgetBytes(): int
     {
         return $this->totalBudgetBytes;
@@ -238,7 +279,12 @@ final class MemoryBudget
         return $this->tokenCacheChunkBytes;
     }
 
-    /** Human-readable profile name: "conservative" | "balanced" | "aggressive". */
+    /**
+     * Human-readable profile name: "conservative" | "balanced" | "aggressive".
+     *
+     * @since 1.0.0
+     * @stability stable
+     */
     public function profile(): string
     {
         return $this->profile;

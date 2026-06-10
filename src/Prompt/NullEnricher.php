@@ -14,6 +14,10 @@ namespace Tag1\Scolta\Prompt;
  */
 class NullEnricher implements PromptEnricherInterface
 {
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public function enrich(string $resolvedPrompt, string $promptName, array $context = []): string
     {
         return $resolvedPrompt;

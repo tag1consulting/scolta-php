@@ -23,6 +23,8 @@ interface PromptEnricherInterface
      * @param string $promptName     The prompt identifier ('expand_query', 'summarize', or 'follow_up').
      * @param array  $context        Additional context (e.g., query, search results, messages).
      * @return string The enriched prompt text.
+     * @since 1.0.0
+     * @stability stable
      */
     public function enrich(string $resolvedPrompt, string $promptName, array $context = []): string;
 }

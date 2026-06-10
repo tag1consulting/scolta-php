@@ -157,6 +157,8 @@ Tone: Direct, expert, helpful. Like a knowledgeable friend who has reviewed the 
      * @param string $siteDescription The site description.
      *
      * @return string The resolved prompt.
+     * @since 1.0.0
+     * @stability stable
      */
     public static function resolve(string $template, string $siteName, string $siteDescription = 'website'): string
     {
@@ -174,6 +176,8 @@ Tone: Direct, expert, helpful. Like a knowledgeable friend who has reviewed the 
      *
      * @param string $name One of the template constants.
      * @return string The template text with {SITE_NAME} and {SITE_DESCRIPTION} placeholders.
+     * @since 1.0.0
+     * @stability stable
      */
     public static function getTemplate(string $name): string
     {

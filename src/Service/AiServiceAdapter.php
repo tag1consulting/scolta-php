@@ -36,6 +36,9 @@ class AiServiceAdapter
 
     /**
      * Get the Scolta configuration.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function getConfig(): ScoltaConfig
     {
@@ -53,6 +56,8 @@ class AiServiceAdapter
      * @param int $maxTokens Maximum response tokens.
      *
      * @return string The AI response text.
+     * @since 1.0.0
+     * @stability stable
      */
     public function message(string $systemPrompt, string $userMessage, int $maxTokens = 512): string
     {
@@ -80,6 +85,8 @@ class AiServiceAdapter
      * @param int $maxTokens Maximum response tokens.
      *
      * @return string The AI response text.
+     * @since 1.0.0
+     * @stability stable
      */
     public function conversation(string $systemPrompt, array $messages, int $maxTokens = 512): string
     {
@@ -134,6 +141,9 @@ class AiServiceAdapter
 
     /**
      * Get the expand-query system prompt (custom override or default).
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function getExpandPrompt(): string
     {
@@ -146,6 +156,9 @@ class AiServiceAdapter
 
     /**
      * Get the summarize system prompt (custom override or default).
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function getSummarizePrompt(): string
     {
@@ -158,6 +171,9 @@ class AiServiceAdapter
 
     /**
      * Get the follow-up system prompt (custom override or default).
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function getFollowUpPrompt(): string
     {
@@ -170,6 +186,9 @@ class AiServiceAdapter
 
     /**
      * Resolve a prompt template with site name and description from config.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function resolvePrompt(string $template): string
     {

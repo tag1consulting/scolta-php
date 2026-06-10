@@ -28,6 +28,10 @@ final class ProvisioningResult
     ) {
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public static function success(
         string $litellmToken,
         string $litellmApiUrl,
@@ -46,6 +50,10 @@ final class ProvisioningResult
         );
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public static function failure(string $error): self
     {
         return new self(
@@ -58,6 +66,10 @@ final class ProvisioningResult
         );
     }
 
+    /**
+     * @since 1.0.0
+     * @stability stable
+     */
     public static function skippedExistingProvider(): self
     {
         return new self(

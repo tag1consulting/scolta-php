@@ -22,6 +22,9 @@ class HtmlCleaner
 {
     /**
      * Clean raw HTML into plain text suitable for search indexing.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function clean(string $html, string $title = ''): string
     {
@@ -105,15 +108,18 @@ class HtmlCleaner
         $closePattern = '</' . $tagName;
         $depth = 1;
         $pos = 0;
+        $len = strlen($search);
 
-        while ($pos < strlen($search)) {
-            $remaining = substr($search, $pos);
-            $nextOpen = stripos($remaining, $openPattern);
-            $nextClose = stripos($remaining, $closePattern);
+        // Offset-based stripos, never substr-copying the tail: the previous
+        // substr($search, $pos) per iteration made this loop O(n²) on large
+        // documents with many nested same-name tags.
+        while ($pos < $len) {
+            $nextOpen = stripos($search, $openPattern, $pos);
+            $nextClose = stripos($search, $closePattern, $pos);
 
             // Validate open tag (must be followed by space, >, /, tab, newline)
             if ($nextOpen !== false) {
-                $afterOpen = $remaining[$nextOpen + strlen($openPattern)] ?? null;
+                $afterOpen = $search[$nextOpen + strlen($openPattern)] ?? null;
                 if (!in_array($afterOpen, [' ', '>', '/', "\t", "\n"], true)) {
                     $nextOpen = false;
                 }
@@ -121,16 +127,16 @@ class HtmlCleaner
 
             if ($nextOpen !== false && $nextClose !== false && $nextOpen < $nextClose) {
                 $depth++;
-                $pos += $nextOpen + strlen($openPattern);
+                $pos = $nextOpen + strlen($openPattern);
             } elseif ($nextClose !== false) {
                 $depth--;
                 if ($depth === 0) {
-                    return $startPos + $pos + $nextClose;
+                    return $startPos + $nextClose;
                 }
-                $pos += $nextClose + strlen($closePattern);
+                $pos = $nextClose + strlen($closePattern);
             } elseif ($nextOpen !== false) {
                 $depth++;
-                $pos += $nextOpen + strlen($openPattern);
+                $pos = $nextOpen + strlen($openPattern);
             } else {
                 break;
             }

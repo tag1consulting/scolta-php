@@ -22,6 +22,8 @@ interface CacheDriverInterface
      *
      * @param string $key The cache key.
      * @return mixed The cached value, or null if not found.
+     * @since 1.0.0
+     * @stability stable
      */
     public function get(string $key): mixed;
 
@@ -31,6 +33,8 @@ interface CacheDriverInterface
      * @param string $key        The cache key.
      * @param mixed  $value      The value to cache.
      * @param int    $ttlSeconds Time-to-live in seconds.
+     * @since 1.0.0
+     * @stability stable
      */
     public function set(string $key, mixed $value, int $ttlSeconds): void;
 }

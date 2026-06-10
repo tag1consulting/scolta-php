@@ -1,0 +1,865 @@
+parameters:
+	ignoreErrors:
+		-
+			message: '#^Method Tag1\\Scolta\\AiClient\:\:__construct\(\) has parameter \$config with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/AiClient.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\AiClient\:\:conversation\(\) has parameter \$messages with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/AiClient.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\AiClient\:\:sendAnthropicRequest\(\) has parameter \$messages with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/AiClient.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\AiClient\:\:sendOpenAiRequest\(\) has parameter \$messages with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/AiClient.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\AiClient\:\:sendRequest\(\) has parameter \$messages with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/AiClient.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\<string, mixed\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: src/AiProvider/Amazee/AmazeeModelResolver.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\AiProvider\\Amazee\\AmazeeModelResolver\:\:pickHighestVersion\(\) has parameter \$names with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/AiProvider/Amazee/AmazeeModelResolver.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\AiProvider\\Amazee\\BudgetAwareProviderDecorator\:\:conversation\(\) has parameter \$messages with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/AiProvider/Amazee/BudgetAwareProviderDecorator.php
+
+		-
+			message: '#^Call to an undefined method ReflectionType\:\:getName\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Config/ScoltaConfig.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Config\\ScoltaConfig\:\:fromArray\(\) has parameter \$values with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Config/ScoltaConfig.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Config\\ScoltaConfig\:\:toAiClientConfig\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Config/ScoltaConfig.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Config\\ScoltaConfig\:\:toBrowserConfig\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Config/ScoltaConfig.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Config\\ScoltaConfig\:\:toJsScoringConfig\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Config/ScoltaConfig.php
+
+		-
+			message: '#^Offset ''values'' on array\{label\: ''Blog & Editorial'', description\: ''Best for blogs,…'', values\: array\{recency_strategy\: ''exponential'', recency_boost_max\: 0\.25, recency_half_life_days\: 365, title_match_boost\: 1\.5, title_all_terms_multiplier\: 2\.0, content_match_boost\: 0\.5, expand_primary_weight\: 0\.7, expansion_combine_mode\: ''round_robin'', \.\.\.\}\}\|array\{label\: ''Documentation &…'', description\: ''Best for knowledge…'', values\: array\{recency_strategy\: ''none'', recency_boost_max\: 0\.0, title_match_boost\: 2\.0, title_all_terms_multiplier\: 2\.5, exact_title_match_boost\: 5\.0, content_match_boost\: 0\.5, expand_primary_weight\: 0\.6, expansion_combine_mode\: ''relevance_union'', \.\.\.\}\}\|array\{label\: ''E\-commerce &…'', description\: ''Best for online…'', values\: array\{recency_strategy\: ''none'', title_match_boost\: 1\.5, title_all_terms_multiplier\: 2\.0, content_match_boost\: 0\.6, expand_primary_weight\: 0\.8, expansion_combine_mode\: ''round_robin'', ai_summary_top_n\: 12, max_pagefind_results\: 75, \.\.\.\}\}\|array\{label\: ''Recipe & Content…'', description\: ''Best for recipe…'', values\: array\{recency_strategy\: ''none'', recency_boost_max\: 0\.0, title_match_boost\: 2\.0, title_all_terms_multiplier\: 2\.5, exact_title_match_boost\: 5\.0, content_match_boost\: 0\.5, expand_primary_weight\: 0\.9, expand_subword_max_frequency\: 0\.1, \.\.\.\}\}\|array\{label\: ''Start from Scratch'', description\: ''No preset applied\.…'', values\: array\{expand_subword_max_frequency\: 0\.1, expansion_combine_mode\: ''relevance_union''\}\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Config/ScoltaConfig.php
+
+		-
+			message: '#^Property Tag1\\Scolta\\Config\\ScoltaConfig\:\:\$aiLanguages type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Config/ScoltaConfig.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Content\\ContentSourceInterface\:\:getPublishedContent\(\) has parameter \$options with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Content/ContentSourceInterface.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Content\\ContentSourceInterface\:\:getTotalCount\(\) has parameter \$options with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Content/ContentSourceInterface.php
+
+		-
+			message: '#^Call to function is_callable\(\) with ''exec'' will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: src/Environment/HostingDetector.php
+
+		-
+			message: '#^Parameter \#1 \$json of function json_decode expects string, string\|false given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Export/ContentExporter.php
+
+		-
+			message: '#^Property Tag1\\Scolta\\Export\\ContentExporter\:\:\$exportedPaths type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Export/ContentExporter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Export\\ContentItem\:\:__construct\(\) has parameter \$filters with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Export/ContentItem.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Export\\ContentItem\:\:__construct\(\) has parameter \$metadata with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Export/ContentItem.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Export\\ContentItem\:\:__construct\(\) has parameter \$sortable with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Export/ContentItem.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Health\\HealthChecker\:\:check\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 2
+			path: src/Health/HealthChecker.php
+
+		-
+			message: '#^Property Tag1\\Scolta\\Health\\HealthChecker\:\:\$config on left side of \?\? is not nullable nor uninitialized\.$#'
+			identifier: nullCoalesce.initializedProperty
+			count: 1
+			path: src/Health/HealthChecker.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Html\\PagefindHtmlBuilder\:\:build\(\) has parameter \$filters with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Html/PagefindHtmlBuilder.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Html\\PagefindHtmlBuilder\:\:build\(\) has parameter \$metadata with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Html/PagefindHtmlBuilder.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Html\\PagefindHtmlBuilder\:\:build\(\) has parameter \$sortable with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Html/PagefindHtmlBuilder.php
+
+		-
+			message: '#^Trait Tag1\\Scolta\\Http\\AiControllerTrait is used zero times and is not analysed\.$#'
+			identifier: trait.unused
+			count: 1
+			path: src/Http/AiControllerTrait.php
+
+		-
+			message: '#^Call to an undefined method object\:\:conversation\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Http/AiEndpointHandler.php
+
+		-
+			message: '#^Call to an undefined method object\:\:getExpandPrompt\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Http/AiEndpointHandler.php
+
+		-
+			message: '#^Call to an undefined method object\:\:getFollowUpPrompt\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Http/AiEndpointHandler.php
+
+		-
+			message: '#^Call to an undefined method object\:\:getSummarizePrompt\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Http/AiEndpointHandler.php
+
+		-
+			message: '#^Call to an undefined method object\:\:message\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Http/AiEndpointHandler.php
+
+		-
+			message: '#^Call to an undefined method object\:\:messageForOperation\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Http/AiEndpointHandler.php
+
+		-
+			message: '#^Call to function is_array\(\) with non\-empty\-array will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: src/Http/AiEndpointHandler.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Http\\AiEndpointHandler\:\:__construct\(\) has parameter \$aiLanguages with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Http/AiEndpointHandler.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Http\\AiEndpointHandler\:\:__construct\(\) has parameter \$filterFields with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Http/AiEndpointHandler.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Http\\AiEndpointHandler\:\:__construct\(\) has parameter \$sortableFields with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Http/AiEndpointHandler.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Http\\AiEndpointHandler\:\:handleFollowUp\(\) has parameter \$messages with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Http/AiEndpointHandler.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Http\\AiEndpointHandler\:\:parseExpansionResponse\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Http/AiEndpointHandler.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Http\\AiEndpointHandler\:\:parseExpansionResult\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 2
+			path: src/Http/AiEndpointHandler.php
+
+		-
+			message: '#^Parameter \#1 \$string of function trim expects string, string\|null given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Http/AiEndpointHandler.php
+
+		-
+			message: '#^Parameter \#3 \$subject of function preg_replace expects array\<float\|int\|string\>\|string, string\|null given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Http/AiEndpointHandler.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\BuildCoordinator\:\:commitChunk\(\) has parameter \$partial with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/BuildCoordinator.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\BuildCoordinator\:\:prepare\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/BuildCoordinator.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\BuildIntent\:\:__construct\(\) has parameter \$sourceMeta with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/BuildIntent.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\BuildIntent\:\:fresh\(\) has parameter \$sourceMeta with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/BuildIntent.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\BuildIntent\:\:restart\(\) has parameter \$sourceMeta with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/BuildIntent.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\BuildIntent\:\:sourceMeta\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/BuildIntent.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\BuildState\:\:commitManifest\(\) has parameter \$manifest with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/BuildState.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\BuildState\:\:initiateBuild\(\) has parameter \$manifest with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/BuildState.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\BuildState\:\:readChunk\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/BuildState.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\BuildState\:\:readManifest\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/BuildState.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\BuildState\:\:recordChunk\(\) has parameter \$partialData with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/BuildState.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\BuildState\:\:shouldResume\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/BuildState.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\CachedContentReference\:\:__construct\(\) has parameter \$filters with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/CachedContentReference.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\CachedContentReference\:\:__construct\(\) has parameter \$sortable with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/CachedContentReference.php
+
+		-
+			message: '#^Cannot access offset 1 on array\|false\.$#'
+			identifier: offsetAccess.nonOffsetAccessible
+			count: 4
+			path: src/Index/ChunkReader.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\ChunkReader\:\:openIndex\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/ChunkReader.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\ChunkReader\:\:openPages\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/ChunkReader.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\ChunkReader\:\:readRecord\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/ChunkReader.php
+
+		-
+			message: '#^PHPDoc tag @throws with type RuntimeException\|Tag1\\Scolta\\Index\\OldChunkFormatException is not subtype of Throwable$#'
+			identifier: throws.notThrowable
+			count: 1
+			path: src/Index/ChunkReader.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\ChunkWriter\:\:write\(\) has parameter \$partial with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/ChunkWriter.php
+
+		-
+			message: '#^Access to an undefined property object\:\:\$date\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Index/IndexBuildOrchestrator.php
+
+		-
+			message: '#^Access to an undefined property object\:\:\$filters\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Index/IndexBuildOrchestrator.php
+
+		-
+			message: '#^Access to an undefined property object\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Index/IndexBuildOrchestrator.php
+
+		-
+			message: '#^Access to an undefined property object\:\:\$language\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Index/IndexBuildOrchestrator.php
+
+		-
+			message: '#^Access to an undefined property object\:\:\$siteName\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Index/IndexBuildOrchestrator.php
+
+		-
+			message: '#^Access to an undefined property object\:\:\$sortable\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Index/IndexBuildOrchestrator.php
+
+		-
+			message: '#^Access to an undefined property object\:\:\$url\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Index/IndexBuildOrchestrator.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\IndexBuildOrchestrator\:\:flushChunk\(\) has parameter \$chunk with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/IndexBuildOrchestrator.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\IndexMerger\:\:merge\(\) has parameter \$partials with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/IndexMerger.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\IndexMerger\:\:merge\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 2
+			path: src/Index/IndexMerger.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\IndexMerger\:\:mergeEntries\(\) has parameter \$allEntries with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/IndexMerger.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\IndexMerger\:\:mergeEntries\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/IndexMerger.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\IndexMerger\:\:nWayTermMerge\(\) has parameter \$chunkPaths with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/IndexMerger.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\IndexMerger\:\:streamMergeTermsToFile\(\) has parameter \$batch with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/IndexMerger.php
+
+		-
+			message: '#^Parameter \#2 \$length of function array_chunk expects int\<1, max\>, int given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Index/IndexMerger.php
+
+		-
+			message: '#^Access to an undefined property object\:\:\$date\.$#'
+			identifier: property.notFound
+			count: 4
+			path: src/Index/InvertedIndexBuilder.php
+
+		-
+			message: '#^Access to an undefined property object\:\:\$filters\.$#'
+			identifier: property.notFound
+			count: 2
+			path: src/Index/InvertedIndexBuilder.php
+
+		-
+			message: '#^Access to an undefined property object\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 2
+			path: src/Index/InvertedIndexBuilder.php
+
+		-
+			message: '#^Access to an undefined property object\:\:\$language\.$#'
+			identifier: property.notFound
+			count: 2
+			path: src/Index/InvertedIndexBuilder.php
+
+		-
+			message: '#^Access to an undefined property object\:\:\$siteName\.$#'
+			identifier: property.notFound
+			count: 2
+			path: src/Index/InvertedIndexBuilder.php
+
+		-
+			message: '#^Access to an undefined property object\:\:\$url\.$#'
+			identifier: property.notFound
+			count: 2
+			path: src/Index/InvertedIndexBuilder.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\InvertedIndexBuilder\:\:build\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 2
+			path: src/Index/InvertedIndexBuilder.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\InvertedIndexBuilder\:\:buildFromItemStream\(\) has parameter \$items with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/InvertedIndexBuilder.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\InvertedIndexBuilder\:\:buildFromItemStream\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 2
+			path: src/Index/InvertedIndexBuilder.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\InvertedIndexBuilder\:\:buildFromTokenData\(\) has parameter \$tokenDataList with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/InvertedIndexBuilder.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\InvertedIndexBuilder\:\:buildFromTokenData\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 2
+			path: src/Index/InvertedIndexBuilder.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\InvertedIndexBuilder\:\:indexTokens\(\) has parameter \$index with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/InvertedIndexBuilder.php
+
+		-
+			message: '#^Parameter \#2 \$string of function explode expects string, string\|null given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Index/InvertedIndexBuilder.php
+
+		-
+			message: '#^Parameter \#3 \$subject of function preg_replace expects array\<float\|int\|string\>\|string, string\|false given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Index/InvertedIndexBuilder.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\MemoryTelemetry\:\:emit\(\) has parameter \$extra with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/MemoryTelemetry.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between string and false will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: src/Index/MemoryTelemetry.php
+
+		-
+			message: '#^Argument of an invalid type list\<string\>\|false supplied for foreach, only iterables are supported\.$#'
+			identifier: foreach.nonIterable
+			count: 1
+			path: src/Index/PageWordCache.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PageWordCache\:\:estimateBytes\(\) has parameter \$tokenData with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PageWordCache.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PageWordCache\:\:get\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PageWordCache.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PageWordCache\:\:loadChunkFile\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PageWordCache.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PageWordCache\:\:put\(\) has parameter \$tokenData with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PageWordCache.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PageWordCache\:\:writeChunkFile\(\) has parameter \$entries with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PageWordCache.php
+
+		-
+			message: '#^Property Tag1\\Scolta\\Index\\PageWordCache\:\:\$loadedChunk type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PageWordCache.php
+
+		-
+			message: '#^Property Tag1\\Scolta\\Index\\PageWordCache\:\:\$writeBuffer type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PageWordCache.php
+
+		-
+			message: '#^Comparison operation "\>" between int\<1, max\> and 0 is always true\.$#'
+			identifier: greater.alwaysTrue
+			count: 1
+			path: src/Index/PagefindFormatWriter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PagefindFormatWriter\:\:buildFilterIndex\(\) has parameter \$pages with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PagefindFormatWriter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PagefindFormatWriter\:\:buildMetadata\(\) has parameter \$indexChunks with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PagefindFormatWriter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PagefindFormatWriter\:\:buildMetadata\(\) has parameter \$pages with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PagefindFormatWriter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PagefindFormatWriter\:\:buildSortsArray\(\) has parameter \$pages with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PagefindFormatWriter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PagefindFormatWriter\:\:chunkWords\(\) has parameter \$index with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PagefindFormatWriter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PagefindFormatWriter\:\:chunkWords\(\) has parameter \$wordList with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PagefindFormatWriter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PagefindFormatWriter\:\:collectMetaFields\(\) has parameter \$pages with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PagefindFormatWriter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PagefindFormatWriter\:\:collectMetaFields\(\) should return array\<string\> but returns list\<int\|string\>\.$#'
+			identifier: return.type
+			count: 1
+			path: src/Index/PagefindFormatWriter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PagefindFormatWriter\:\:encodeWordEntry\(\) has parameter \$pageEntries with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PagefindFormatWriter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PagefindFormatWriter\:\:remapPageNumbers\(\) has parameter \$mergedIndex with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PagefindFormatWriter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PagefindFormatWriter\:\:remapPageNumbers\(\) has parameter \$pages with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PagefindFormatWriter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PagefindFormatWriter\:\:remapPageNumbers\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 2
+			path: src/Index/PagefindFormatWriter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PagefindFormatWriter\:\:write\(\) has parameter \$mergedIndex with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PagefindFormatWriter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PagefindFormatWriter\:\:write\(\) has parameter \$pages with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PagefindFormatWriter.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<int\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: src/Index/PagefindFormatWriter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\PhpIndexer\:\:tokenizeItems\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/PhpIndexer.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\StreamingFormatWriter\:\:encodeWordEntry\(\) has parameter \$pageEntries with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/StreamingFormatWriter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\StreamingFormatWriter\:\:writePage\(\) has parameter \$pageData with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/StreamingFormatWriter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Index\\StreamingFormatWriter\:\:writeTerm\(\) has parameter \$termData with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/StreamingFormatWriter.php
+
+		-
+			message: '#^Parameter \#1 \$callback of function array_map expects \(callable\(int\|string\)\: mixed\)\|null, Closure\(int\)\: string given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Index/StreamingFormatWriter.php
+
+		-
+			message: '#^Property Tag1\\Scolta\\Index\\StreamingFormatWriter\:\:\$collectedMetaFields type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/StreamingFormatWriter.php
+
+		-
+			message: '#^Property Tag1\\Scolta\\Index\\StreamingFormatWriter\:\:\$currentChunkItems type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/StreamingFormatWriter.php
+
+		-
+			message: '#^Property Tag1\\Scolta\\Index\\StreamingFormatWriter\:\:\$currentChunkWords type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/StreamingFormatWriter.php
+
+		-
+			message: '#^Property Tag1\\Scolta\\Index\\StreamingFormatWriter\:\:\$filterData type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/StreamingFormatWriter.php
+
+		-
+			message: '#^Property Tag1\\Scolta\\Index\\StreamingFormatWriter\:\:\$indexChunkMeta type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/StreamingFormatWriter.php
+
+		-
+			message: '#^Property Tag1\\Scolta\\Index\\StreamingFormatWriter\:\:\$outputDir is never read, only written\.$#'
+			identifier: property.onlyWritten
+			count: 1
+			path: src/Index/StreamingFormatWriter.php
+
+		-
+			message: '#^Property Tag1\\Scolta\\Index\\StreamingFormatWriter\:\:\$pageMeta type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/StreamingFormatWriter.php
+
+		-
+			message: '#^Property Tag1\\Scolta\\Index\\StreamingFormatWriter\:\:\$sortFields type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Index/StreamingFormatWriter.php
+
+		-
+			message: '#^Offset string does not exist on array\{\}\.$#'
+			identifier: offsetAccess.notFound
+			count: 1
+			path: src/Index/SupportedVersions.php
+
+		-
+			message: '#^Offset string on array\{\} in isset\(\) does not exist\.$#'
+			identifier: isset.offset
+			count: 1
+			path: src/Index/SupportedVersions.php
+
+		-
+			message: '#^Ternary operator condition is always true\.$#'
+			identifier: ternary.alwaysTrue
+			count: 6
+			path: src/Index/Tokenizer.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Prompt\\NullEnricher\:\:enrich\(\) has parameter \$context with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Prompt/NullEnricher.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Prompt\\PromptEnricherInterface\:\:enrich\(\) has parameter \$context with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Prompt/PromptEnricherInterface.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Service\\AiServiceAdapter\:\:conversation\(\) has parameter \$messages with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Service/AiServiceAdapter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Service\\AiServiceAdapter\:\:tryFrameworkConversation\(\) has parameter \$messages with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Service/AiServiceAdapter.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\SetupCheck\:\:exitCode\(\) has parameter \$results with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/SetupCheck.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between string and false will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: src/SetupCheck.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Util\\MarkdownRenderer\:\:cleanBrokenLinks\(\) should return string but returns string\|null\.$#'
+			identifier: return.type
+			count: 1
+			path: src/Util/MarkdownRenderer.php
+
+		-
+			message: '#^Method Tag1\\Scolta\\Util\\MarkdownRenderer\:\:renderInline\(\) should return string but returns string\|null\.$#'
+			identifier: return.type
+			count: 1
+			path: src/Util/MarkdownRenderer.php
+
+		-
+			message: '#^Parameter \#3 \$subject of function preg_replace expects array\<float\|int\|string\>\|string, string\|null given\.$#'
+			identifier: argument.type
+			count: 4
+			path: src/Util/MarkdownRenderer.php

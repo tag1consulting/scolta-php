@@ -31,6 +31,8 @@ final class HealthChecker
      * Run all health checks and return a structured result.
      *
      * @return array{status: string, ai_configured: bool, ai_provider: string, pagefind_available: bool, wasm_available: bool, index_exists: bool, pagefind: array, wasm: array}
+     * @since 1.0.0
+     * @stability stable
      */
     public function check(): array
     {

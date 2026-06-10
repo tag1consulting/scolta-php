@@ -91,6 +91,9 @@ class StreamingFormatWriter
      * Open the output directory and create the build-time working tree.
      *
      * Must be called before writePage() or writeTerm().
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function beginWrite(string $outputDir): void
     {
@@ -119,6 +122,8 @@ class StreamingFormatWriter
      *
      * @param int   $pageNum  Sequential 0-based page number.
      * @param array $pageData Page data from InvertedIndexBuilder::build().
+     * @since 1.0.0
+     * @stability stable
      */
     public function writePage(int $pageNum, array $pageData): void
     {
@@ -179,6 +184,8 @@ class StreamingFormatWriter
      *
      * @param string $term     Index term (stemmed).
      * @param array  $termData Merged page entries for this term.
+     * @since 1.0.0
+     * @stability stable
      */
     public function writeTerm(string $term, array $termData): void
     {
@@ -200,6 +207,9 @@ class StreamingFormatWriter
      * Flush the last index chunk and write pf_meta, entry.json, and assets.
      *
      * Must be called after all writePage() and writeTerm() calls.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function endWrite(): void
     {

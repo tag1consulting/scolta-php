@@ -18,6 +18,8 @@ class IndexMerger
      *
      * @param array $partials Array of partial index arrays (from InvertedIndexBuilder::build).
      * @return array{index: array, pages: array} Merged index and page metadata.
+     * @since 1.0.0
+     * @stability stable
      */
     public function merge(array $partials): array
     {
@@ -126,6 +128,8 @@ class IndexMerger
      * @param string[]              $chunkPaths Paths to v2 chunk files.
      * @param StreamingFormatWriter $writer     Writer positioned after beginWrite().
      * @param MemoryBudget|null     $budget     Controls file-handle soft cap.
+     * @since 1.0.0
+     * @stability stable
      */
     public function mergeStreaming(
         array $chunkPaths,

@@ -76,6 +76,8 @@ class PhpIndexer
      * @param int|null $totalPages Total pages across all chunks.
      * @param bool $force Skip cache lookups (still populates cache on tokenization).
      * @return int Number of pages processed in this chunk.
+     * @since 1.0.0
+     * @stability stable
      */
     public function processChunk(array $items, int $chunkNumber, ?int $totalPages = null, bool $force = false): int
     {
@@ -133,6 +135,9 @@ class PhpIndexer
 
     /**
      * Finalize the build: stream-merge chunks, write Pagefind format, atomic swap.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function finalize(): BuildResult
     {
@@ -200,6 +205,8 @@ class PhpIndexer
      *
      * @param \Tag1\Scolta\Export\ContentItem[] $items
      * @return string|null New fingerprint if build needed, null if up to date.
+     * @since 1.0.0
+     * @stability stable
      */
     public function shouldBuild(array $items): ?string
     {
@@ -220,6 +227,8 @@ class PhpIndexer
      * Compute a deterministic fingerprint for a set of content items.
      *
      * @param \Tag1\Scolta\Export\ContentItem[] $items
+     * @since 1.0.0
+     * @stability stable
      */
     public static function computeFingerprint(array $items): string
     {
@@ -231,6 +240,9 @@ class PhpIndexer
 
     /**
      * Compute a content hash for a single item (for smart rebuild cache).
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public static function contentHash(\Tag1\Scolta\Export\ContentItem $item): string
     {

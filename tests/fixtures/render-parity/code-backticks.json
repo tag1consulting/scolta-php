@@ -1,0 +1,10 @@
+{
+    "input": "Edit the `config.yml` file and run `composer install` next.",
+    "mustContain": [
+        "`config.yml`",
+        "`composer install`"
+    ],
+    "mustNotContain": [
+        "<code>"
+    ]
+}

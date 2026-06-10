@@ -120,6 +120,9 @@ final class PageWordCache
      * Records the hash as "used" for pruning regardless of hit/miss.
      * On cache hit: loads the chunk file containing the entry (if not already
      * loaded), returns the token data, then releases the chunk.
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function get(string $hash): ?array
     {
@@ -165,6 +168,9 @@ final class PageWordCache
      * comes first. The byte limit prevents a single serialize() call from
      * allocating tens of megabytes when pages contain thousands of tokens
      * (e.g. long encyclopedia articles).
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function put(string $hash, array $tokenData): void
     {
@@ -191,6 +197,9 @@ final class PageWordCache
      * chunk files that no longer have any live entries.
      *
      * Call once at the end of the build (finalize path).
+     *
+     * @since 1.0.0
+     * @stability stable
      */
     public function pruneAndSave(): void
     {
