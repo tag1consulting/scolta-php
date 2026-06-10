@@ -285,6 +285,8 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 
 ## Methods
 
+Every public `ScoltaConfig` method carries `@since` and `@stability` PHPDoc annotations (the semantic-versioning contract described in `UPGRADE.md`); the methods below are `@stability stable`, so their signatures will not change within a major version. This holds for the whole `src/` public API and is enforced in CI by `tests/Documentation/StabilityAnnotationTest.php`.
+
 ### `ScoltaConfig::fromArray(array $values): self`
 
 Creates a config instance from an associative array. Keys are expected in snake_case and are automatically converted to camelCase property names. Unknown keys are silently ignored.
