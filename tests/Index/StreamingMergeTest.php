@@ -285,7 +285,7 @@ class StreamingMergeTest extends TestCase
         $this->assertStringContainsString(
             '"crc32":"',
             file_get_contents($out),
-            'pre-merge footer must carry a crc32 digest'
+            'pre-merge footer must carry a crc32 digest',
         );
         $this->assertTrue((new ChunkReader($out))->verifyCrc32());
 

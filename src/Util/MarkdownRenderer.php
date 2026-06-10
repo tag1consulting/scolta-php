@@ -83,14 +83,18 @@ final class MarkdownRenderer
         // Escape all HTML entities first for XSS safety.
         $text = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
 
+        // preg_replace returns null only on engine error (e.g. PREG_BAD_UTF8);
+        // fall back to the unreplaced text so a single bad input degrades to
+        // raw markdown markers instead of nulling the whole line.
+
         // Bold+italic: ***text*** -> <strong><em>text</em></strong>
-        $text = preg_replace('/\*\*\*(.+?)\*\*\*/', '<strong><em>$1</em></strong>', $text);
+        $text = preg_replace('/\*\*\*(.+?)\*\*\*/', '<strong><em>$1</em></strong>', $text) ?? $text;
 
         // Bold: **text** -> <strong>text</strong>
-        $text = preg_replace('/\*\*(.+?)\*\*/', '<strong>$1</strong>', $text);
+        $text = preg_replace('/\*\*(.+?)\*\*/', '<strong>$1</strong>', $text) ?? $text;
 
         // Italic: *text* -> <em>text</em>
-        $text = preg_replace('/\*(.+?)\*/', '<em>$1</em>', $text);
+        $text = preg_replace('/\*(.+?)\*/', '<em>$1</em>', $text) ?? $text;
 
         // Links: [text](url) -> <a href="url" target="_blank" rel="noopener">text</a>
         // Only http(s) and scheme-less (relative) URLs become links; any other
@@ -104,7 +108,7 @@ final class MarkdownRenderer
                 return '<a href="' . $m[2] . '" target="_blank" rel="noopener">' . $m[1] . '</a>';
             },
             $text,
-        );
+        ) ?? $text;
 
         return $text;
     }
@@ -135,9 +139,9 @@ final class MarkdownRenderer
     private static function cleanBrokenLinks(string $text): string
     {
         // [text]( with no closing ) — truncated URL, keep the label as bold.
-        $text = preg_replace('/\[([^\]]+)\]\([^)]*$/', '**$1**', $text);
+        $text = preg_replace('/\[([^\]]+)\]\([^)]*$/', '**$1**', $text) ?? $text;
         // [text] with no following (url) — orphaned bracket, keep label as bold.
-        $text = preg_replace('/\[([^\]]+)\](?!\()/', '**$1**', $text);
+        $text = preg_replace('/\[([^\]]+)\](?!\()/', '**$1**', $text) ?? $text;
         return $text;
     }
 }

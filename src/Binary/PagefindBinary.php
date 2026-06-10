@@ -212,7 +212,12 @@ class PagefindBinary
     public static function escapeShellCommand(string $cmd): string
     {
         if (preg_match('/^npx\s+/', $cmd)) {
-            return implode(' ', array_map('escapeshellarg', preg_split('/\s+/', trim($cmd))));
+            $tokens = preg_split('/\s+/', trim($cmd));
+            if ($tokens !== false) {
+                return implode(' ', array_map('escapeshellarg', $tokens));
+            }
+            // preg_split can only fail on engine error — fall through to
+            // whole-string escaping, which is still injection-safe.
         }
         return escapeshellarg($cmd);
     }

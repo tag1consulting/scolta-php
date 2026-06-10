@@ -846,20 +846,3 @@ parameters:
 			count: 1
 			path: src/SetupCheck.php
 
-		-
-			message: '#^Method Tag1\\Scolta\\Util\\MarkdownRenderer\:\:cleanBrokenLinks\(\) should return string but returns string\|null\.$#'
-			identifier: return.type
-			count: 1
-			path: src/Util/MarkdownRenderer.php
-
-		-
-			message: '#^Method Tag1\\Scolta\\Util\\MarkdownRenderer\:\:renderInline\(\) should return string but returns string\|null\.$#'
-			identifier: return.type
-			count: 1
-			path: src/Util/MarkdownRenderer.php
-
-		-
-			message: '#^Parameter \#3 \$subject of function preg_replace expects array\<float\|int\|string\>\|string, string\|null given\.$#'
-			identifier: argument.type
-			count: 4
-			path: src/Util/MarkdownRenderer.php

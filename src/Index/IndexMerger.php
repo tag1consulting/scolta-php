@@ -233,6 +233,8 @@ class IndexMerger
     /**
      * fwrite() the full buffer or throw — fwrite can silently write fewer
      * bytes (e.g. disk full), which would corrupt the chunk stream.
+     *
+     * @param resource $fp Open file handle.
      */
     private function writeAll($fp, string $data, string $path): void
     {
