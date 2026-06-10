@@ -92,4 +92,34 @@ class BudgetAwareProviderDecoratorTest extends TestCase
 
         $this->assertSame($aiClient, $decorator->getClient());
     }
+
+    // -------------------------------------------------------------------
+    // isBudgetError() — the public API platform adapters call instead of
+    // duplicating the budget-message magic string.
+    // -------------------------------------------------------------------
+
+    public function testIsBudgetErrorMatchesDirectMessage(): void
+    {
+        $e = new \RuntimeException('HTTP 429: ' . BudgetAwareProviderDecorator::BUDGET_MESSAGE);
+        $this->assertTrue(BudgetAwareProviderDecorator::isBudgetError($e));
+    }
+
+    public function testIsBudgetErrorWalksTheExceptionChain(): void
+    {
+        $inner = new \RuntimeException('Budget has been exceeded!');
+        $outer = new \RuntimeException('AI API request failed', 0, $inner);
+        $this->assertTrue(BudgetAwareProviderDecorator::isBudgetError($outer));
+    }
+
+    public function testIsBudgetErrorRecognizesAmazeeBudgetExceededException(): void
+    {
+        $e = new AmazeeBudgetExceededException(new \RuntimeException('original'));
+        $this->assertTrue(BudgetAwareProviderDecorator::isBudgetError($e));
+    }
+
+    public function testIsBudgetErrorRejectsUnrelatedErrors(): void
+    {
+        $e = new \RuntimeException('Internal server error', 0, new \RuntimeException('timeout'));
+        $this->assertFalse(BudgetAwareProviderDecorator::isBudgetError($e));
+    }
 }

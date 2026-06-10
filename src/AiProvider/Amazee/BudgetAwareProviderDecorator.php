@@ -19,7 +19,15 @@ use Tag1\Scolta\AiClient;
  */
 final class BudgetAwareProviderDecorator
 {
-    private const BUDGET_MESSAGE = 'Budget has been exceeded!';
+    /**
+     * The exact message Amazee.ai returns (inside an HTTP 429 body) when a
+     * key's spending limit is reached. Public so platform adapters can refer
+     * to one definition instead of duplicating the magic string.
+     *
+     * @since 1.0.4
+     * @stability experimental
+     */
+    public const BUDGET_MESSAGE = 'Budget has been exceeded!';
 
     public function __construct(private readonly AiClient $client)
     {
@@ -73,16 +81,36 @@ final class BudgetAwareProviderDecorator
         return $this->client;
     }
 
-    private function rethrowIfBudgetExceeded(\RuntimeException $e): void
+    /**
+     * Whether an exception (anywhere in its chain) is an Amazee budget-
+     * exhaustion error.
+     *
+     * Platform adapters use this instead of duplicating the message-substring
+     * check against their own copy of the budget string.
+     *
+     * @since 1.0.4
+     * @stability experimental
+     */
+    public static function isBudgetError(\Throwable $e): bool
     {
         // Walk the exception chain: RateLimitException wraps the Guzzle ClientException
         // whose message contains the raw API response body with the budget error text.
         $cause = $e;
         while ($cause !== null) {
-            if (str_contains($cause->getMessage(), self::BUDGET_MESSAGE)) {
-                throw new AmazeeBudgetExceededException($e);
+            if ($cause instanceof AmazeeBudgetExceededException
+                || str_contains($cause->getMessage(), self::BUDGET_MESSAGE)
+            ) {
+                return true;
             }
             $cause = $cause->getPrevious();
+        }
+        return false;
+    }
+
+    private function rethrowIfBudgetExceeded(\RuntimeException $e): void
+    {
+        if (self::isBudgetError($e)) {
+            throw new AmazeeBudgetExceededException($e);
         }
     }
 }

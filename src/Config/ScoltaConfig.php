@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tag1\Scolta\Config;
 
+use Tag1\Scolta\AiClient;
+
 /**
  * Platform-agnostic configuration for Scolta.
  *
@@ -20,7 +22,7 @@ class ScoltaConfig
     // -- AI provider --
     public string $aiProvider = 'anthropic';
     public string $aiApiKey = '';
-    public string $aiModel = 'claude-sonnet-4-5-20250929';
+    public string $aiModel = AiClient::DEFAULT_MODEL;
     public string $aiExpansionModel = '';
     public string $aiBaseUrl = '';
 

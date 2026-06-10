@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tag1\Scolta\Index;
 
 use Psr\Log\LoggerInterface;
+use Tag1\Scolta\Exception\MemoryThresholdExceededException;
 
 /**
  * Emits PSR-3 memory-usage events at build phase boundaries.
@@ -69,7 +70,7 @@ final class MemoryTelemetry
     /**
      * Record a telemetry event for a named build phase.
      *
-     * @throws \RuntimeException When memory usage exceeds 90% of the effective limit.
+     * @throws MemoryThresholdExceededException When memory usage exceeds 90% of the effective limit.
      */
     public function emit(string $phase, array $extra = []): void
     {
@@ -96,7 +97,7 @@ final class MemoryTelemetry
                 '[scolta] Memory at {limit_pct}% of limit ({current_mb} MB RSS, limit {limit_mb} MB) at phase {phase} (+{elapsed_s}s). Aborting.',
                 $context
             );
-            throw new \RuntimeException(
+            throw new MemoryThresholdExceededException(
                 "Memory usage ({$pct}% of {$context['limit_mb']} MB limit) exceeds safe threshold at phase '{$phase}'. "
                 . 'Use --memory-budget=conservative or reduce chunk size.'
             );

@@ -307,6 +307,48 @@ class PagefindBinaryTest extends TestCase
     }
 
     // -------------------------------------------------------------------
+    // Shell escaping (configured paths can come from platform config)
+    // -------------------------------------------------------------------
+
+    /**
+     * A configured binary path containing shell metacharacters must be
+     * escaped before interpolation into the exec() command — otherwise
+     * `; rm -rf ~` in an admin-form path executes as a second command.
+     * Asserts the composed command string only; nothing is executed.
+     */
+    public function testEscapeShellCommandNeutralizesMetacharacters(): void
+    {
+        $malicious = '/tmp/pagefind; rm -rf ~';
+        $escaped = PagefindBinary::escapeShellCommand($malicious);
+
+        $this->assertSame(escapeshellarg($malicious), $escaped);
+        $this->assertStringStartsWith("'", $escaped);
+        $this->assertStringEndsWith("'", $escaped);
+    }
+
+    public function testEscapeShellCommandHandlesCommandSubstitution(): void
+    {
+        $escaped = PagefindBinary::escapeShellCommand('/tmp/$(touch /tmp/pwned)/pagefind');
+        $this->assertSame(escapeshellarg('/tmp/$(touch /tmp/pwned)/pagefind'), $escaped);
+    }
+
+    public function testEscapeShellCommandPreservesPathWithSpacesAsSingleArgument(): void
+    {
+        $escaped = PagefindBinary::escapeShellCommand('/opt/my tools/pagefind');
+        $this->assertSame(escapeshellarg('/opt/my tools/pagefind'), $escaped);
+    }
+
+    /**
+     * "npx pagefind" is a known multi-word command: each token is escaped
+     * separately so it still runs as a command with an argument instead of
+     * being treated as one (nonexistent) binary path.
+     */
+    public function testEscapeShellCommandSplitsNpxPagefind(): void
+    {
+        $this->assertSame("'npx' 'pagefind'", PagefindBinary::escapeShellCommand('npx pagefind'));
+    }
+
+    // -------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------
 

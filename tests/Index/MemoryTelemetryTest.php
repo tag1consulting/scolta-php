@@ -154,7 +154,10 @@ class MemoryTelemetryTest extends TestCase
 
     public function testAbortThresholdFiresOnHighCurrentMemory(): void
     {
-        $this->expectException(\RuntimeException::class);
+        // The dedicated subclass (not a bare RuntimeException) is what
+        // IndexBuildOrchestrator catches to classify a resumable memory
+        // abort — matching on the message text is no longer load-bearing.
+        $this->expectException(\Tag1\Scolta\Exception\MemoryThresholdExceededException::class);
         $this->expectExceptionMessageMatches('/exceeds safe threshold/');
 
         // current = 92 MB (over 90% threshold), peak = 92 MB

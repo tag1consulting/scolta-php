@@ -142,12 +142,21 @@ class IndexMerger
         }
 
         // ── Phase 2: N-way merge of sorted term streams ───────────────────
-        $cap       = $budget?->mergeOpenFileHandles() ?? PHP_INT_MAX;
-        $termPaths = count($chunkPaths) > $cap
-            ? $this->preMergeTerms($chunkPaths, $cap)
+        $cap         = $budget?->mergeOpenFileHandles() ?? PHP_INT_MAX;
+        $premergeDirs = [];
+        $termPaths   = count($chunkPaths) > $cap
+            ? $this->preMergeTerms($chunkPaths, $cap, $premergeDirs)
             : $chunkPaths;
 
-        $this->nWayTermMerge($termPaths, $writer);
+        try {
+            $this->nWayTermMerge($termPaths, $writer);
+        } finally {
+            // Batch temp dirs are only needed until the final merge has
+            // consumed them — delete them even when the merge throws.
+            foreach ($premergeDirs as $dir) {
+                $this->removePremergeDir($dir);
+            }
+        }
     }
 
     /**
@@ -158,14 +167,17 @@ class IndexMerger
      * and written to a temporary ChunkWriter file with an empty pages section.
      * Phase 1 is unaffected — it reads from the original paths.
      *
-     * Temporary files are stored in sys_get_temp_dir() and may be cleaned up
-     * by the caller; they are not cleaned here to allow the final nWayTermMerge
-     * to read them. PHP's process exit will collect any leaks.
+     * Temporary files are stored in sys_get_temp_dir(); each recursion level
+     * creates its own scolta-premerge-* directory and records it in $tmpDirs.
+     * They are not deleted here because the final nWayTermMerge still reads
+     * them — mergeStreaming() removes every recorded directory once the
+     * n-way merge completes (or throws).
      *
      * @param string[] $chunkPaths
+     * @param string[] $tmpDirs    Collects every temp dir created (out param).
      * @return string[] Reduced set of (possibly temporary) paths for phase 2.
      */
-    private function preMergeTerms(array $chunkPaths, int $cap): array
+    private function preMergeTerms(array $chunkPaths, int $cap, array &$tmpDirs): array
     {
         if (count($chunkPaths) <= $cap) {
             return $chunkPaths;
@@ -175,6 +187,7 @@ class IndexMerger
         if (!mkdir($tmpDir, 0755, true) && !is_dir($tmpDir)) {
             throw new \RuntimeException("Failed to create temp directory: {$tmpDir}");
         }
+        $tmpDirs[] = $tmpDir;
 
         $batches   = array_chunk($chunkPaths, $cap);
         $outPaths  = [];
@@ -191,7 +204,38 @@ class IndexMerger
         }
 
         // Recurse until fan-in ≤ cap.
-        return $this->preMergeTerms($outPaths, $cap);
+        return $this->preMergeTerms($outPaths, $cap, $tmpDirs);
+    }
+
+    /**
+     * Delete one scolta-premerge-* batch directory and its premerge files.
+     *
+     * Best-effort: a failure to clean a temp dir must not fail the build,
+     * so unlink/rmdir results are ignored beyond the existence checks.
+     */
+    private function removePremergeDir(string $dir): void
+    {
+        if (!is_dir($dir)) {
+            return;
+        }
+        foreach (glob($dir . '/premerge-*.dat') ?: [] as $file) {
+            if (is_file($file)) {
+                unlink($file);
+            }
+        }
+        rmdir($dir);
+    }
+
+    /**
+     * fwrite() the full buffer or throw — fwrite can silently write fewer
+     * bytes (e.g. disk full), which would corrupt the chunk stream.
+     */
+    private function writeAll($fp, string $data, string $path): void
+    {
+        $written = fwrite($fp, $data);
+        if ($written !== strlen($data)) {
+            throw new \RuntimeException("Short write to pre-merge file: {$path}");
+        }
     }
 
     /**
@@ -226,7 +270,12 @@ class IndexMerger
         }
 
         try {
-            fwrite($fp, json_encode(['v' => 2, 'page_count' => 0, 'term_count' => 0]) . "\n");
+            $this->writeAll($fp, json_encode(['v' => 2, 'page_count' => 0, 'term_count' => 0]) . "\n", $outputPath);
+
+            // Same record digest as ChunkWriter (length prefix + payload,
+            // sentinel excluded) so ChunkReader::verifyCrc32() validates
+            // pre-merge files instead of skipping them as crc-less.
+            $crcCtx = hash_init('crc32b');
 
             while (!$heap->isEmpty()) {
                 [$minTerm] = $heap->top();
@@ -242,15 +291,18 @@ class IndexMerger
                     }
                 }
 
-                $merged  = $this->mergeEntries($allEntries);
-                $payload = serialize([$minTerm, $merged]);
-                fwrite($fp, pack('V', strlen($payload)));
-                fwrite($fp, $payload);
+                $merged    = $this->mergeEntries($allEntries);
+                $payload   = serialize([$minTerm, $merged]);
+                $lenPacked = pack('V', strlen($payload));
+                $this->writeAll($fp, $lenPacked, $outputPath);
+                $this->writeAll($fp, $payload, $outputPath);
+                hash_update($crcCtx, $lenPacked);
+                hash_update($crcCtx, $payload);
                 unset($merged, $allEntries, $payload);
             }
 
-            fwrite($fp, "\x00\x00\x00\x00");
-            fwrite($fp, json_encode(['hmac' => '']) . "\n");
+            $this->writeAll($fp, "\x00\x00\x00\x00", $outputPath);
+            $this->writeAll($fp, json_encode(['hmac' => '', 'crc32' => hash_final($crcCtx)]) . "\n", $outputPath);
         } finally {
             fclose($fp);
         }

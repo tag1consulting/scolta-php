@@ -46,6 +46,51 @@ class AiControllerTraitTest extends TestCase
 
         $this->assertSame(0, $controller->lastCacheTtl);
     }
+
+    // -------------------------------------------------------------------
+    // parseJsonBody() — shared JSON decode + error shape for controllers
+    // -------------------------------------------------------------------
+
+    public function testParseJsonBodyDecodesValidJson(): void
+    {
+        $controller = new ConcreteAiController();
+
+        $result = $controller->exposeParseJsonBody('{"query": "hello", "n": 3}');
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame(['query' => 'hello', 'n' => 3], $result['data']);
+    }
+
+    public function testParseJsonBodyReturnsErrorShapeOnMalformedJson(): void
+    {
+        $controller = new ConcreteAiController();
+
+        $result = $controller->exposeParseJsonBody('{"query": ');
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame(400, $result['status']);
+        $this->assertStringContainsString('Malformed JSON', $result['error']);
+    }
+
+    public function testParseJsonBodyRejectsScalarJson(): void
+    {
+        $controller = new ConcreteAiController();
+
+        $result = $controller->exposeParseJsonBody('"just a string"');
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame(400, $result['status']);
+    }
+
+    public function testParseJsonBodyRejectsEmptyBody(): void
+    {
+        $controller = new ConcreteAiController();
+
+        $result = $controller->exposeParseJsonBody('');
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame(400, $result['status']);
+    }
 }
 
 /** @internal test double */
@@ -58,6 +103,11 @@ class ConcreteAiController
     public function exposeCreateHandler(object $aiService, ScoltaConfig $config): AiEndpointHandler
     {
         return $this->createHandler($aiService, $config);
+    }
+
+    public function exposeParseJsonBody(string $rawBody): array
+    {
+        return $this->parseJsonBody($rawBody);
     }
 
     protected function resolveCache(int $cacheTtl): CacheDriverInterface

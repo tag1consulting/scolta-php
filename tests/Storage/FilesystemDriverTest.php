@@ -124,4 +124,55 @@ class FilesystemDriverTest extends TestCase
         $this->driver->put($path, 'ok');
         $this->assertSame('ok', $this->driver->get($path));
     }
+
+    public function testRejectsStreamWrapperInExists(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Stream wrappers');
+        $this->driver->exists('php://filter/resource=/etc/passwd');
+    }
+
+    public function testDeleteDirectoryDoesNotFollowSymlinks(): void
+    {
+        if (DIRECTORY_SEPARATOR === '\\') {
+            $this->markTestSkipped('Symlink semantics differ on Windows.');
+        }
+
+        // Targets OUTSIDE the directory being deleted.
+        $outside = sys_get_temp_dir() . '/scolta-fs-outside-' . uniqid();
+        mkdir($outside . '/dir', 0755, true);
+        file_put_contents($outside . '/target.txt', 'survives');
+        file_put_contents($outside . '/dir/inner.txt', 'survives');
+
+        try {
+            $doomed = $this->tmpDir . '/doomed';
+            mkdir($doomed . '/sub', 0755, true);
+            file_put_contents($doomed . '/regular.txt', 'gone');
+            symlink($outside . '/target.txt', $doomed . '/file-link');
+            symlink($outside . '/dir', $doomed . '/sub/dir-link');
+
+            $this->assertTrue($this->driver->deleteDirectory($doomed));
+
+            // The tree (including the symlinks themselves) is gone…
+            $this->assertFalse(is_dir($doomed));
+            // …but the symlink targets outside the tree survive. With the
+            // previous getRealPath()-based delete, both were deleted.
+            $this->assertFileExists($outside . '/target.txt');
+            $this->assertDirectoryExists($outside . '/dir');
+            $this->assertFileExists($outside . '/dir/inner.txt');
+        } finally {
+            if (is_file($outside . '/target.txt')) {
+                unlink($outside . '/target.txt');
+            }
+            if (is_file($outside . '/dir/inner.txt')) {
+                unlink($outside . '/dir/inner.txt');
+            }
+            if (is_dir($outside . '/dir')) {
+                rmdir($outside . '/dir');
+            }
+            if (is_dir($outside)) {
+                rmdir($outside);
+            }
+        }
+    }
 }
