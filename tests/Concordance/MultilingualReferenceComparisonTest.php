@@ -56,7 +56,7 @@ class MultilingualReferenceComparisonTest extends TestCase
 
         if (!file_exists($this->referenceMlDir . '/pagefind-entry.json')) {
             $this->markTestSkipped(
-                'ML reference fixtures not generated. Run: ./scripts/generate-concordance-fixtures-ml.sh'
+                'ML reference fixtures not generated. Run: ./scripts/generate-concordance-fixtures-ml.sh',
             );
         }
 
@@ -91,8 +91,8 @@ class MultilingualReferenceComparisonTest extends TestCase
                 '[%s] PHP indexed %d pages, Pagefind indexed %d. Allowed delta: 1.',
                 $lang,
                 count($phpFragments),
-                count($refFragments)
-            )
+                count($refFragments),
+            ),
         );
     }
 
@@ -143,8 +143,8 @@ class MultilingualReferenceComparisonTest extends TestCase
                 $lang,
                 $avg,
                 $threshold,
-                count($similarities)
-            )
+                count($similarities),
+            ),
         );
     }
 
@@ -297,7 +297,7 @@ class MultilingualReferenceComparisonTest extends TestCase
     {
         $words = preg_split('/[\s\p{P}]+/u', mb_strtolower($text));
 
-        return array_values(array_unique(array_filter($words, fn (string $w) => mb_strlen($w) >= 2)));
+        return array_values(array_unique(array_filter($words, fn(string $w) => mb_strlen($w) >= 2)));
     }
 
     private function removeDir(string $dir): void
@@ -307,7 +307,7 @@ class MultilingualReferenceComparisonTest extends TestCase
         }
         $items = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($items as $item) {
             $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());

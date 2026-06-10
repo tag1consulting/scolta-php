@@ -133,8 +133,8 @@ class IndexerUrlParityTest extends TestCase
                     . 'must mirror the canonical URL for both indexers to produce identical output.',
                     $id,
                     $canonicalUrl,
-                    $expectedFilePath
-                )
+                    $expectedFilePath,
+                ),
             );
         }
     }
@@ -172,8 +172,8 @@ class IndexerUrlParityTest extends TestCase
                             'PHP indexer fragment for "%s" has data.url=%s, expected %s',
                             $item->title,
                             $frag['url'],
-                            $item->url
-                        )
+                            $item->url,
+                        ),
                     );
                     $found = true;
                     break;
@@ -201,13 +201,13 @@ class IndexerUrlParityTest extends TestCase
         }
 
         $flatFiles = glob($exportDir . '/*.html') ?: [];
-        $rootIndex = array_filter($flatFiles, fn ($f) => basename($f) === 'index.html');
+        $rootIndex = array_filter($flatFiles, fn($f) => basename($f) === 'index.html');
         $nonRootFlat = array_diff($flatFiles, $rootIndex);
 
         $this->assertEmpty(
             $nonRootFlat,
             'No flat {id}.html files should exist in export root (except index.html for /). '
-            . 'Found: ' . implode(', ', array_map('basename', $nonRootFlat))
+            . 'Found: ' . implode(', ', array_map('basename', $nonRootFlat)),
         );
     }
 
@@ -294,7 +294,7 @@ class IndexerUrlParityTest extends TestCase
         }
         $items = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($items as $item) {
             $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());

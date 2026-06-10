@@ -50,7 +50,7 @@ class StabilityAnnotationTest extends TestCase
             [],
             $violations,
             "Public methods missing @since/@stability annotations (CLAUDE.md mandate):\n  - "
-            . implode("\n  - ", $violations)
+            . implode("\n  - ", $violations),
         );
     }
 
@@ -61,8 +61,8 @@ class StabilityAnnotationTest extends TestCase
         $iterator = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator(
                 dirname(__DIR__, 2) . '/src',
-                \FilesystemIterator::SKIP_DOTS
-            )
+                \FilesystemIterator::SKIP_DOTS,
+            ),
         );
         foreach ($iterator as $file) {
             if ($file->getExtension() === 'php') {
@@ -82,7 +82,7 @@ class StabilityAnnotationTest extends TestCase
         if (preg_match(
             '/^\s*(?:(?:final|abstract)\s+)*public\s+(?:static\s+)?function\s+&?(\w+)/',
             $line,
-            $m
+            $m,
         )) {
             return $m[1];
         }

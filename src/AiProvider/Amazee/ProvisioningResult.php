@@ -25,8 +25,7 @@ final class ProvisioningResult
         public readonly string $status = self::STATUS_PROVISIONED,
         public readonly ?string $aiModel = null,
         public readonly ?string $aiExpansionModel = null,
-    ) {
-    }
+    ) {}
 
     /**
      * @since 1.0.0

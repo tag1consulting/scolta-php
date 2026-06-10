@@ -84,8 +84,7 @@ class AiEndpointHandler
         private readonly array $sortableFieldDescriptions = [],
         private readonly array $filterFields = [],
         private readonly array $filterFieldDescriptions = [],
-    ) {
-    }
+    ) {}
 
     /**
      * Handle an expand-query request.
@@ -448,7 +447,7 @@ class AiEndpointHandler
             return null;
         }
 
-        $filtered = array_values(array_filter($raw, static fn ($v) => is_string($v) && $v !== ''));
+        $filtered = array_values(array_filter($raw, static fn($v) => is_string($v) && $v !== ''));
 
         return !empty($filtered) ? $filtered : null;
     }

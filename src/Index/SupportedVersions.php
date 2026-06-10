@@ -73,7 +73,7 @@ class SupportedVersions
             return sprintf(
                 'Pagefind version %s is INCOMPATIBLE: %s',
                 $version,
-                self::INCOMPATIBLE_VERSIONS[$version]
+                self::INCOMPATIBLE_VERSIONS[$version],
             );
         }
 
@@ -83,7 +83,7 @@ class SupportedVersions
                 . 'Search may work, but results are not guaranteed. '
                 . 'Tested versions: %s.',
                 $version,
-                implode(', ', self::TESTED_VERSIONS)
+                implode(', ', self::TESTED_VERSIONS),
             );
         }
 
@@ -113,7 +113,7 @@ class SupportedVersions
             'Bundled Pagefind: %s | Tested versions: %s | Minimum: %s',
             self::BUNDLED_VERSION,
             implode(', ', self::TESTED_VERSIONS),
-            self::MIN_VERSION
+            self::MIN_VERSION,
         );
     }
 }

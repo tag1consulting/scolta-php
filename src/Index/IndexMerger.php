@@ -54,8 +54,8 @@ class IndexMerger
                             }
                             $mergedIndex[$word]['_variants'][$variant] = array_values(
                                 array_unique(
-                                    array_merge($mergedIndex[$word]['_variants'][$variant], $variantPages)
-                                )
+                                    array_merge($mergedIndex[$word]['_variants'][$variant], $variantPages),
+                                ),
                             );
                         }
 
@@ -72,8 +72,8 @@ class IndexMerger
                             }
                             $mergedIndex[$word][$pageNum]['positions'][$weight] = array_values(
                                 array_unique(
-                                    array_merge($mergedIndex[$word][$pageNum]['positions'][$weight], $positions)
-                                )
+                                    array_merge($mergedIndex[$word][$pageNum]['positions'][$weight], $positions),
+                                ),
                             );
                             sort($mergedIndex[$word][$pageNum]['positions'][$weight]);
                         }
@@ -84,8 +84,8 @@ class IndexMerger
                             }
                             $mergedIndex[$word][$pageNum]['meta_positions'] = array_values(
                                 array_unique(
-                                    array_merge($mergedIndex[$word][$pageNum]['meta_positions'], $data['meta_positions'])
-                                )
+                                    array_merge($mergedIndex[$word][$pageNum]['meta_positions'], $data['meta_positions']),
+                                ),
                             );
                             sort($mergedIndex[$word][$pageNum]['meta_positions']);
                         }
@@ -375,8 +375,8 @@ class IndexMerger
                         }
                         $merged['_variants'][$variant] = array_values(
                             array_unique(
-                                array_merge($merged['_variants'][$variant], $variantPages)
-                            )
+                                array_merge($merged['_variants'][$variant], $variantPages),
+                            ),
                         );
                     }
                 } else {

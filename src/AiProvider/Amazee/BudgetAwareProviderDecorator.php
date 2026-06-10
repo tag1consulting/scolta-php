@@ -29,9 +29,7 @@ final class BudgetAwareProviderDecorator
      */
     public const BUDGET_MESSAGE = 'Budget has been exceeded!';
 
-    public function __construct(private readonly AiClient $client)
-    {
-    }
+    public function __construct(private readonly AiClient $client) {}
 
     /**
      * Send a single-turn message, re-throwing budget errors distinctly.

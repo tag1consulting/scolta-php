@@ -31,8 +31,7 @@ class PagefindBinary
     public function __construct(
         private readonly ?string $configuredPath = null,
         private readonly ?string $projectDir = null,
-    ) {
-    }
+    ) {}
 
     /**
      * Resolve the Pagefind binary command string.

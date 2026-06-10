@@ -21,8 +21,7 @@ final class AmazeeAccountUpgrader
     public function __construct(
         private readonly AmazeeClient $client,
         private readonly ConfigStorageInterface $storage,
-    ) {
-    }
+    ) {}
 
     /**
      * Step 1: Send a verification code to the given email address.

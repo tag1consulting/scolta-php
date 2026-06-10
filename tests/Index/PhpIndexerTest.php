@@ -174,14 +174,14 @@ class PhpIndexerTest extends TestCase
         $phpFingerprint = PhpIndexer::computeFingerprint($items);
 
         // Simulate a "binary indexer" fingerprint: same content, no type prefix.
-        $data = array_map(fn ($item) => $item->id . ':' . hash('sha256', $item->bodyHtml), $items);
+        $data = array_map(fn($item) => $item->id . ':' . hash('sha256', $item->bodyHtml), $items);
         sort($data);
         $binaryFingerprint = hash('sha256', json_encode($data));
 
         $this->assertNotSame(
             $phpFingerprint,
             $binaryFingerprint,
-            'PHP and binary indexer must produce different fingerprints for same content'
+            'PHP and binary indexer must produce different fingerprints for same content',
         );
     }
 
@@ -190,7 +190,7 @@ class PhpIndexerTest extends TestCase
         $items = $this->makeItems(3);
 
         // Store a "binary indexer" fingerprint in .scolta-state.
-        $data = array_map(fn ($item) => $item->id . ':' . hash('sha256', $item->bodyHtml), $items);
+        $data = array_map(fn($item) => $item->id . ':' . hash('sha256', $item->bodyHtml), $items);
         sort($data);
         $binaryFingerprint = hash('sha256', json_encode($data));
         file_put_contents($this->outputDir . '/.scolta-state', $binaryFingerprint);
@@ -296,7 +296,7 @@ class PhpIndexerTest extends TestCase
         }
         $files = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($files as $file) {
             $file->isDir() ? rmdir($file->getRealPath()) : unlink($file->getRealPath());

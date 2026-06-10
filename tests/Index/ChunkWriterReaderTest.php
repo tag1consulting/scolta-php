@@ -269,7 +269,7 @@ class ChunkWriterReaderTest extends TestCase
         $reader = new ChunkReader($path);
         $this->assertTrue(
             $reader->verifyCrc32(),
-            'verifyCrc32() must return true (skip, not fail) for chunks without crc32 footer'
+            'verifyCrc32() must return true (skip, not fail) for chunks without crc32 footer',
         );
     }
 

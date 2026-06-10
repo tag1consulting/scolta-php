@@ -541,7 +541,7 @@ final class IndexBuildOrchestrator
         if ($fragmentCount === 0) {
             throw new \RuntimeException(
                 "Build processed {$pagesProcessed} pages but the output index contains zero fragment files. "
-                . 'The write may have failed silently. Check filesystem permissions and available space.'
+                . 'The write may have failed silently. Check filesystem permissions and available space.',
             );
         }
 
@@ -566,14 +566,14 @@ final class IndexBuildOrchestrator
         if (!file_exists($entryPath)) {
             throw new \RuntimeException(
                 "Index verification failed: pagefind-entry.json not found at {$entryPath}. "
-                . 'The build did not produce a usable index. Do not exit 0.'
+                . 'The build did not produce a usable index. Do not exit 0.',
             );
         }
 
         $content = file_get_contents($entryPath);
         if ($content === false) {
             throw new \RuntimeException(
-                "Index verification failed: cannot read pagefind-entry.json at {$entryPath}."
+                "Index verification failed: cannot read pagefind-entry.json at {$entryPath}.",
             );
         }
 
@@ -581,7 +581,7 @@ final class IndexBuildOrchestrator
         if (!is_array($data) || !isset($data['version']) || !isset($data['languages'])) {
             throw new \RuntimeException(
                 "Index verification failed: pagefind-entry.json is malformed (missing 'version' or 'languages' key). "
-                . 'The index may be incomplete or corrupted.'
+                . 'The index may be incomplete or corrupted.',
             );
         }
     }

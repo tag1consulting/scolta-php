@@ -30,7 +30,7 @@ class LargeContentTest extends AbstractLargeContentTestCase
         $this->assertLessThanOrEqual(
             $limitMb,
             $actualMb,
-            sprintf('Peak RSS %.1f MB exceeded conservative limit of %d MB', $actualMb, $limitMb)
+            sprintf('Peak RSS %.1f MB exceeded conservative limit of %d MB', $actualMb, $limitMb),
         );
     }
 
@@ -84,7 +84,7 @@ class LargeContentTest extends AbstractLargeContentTestCase
 
         $entry = json_decode(
             file_get_contents($this->outputDir . '/pagefind/pagefind-entry.json'),
-            true
+            true,
         );
         $this->assertSame(50_000, $entry['languages']['en']['page_count']);
     }
@@ -107,7 +107,7 @@ class LargeContentTest extends AbstractLargeContentTestCase
         $refOrch->build(BuildIntent::fresh(200, $budget), $items);
         $refEntry = json_decode(
             file_get_contents($refOutputDir . '/pagefind/pagefind-entry.json'),
-            true
+            true,
         );
 
         // Simulate an interrupted build: commit chunk 0 manually and release only the lock.
@@ -131,7 +131,7 @@ class LargeContentTest extends AbstractLargeContentTestCase
         $this->assertTrue($report->success);
         $resumeEntry = json_decode(
             file_get_contents($this->outputDir . '/pagefind/pagefind-entry.json'),
-            true
+            true,
         );
         $this->assertSame($refEntry['languages']['en']['page_count'], $resumeEntry['languages']['en']['page_count']);
 

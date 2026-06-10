@@ -130,7 +130,7 @@ class PromptTextIdentityTest extends TestCase
         $this->assertSame(
             $coreBase,
             $php,
-            self::diffMessage($phpName, $rustConst, $coreBase, $php)
+            self::diffMessage($phpName, $rustConst, $coreBase, $php),
         );
     }
 
@@ -245,7 +245,7 @@ class PromptTextIdentityTest extends TestCase
             var_export($coreWin, true),
             $start,
             $window,
-            var_export($phpWin, true)
+            var_export($phpWin, true),
         );
     }
 }

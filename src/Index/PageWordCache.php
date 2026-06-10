@@ -148,7 +148,7 @@ final class PageWordCache
                 // Chunk file corrupted or missing — remove stale manifest entries.
                 $this->logger->warning(
                     "[scolta] Token cache chunk {$chunkNumber} is corrupted or missing. "
-                    . 'Affected pages will be re-tokenized.'
+                    . 'Affected pages will be re-tokenized.',
                 );
                 $this->removeChunkFromManifest($chunkNumber);
                 return null;
@@ -311,7 +311,7 @@ final class PageWordCache
 
         $totalEntries = count($this->manifest);
         $this->logger->info(
-            "[scolta] Migration complete: {$totalEntries} entries across {$chunkNum} chunks."
+            "[scolta] Migration complete: {$totalEntries} entries across {$chunkNum} chunks.",
         );
     }
 
@@ -409,7 +409,7 @@ final class PageWordCache
     {
         $this->manifest = array_filter(
             $this->manifest,
-            fn (int $num) => $num !== $chunkNumber,
+            fn(int $num) => $num !== $chunkNumber,
         );
     }
 }

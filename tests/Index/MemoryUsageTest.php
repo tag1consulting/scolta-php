@@ -17,7 +17,7 @@ class MemoryUsageTest extends TestCase
     public function testLargeCorpusTokenizationStaysWithinMemoryBudget(): void
     {
         $words = ['the', 'quick', 'brown', 'fox', 'jumps', 'over', 'lazy', 'dog',
-                  'and', 'then', 'runs', 'through', 'field', 'with', 'great', 'speed'];
+            'and', 'then', 'runs', 'through', 'field', 'with', 'great', 'speed'];
         $text = '';
         for ($i = 0; $i < 20000; $i++) {
             $text .= $words[$i % count($words)] . ' ';
@@ -36,7 +36,7 @@ class MemoryUsageTest extends TestCase
         $this->assertLessThan(
             5 * 1024 * 1024,
             $used,
-            sprintf('Tokenizing 20k tokens used %.1f MB — expected under 5 MB', $used / 1024 / 1024)
+            sprintf('Tokenizing 20k tokens used %.1f MB — expected under 5 MB', $used / 1024 / 1024),
         );
         $this->assertCount(20000, $tokens);
         $this->assertInstanceOf(Token::class, $tokens[0]);

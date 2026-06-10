@@ -46,7 +46,7 @@ final class BuildCoordinator
             if ($this->state->isRunning()) {
                 throw new \RuntimeException(
                     'Another index build is already running. '
-                    . 'Wait for it to complete, or kill the process and retry with --restart.'
+                    . 'Wait for it to complete, or kill the process and retry with --restart.',
                 );
             }
 
@@ -61,7 +61,7 @@ final class BuildCoordinator
 
             if (!$this->state->initiateBuild($manifest)) {
                 throw new \RuntimeException(
-                    'Failed to acquire build lock — another process may have just started.'
+                    'Failed to acquire build lock — another process may have just started.',
                 );
             }
 
@@ -73,7 +73,7 @@ final class BuildCoordinator
         if ($manifest === null) {
             throw new \RuntimeException(
                 'No resumable build found in state directory. '
-                . 'Run without --resume to start a fresh build.'
+                . 'Run without --resume to start a fresh build.',
             );
         }
 

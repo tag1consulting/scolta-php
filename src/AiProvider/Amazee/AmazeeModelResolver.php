@@ -36,7 +36,7 @@ final class AmazeeModelResolver
 
         $names = array_filter(
             array_map(
-                fn (mixed $m) => is_array($m) && isset($m['model_name']) && is_string($m['model_name'])
+                fn(mixed $m) => is_array($m) && isset($m['model_name']) && is_string($m['model_name'])
                     ? $m['model_name']
                     : null,
                 $models,

@@ -49,14 +49,14 @@ class RenderParityTest extends TestCase
             $this->assertStringContainsString(
                 $needle,
                 $html,
-                "PHP renderer output must contain '{$needle}'"
+                "PHP renderer output must contain '{$needle}'",
             );
         }
         foreach ($fixture['mustNotContain'] ?? [] as $needle) {
             $this->assertStringNotContainsString(
                 $needle,
                 $html,
-                "PHP renderer output must not contain '{$needle}'"
+                "PHP renderer output must not contain '{$needle}'",
             );
         }
     }

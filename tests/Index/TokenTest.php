@@ -49,8 +49,8 @@ class TokenTest extends TestCase
                 'Token objects used %d bytes vs arrays %d bytes (%.1f%%)',
                 $objectMem,
                 $arrayMem,
-                $objectMem / $arrayMem * 100
-            )
+                $objectMem / $arrayMem * 100,
+            ),
         );
     }
 }

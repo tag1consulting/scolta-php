@@ -159,7 +159,7 @@ class BuildState
         if ($digests['crc32'] === false) {
             throw new \RuntimeException(
                 "CRC32 validation failed for chunk: {$filename}. "
-                . 'The chunk may be corrupted — delete the state directory and re-run a fresh build.'
+                . 'The chunk may be corrupted — delete the state directory and re-run a fresh build.',
             );
         }
 

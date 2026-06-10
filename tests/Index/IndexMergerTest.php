@@ -70,7 +70,7 @@ class IndexMergerTest extends TestCase
         $result = $this->merger->merge([$partial1, $partial2]);
 
         // Apple should have both pages.
-        $applePages = array_filter($result['index']['apple'], fn ($k) => is_int($k), ARRAY_FILTER_USE_KEY);
+        $applePages = array_filter($result['index']['apple'], fn($k) => is_int($k), ARRAY_FILTER_USE_KEY);
         $this->assertCount(2, $applePages);
     }
 
@@ -96,7 +96,7 @@ class IndexMergerTest extends TestCase
 
         $result = $this->merger->merge([$partial1, $partial2]);
         $pageNums = array_keys(
-            array_filter($result['index']['test'], fn ($k) => is_int($k), ARRAY_FILTER_USE_KEY)
+            array_filter($result['index']['test'], fn($k) => is_int($k), ARRAY_FILTER_USE_KEY),
         );
         $this->assertSame([2, 5], $pageNums);
     }
@@ -161,7 +161,7 @@ class IndexMergerTest extends TestCase
         $result = $this->merger->merge($partials);
 
         // 'common' should have all 10 pages.
-        $commonPages = array_filter($result['index']['common'], fn ($k) => is_int($k), ARRAY_FILTER_USE_KEY);
+        $commonPages = array_filter($result['index']['common'], fn($k) => is_int($k), ARRAY_FILTER_USE_KEY);
         $this->assertCount(10, $commonPages);
         $this->assertCount(10, $result['pages']);
     }

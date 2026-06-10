@@ -87,7 +87,7 @@ class PipelineTest extends TestCase
         }
         $it = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($it as $file) {
             $file->isDir() ? rmdir($file->getRealPath()) : unlink($file->getRealPath());

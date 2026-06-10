@@ -436,7 +436,7 @@ class ScoltaConfigTest extends TestCase
             $this->assertSame(
                 $mode,
                 $config->expansionCombineMode,
-                "preset `$preset` should default expansionCombineMode to `$mode`"
+                "preset `$preset` should default expansionCombineMode to `$mode`",
             );
         }
 
@@ -618,7 +618,7 @@ class ScoltaConfigTest extends TestCase
             $this->assertStringContainsString(
                 'starting point',
                 $presets[$key]['description'],
-                "Preset '{$key}' description must contain 'starting point'"
+                "Preset '{$key}' description must contain 'starting point'",
             );
         }
     }
@@ -645,7 +645,7 @@ class ScoltaConfigTest extends TestCase
                 'expand_subword_max_frequency' => 0.10,
                 'expansion_combine_mode' => 'relevance_union',
             ],
-            ScoltaConfig::getPresetValues('none')
+            ScoltaConfig::getPresetValues('none'),
         );
     }
 
@@ -667,7 +667,7 @@ class ScoltaConfigTest extends TestCase
             $this->assertGreaterThanOrEqual(
                 $default,
                 $config->aiSummaryMaxTokens,
-                "Preset '{$name}' must not set ai_summary_max_tokens below the default"
+                "Preset '{$name}' must not set ai_summary_max_tokens below the default",
             );
         }
     }
@@ -716,12 +716,12 @@ class ScoltaConfigTest extends TestCase
             $this->assertEquals(
                 $freq,
                 $config->expandSubwordMaxFrequency,
-                "Preset '{$preset}' should resolve sub-word frequency to {$freq}"
+                "Preset '{$preset}' should resolve sub-word frequency to {$freq}",
             );
             $this->assertEquals(
                 $freq,
                 $config->toJsScoringConfig()['EXPAND_SUBWORD_MAX_FREQ'],
-                "Preset '{$preset}' sub-word frequency must reach the JS config"
+                "Preset '{$preset}' sub-word frequency must reach the JS config",
             );
         }
     }

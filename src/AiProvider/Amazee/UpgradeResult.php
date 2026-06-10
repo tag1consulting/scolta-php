@@ -18,8 +18,7 @@ final class UpgradeResult
         public readonly string $litellmApiUrl,
         public readonly string $region,
         public readonly ?string $error = null,
-    ) {
-    }
+    ) {}
 
     /**
      * @since 1.0.0

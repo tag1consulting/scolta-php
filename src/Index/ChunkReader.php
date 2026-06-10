@@ -16,9 +16,7 @@ namespace Tag1\Scolta\Index;
  */
 class ChunkReader
 {
-    public function __construct(private readonly string $path)
-    {
-    }
+    public function __construct(private readonly string $path) {}
 
     /**
      * Stream page records in insertion order.
@@ -245,7 +243,7 @@ class ChunkReader
         if ($firstByte !== '{') {
             throw new \RuntimeException(
                 "Chunk is not in v2 streaming format (first byte is not '{'). "
-                . "Delete the state directory and re-run a fresh build: {$this->path}"
+                . "Delete the state directory and re-run a fresh build: {$this->path}",
             );
         }
 

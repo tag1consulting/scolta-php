@@ -153,7 +153,7 @@ class AiClient
     ): string {
         if (empty($this->apiKey)) {
             throw new ApiKeyMissingException(
-                'Scolta AI API key not configured. Set the api_key in your platform\'s Scolta configuration.'
+                'Scolta AI API key not configured. Set the api_key in your platform\'s Scolta configuration.',
             );
         }
 

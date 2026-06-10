@@ -315,7 +315,7 @@ class StreamingFormatWriter
                 $valueTuples[] = $this->cbor->encodeArray([
                     $this->cbor->encodeString((string) $value),
                     $this->cbor->encodeArray(
-                        array_map(fn (int $p) => $this->cbor->encodeUint($p), $pageNums)
+                        array_map(fn(int $p) => $this->cbor->encodeUint($p), $pageNums),
                     ),
                 ]);
             }
@@ -399,7 +399,7 @@ class StreamingFormatWriter
         foreach ($this->sortFields as $field => $pageValues) {
             $allNumeric = array_reduce(
                 $pageValues,
-                fn (bool $carry, string $v) => $carry && is_numeric($v),
+                fn(bool $carry, string $v) => $carry && is_numeric($v),
                 true,
             );
 
@@ -410,7 +410,7 @@ class StreamingFormatWriter
             }
 
             $sortedPageIndices = array_map(
-                fn (int $p) => $this->cbor->encodeUint($p),
+                fn(int $p) => $this->cbor->encodeUint($p),
                 array_keys($pageValues),
             );
 

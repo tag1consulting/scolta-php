@@ -97,23 +97,23 @@ final class MemoryTelemetry
         if ($pct >= 90.0 && $this->limitBytes > 0) {
             $this->logger->error(
                 '[scolta] Memory at {limit_pct}% of limit ({current_mb} MB RSS, limit {limit_mb} MB) at phase {phase} (+{elapsed_s}s). Aborting.',
-                $context
+                $context,
             );
             throw new MemoryThresholdExceededException(
                 "Memory usage ({$pct}% of {$context['limit_mb']} MB limit) exceeds safe threshold at phase '{$phase}'. "
-                . 'Use --memory-budget=conservative or reduce chunk size.'
+                . 'Use --memory-budget=conservative or reduce chunk size.',
             );
         }
 
         if ($pct >= 75.0 && $this->limitBytes > 0) {
             $this->logger->warning(
                 '[scolta] Memory at {limit_pct}% of limit ({current_mb} MB RSS) at phase {phase} (+{elapsed_s}s).',
-                $context
+                $context,
             );
         } else {
             $this->logger->info(
                 '[scolta] Phase {phase}: {peak_mb} MB peak ({limit_pct}% of limit, source: {source}) +{elapsed_s}s.',
-                $context
+                $context,
             );
         }
     }

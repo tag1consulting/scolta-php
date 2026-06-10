@@ -82,9 +82,9 @@ class ContentExporter
             $files = new \RecursiveIteratorIterator(
                 new \RecursiveDirectoryIterator(
                     $this->outputDir,
-                    \RecursiveDirectoryIterator::SKIP_DOTS
+                    \RecursiveDirectoryIterator::SKIP_DOTS,
                 ),
-                \RecursiveIteratorIterator::CHILD_FIRST
+                \RecursiveIteratorIterator::CHILD_FIRST,
             );
             foreach ($files as $file) {
                 $file->isDir()
@@ -94,7 +94,7 @@ class ContentExporter
         }
         if (!is_dir($this->outputDir) && !mkdir($this->outputDir, 0755, true)) {
             throw new \RuntimeException(
-                sprintf('Failed to create output directory: %s', $this->outputDir)
+                sprintf('Failed to create output directory: %s', $this->outputDir),
             );
         }
         $this->exportedPaths = [];
@@ -137,7 +137,7 @@ class ContentExporter
                 $this->exportedPaths[$relativePath],
                 $item->id,
                 $relativePath,
-                $item->url
+                $item->url,
             ));
         }
         $this->exportedPaths[$relativePath] = $item->id;
@@ -227,7 +227,7 @@ class ContentExporter
 
         $count = 0;
         $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
+            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
         );
         foreach ($iterator as $file) {
             if ($file->isFile() && $file->getExtension() === 'html') {

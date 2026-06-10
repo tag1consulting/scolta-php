@@ -72,7 +72,7 @@ class StemmerConcordanceTest extends TestCase
 
         $this->assertEmpty(
             $divergences,
-            "Stemmer divergences found:\n" . implode("\n", $divergences)
+            "Stemmer divergences found:\n" . implode("\n", $divergences),
         );
     }
 
@@ -137,7 +137,7 @@ class StemmerConcordanceTest extends TestCase
         if (!class_exists($class)) {
             throw new \RuntimeException(
                 "Stemmer class {$class} not found. "
-                . 'Ensure wamania/php-stemmer is installed: composer require wamania/php-stemmer'
+                . 'Ensure wamania/php-stemmer is installed: composer require wamania/php-stemmer',
             );
         }
     }
@@ -203,8 +203,8 @@ class StemmerConcordanceTest extends TestCase
                 $refCount,
                 count($phpStemSet),
                 $intersection,
-                implode(', ', array_slice(array_diff($refStemSet, $phpStemSet), 0, 20))
-            )
+                implode(', ', array_slice(array_diff($refStemSet, $phpStemSet), 0, 20)),
+            ),
         );
     }
 
@@ -288,7 +288,7 @@ class StemmerConcordanceTest extends TestCase
             }
         }
 
-        $tested = $total - count(array_filter($words, fn ($w) => str_starts_with($w, "'")));
+        $tested = $total - count(array_filter($words, fn($w) => str_starts_with($w, "'")));
         $rate = $tested > 0 ? 1 - (count($mismatches) / $tested) : 1.0;
 
         fwrite(STDERR, sprintf(
@@ -297,7 +297,7 @@ class StemmerConcordanceTest extends TestCase
             $rate * 100,
             $tested - count($mismatches),
             $tested,
-            count($mismatches)
+            count($mismatches),
         ));
 
         // Per-language thresholds. EN/ES/RU achieve ≥99.7% concordance.
@@ -321,8 +321,8 @@ class StemmerConcordanceTest extends TestCase
                 strtoupper($lang),
                 $rate * 100,
                 $threshold * 100,
-                implode("\n", array_slice($mismatches, 0, 10))
-            )
+                implode("\n", array_slice($mismatches, 0, 10)),
+            ),
         );
     }
 

@@ -27,11 +27,11 @@ class FilterFieldDescriptionValidationTest extends TestCase
         $raw = $m[1];
         // Split on commas, trim quotes and whitespace.
         $values = array_map(
-            fn (string $v) => trim($v, " \t\n\r\0\x0B\"'"),
-            explode(',', $raw)
+            fn(string $v) => trim($v, " \t\n\r\0\x0B\"'"),
+            explode(',', $raw),
         );
 
-        return array_filter($values, fn (string $v) => $v !== '');
+        return array_filter($values, fn(string $v) => $v !== '');
     }
 
     public function testExtractsValidValuesFormat(): void
@@ -63,7 +63,7 @@ class FilterFieldDescriptionValidationTest extends TestCase
     public function testDescriptionValuesExistInIndex(
         string $field,
         string $description,
-        array $actualValues
+        array $actualValues,
     ): void {
         $described = $this->extractEnumeratedValues($description);
         if (empty($described)) {
@@ -77,8 +77,8 @@ class FilterFieldDescriptionValidationTest extends TestCase
                 "Filter field '%s' description references values not in the index: %s\nActual values: %s",
                 $field,
                 implode(', ', $missing),
-                implode(', ', $actualValues)
-            )
+                implode(', ', $actualValues),
+            ),
         );
     }
 
@@ -88,7 +88,7 @@ class FilterFieldDescriptionValidationTest extends TestCase
     public function testIndexValuesAppearInDescription(
         string $field,
         string $description,
-        array $actualValues
+        array $actualValues,
     ): void {
         $described = $this->extractEnumeratedValues($description);
         if (empty($described)) {
@@ -102,8 +102,8 @@ class FilterFieldDescriptionValidationTest extends TestCase
                 "Filter field '%s' has index values not mentioned in description: %s\nDescribed values: %s",
                 $field,
                 implode(', ', $undocumented),
-                implode(', ', $described)
-            )
+                implode(', ', $described),
+            ),
         );
     }
 

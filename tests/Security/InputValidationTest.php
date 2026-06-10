@@ -376,7 +376,7 @@ class InputValidationTest extends TestCase
 
     private function makeHandlerWithMaxFollowUps(int $max): AiEndpointHandler
     {
-        $aiService = new class () {
+        $aiService = new class {
             public function getExpandPrompt(): string
             {
                 return 'expand';
@@ -403,20 +403,14 @@ class InputValidationTest extends TestCase
             }
         };
 
-        $cache = new class () implements \Tag1\Scolta\Cache\CacheDriverInterface {
+        $cache = new class implements \Tag1\Scolta\Cache\CacheDriverInterface {
             public function get(string $key): mixed
             {
                 return null;
             }
-            public function set(string $key, mixed $value, int $ttlSeconds): void
-            {
-            }
-            public function delete(string $key): void
-            {
-            }
-            public function flush(): void
-            {
-            }
+            public function set(string $key, mixed $value, int $ttlSeconds): void {}
+            public function delete(string $key): void {}
+            public function flush(): void {}
         };
 
         return new AiEndpointHandler(
@@ -435,7 +429,7 @@ class InputValidationTest extends TestCase
         }
         $items = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($items as $item) {
             $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());

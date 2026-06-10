@@ -68,7 +68,7 @@ class AutoProvisionerTest extends TestCase
     {
         $stored = null;
         $storage = $this->createMock(ConfigStorageInterface::class);
-        $storage->method('load')->willReturnCallback(fn () => $stored);
+        $storage->method('load')->willReturnCallback(fn() => $stored);
         $storage->expects($this->once())
             ->method('store')
             ->willReturnCallback(function (string $token, string $url, string $region) use (&$stored): void {

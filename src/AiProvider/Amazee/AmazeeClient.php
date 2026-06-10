@@ -60,7 +60,7 @@ final class AmazeeClient
 
         if (!is_string($token) || $token === '' || !is_string($apiUrl) || $apiUrl === '') {
             throw new AmazeeApiException(
-                'Amazee.ai trial provisioning response missing litellm_token or litellm_api_url.'
+                'Amazee.ai trial provisioning response missing litellm_token or litellm_api_url.',
             );
         }
 
@@ -139,7 +139,7 @@ final class AmazeeClient
 
         if (!is_string($token) || $token === '' || !is_string($apiUrl) || $apiUrl === '') {
             throw new AmazeeApiException(
-                'Amazee.ai private key creation response missing litellm_token or litellm_api_url.'
+                'Amazee.ai private key creation response missing litellm_token or litellm_api_url.',
             );
         }
 
@@ -203,14 +203,14 @@ final class AmazeeClient
             if ($statusCode < 200 || $statusCode >= 300) {
                 throw new AmazeeApiException(
                     "Amazee.ai token validation failed with HTTP {$statusCode}.",
-                    $statusCode
+                    $statusCode,
                 );
             }
         } catch (GuzzleException $e) {
             throw new AmazeeApiException(
                 'Amazee.ai token validation request failed: ' . $e->getMessage(),
                 0,
-                $e
+                $e,
             );
         }
     }
@@ -240,7 +240,7 @@ final class AmazeeClient
             throw new AmazeeApiException(
                 "Amazee.ai API request to {$path} failed: " . $e->getMessage(),
                 0,
-                $e
+                $e,
             );
         }
 
@@ -270,7 +270,7 @@ final class AmazeeClient
             throw new AmazeeApiException(
                 "Amazee.ai API request to {$path} failed: " . $e->getMessage(),
                 0,
-                $e
+                $e,
             );
         }
 
@@ -307,7 +307,7 @@ final class AmazeeClient
             throw new AmazeeApiException(
                 "Amazee.ai API returned malformed JSON from {$path}: " . $e->getMessage(),
                 $statusCode,
-                $e
+                $e,
             );
         }
     }

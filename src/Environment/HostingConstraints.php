@@ -15,6 +15,5 @@ class HostingConstraints
         public readonly bool $execAvailable = true,
         public readonly bool $ephemeralFilesystem = false,
         public readonly string $note = '',
-    ) {
-    }
+    ) {}
 }

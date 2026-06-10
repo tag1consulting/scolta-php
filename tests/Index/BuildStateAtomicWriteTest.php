@@ -104,7 +104,7 @@ class BuildStateAtomicWriteTest extends TestCase
         $state = new BuildState($this->tmpDir);
         $this->assertTrue(
             $state->initiateBuild(['total_pages' => 10]),
-            'initiateBuild() must succeed when existing lock has a stale timestamp'
+            'initiateBuild() must succeed when existing lock has a stale timestamp',
         );
         $this->assertFileExists($lockFile, 'Lock file must be re-created after stale release');
 
@@ -122,7 +122,7 @@ class BuildStateAtomicWriteTest extends TestCase
         $state = new BuildState($this->tmpDir);
         $this->assertTrue(
             $state->initiateBuild(['total_pages' => 5]),
-            'initiateBuild() must succeed when malformed lock file has old mtime'
+            'initiateBuild() must succeed when malformed lock file has old mtime',
         );
         $state->releaseLock();
     }
@@ -134,7 +134,7 @@ class BuildStateAtomicWriteTest extends TestCase
         }
         $files = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($files as $file) {
             $file->isDir() ? rmdir($file->getRealPath()) : unlink($file->getRealPath());

@@ -458,7 +458,7 @@ class MultiLanguageConcordanceTest extends TestCase
         $this->assertStringContainsString(
             mb_strtolower($needle),
             $all,
-            "Fragment content/meta should contain '{$needle}'"
+            "Fragment content/meta should contain '{$needle}'",
         );
     }
 
@@ -469,7 +469,7 @@ class MultiLanguageConcordanceTest extends TestCase
         }
         $items = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($items as $item) {
             $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());

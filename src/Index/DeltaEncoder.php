@@ -60,7 +60,7 @@ class DeltaEncoder
     public static function encodePositions(array $positionsByWeight): array
     {
         // Filter out empty weight groups.
-        $positionsByWeight = array_filter($positionsByWeight, fn (array $positions) => count($positions) > 0);
+        $positionsByWeight = array_filter($positionsByWeight, fn(array $positions) => count($positions) > 0);
 
         if (count($positionsByWeight) === 0) {
             return [];

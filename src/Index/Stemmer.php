@@ -68,7 +68,7 @@ class Stemmer
         if (!class_exists($class)) {
             throw new \RuntimeException(
                 "Stemmer class {$class} not found. "
-                . 'Ensure wamania/php-stemmer is installed: composer require wamania/php-stemmer'
+                . 'Ensure wamania/php-stemmer is installed: composer require wamania/php-stemmer',
             );
         }
         $this->stemmer = new $class();

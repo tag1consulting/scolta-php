@@ -32,7 +32,7 @@ class ReferenceComparisonTest extends TestCase
 
         if (!file_exists($this->referenceDir . '/pagefind-entry.json')) {
             $this->markTestSkipped(
-                'Reference fixtures not generated. Run: ./scripts/generate-concordance-fixtures.sh'
+                'Reference fixtures not generated. Run: ./scripts/generate-concordance-fixtures.sh',
             );
         }
 
@@ -68,8 +68,8 @@ class ReferenceComparisonTest extends TestCase
             sprintf(
                 'PHP indexed %d pages, Pagefind indexed %d. Allowed delta: 1.',
                 count($phpFragments),
-                count($refFragments)
-            )
+                count($refFragments),
+            ),
         );
     }
 
@@ -125,7 +125,7 @@ class ReferenceComparisonTest extends TestCase
                     $url,
                     $similarity * 100,
                     implode(',', $refSample),
-                    implode(',', $phpSample)
+                    implode(',', $phpSample),
                 );
             }
         }
@@ -216,7 +216,7 @@ class ReferenceComparisonTest extends TestCase
                     $url,
                     $refFrag['word_count'],
                     $phpFrag['word_count'],
-                    $ratio * 100
+                    $ratio * 100,
                 );
             }
         }
@@ -304,8 +304,8 @@ class ReferenceComparisonTest extends TestCase
                 $intersection,
                 count($onlyInRef),
                 count($onlyInPhp),
-                implode(', ', array_slice($onlyInRef, 0, 15))
-            )
+                implode(', ', array_slice($onlyInRef, 0, 15)),
+            ),
         );
     }
 
@@ -359,8 +359,8 @@ class ReferenceComparisonTest extends TestCase
                 count($countMismatches),
                 count($sharedWords),
                 $mismatchRate * 100,
-                implode("\n", array_slice($countMismatches, 0, 20))
-            )
+                implode("\n", array_slice($countMismatches, 0, 20)),
+            ),
         );
     }
 
@@ -392,8 +392,8 @@ class ReferenceComparisonTest extends TestCase
         $phpMeta = $this->decodeMeta($phpDir . '/pagefind');
         $refMeta = $this->decodeMeta($this->referenceDir);
 
-        $refTotal = array_sum(array_map(fn ($p) => $p[1] ?? 0, $refMeta[1]));
-        $phpTotal = array_sum(array_map(fn ($p) => $p[1] ?? 0, $phpMeta[1]));
+        $refTotal = array_sum(array_map(fn($p) => $p[1] ?? 0, $refMeta[1]));
+        $phpTotal = array_sum(array_map(fn($p) => $p[1] ?? 0, $phpMeta[1]));
 
         if ($refTotal > 0) {
             $ratio = abs($refTotal - $phpTotal) / $refTotal;
@@ -535,8 +535,8 @@ class ReferenceComparisonTest extends TestCase
                 . "artifacts from Pagefind's hyphen/em-dash joining.\nWords: %s",
                 $contentPct,
                 count($contentWords),
-                implode(', ', array_slice($contentWords, 0, 30))
-            )
+                implode(', ', array_slice($contentWords, 0, 30)),
+            ),
         );
     }
 
@@ -592,7 +592,7 @@ class ReferenceComparisonTest extends TestCase
                     $term,
                     $stem,
                     $refCount,
-                    $phpCount
+                    $phpCount,
                 );
             }
         }
@@ -608,8 +608,8 @@ class ReferenceComparisonTest extends TestCase
                 "%d of %d search terms match. Mismatches:\n%s",
                 $matched,
                 count($searchTerms),
-                implode("\n", $mismatches)
-            )
+                implode("\n", $mismatches),
+            ),
         );
     }
 
@@ -623,7 +623,7 @@ class ReferenceComparisonTest extends TestCase
         $this->assertNotEmpty(glob($phpDir . '/pagefind/index/*.pf_index'), 'PHP index files must exist');
         $this->assertNotEmpty(
             glob($this->referenceDir . '/index/*.pf_index') ?: glob($this->referenceDir . '/*.pf_index'),
-            'Reference index files must exist'
+            'Reference index files must exist',
         );
     }
 
@@ -660,12 +660,12 @@ class ReferenceComparisonTest extends TestCase
                     $this->assertGreaterThanOrEqual(
                         0,
                         $pageNum,
-                        "Word '{$word}' references negative page {$pageNum}"
+                        "Word '{$word}' references negative page {$pageNum}",
                     );
                     $this->assertLessThan(
                         $pageCount,
                         $pageNum,
-                        "Word '{$word}' references page {$pageNum} but only {$pageCount} pages in pf_meta"
+                        "Word '{$word}' references page {$pageNum} but only {$pageCount} pages in pf_meta",
                     );
                 }
             }
@@ -680,7 +680,7 @@ class ReferenceComparisonTest extends TestCase
         $phpDir = $this->buildWithPhpIndexer();
         $this->assertNotEmpty(
             glob($phpDir . '/pagefind/pagefind.*.pf_meta') ?: glob($phpDir . '/pagefind/*.pf_meta'),
-            'PHP meta file must exist'
+            'PHP meta file must exist',
         );
     }
 
@@ -779,7 +779,7 @@ class ReferenceComparisonTest extends TestCase
     {
         $words = preg_split('/[\s\p{P}]+/u', mb_strtolower($text));
 
-        return array_values(array_unique(array_filter($words, fn (string $w) => mb_strlen($w) >= 3)));
+        return array_values(array_unique(array_filter($words, fn(string $w) => mb_strlen($w) >= 3)));
     }
 
     /** @return string[] Sorted unique stemmed words. */
@@ -883,7 +883,7 @@ class ReferenceComparisonTest extends TestCase
         }
         $items = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($items as $item) {
             $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());

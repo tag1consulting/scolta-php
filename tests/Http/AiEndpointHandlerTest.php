@@ -311,7 +311,7 @@ class AiEndpointHandlerTest extends TestCase
 
         $result = $handler->parseExpansionResponse(
             "```json\n[\"term1\", \"term2\", \"term3\"]\n```",
-            'original'
+            'original',
         );
 
         $this->assertEquals(['term1', 'term2', 'term3'], $result);
@@ -323,7 +323,7 @@ class AiEndpointHandlerTest extends TestCase
 
         $result = $handler->parseExpansionResponse(
             '["alpha", "beta", "gamma"]',
-            'original'
+            'original',
         );
 
         $this->assertEquals(['alpha', 'beta', 'gamma'], $result);
@@ -335,7 +335,7 @@ class AiEndpointHandlerTest extends TestCase
 
         $result = $handler->parseExpansionResponse(
             '{"terms": ["alpha", "beta", "gamma"]}',
-            'original'
+            'original',
         );
 
         $this->assertEquals(['alpha', 'beta', 'gamma'], $result);
@@ -347,7 +347,7 @@ class AiEndpointHandlerTest extends TestCase
 
         $result = $handler->parseExpansionResponse(
             'this is not json at all',
-            'original query'
+            'original query',
         );
 
         $this->assertEquals(['original query'], $result);
@@ -360,7 +360,7 @@ class AiEndpointHandlerTest extends TestCase
         // A valid JSON array with only one element should fall back.
         $result = $handler->parseExpansionResponse(
             '["only_one"]',
-            'original'
+            'original',
         );
 
         $this->assertEquals(['original'], $result);
@@ -610,12 +610,12 @@ class AiEndpointHandlerTest extends TestCase
         $this->assertStringContainsString(
             'SUPERLATIVES AS QUALIFIERS',
             $ai->lastSystemPrompt,
-            'Sort intent prompt must explicitly address superlatives used as qualifiers'
+            'Sort intent prompt must explicitly address superlatives used as qualifiers',
         );
         $this->assertStringContainsString(
             'most popular',
             $ai->lastSystemPrompt,
-            'Sort intent prompt must list "most popular" as a counter-example'
+            'Sort intent prompt must list "most popular" as a counter-example',
         );
     }
 
@@ -629,7 +629,7 @@ class AiEndpointHandlerTest extends TestCase
         $this->assertMatchesRegularExpression(
             '/semantically? map|direct.*semantic|semantic.*match/i',
             $ai->lastSystemPrompt,
-            'Sort intent prompt must require a semantic match between the sort signal and the field'
+            'Sort intent prompt must require a semantic match between the sort signal and the field',
         );
     }
 
@@ -643,7 +643,7 @@ class AiEndpointHandlerTest extends TestCase
         $this->assertMatchesRegularExpression(
             '/false negative|prefer.*omit|uncertain.*omit|when.*doubt.*omit/i',
             $ai->lastSystemPrompt,
-            'Sort intent prompt must instruct the LLM to prefer omitting the sort key over false positives'
+            'Sort intent prompt must instruct the LLM to prefer omitting the sort key over false positives',
         );
     }
 
@@ -1155,7 +1155,7 @@ class AiEndpointHandlerTest extends TestCase
 
     public function testCustomEnricherModifiesPrompt(): void
     {
-        $enricher = new class () implements PromptEnricherInterface {
+        $enricher = new class implements PromptEnricherInterface {
             public function enrich(string $resolvedPrompt, string $promptName, array $context = []): string
             {
                 return $resolvedPrompt . "\n\nAlways mention our return policy.";
@@ -1570,8 +1570,7 @@ class MockAiService
         private readonly bool $throwApiKeyInvalid = false,
         private readonly bool $throwRateLimit = false,
         private readonly ?string $rateLimitRetryAfter = null,
-    ) {
-    }
+    ) {}
 
     public function getExpandPrompt(): string
     {
@@ -1683,8 +1682,7 @@ class SpyEnricher implements PromptEnricherInterface
 
     public function __construct(
         private readonly string $prefix = '',
-    ) {
-    }
+    ) {}
 
     public function enrich(string $resolvedPrompt, string $promptName, array $context = []): string
     {

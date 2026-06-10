@@ -162,13 +162,13 @@ class IndexerBenchmarkTest extends TestCase
         $this->assertLessThan(
             $maxSeconds,
             $elapsed,
-            sprintf('Build of %d pages took %.1fs (limit %.1fs)', $count, $elapsed, $maxSeconds)
+            sprintf('Build of %d pages took %.1fs (limit %.1fs)', $count, $elapsed, $maxSeconds),
         );
 
         $this->assertLessThan(
             $maxMemoryMb,
             $peakMb,
-            sprintf('Build of %d pages used %.1fMB peak memory (limit %.1fMB)', $count, $peakMb, $maxMemoryMb)
+            sprintf('Build of %d pages used %.1fMB peak memory (limit %.1fMB)', $count, $peakMb, $maxMemoryMb),
         );
     }
 
@@ -304,7 +304,7 @@ class IndexerBenchmarkTest extends TestCase
             $elapsed,
             $peakMb,
             $outputMb,
-            $msPerPage
+            $msPerPage,
         ));
     }
 
@@ -318,7 +318,7 @@ class IndexerBenchmarkTest extends TestCase
         }
         $size = 0;
         $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
+            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
         );
         foreach ($iterator as $file) {
             $size += $file->getSize();
@@ -345,7 +345,7 @@ class IndexerBenchmarkTest extends TestCase
         }
         $items = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($items as $item) {
             $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());

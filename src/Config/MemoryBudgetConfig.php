@@ -21,8 +21,7 @@ final class MemoryBudgetConfig
         private readonly string $profile,
         private readonly ?int $customBytes = null,
         private readonly ?int $chunkSize = null,
-    ) {
-    }
+    ) {}
 
     /**
      * @since 1.0.0

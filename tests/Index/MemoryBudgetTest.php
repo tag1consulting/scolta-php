@@ -93,11 +93,11 @@ class MemoryBudgetTest extends TestCase
     {
         $this->assertLessThan(
             MemoryBudget::balanced()->chunkSize(),
-            MemoryBudget::conservative()->chunkSize()
+            MemoryBudget::conservative()->chunkSize(),
         );
         $this->assertLessThan(
             MemoryBudget::aggressive()->chunkSize(),
-            MemoryBudget::balanced()->chunkSize()
+            MemoryBudget::balanced()->chunkSize(),
         );
     }
 

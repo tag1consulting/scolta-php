@@ -17,8 +17,7 @@ final class BuildIntent
         private readonly ?int $totalPages,
         private readonly MemoryBudget $memoryBudget,
         private readonly array $sourceMeta,
-    ) {
-    }
+    ) {}
 
     /**
      * Start a clean build, wiping any existing state directory.

@@ -28,8 +28,7 @@ final class IndexerResolver
     public function __construct(
         private readonly PagefindBinary $binary,
         private readonly LoggerInterface $logger,
-    ) {
-    }
+    ) {}
 
     /**
      * Resolve the effective indexer backend and emit a notice-level log message.

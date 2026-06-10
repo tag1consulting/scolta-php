@@ -302,7 +302,7 @@ class PagefindBinaryTest extends TestCase
         $reflection = new \ReflectionMethod(PagefindBinary::class, 'isExecutable');
         $this->assertTrue(
             $reflection->isPrivate(),
-            'isExecutable() must remain private — callers use resolve() + status()'
+            'isExecutable() must remain private — callers use resolve() + status()',
         );
     }
 

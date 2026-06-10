@@ -232,7 +232,7 @@ class PhpIndexer
      */
     public static function computeFingerprint(array $items): string
     {
-        $data = array_map(fn ($item) => $item->id . ':' . hash('sha256', $item->bodyHtml), $items);
+        $data = array_map(fn($item) => $item->id . ':' . hash('sha256', $item->bodyHtml), $items);
         sort($data);
 
         return hash('sha256', 'php-indexer-v1:' . json_encode($data));
@@ -283,7 +283,7 @@ class PhpIndexer
 
         $count = 0;
         $files = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS)
+            new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
         );
         foreach ($files as $file) {
             if ($file->isFile()) {

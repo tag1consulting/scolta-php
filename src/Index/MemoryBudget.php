@@ -34,8 +34,7 @@ final class MemoryBudget
         private readonly int $mergeOpenFileHandles,
         private readonly int $totalBudgetBytes,
         private readonly int $tokenCacheChunkBytes,
-    ) {
-    }
+    ) {}
 
     /**
      * Conservative: safe for shared hosts with PHP memory_limit ≤ 128 MB.

@@ -37,8 +37,7 @@ class InvertedIndexBuilder
     public function __construct(
         private readonly Tokenizer $tokenizer,
         private readonly Stemmer $stemmer,
-    ) {
-    }
+    ) {}
 
     /**
      * Build a partial inverted index from content items.
@@ -106,7 +105,7 @@ class InvertedIndexBuilder
         // Tokenize URL path segments for search discovery.
         $urlPath     = parse_url($item->url, PHP_URL_PATH) ?? '';
         $urlPath     = preg_replace('/\.\w+$/', '', $urlPath);
-        $urlSegments = array_filter(explode('/', $urlPath), fn ($s) => strlen($s) > 0);
+        $urlSegments = array_filter(explode('/', $urlPath), fn($s) => strlen($s) > 0);
         $urlText     = implode(' ', $urlSegments);
         $rawUrlTokens = $this->tokenizer->tokenize($urlText);
         $urlResult   = $this->reindexToWordPositions($rawUrlTokens, $bodyResult['nextIndex']);
@@ -177,7 +176,7 @@ class InvertedIndexBuilder
                 'meta'      => array_filter([
                     'title' => $tokenData['cleanTitle'],
                     'date'  => $item->date,
-                ] + $itemSortable, fn ($v) => $v !== null && $v !== ''),
+                ] + $itemSortable, fn($v) => $v !== null && $v !== ''),
                 'sortable'  => $itemSortable,
                 'hash'      => hash('sha256', $tokenData['content']),
             ];
@@ -237,7 +236,7 @@ class InvertedIndexBuilder
                 'meta'      => array_filter([
                     'title' => $tokenData['cleanTitle'],
                     'date'  => $item->date,
-                ] + $itemSortable, fn ($v) => $v !== null && $v !== ''),
+                ] + $itemSortable, fn($v) => $v !== null && $v !== ''),
                 'sortable'  => $itemSortable,
                 'hash'      => hash('sha256', $tokenData['content']),
             ];

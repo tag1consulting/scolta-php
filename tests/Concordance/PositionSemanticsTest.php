@@ -52,7 +52,7 @@ class PositionSemanticsTest extends TestCase
                 'Quick Brown Fox',
                 '<p>The quick brown fox jumps over the lazy dog.</p>',
                 '/test-page',
-                '2026-04-27'
+                '2026-04-27',
             ),
         ];
 
@@ -80,7 +80,7 @@ class PositionSemanticsTest extends TestCase
                 20,
                 $pos,
                 "Position {$pos} looks like a character offset, not a word index. "
-                . 'Expected small sequential integers (0-11 for this content).'
+                . 'Expected small sequential integers (0-11 for this content).',
             );
         }
 
@@ -91,7 +91,7 @@ class PositionSemanticsTest extends TestCase
                 $this->assertLessThan(
                     20,
                     $pos,
-                    "Position {$pos} for 'quick' looks like a character offset."
+                    "Position {$pos} for 'quick' looks like a character offset.",
                 );
             }
         }
@@ -114,7 +114,7 @@ class PositionSemanticsTest extends TestCase
                 'Unique Alpha Beta',
                 '<p>Gamma delta epsilon zeta eta.</p>',
                 '/test-page-2',
-                '2026-04-27'
+                '2026-04-27',
             ),
         ];
 
@@ -138,7 +138,7 @@ class PositionSemanticsTest extends TestCase
             $this->assertNotEmpty($uniqueMetaPos, "'unique' should have meta positions");
             $this->assertEmpty(
                 $uniqueBodyPos,
-                "'unique' is title-only — should NOT have body positions. Got: " . json_encode($uniqueBodyPos)
+                "'unique' is title-only — should NOT have body positions. Got: " . json_encode($uniqueBodyPos),
             );
         }
     }
@@ -154,7 +154,7 @@ class PositionSemanticsTest extends TestCase
                 'Simple Title',
                 '<p>Body content with several words for testing purposes here today.</p>',
                 '/some/complex/url/path',
-                '2026-04-27'
+                '2026-04-27',
             ),
         ];
 
@@ -169,7 +169,7 @@ class PositionSemanticsTest extends TestCase
 
         $fragment = json_decode(
             preg_replace('/^pagefind_dcd/', '', gzdecode(file_get_contents($fragmentFiles[0]))),
-            true
+            true,
         );
 
         // content = "Simple Title. Body content with several words for testing purposes here today."
@@ -178,7 +178,7 @@ class PositionSemanticsTest extends TestCase
             $contentWordCount,
             $fragment['word_count'],
             'word_count should match content word count (no URL tokens). '
-            . "content_words={$contentWordCount}, word_count={$fragment['word_count']}"
+            . "content_words={$contentWordCount}, word_count={$fragment['word_count']}",
         );
     }
 
@@ -239,7 +239,7 @@ class PositionSemanticsTest extends TestCase
                             $word,
                             $pos,
                             $cap,
-                            $maxWordCount
+                            $maxWordCount,
                         );
                     }
                 }
@@ -249,7 +249,7 @@ class PositionSemanticsTest extends TestCase
         $this->assertEmpty(
             $overflows,
             "Body positions exceed word-count cap (likely character offsets):\n"
-            . implode("\n", array_slice($overflows, 0, 20))
+            . implode("\n", array_slice($overflows, 0, 20)),
         );
     }
 
@@ -346,7 +346,7 @@ class PositionSemanticsTest extends TestCase
         }
         $items = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
+            \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($items as $item) {
             $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());

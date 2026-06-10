@@ -41,6 +41,5 @@ final class CachedContentReference
         public readonly string $language,
         public readonly array $filters,
         public readonly array $sortable = [],
-    ) {
-    }
+    ) {}
 }

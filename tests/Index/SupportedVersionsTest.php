@@ -14,7 +14,7 @@ class SupportedVersionsTest extends TestCase
         $this->assertContains(
             SupportedVersions::BUNDLED_VERSION,
             SupportedVersions::TESTED_VERSIONS,
-            'Bundled version must be in tested versions list'
+            'Bundled version must be in tested versions list',
         );
     }
 
@@ -67,7 +67,7 @@ class SupportedVersionsTest extends TestCase
         $this->assertContains(
             SupportedVersions::MIN_VERSION,
             SupportedVersions::TESTED_VERSIONS,
-            'Min version must be in tested versions list'
+            'Min version must be in tested versions list',
         );
     }
 
@@ -81,7 +81,7 @@ class SupportedVersionsTest extends TestCase
         $this->assertMatchesRegularExpression(
             '/^\d+\.\d+\.\d+$/',
             SupportedVersions::BUNDLED_VERSION,
-            'Bundled version must be valid semver'
+            'Bundled version must be valid semver',
         );
     }
 }

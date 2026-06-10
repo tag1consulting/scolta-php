@@ -11,6 +11,5 @@ class AiResponse
         public readonly int $inputTokens = 0,
         public readonly int $outputTokens = 0,
         public readonly string $model = '',
-    ) {
-    }
+    ) {}
 }

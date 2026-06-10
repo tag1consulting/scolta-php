@@ -25,8 +25,7 @@ final class StatusReport
         public readonly ?string $warnings = null,
         public readonly bool $success = true,
         public readonly ?string $error = null,
-    ) {
-    }
+    ) {}
 
     /**
      * Convert to a BuildResult for callers that still use the legacy return type.

@@ -70,7 +70,7 @@ class PageNumberingTest extends TestCase
         $this->assertSame(
             [0, 1, 2],
             $pageKeys,
-            'String-keyed items must produce sequential pages 0, 1, 2 — NOT 12, 34, 56'
+            'String-keyed items must produce sequential pages 0, 1, 2 — NOT 12, 34, 56',
         );
     }
 
@@ -89,7 +89,7 @@ class PageNumberingTest extends TestCase
         $this->assertSame(
             [0, 1],
             $pageKeys,
-            'UUID-keyed items must produce sequential pages 0, 1'
+            'UUID-keyed items must produce sequential pages 0, 1',
         );
     }
 
@@ -110,7 +110,7 @@ class PageNumberingTest extends TestCase
         $this->assertSame(
             [0, 1],
             $pageKeys,
-            'Skipped items must not create gaps — expected pages 0 and 1, not 0 and 2'
+            'Skipped items must not create gaps — expected pages 0 and 1, not 0 and 2',
         );
         $this->assertCount(2, $result['pages'], 'Exactly 2 pages should be indexed (1 skipped)');
     }
@@ -140,7 +140,7 @@ class PageNumberingTest extends TestCase
                 $this->assertContains(
                     (int) $pageNum,
                     $validIndices,
-                    "Word '{$word}' references page {$pageNum} which is out of range [0..{$pageCount})"
+                    "Word '{$word}' references page {$pageNum} which is out of range [0..{$pageCount})",
                 );
             }
         }
@@ -165,20 +165,20 @@ class PageNumberingTest extends TestCase
 
         $allPageKeys = array_merge(
             array_keys($partial0['pages']),
-            array_keys($partial1['pages'])
+            array_keys($partial1['pages']),
         );
 
         $this->assertCount(
             count($allPageKeys),
             array_unique($allPageKeys),
-            'Multi-chunk page numbers must be globally unique — no collisions between chunks'
+            'Multi-chunk page numbers must be globally unique — no collisions between chunks',
         );
 
         sort($allPageKeys);
         $this->assertSame(
             [0, 1, 2, 3],
             $allPageKeys,
-            'Multi-chunk pages must form a contiguous 0-based range'
+            'Multi-chunk pages must form a contiguous 0-based range',
         );
     }
 }

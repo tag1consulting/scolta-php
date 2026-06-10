@@ -134,7 +134,7 @@ class MemoryBudgetSuggestionTest extends TestCase
             $this->assertStringNotContainsString(
                 'peak RAM',
                 $result['reason'],
-                'suggest() reason must not claim "peak RAM" — that overstates what the internal budget controls.'
+                'suggest() reason must not claim "peak RAM" — that overstates what the internal budget controls.',
             );
         }
 
@@ -155,7 +155,7 @@ class MemoryBudgetSuggestionTest extends TestCase
         $this->assertSame(
             96 * 1024 * 1024,
             $result['profile_budget_bytes'],
-            'profile_budget_bytes must be 96 MB for the conservative profile.'
+            'profile_budget_bytes must be 96 MB for the conservative profile.',
         );
     }
 
@@ -169,7 +169,7 @@ class MemoryBudgetSuggestionTest extends TestCase
         $this->assertStringContainsString(
             'internal allocation budget',
             $result['warning'],
-            'checkProfileFit warning must clarify the budget is Scolta\'s internal allocation, not total process RSS.'
+            'checkProfileFit warning must clarify the budget is Scolta\'s internal allocation, not total process RSS.',
         );
     }
 
@@ -181,7 +181,7 @@ class MemoryBudgetSuggestionTest extends TestCase
         $this->assertStringContainsString(
             'PHP runtime baseline',
             $result['warning'],
-            'checkProfileFit warning must mention PHP runtime baseline so admins understand total process RSS.'
+            'checkProfileFit warning must mention PHP runtime baseline so admins understand total process RSS.',
         );
     }
 

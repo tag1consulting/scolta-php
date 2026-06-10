@@ -24,8 +24,7 @@ final class HealthChecker
         private readonly string $indexOutputDir,
         private readonly ?string $pagefindBinaryPath,
         private readonly ?string $projectDir,
-    ) {
-    }
+    ) {}
 
     /**
      * Run all health checks and return a structured result.
