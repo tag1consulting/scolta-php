@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Tag1\Scolta\Health;
 
+use Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery;
 use Tag1\Scolta\Binary\PagefindBinary;
+use Tag1\Scolta\Cache\CacheDriverInterface;
 use Tag1\Scolta\Config\ScoltaConfig;
 
 /**
@@ -19,17 +21,33 @@ use Tag1\Scolta\Config\ScoltaConfig;
  */
 final class HealthChecker
 {
+    /**
+     * @param CacheDriverInterface|null $cache Optional cache used to read the
+     *   KeyExpiryRecovery auth-failure marker. When provided, `ai_usable`
+     *   reflects whether the stored credentials actually authenticate (a
+     *   cached marker recorded at call time — never a live API call per
+     *   health request). When null, `ai_usable` mirrors `ai_configured`,
+     *   preserving the previous behavior for adapters that have not wired
+     *   recovery yet.
+     */
     public function __construct(
         private readonly ScoltaConfig $config,
         private readonly string $indexOutputDir,
         private readonly ?string $pagefindBinaryPath,
         private readonly ?string $projectDir,
+        private readonly ?CacheDriverInterface $cache = null,
     ) {}
 
     /**
      * Run all health checks and return a structured result.
      *
-     * @return array{status: string, ai_configured: bool, ai_provider: string, pagefind_available: bool, wasm_available: bool, index_exists: bool, pagefind: array, wasm: array}
+     * `ai_configured` states that credentials are present; `ai_usable` states
+     * that they are also not known to be expired/auth-failing. The two
+     * diverged silently before: an expired Amazee trial key kept
+     * `ai_configured: true` for ~24h while every AI call failed (django demo
+     * outage, 2026-06-09).
+     *
+     * @return array{status: string, ai_configured: bool, ai_usable: bool, ai_auth_failing: bool, ai_provider: string, pagefind_available: bool, wasm_available: bool, index_exists: bool, pagefind: array, wasm: array}
      * @since 1.0.0
      * @stability stable
      */
@@ -50,8 +68,16 @@ final class HealthChecker
 
         $aiConfigured = trim($this->config->aiApiKey) !== '';
 
+        // "Configured" must not imply "usable": stored credentials can be
+        // expired/revoked server-side. KeyExpiryRecovery records auth failures
+        // in the cache at call time; reading that marker here keeps health
+        // truthful without adding a live API call per health request.
+        $aiAuthFailing = $this->cache !== null
+            && (bool) $this->cache->get(KeyExpiryRecovery::CACHE_KEY_AUTH_FAILURE);
+        $aiUsable = $aiConfigured && !$aiAuthFailing;
+
         $status = 'ok';
-        if (!$indexExists || !$aiConfigured) {
+        if (!$indexExists || !$aiUsable) {
             $status = 'degraded';
         }
 
@@ -71,6 +97,8 @@ final class HealthChecker
             'status' => $status,
             'ai_provider' => $this->config->aiProvider ?: 'anthropic',
             'ai_configured' => $aiConfigured,
+            'ai_usable' => $aiUsable,
+            'ai_auth_failing' => $aiAuthFailing,
             'pagefind_available' => $binaryStatus['available'],
             'wasm_available' => false,
             'index_exists' => $indexExists,
