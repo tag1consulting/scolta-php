@@ -647,6 +647,78 @@ class AiEndpointHandlerTest extends TestCase
         );
     }
 
+    public function testSortIntentPromptForbidsBuriedSortPhrases(): void
+    {
+        // Regression (terra, 2026-06-09): a sort-like word buried in a long
+        // natural-language query triggered `price asc` even though sorting was
+        // not the query's purpose.
+        $ai = new PromptCapturingAiService('{"terms": ["gem", "rock"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $handler->handleExpandQuery('test');
+
+        $this->assertStringContainsString(
+            'buried inside a longer descriptive or conversational query is NOT primary sort intent',
+            $ai->lastSystemPrompt,
+            'Sort intent prompt must rule out sort-like words buried in longer queries',
+        );
+        $this->assertStringContainsString(
+            'would the user feel their question was answered by an unsorted list',
+            $ai->lastSystemPrompt,
+            'Sort intent prompt must give the unsorted-list litmus test for primary intent',
+        );
+    }
+
+    public function testSortIntentPromptForbidsCommonnessFieldSubstitution(): void
+    {
+        // Regression (wikipedia, 2026-06-09): "most common elements" mapped to
+        // reference_count desc — reference_count measures citations, not
+        // commonness. The discovery-qualifier rule existed but the field-mapping
+        // examples did not name this substitution as WRONG.
+        $ai = new PromptCapturingAiService('{"terms": ["gem", "rock"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['reference_count']);
+
+        $handler->handleExpandQuery('test');
+
+        $this->assertStringContainsString(
+            'WRONG: "most common elements" → reference_count desc',
+            $ai->lastSystemPrompt,
+            'Sort intent prompt must name the commonness→reference_count substitution as WRONG',
+        );
+    }
+
+    public function testSortIntentPromptAffirmsRecencyPositivesWhenDateFieldExists(): void
+    {
+        // Regression (apollo, 2026-06-09): "oldest articles" / "latest news"
+        // persistently failed to fire on a date-sortable corpus (~1/3 detection
+        // for "newest posts"). Root cause: every recency example in the prompt
+        // demonstrated the no-date-field → null branch, biasing the model to
+        // suppress recency sorts even when a date field exists. The prompt must
+        // carry explicit positive recency examples.
+        $ai = new PromptCapturingAiService('{"terms": ["gem", "rock"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['date']);
+
+        $handler->handleExpandQuery('test');
+
+        $this->assertStringContainsString(
+            'RIGHT: "newest posts" with a date field available → date field, desc',
+            $ai->lastSystemPrompt,
+        );
+        $this->assertStringContainsString(
+            'RIGHT: "oldest articles" with a date field available → date field, asc',
+            $ai->lastSystemPrompt,
+        );
+        $this->assertStringContainsString(
+            'RIGHT: "latest news" with a date field available → date field, desc',
+            $ai->lastSystemPrompt,
+        );
+        $this->assertStringContainsString(
+            'a date/time field IS in the list → proceed to the next steps',
+            $ai->lastSystemPrompt,
+            'STEP 0 must demonstrate the field-exists → proceed branch, not only the null branch',
+        );
+    }
+
     // ===================================================================
     // Subject terms — parsing
     // ===================================================================
@@ -810,6 +882,113 @@ class AiEndpointHandlerTest extends TestCase
         $this->assertNotEmpty($logger->errors, 'Underlying failure should be logged for diagnosis');
     }
 
+    // ===================================================================
+    // Degraded indicator: the graceful fallback must be machine-readable.
+    //
+    // Regression (django demo, 2026-06-09): an expired provider key made
+    // expand silently echo the query and summarize return {} for ~24h while
+    // every response looked healthy. The fallback behavior is correct; hiding
+    // it is not.
+    // ===================================================================
+
+    public function testExpandQueryFallbackCarriesDegradedFlagOnAiError(): void
+    {
+        $ai = new MockAiService('', throwOnMessage: true);
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleExpandQuery('test query');
+
+        $this->assertTrue($result['ok']);
+        $this->assertTrue($result['data']['degraded']);
+        $this->assertSame('ai_error', $result['data']['degraded_reason']);
+        $this->assertEquals(['test query'], $result['data']['terms']);
+    }
+
+    public function testExpandQueryFallbackCarriesDegradedFlagWhenUnconfigured(): void
+    {
+        $ai = new MockAiService('', throwApiKeyMissing: true);
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleExpandQuery('test query');
+
+        $this->assertTrue($result['ok']);
+        $this->assertTrue($result['data']['degraded']);
+        $this->assertSame('ai_unconfigured', $result['data']['degraded_reason']);
+    }
+
+    public function testExpandQuerySuccessCarriesNoDegradedFlag(): void
+    {
+        $ai = new MockAiService('{"terms": ["gem", "rock", "mineral"]}');
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleExpandQuery('stones');
+
+        $this->assertTrue($result['ok']);
+        $this->assertArrayNotHasKey('degraded', $result['data']);
+        $this->assertArrayNotHasKey('degraded_reason', $result['data']);
+    }
+
+    public function testDegradedExpandResponseIsNotCached(): void
+    {
+        $ai = new MockAiService('', throwOnMessage: true);
+        $cache = new TrackingCacheDriver();
+        $handler = $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600);
+
+        $result = $handler->handleExpandQuery('test query');
+
+        $this->assertTrue($result['data']['degraded']);
+        $this->assertSame(0, $cache->setCalls, 'A degraded fallback must not be cached — the next request should retry the AI call');
+    }
+
+    public function testSummarizeFallbackCarriesDegradedFlagOnAiError(): void
+    {
+        $ai = new MockAiService('', throwOnMessage: true);
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleSummarize('test', 'some context');
+
+        $this->assertTrue($result['ok']);
+        $this->assertTrue($result['data']['degraded']);
+        $this->assertSame('ai_error', $result['data']['degraded_reason']);
+        $this->assertArrayNotHasKey('summary', $result['data']);
+    }
+
+    public function testSummarizeFallbackCarriesDegradedFlagWhenUnconfigured(): void
+    {
+        $ai = new MockAiService('', throwApiKeyMissing: true);
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleSummarize('test', 'some context');
+
+        $this->assertTrue($result['ok']);
+        $this->assertTrue($result['data']['degraded']);
+        $this->assertSame('ai_unconfigured', $result['data']['degraded_reason']);
+    }
+
+    public function testSummarizeSuccessCarriesNoDegradedFlag(): void
+    {
+        $ai = new MockAiService('A summary.');
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleSummarize('test', 'some context');
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('A summary.', $result['data']['summary']);
+        $this->assertArrayNotHasKey('degraded', $result['data']);
+    }
+
+    public function testDegradedSummarizeResponseIsNotCached(): void
+    {
+        $ai = new MockAiService('', throwOnMessage: true);
+        $cache = new TrackingCacheDriver();
+        $handler = $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600);
+
+        $result = $handler->handleSummarize('test', 'some context');
+
+        $this->assertTrue($result['data']['degraded']);
+        $this->assertSame(0, $cache->setCalls, 'A degraded fallback must not be cached — the next request should retry the AI call');
+    }
+
     public function testSummarizeDegradesToNoSummaryOnAiException(): void
     {
         $ai = new MockAiService('', throwOnMessage: true);
@@ -827,7 +1006,7 @@ class AiEndpointHandlerTest extends TestCase
 
         $this->assertTrue($result['ok']);
         $this->assertArrayNotHasKey('status', $result);
-        $this->assertEquals([], $result['data']);
+        $this->assertArrayNotHasKey('summary', $result['data']);
         $this->assertNotEmpty($logger->errors, 'Underlying failure should be logged for diagnosis');
     }
 
@@ -888,7 +1067,7 @@ class AiEndpointHandlerTest extends TestCase
 
         $this->assertTrue($result['ok']);
         $this->assertArrayNotHasKey('status', $result);
-        $this->assertEquals([], $result['data']);
+        $this->assertArrayNotHasKey('summary', $result['data']);
         $this->assertNotEmpty($logger->errors, 'The 401 should be preserved in the server log');
     }
 
@@ -945,7 +1124,7 @@ class AiEndpointHandlerTest extends TestCase
 
         $this->assertTrue($result['ok']);
         $this->assertArrayNotHasKey('status', $result);
-        $this->assertEquals([], $result['data']);
+        $this->assertArrayNotHasKey('summary', $result['data']);
         $this->assertNotEmpty($logger->errors, 'The 429 should be preserved in the server log');
     }
 
@@ -988,7 +1167,7 @@ class AiEndpointHandlerTest extends TestCase
     // No API key — graceful degradation
     // ===================================================================
 
-    public function testSummarizeReturns200WithEmptyDataWhenNoApiKey(): void
+    public function testSummarizeReturns200WithNoSummaryWhenNoApiKey(): void
     {
         $ai = new MockAiService('', throwApiKeyMissing: true);
         $handler = $this->makeHandler(aiService: $ai);
@@ -996,7 +1175,7 @@ class AiEndpointHandlerTest extends TestCase
         $result = $handler->handleSummarize('test query', 'some context');
 
         $this->assertTrue($result['ok']);
-        $this->assertEquals([], $result['data']);
+        $this->assertArrayNotHasKey('summary', $result['data']);
         $this->assertArrayNotHasKey('status', $result);
     }
 
