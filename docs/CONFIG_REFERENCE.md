@@ -361,7 +361,7 @@ Returns `array<array{name: string, status: string, message: string}>` where `sta
 
 | # | Check | Status on Failure | Description |
 |---|-------|-------------------|-------------|
-| 1 | PHP version | `fail` | Requires PHP 8.2+ |
+| 1 | PHP version | `fail` | Requires PHP 8.1+ |
 | 2 | AI API key | `warn` | Checks if an API key is provided |
 | 3 | Browser WASM | `warn` | Verifies `scolta_core_bg.wasm` and `scolta_core.js` exist in the assets directory |
 | 4 | Pagefind binary | `warn` | Resolves Pagefind binary via `PagefindBinary`; falls back to PHP indexer if absent |
