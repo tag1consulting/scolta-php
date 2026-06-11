@@ -437,4 +437,221 @@ class AiServiceAdapterTest extends TestCase
         $this->expectExceptionMessage('converted: Budget has been exceeded!');
         $adapter->message('sys', 'user');
     }
+
+    // -------------------------------------------------------------------
+    // Key-expiry recovery — expired Amazee trial key triggers a guarded
+    // re-provision and exactly one retry with the fresh credentials.
+    //
+    // Regression (django demo, 2026-06-09): expired key → every call 400
+    // expired_key → expand silently echoed the query while ensureAiAvailable
+    // no-opped on the stored dead credentials.
+    // -------------------------------------------------------------------
+
+    private const FRESH_TRIAL_RESPONSE = '{"key": {"litellm_token": "sk-fresh-token", "litellm_api_url": "https://llm.test.amazee.ai", "region": "test-region"}}';
+    private const MODEL_INFO_RESPONSE = '{"data": [{"model_name": "claude-sonnet-4-5"}, {"model_name": "claude-haiku-4-5"}]}';
+
+    /**
+     * Build an adapter whose first client throws $toThrow, with recovery wired
+     * against a mocked Amazee provisioning API. The recovered client returns
+     * 'recovered response' and records the credentials it was built from.
+     */
+    private function makeRecoveringAdapter(
+        \RuntimeException $toThrow,
+        array $provisioningResponses,
+        ?\GuzzleHttp\Handler\MockHandler &$mock = null,
+        ?InMemoryAmazeeStorage &$storage = null,
+    ): AiServiceAdapter {
+        $config = ScoltaConfig::fromArray([]);
+
+        $throwingClient = new class ($toThrow) extends AiClient {
+            private \RuntimeException $toThrow;
+
+            public function __construct(\RuntimeException $toThrow)
+            {
+                $this->toThrow = $toThrow;
+                parent::__construct([]);
+            }
+
+            public function message(string $systemPrompt, string $userMessage, int $maxTokens = 1024, ?string $model = null): string
+            {
+                throw $this->toThrow;
+            }
+
+            public function conversation(string $systemPrompt, array $messages, int $maxTokens = 1024, ?string $model = null): string
+            {
+                throw $this->toThrow;
+            }
+        };
+
+        $adapter = new class ($config, $throwingClient) extends AiServiceAdapter {
+            public ?array $recoveredWith = null;
+
+            private AiClient $initialClient;
+
+            public function __construct(ScoltaConfig $config, AiClient $initialClient)
+            {
+                parent::__construct($config);
+                $this->initialClient = $initialClient;
+            }
+
+            protected function createClient(): AiClient
+            {
+                return $this->initialClient;
+            }
+
+            protected function createRecoveredClient(array $credentials): AiClient
+            {
+                $this->recoveredWith = $credentials;
+
+                return new class extends AiClient {
+                    public function __construct()
+                    {
+                        parent::__construct([]);
+                    }
+
+                    public function message(string $systemPrompt, string $userMessage, int $maxTokens = 1024, ?string $model = null): string
+                    {
+                        return 'recovered response';
+                    }
+
+                    public function conversation(string $systemPrompt, array $messages, int $maxTokens = 1024, ?string $model = null): string
+                    {
+                        return 'recovered response';
+                    }
+                };
+            }
+        };
+
+        $storage = new InMemoryAmazeeStorage([
+            'litellm_token' => 'sk-expired-token',
+            'litellm_api_url' => 'https://llm.test.amazee.ai',
+            'region' => 'test-region',
+        ]);
+
+        $mock = new \GuzzleHttp\Handler\MockHandler($provisioningResponses);
+        $amazeeClient = new \Tag1\Scolta\AiProvider\Amazee\AmazeeClient(
+            'https://api.amazee.ai',
+            new \GuzzleHttp\Client(['handler' => \GuzzleHttp\HandlerStack::create($mock)]),
+        );
+
+        $adapter->setKeyExpiryRecovery(new \Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery(
+            storage: $storage,
+            cache: new InMemoryAdapterCache(),
+            client: $amazeeClient,
+        ));
+
+        return $adapter;
+    }
+
+    public function testExpiredKeyReprovisionsOnceAndRetriesWithFreshCreds(): void
+    {
+        $adapter = $this->makeRecoveringAdapter(
+            new \RuntimeException('Scolta AI API request failed: 400 code: expired_key'),
+            [
+                new \GuzzleHttp\Psr7\Response(200, [], self::FRESH_TRIAL_RESPONSE),
+                new \GuzzleHttp\Psr7\Response(200, [], self::MODEL_INFO_RESPONSE),
+            ],
+            $mock,
+            $storage,
+        );
+
+        $result = $adapter->message('sys', 'user');
+
+        $this->assertSame('recovered response', $result);
+        $this->assertSame('sk-fresh-token', $adapter->recoveredWith['litellm_token'], 'Retry client must be built from the freshly provisioned credentials');
+        $this->assertSame('sk-fresh-token', $storage->load()['litellm_token'], 'Fresh credentials must be stored for subsequent requests');
+        $this->assertSame(0, $mock->count(), 'Re-provision attempted exactly once');
+    }
+
+    public function testExpiredKeyRecoveryWorksOnConversationPath(): void
+    {
+        $adapter = $this->makeRecoveringAdapter(
+            new \RuntimeException('Scolta AI API request failed: 401 invalid_api_key'),
+            [
+                new \GuzzleHttp\Psr7\Response(200, [], self::FRESH_TRIAL_RESPONSE),
+                new \GuzzleHttp\Psr7\Response(200, [], self::MODEL_INFO_RESPONSE),
+            ],
+        );
+
+        $result = $adapter->conversation('sys', [['role' => 'user', 'content' => 'hi']]);
+
+        $this->assertSame('recovered response', $result);
+    }
+
+    public function testBudgetExceededDoesNotTriggerReprovision(): void
+    {
+        // Budget exhaustion must route to the budget path, not re-provisioning:
+        // a fresh trial key would reset the spend ceiling, which is the upgrade
+        // flow's job. The empty MockHandler queue makes any provisioning call blow up.
+        $adapter = $this->makeRecoveringAdapter(
+            new \RuntimeException('Budget has been exceeded!'),
+            [],
+            $mock,
+            $storage,
+        );
+
+        try {
+            $adapter->message('sys', 'user');
+            $this->fail('Budget error must propagate');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('Budget has been exceeded!', $e->getMessage());
+        }
+
+        $this->assertSame('sk-expired-token', $storage->load()['litellm_token'], 'Storage untouched by a budget error');
+    }
+
+    public function testAuthFailureWithoutRecoveryWiredStillPropagates(): void
+    {
+        $adapter = $this->makeThrowingAdapter(new \RuntimeException('400 code: expired_key'));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('expired_key');
+        $adapter->message('sys', 'user');
+    }
+}
+
+/**
+ * Minimal in-memory credential store for recovery tests.
+ */
+class InMemoryAmazeeStorage implements \Tag1\Scolta\AiProvider\Amazee\ConfigStorageInterface
+{
+    public function __construct(private ?array $stored = null) {}
+
+    public function store(string $litellmToken, string $litellmApiUrl, string $region): void
+    {
+        $this->stored = [
+            'litellm_token' => $litellmToken,
+            'litellm_api_url' => $litellmApiUrl,
+            'region' => $region,
+        ];
+    }
+
+    public function load(): ?array
+    {
+        return $this->stored;
+    }
+
+    public function clear(): void
+    {
+        $this->stored = null;
+    }
+}
+
+/**
+ * Minimal in-memory cache for recovery tests.
+ */
+class InMemoryAdapterCache implements \Tag1\Scolta\Cache\CacheDriverInterface
+{
+    /** @var array<string, mixed> */
+    private array $store = [];
+
+    public function get(string $key): mixed
+    {
+        return $this->store[$key] ?? null;
+    }
+
+    public function set(string $key, mixed $value, int $ttlSeconds): void
+    {
+        $this->store[$key] = $value;
+    }
 }

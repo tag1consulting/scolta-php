@@ -172,4 +172,73 @@ class AutoProvisionerTest extends TestCase
 
         $this->assertFalse($result);
     }
+
+    // -------------------------------------------------------------------
+    // reprovision() — the expired-key recovery entry point.
+    // -------------------------------------------------------------------
+
+    public function testReprovisionReplacesStoredCredentials(): void
+    {
+        // Unlike ensureAiAvailable(), stored credentials must NOT short-circuit:
+        // they are known-bad (expired/revoked) when this path runs.
+        $stored = [
+            'litellm_token' => 'expired-tok',
+            'litellm_api_url' => 'https://trial.amazee.ai',
+            'region' => 'eu-west',
+        ];
+        $storage = $this->createMock(ConfigStorageInterface::class);
+        $storage->method('load')->willReturnCallback(function () use (&$stored) {
+            return $stored;
+        });
+        $storage->expects($this->once())
+            ->method('clear')
+            ->willReturnCallback(function () use (&$stored): void {
+                $stored = null;
+            });
+        $storage->expects($this->once())
+            ->method('store')
+            ->with('new-tok', 'https://trial.amazee.ai', 'eu-west');
+
+        $client = $this->makeClient([
+            new Response(200, [], json_encode([
+                'key' => [
+                    'litellm_token' => 'new-tok',
+                    'litellm_api_url' => 'https://trial.amazee.ai',
+                    'region' => 'eu-west',
+                ],
+            ])),
+            new Response(200, [], json_encode(['data' => []])),
+        ]);
+
+        $result = AutoProvisioner::reprovision($storage, client: $client);
+
+        $this->assertTrue($result);
+    }
+
+    public function testReprovisionReturnsFalseOnApiError(): void
+    {
+        $stored = [
+            'litellm_token' => 'expired-tok',
+            'litellm_api_url' => 'https://trial.amazee.ai',
+            'region' => 'eu-west',
+        ];
+        $storage = $this->createMock(ConfigStorageInterface::class);
+        $storage->method('load')->willReturnCallback(function () use (&$stored) {
+            return $stored;
+        });
+        $storage->expects($this->once())
+            ->method('clear')
+            ->willReturnCallback(function () use (&$stored): void {
+                $stored = null;
+            });
+        $storage->expects($this->never())->method('store');
+
+        $client = $this->makeClient([
+            new Response(500, [], json_encode(['detail' => 'Server error.'])),
+        ]);
+
+        $result = AutoProvisioner::reprovision($storage, client: $client);
+
+        $this->assertFalse($result);
+    }
 }

@@ -529,6 +529,12 @@
       }
       const data = await resp.json();
       debugLog("[scolta:expand] response:", data);
+      if (data && data.degraded) {
+        // Server AI call failed and the response is an unexpanded fallback
+        // (HTTP 200 by design). Surface it so an AI outage is visible in the
+        // console instead of masquerading as a normal empty expansion.
+        console.warn("[scolta:expand] degraded response (server AI unavailable):", data.degraded_reason || 'unknown');
+      }
       if (Array.isArray(data)) {
         return { terms: data, sort_hint: null, subject_terms: null, filter_hint: null };
       }
@@ -1856,9 +1862,15 @@
       if (hasFilterMatch) {
         debugLog('[scolta:sort] Subject filter match:', JSON.stringify(subjectFilters));
       } else if (subjectTerms && subjectTerms.length > 0) {
-        debugLog('[scolta:sort] No filter match for subject terms — dropping sort, using relevance');
-        currentSortOverride = null;
-        useSortPath = false;
+        // An unmatched subject must NOT drop the sort: generic subjects that
+        // name the corpus itself ("posts" on a blog, "crystals" in a crystal
+        // shop) never map to a facet, and dropping silently ignored the
+        // user's explicit sort intent ("newest posts" → no reorder, no
+        // badge). Fall through to an unscoped sort instead — the sort badge
+        // stays visible and dismissible, topical subjects usually map via
+        // the exact/substring/subcategory passes above, and a sort field
+        // absent from all results still falls back to relevance below.
+        debugLog('[scolta:sort] No filter match for subject terms — applying sort unscoped');
       } else {
         debugLog('[scolta:sort] No subject terms, using sort only');
       }

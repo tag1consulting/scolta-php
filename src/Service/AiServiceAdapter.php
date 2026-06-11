@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tag1\Scolta\Service;
 
 use Tag1\Scolta\AiClient;
+use Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery;
 use Tag1\Scolta\Config\ScoltaConfig;
 use Tag1\Scolta\Prompt\DefaultPrompts;
 
@@ -29,9 +30,28 @@ class AiServiceAdapter
 
     private ?AiClient $client = null;
 
+    private ?KeyExpiryRecovery $keyRecovery = null;
+
     public function __construct(ScoltaConfig $config)
     {
         $this->config = $config;
+    }
+
+    /**
+     * Wire Amazee key-expiry recovery into the AI call path.
+     *
+     * When set, an auth-class failure (expired/revoked trial key) on any AI
+     * call triggers a one-shot re-provision through the recovery's guarded
+     * path and, on success, a single retry with the fresh credentials.
+     * Without it (an explicit user-configured key, or a platform that has not
+     * adopted recovery yet) behavior is unchanged: the failure propagates.
+     *
+     * @since 1.0.4
+     * @stability experimental
+     */
+    public function setKeyExpiryRecovery(KeyExpiryRecovery $recovery): void
+    {
+        $this->keyRecovery = $recovery;
     }
 
     /**
@@ -70,6 +90,9 @@ class AiServiceAdapter
             return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens);
         } catch (\RuntimeException $e) {
             $this->handlePossibleBudgetException($e);
+            if ($this->recoverFromAuthFailure($e)) {
+                return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens);
+            }
             throw $e;
         }
     }
@@ -99,6 +122,9 @@ class AiServiceAdapter
             return $this->getClient()->conversation($systemPrompt, $messages, $maxTokens);
         } catch (\RuntimeException $e) {
             $this->handlePossibleBudgetException($e);
+            if ($this->recoverFromAuthFailure($e)) {
+                return $this->getClient()->conversation($systemPrompt, $messages, $maxTokens);
+            }
             throw $e;
         }
     }
@@ -135,6 +161,12 @@ class AiServiceAdapter
             return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens, $model);
         } catch (\RuntimeException $e) {
             $this->handlePossibleBudgetException($e);
+            if ($this->recoverFromAuthFailure($e)) {
+                $model = ($operation === 'expand_query' && $this->config->aiExpansionModel !== '')
+                    ? $this->config->aiExpansionModel
+                    : null;
+                return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens, $model);
+            }
             throw $e;
         }
     }
@@ -269,5 +301,55 @@ class AiServiceAdapter
     {
         // No-op by default. Platform adapters override to convert/notify on
         // budget-exhaustion errors before the exception propagates.
+    }
+
+    /**
+     * Attempt expired-key recovery and prepare a fresh client for one retry.
+     *
+     * Returns true only when recovery is wired, the failure is auth-class
+     * (never budget-exhaustion — KeyExpiryRecovery excludes it), the guarded
+     * re-provision succeeded, and fresh credentials are available. The caller
+     * then retries the original request exactly once; a failure of that retry
+     * propagates normally (the recovery's window guard prevents another
+     * re-provision attempt).
+     */
+    private function recoverFromAuthFailure(\RuntimeException $e): bool
+    {
+        if ($this->keyRecovery === null) {
+            return false;
+        }
+
+        if (!$this->keyRecovery->handleAuthFailure($e)) {
+            return false;
+        }
+
+        $credentials = $this->keyRecovery->credentials();
+        if ($credentials === null) {
+            return false;
+        }
+
+        $this->client = $this->createRecoveredClient($credentials);
+
+        return true;
+    }
+
+    /**
+     * Build an AiClient from freshly re-provisioned Amazee credentials.
+     *
+     * Recovered credentials are by definition Amazee LiteLLM ones, so the
+     * provider is the OpenAI-compatible path regardless of what the (stale)
+     * config says. Override in platform subclasses to inject a custom HTTP
+     * client, mirroring createClient().
+     *
+     * @param array{litellm_token: string, litellm_api_url: string, region: string} $credentials
+     */
+    protected function createRecoveredClient(array $credentials): AiClient
+    {
+        $config = $this->config->toAiClientConfig();
+        $config['provider'] = 'openai';
+        $config['api_key'] = $credentials['litellm_token'];
+        $config['base_url'] = $credentials['litellm_api_url'];
+
+        return new AiClient($config);
     }
 }

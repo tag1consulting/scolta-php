@@ -199,6 +199,79 @@ class HealthCheckerTest extends TestCase
     // Helpers
     // -------------------------------------------------------------------
 
+    // -------------------------------------------------------------------
+    // AI usability — "configured" must not imply "usable"
+    //
+    // Regression (django demo, 2026-06-09): an expired Amazee trial key kept
+    // health reporting ai_configured: true for ~24h while every AI call
+    // returned 400 expired_key.
+    // -------------------------------------------------------------------
+
+    public function testStoredButAuthFailingCredentialsReportAiNotUsable(): void
+    {
+        file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
+
+        $cache = new HealthTestCache();
+        $cache->set(\Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery::CACHE_KEY_AUTH_FAILURE, time(), 3600);
+
+        $config = ScoltaConfig::fromArray(['ai_api_key' => 'sk-stored-but-expired']);
+        $checker = new HealthChecker($config, $this->tempDir, null, null, $cache);
+
+        $result = $checker->check();
+
+        $this->assertTrue($result['ai_configured'], 'Credentials ARE present — configured stays true');
+        $this->assertTrue($result['ai_auth_failing']);
+        $this->assertFalse($result['ai_usable'], 'Known-expired credentials must not report AI as usable');
+        $this->assertEquals('degraded', $result['status']);
+    }
+
+    public function testConfiguredAndNotAuthFailingReportsUsable(): void
+    {
+        file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
+
+        $config = ScoltaConfig::fromArray(['ai_api_key' => 'sk-good']);
+        $checker = new HealthChecker($config, $this->tempDir, null, null, new HealthTestCache());
+
+        $result = $checker->check();
+
+        $this->assertTrue($result['ai_usable']);
+        $this->assertFalse($result['ai_auth_failing']);
+        $this->assertEquals('ok', $result['status']);
+    }
+
+    public function testWithoutCacheAiUsableMirrorsConfigured(): void
+    {
+        // Adapters that have not wired recovery yet pass no cache; behavior
+        // is unchanged from before the ai_usable field existed.
+        file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
+
+        $config = ScoltaConfig::fromArray(['ai_api_key' => 'sk-good']);
+        $checker = new HealthChecker($config, $this->tempDir, null, null);
+
+        $result = $checker->check();
+
+        $this->assertTrue($result['ai_usable']);
+        $this->assertFalse($result['ai_auth_failing']);
+        $this->assertEquals('ok', $result['status']);
+    }
+
+    public function testClearedAuthFailureMarkerRestoresUsable(): void
+    {
+        file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
+
+        $cache = new HealthTestCache();
+        // KeyExpiryRecovery clears the marker by overwriting it with false.
+        $cache->set(\Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery::CACHE_KEY_AUTH_FAILURE, false, 1);
+
+        $config = ScoltaConfig::fromArray(['ai_api_key' => 'sk-recovered']);
+        $checker = new HealthChecker($config, $this->tempDir, null, null, $cache);
+
+        $result = $checker->check();
+
+        $this->assertTrue($result['ai_usable']);
+        $this->assertEquals('ok', $result['status']);
+    }
+
     private function removeDir(string $dir): void
     {
         if (!is_dir($dir)) {
@@ -212,5 +285,24 @@ class HealthCheckerTest extends TestCase
             $file->isDir() ? rmdir($file->getRealPath()) : unlink($file->getRealPath());
         }
         rmdir($dir);
+    }
+}
+
+/**
+ * Minimal in-memory cache for health tests.
+ */
+class HealthTestCache implements \Tag1\Scolta\Cache\CacheDriverInterface
+{
+    /** @var array<string, mixed> */
+    private array $store = [];
+
+    public function get(string $key): mixed
+    {
+        return $this->store[$key] ?? null;
+    }
+
+    public function set(string $key, mixed $value, int $ttlSeconds): void
+    {
+        $this->store[$key] = $value;
     }
 }

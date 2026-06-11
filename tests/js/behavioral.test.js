@@ -780,3 +780,152 @@ describe('config default alignment', () => {
         }
     });
 });
+
+// =============================================================================
+// Sort-drop guard: unmatched subject terms must not silently drop the sort
+// =============================================================================
+//
+// Regression (apollo/terra, 2026-06-09): when the expand response carried
+// sort_hint + subject_terms and the subject matched no facet ("posts" on a
+// blog, "crystals" in a crystal shop — generic subjects that name the corpus
+// itself), the sort was dropped with only a debug log: no badge, no reorder.
+// The fix applies the sort unscoped in that case; a facet-matching subject
+// still scopes the sort exactly as before.
+
+describe('sort-drop guard: unmatched subject falls back to unscoped sort', () => {
+
+    const sortFlowSource = patchedSource.replace(
+        'pagefind = { init: function() { return Promise.resolve(); }, search: function() { return Promise.resolve({ results: [] }); } }',
+        'pagefind = {' +
+        '  init: function() { return Promise.resolve(); },' +
+        '  search: function(q, opts) {' +
+        '    (window.__pfCalls = window.__pfCalls || []).push({ q: q, opts: opts || null });' +
+        '    return Promise.resolve({ results: (window.__docs || []).map(function(d) { return { data: function() { return Promise.resolve(d); } }; }) });' +
+        '  },' +
+        '  filters: function() { return Promise.resolve(window.__filters || {}); }' +
+        '}'
+    ).replace(
+        '// SHARED SEARCH HELPERS',
+        '// SHARED SEARCH HELPERS\n  window.__getSortState = function() { return { currentSortOverride, allScoredResults, activeFilters, llmAppliedFilters }; };'
+    );
+
+    function createSortFlowWindow(expandResponse, pagefindFilters, docs) {
+        const dom = new JSDOM(
+            '<!DOCTYPE html><html><body><div id="scolta-search"></div></body></html>',
+            { url: 'https://example.com', runScripts: 'dangerously' }
+        );
+        const win = dom.window;
+        win.__docs = docs;
+        win.__filters = pagefindFilters;
+        win.fetch = jest.fn().mockImplementation(url => {
+            if (url === '/e') {
+                return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(expandResponse) });
+            }
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.resolve('') });
+        });
+        win.console = { log: jest.fn(), error: jest.fn(), warn: jest.fn() };
+        win.scrollTo = () => {};
+        win.eval(sortFlowSource);
+        win.scolta = {
+            scoring: {},
+            endpoints: { expand: '/e', summarize: '/s', followup: '/f' },
+            pagefindPath: '/pf.js',
+            siteName: 'Test',
+            container: '#scolta-search',
+            allowedLinkDomains: [],
+            disclaimer: '',
+        };
+        win.Scolta.init('#scolta-search');
+        return win;
+    }
+
+    const CRYSTAL_DOCS = [
+        { url: '/amethyst', meta: { title: 'Amethyst', price: '200' }, excerpt: 'purple crystal', content: 'purple quartz crystal' },
+        { url: '/quartz', meta: { title: 'Clear Quartz', price: '51' }, excerpt: 'clear crystal', content: 'clear quartz crystal' },
+        { url: '/citrine', meta: { title: 'Citrine', price: '480' }, excerpt: 'yellow crystal', content: 'yellow quartz crystal' },
+    ];
+
+    async function runSearch(win, query) {
+        const input = win.document.querySelector('#scolta-query');
+        input.value = query;
+        win.document.querySelector('#scolta-search-btn').click();
+        // Allow the primary search + expand + sort/merge promise chains to settle.
+        await new Promise(r => setTimeout(r, 150));
+    }
+
+    test('sort_hint with unmatched generic subject applies the sort and shows the badge', async () => {
+        const win = createSortFlowWindow(
+            {
+                terms: ['crystals', 'quartz', 'gem'],
+                sort_hint: { field: 'price', direction: 'asc' },
+                subject_terms: ['crystals'],
+            },
+            { category: { Gemstones: 3 } },  // 'crystals' matches no facet value
+            CRYSTAL_DOCS
+        );
+
+        await runSearch(win, 'cheapest crystals');
+
+        const state = win.__getSortState();
+        expect(state.currentSortOverride).toEqual({ field: 'price', direction: 'asc' });
+
+        // The sort must actually reorder: price ascending.
+        const prices = state.allScoredResults.map(r => parseFloat(r.data.meta.price));
+        expect(prices).toEqual([51, 200, 480]);
+
+        // Badge visible and dismissible.
+        const badge = win.document.querySelector('#scolta-sort-indicator');
+        expect(badge.style.display).toBe('block');
+        expect(badge.innerHTML).toContain('Sorted by: price');
+
+        // No facet match → no LLM filter applied, no filter badge.
+        expect(Object.keys(state.llmAppliedFilters)).toEqual([]);
+        expect(win.document.querySelector('#scolta-filter-indicator').style.display).toBe('none');
+    });
+
+    test('sort_hint with facet-matching subject keeps the scoped-sort behavior', async () => {
+        const win = createSortFlowWindow(
+            {
+                terms: ['gemstones', 'jewels'],
+                sort_hint: { field: 'price', direction: 'desc' },
+                subject_terms: ['gemstones'],
+            },
+            { category: { Gemstones: 3, Tools: 2 } },  // exact match for 'gemstones'
+            CRYSTAL_DOCS
+        );
+
+        await runSearch(win, 'most expensive gemstones');
+
+        const state = win.__getSortState();
+        expect(state.currentSortOverride).toEqual({ field: 'price', direction: 'desc' });
+
+        // Subject scoped the search: the matched facet is applied as a filter.
+        expect(state.llmAppliedFilters).toEqual({ category: 'Gemstones' });
+        expect([...state.activeFilters.category]).toEqual(['Gemstones']);
+
+        const filterBadge = win.document.querySelector('#scolta-filter-indicator');
+        expect(filterBadge.style.display).toBe('block');
+        expect(filterBadge.innerHTML).toContain('category');
+        expect(filterBadge.innerHTML).toContain('Gemstones');
+
+        // Sort applied within the scope: price descending.
+        const prices = state.allScoredResults.map(r => parseFloat(r.data.meta.price));
+        expect(prices).toEqual([480, 200, 51]);
+
+        expect(win.document.querySelector('#scolta-sort-indicator').style.display).toBe('block');
+    });
+
+    test('no sort_hint shows no sort badge', async () => {
+        const win = createSortFlowWindow(
+            { terms: ['crystals', 'quartz', 'gem'], sort_hint: null },
+            { category: { Gemstones: 3 } },
+            CRYSTAL_DOCS
+        );
+
+        await runSearch(win, 'crystals');
+
+        const state = win.__getSortState();
+        expect(state.currentSortOverride).toBeNull();
+        expect(win.document.querySelector('#scolta-sort-indicator').style.display).toBe('none');
+    });
+});
