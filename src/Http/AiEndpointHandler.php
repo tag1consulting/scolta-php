@@ -158,7 +158,7 @@ class AiEndpointHandler
             return ['ok' => true, 'data' => $payload];
         } catch (ApiKeyMissingException $e) {
             // AI is unconfigured — an expected state, degrade silently (no log).
-            return ['ok' => true, 'data' => ['terms' => [$query], 'expand_primary_weight' => $this->expandPrimaryWeight]];
+            return ['ok' => true, 'data' => $this->degradedExpandPayload($query, 'ai_unconfigured')];
         } catch (\Exception $e) {
             // Query expansion is a non-essential search enhancement. Any provider
             // failure (invalid key, rate limit, transport error, malformed
@@ -168,8 +168,34 @@ class AiEndpointHandler
             // the server log so genuine provider/config outages stay diagnosable.
             $this->logger->error('Scolta query expansion failed, serving unexpanded results', ['exception' => $e]);
 
-            return ['ok' => true, 'data' => ['terms' => [$query], 'expand_primary_weight' => $this->expandPrimaryWeight]];
+            return ['ok' => true, 'data' => $this->degradedExpandPayload($query, 'ai_error')];
         }
+    }
+
+    /**
+     * Build the unexpanded fallback payload served when the AI path fails.
+     *
+     * The fallback itself is correct graceful degradation (search keeps
+     * working without expansion), but it used to be indistinguishable from a
+     * real single-term expansion — an expired provider key could silently kill
+     * AI fleet-wide while every response still looked healthy. The `degraded`
+     * flag makes the fallback machine-readable so clients and monitoring can
+     * see it. Degraded payloads are never cached: callers return them directly
+     * instead of going through the cache-write path, so the next request
+     * retries the AI call.
+     *
+     * @param string $query  The original query, echoed as the sole term.
+     * @param string $reason Machine-readable reason: 'ai_unconfigured' or 'ai_error'.
+     * @return array{terms: array<string>, expand_primary_weight: float, degraded: bool, degraded_reason: string}
+     */
+    private function degradedExpandPayload(string $query, string $reason): array
+    {
+        return [
+            'terms'                 => [$query],
+            'expand_primary_weight' => $this->expandPrimaryWeight,
+            'degraded'              => true,
+            'degraded_reason'       => $reason,
+        ];
     }
 
     /**
@@ -232,7 +258,7 @@ class AiEndpointHandler
             return ['ok' => true, 'data' => $result];
         } catch (ApiKeyMissingException $e) {
             // AI is unconfigured — an expected state, degrade silently (no log).
-            return ['ok' => true, 'data' => []];
+            return ['ok' => true, 'data' => ['degraded' => true, 'degraded_reason' => 'ai_unconfigured']];
         } catch (\Exception $e) {
             // Summarization is a non-essential enhancement layered above the
             // search results. Any provider failure degrades to "no summary"
@@ -241,7 +267,7 @@ class AiEndpointHandler
             // preserved in the server log so genuine outages stay diagnosable.
             $this->logger->error('Scolta summarization failed, serving results without a summary', ['exception' => $e]);
 
-            return ['ok' => true, 'data' => []];
+            return ['ok' => true, 'data' => ['degraded' => true, 'degraded_reason' => 'ai_error']];
         }
     }
 
@@ -553,16 +579,19 @@ SORT INTENT (optional):
 Available sortable fields:
 {FIELD_LIST}
 
-Only add a "sort" key when sorting results is the query's PRIMARY purpose — the user explicitly wants results ordered by a specific field's value.
+Only add a "sort" key when sorting results is the query's PRIMARY purpose — the user explicitly wants results ordered by a specific field's value. A sort-like word buried inside a longer descriptive or conversational query is NOT primary sort intent: it modifies the thing being described, not the ordering of results. Test: would the user feel their question was answered by an unsorted list? If yes, do NOT sort.
+Example: "looking for a meaningful gift for someone who appreciates affordable natural beauty" → "affordable" describes the gift, the user is not asking for a price ordering → no sort.
+Example: "cheapest crystals" → the ENTIRE query is a sort request plus a subject → price asc.
 
 Format: {"terms": [...], "sort": {"field": "<field_name>", "direction": "asc|desc"}, "subject_terms": ["..."]}
 
 DECISION SEQUENCE — follow in order, stop at the first match:
 
 STEP 0: FIELD AVAILABILITY CHECK (always perform first)
-Identify what concept the user's sort intent implies (recency, length, price, citation count, etc.). Check if ANY available sortable field directly measures that exact concept. If no field measures it, set sort to null and skip all further steps. Do NOT substitute an unrelated field.
-Example: "newest articles" → concept is RECENCY → requires a date/time field → no date field in the list → sort is null, STOP.
-Example: "oldest history articles" → concept is RECENCY → requires a date/time field → no date field in the list → sort is null, STOP.
+Identify what concept the user's sort intent implies (recency, length, price, citation count, etc.). Check if ANY available sortable field directly measures that exact concept. If a field measures it, PROCEED to the next steps — the availability check passing never by itself rules sort out. If no field measures it, set sort to null and skip all further steps. Do NOT substitute an unrelated field.
+Example: "newest articles" → concept is RECENCY → a date/time field IS in the list → proceed to the next steps.
+Example: "oldest history articles" → concept is RECENCY → no date/time field in the list → sort is null, STOP. Do NOT substitute word_count or any other field.
+Example: "most expensive crystals" → concept is PRICE → no price field in the list → sort is null, STOP.
 
 STEP 1: EXPLICIT SORT SYNTAX (always classify)
 If the query contains "sort by", "sorted by", "order by", "arrange by", "rank by", or "group by" followed by a field name or concept, this IS sort intent regardless of query length or complexity. Map the named concept to the closest available field.
@@ -583,7 +612,7 @@ EXCEPTION: classify as sort ONLY if a field explicitly described as measuring th
 
 STEP 3: RESEARCH / ADVICE / CONVERSATIONAL QUERIES (never classify as sort)
 If the query is asking a question, seeking advice, or requesting information, do NOT add sort — even if sort-like words appear:
-- "the latest research on..." (research question, "latest" = current, not a date sort)
+- "the latest research on..." (research question, "latest" = current state of knowledge, not a date sort — but a bare "latest news" or "latest posts" with no question around it IS a recency sort, see STEP 4)
 - "cheapest way to comply with..." (advice question)
 - "first aid for radiation exposure" ("first" is not temporal)
 - "what are the newest trends in..." (informational)
@@ -602,8 +631,13 @@ If the query's primary purpose is ordering results by a measurable field, AND a 
   · Severity: "most severe", "highest risk", "most critical" → severity/risk field (desc)
   · Engagement: "most starred", "most liked", "most discussed" → engagement count field (desc)
   If there is no clear, direct semantic match between the user's language and an available field's description, do NOT add sort.
+  These short superlative-plus-subject queries ARE primary sort intent — when the matching field exists, classify them every time, not occasionally:
+  RIGHT: "newest posts" with a date field available → date field, desc
+  RIGHT: "oldest articles" with a date field available → date field, asc
+  RIGHT: "latest news" with a date field available → date field, desc
   WRONG: "newest articles" → word_count desc (word_count measures LENGTH, not DATE — this is a concept mismatch, omit sort)
   WRONG: "oldest articles" → reference_count asc (reference_count measures CITATIONS, not DATE — omit sort)
+  WRONG: "most common elements" → reference_count desc (reference_count measures CITATIONS, not COMMONNESS — "most common" is a discovery qualifier, see STEP 2; omit sort)
   RIGHT: "newest articles" when no date field exists → omit sort entirely
 
 GENERAL RULES:

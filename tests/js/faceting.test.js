@@ -1231,13 +1231,19 @@ describe('matchSubjectToFilters: subcategory matching (Pass 2)', () => {
 // ===========================================================================
 
 describe('sort-without-filter fallback: source structure', () => {
-    test('sort path drops sort when subject terms have no filter match', () => {
+    test('sort path applies the sort unscoped when subject terms have no filter match', () => {
+        // Regression 2026-06-09: dropping the sort here silently ignored
+        // explicit sort intent for generic subjects ("newest posts",
+        // "cheapest crystals") that never map to a facet.
         expect(scoltaSource).toContain(
-            'No filter match for subject terms — dropping sort, using relevance'
+            'No filter match for subject terms — applying sort unscoped'
+        );
+        expect(scoltaSource).not.toContain(
+            'dropping sort, using relevance'
         );
     });
 
-    test('sort path checks subjectTerms length before dropping sort', () => {
+    test('sort path checks subjectTerms length for the unmatched-subject branch', () => {
         expect(scoltaSource).toContain('subjectTerms && subjectTerms.length > 0');
     });
 
