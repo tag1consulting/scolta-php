@@ -75,6 +75,8 @@
       CROSS_LIST_BONUS: s.CROSS_LIST_BONUS ?? 0.05,
       EXPAND_SUBWORD_MAX_FREQ: s.EXPAND_SUBWORD_MAX_FREQ ?? 0.05,
       EXPAND_SUBWORD_DENYLIST: s.EXPAND_SUBWORD_DENYLIST ?? [],
+      FILTER_HINT_MIN_RESULTS: s.FILTER_HINT_MIN_RESULTS ?? 5,
+      FILTER_HINT_MIN_RATIO: s.FILTER_HINT_MIN_RATIO ?? 0.1,
       EXPANSION_COMBINE_MODE: s.EXPANSION_COMBINE_MODE ?? 'relevance_union',
       EXPANSION_PER_TERM_TOP_K: s.EXPANSION_PER_TERM_TOP_K ?? 3,
       AI_MAX_FOLLOWUPS: s.AI_MAX_FOLLOWUPS ?? 3,
@@ -254,6 +256,7 @@
   let pagefindBase = '';   // Set during initPagefind(); used by resolveUrl().
   let currentSortOverride = null;    // { field, direction } or null — active sort override
   let llmAppliedFilters = {};        // { dimension: value } — filters injected by LLM expansion
+  let offeredLlmFilters = {};        // { dimension: value } — LLM hints the recall guard declined to auto-apply
   let expansionInFlight = false;     // true while an expand-query HTTP request is pending
   let cachedPagefindFilters = null;  // { dimension: { value: count } } — from pagefind.filters()
 
@@ -301,6 +304,8 @@
       CROSS_LIST_BONUS: s.CROSS_LIST_BONUS ?? 0.05,
       EXPAND_SUBWORD_MAX_FREQ: s.EXPAND_SUBWORD_MAX_FREQ ?? 0.05,
       EXPAND_SUBWORD_DENYLIST: s.EXPAND_SUBWORD_DENYLIST ?? [],
+      FILTER_HINT_MIN_RESULTS: s.FILTER_HINT_MIN_RESULTS ?? 5,
+      FILTER_HINT_MIN_RATIO: s.FILTER_HINT_MIN_RATIO ?? 0.1,
       EXPANSION_COMBINE_MODE: s.EXPANSION_COMBINE_MODE ?? 'relevance_union',
       EXPANSION_PER_TERM_TOP_K: s.EXPANSION_PER_TERM_TOP_K ?? 3,
       AI_MAX_FOLLOWUPS: s.AI_MAX_FOLLOWUPS ?? 3,
@@ -1142,7 +1147,7 @@
   function renderFilterBadges() {
     const el = els.filterIndicator;
     if (!el) return;
-    if (Object.keys(llmAppliedFilters).length === 0) {
+    if (Object.keys(llmAppliedFilters).length === 0 && Object.keys(offeredLlmFilters).length === 0) {
       el.style.display = 'none';
       el.innerHTML = '';
       return;
@@ -1154,7 +1159,27 @@
         ' <button class="scolta-filter-dismiss" data-scolta-filter-dismiss="' + escapeAttr(dim) +
         '" aria-label="Remove filter">×</button></span> ';
     }
+    // Hints the recall guard declined: suggested, not applied. Clicking
+    // applies the filter explicitly — the user opted in, so no guard.
+    for (const [dim, val] of Object.entries(offeredLlmFilters)) {
+      html += '<span class="scolta-filter-badge scolta-filter-offer">' +
+        '<button class="scolta-filter-apply" data-scolta-filter-offer-dim="' + escapeAttr(dim) +
+        '" data-scolta-filter-offer-val="' + escapeAttr(val) +
+        '">Filter by ' + escapeHtml(dim) + ': ' + escapeHtml(val) + '</button></span> ';
+    }
     el.innerHTML = html;
+  }
+
+  function applyOfferedLlmFilter(dim, val) {
+    if (offeredLlmFilters[dim] !== val) return;
+    delete offeredLlmFilters[dim];
+    llmAppliedFilters[dim] = val;
+    if (!activeFilters[dim]) {
+      activeFilters[dim] = new Set();
+    }
+    activeFilters[dim].add(val);
+    renderFilterBadges();
+    doSearch(true);
   }
 
   function dismissLlmFilter(dim) {
@@ -1192,6 +1217,87 @@
       searchOpts.sort = { [sortHint.field]: sortHint.direction };
     }
     return pagefind.search(query, searchOpts);
+  }
+
+  // Count distinct results across the union of search terms under the given
+  // filters. Mirrors the union the real merged search performs, but only
+  // counts result ids — no fragment loads — so it is cheap enough to run as
+  // a probe before committing to a filter.
+  async function countUnionResults(terms, filters) {
+    const seen = new Set();
+    const searches = await Promise.all(terms.map(async (term) => {
+      try {
+        return await pagefindSearch(term, filters);
+      } catch (_) {
+        return { results: [] };
+      }
+    }));
+    for (const search of searches) {
+      for (const r of (search.results || [])) {
+        seen.add(r.id);
+      }
+    }
+    return seen.size;
+  }
+
+  // Recall guard for LLM filter hints (2026-06-09 regression: auto-applied
+  // topic filters that are individually plausible but jointly near-empty
+  // collapsed "most popular git workflows" from 76 results to 1 on the
+  // git-manual corpus). The LLM cannot know corpus counts, so no prompt fix
+  // can be complete — the client is the only layer holding ground truth.
+  //
+  // Hints are evaluated sequentially against the JOINT result count (each
+  // accepted hint tightens the base for the next), so stacked hints whose
+  // intersection collapses are caught even when each marginal looks healthy.
+  // A hint is auto-applied only when the filtered union keeps at least
+  // FILTER_HINT_MIN_RESULTS results (clamped to the unfiltered count for tiny
+  // corpora) AND at least FILTER_HINT_MIN_RATIO of the unfiltered union.
+  // Declined hints are returned as "offered" — rendered as a clickable
+  // suggestion chip instead of silently narrowing the results. Setting both
+  // knobs to 0 restores the previous always-apply behavior.
+  async function partitionFilterHintByRecall(filterHint, probeTerms, baseFilters, CONFIG) {
+    const applied = {};
+    const offered = {};
+
+    const minResults = CONFIG.FILTER_HINT_MIN_RESULTS;
+    const minRatio = CONFIG.FILTER_HINT_MIN_RATIO;
+
+    const acceptedFilters = {};
+    for (const [dim, vals] of Object.entries(baseFilters)) {
+      acceptedFilters[dim] = new Set(vals);
+    }
+
+    const baseCount = await countUnionResults(probeTerms, acceptedFilters);
+
+    for (const [dim, val] of Object.entries(filterHint)) {
+      const trialFilters = {};
+      for (const [d, vals] of Object.entries(acceptedFilters)) {
+        trialFilters[d] = new Set(vals);
+      }
+      if (!trialFilters[dim]) trialFilters[dim] = new Set();
+      trialFilters[dim].add(val);
+
+      const trialCount = await countUnionResults(probeTerms, trialFilters);
+
+      if (trialCount >= Math.min(minResults, baseCount) && trialCount >= baseCount * minRatio) {
+        applied[dim] = val;
+        acceptedFilters[dim] = trialFilters[dim];
+      } else if (trialCount > 0) {
+        offered[dim] = val;
+        debugLog('[scolta:filter] Recall guard declined hint', dim, '=', val,
+          '(' + trialCount + ' of ' + baseCount + ' results) — offering instead of applying');
+      } else {
+        // Zero matches: the hint names a dimension or value the index does
+        // not have (observed live: a filter_fields config naming "topic"
+        // while the index exposes "section" — the hint can never match).
+        // Offering a known-dead filter would just be a one-click path to an
+        // empty page, so drop it entirely.
+        debugLog('[scolta:filter] Recall guard dropped hint', dim, '=', val,
+          '(0 of ' + baseCount + ' results — dimension/value absent from the index)');
+      }
+    }
+
+    return { applied, offered };
   }
 
   const SKIP_FILTER_DIMENSIONS = new Set(['site', 'language', 'content_type', 'entity_type']);
@@ -2073,9 +2179,13 @@
       if (!preserveFilters) {
         lastExpandedTerms = expansion;
         currentSortOverride = sortHint;
-        // Apply LLM-detected filter intent by merging into activeFilters.
+        // Apply LLM-detected filter intent by merging into activeFilters —
+        // but only the hints that survive the recall guard; the rest become
+        // offered (clickable, not applied) chips.
         llmAppliedFilters = {};
+        offeredLlmFilters = {};
         if (filterHint) {
+          const canonicalHint = {};
           for (const [dim, val] of Object.entries(filterHint)) {
             if (typeof dim === 'string' && dim && typeof val === 'string' && val) {
               let canonicalVal = val;
@@ -2087,12 +2197,31 @@
                   if (ciMatch) canonicalVal = ciMatch;
                 }
               }
-              llmAppliedFilters[dim] = canonicalVal;
-              if (!activeFilters[dim]) {
-                activeFilters[dim] = new Set();
-              }
-              activeFilters[dim].add(canonicalVal);
+              canonicalHint[dim] = canonicalVal;
             }
+          }
+
+          // Probe with the same term union the merged search will run, under
+          // the filters already active (including the language auto-filter),
+          // so the guard's baseline is exactly what the user would see
+          // without the hint.
+          const probeTerms = [query];
+          for (const t of (expandedTerms || [])) {
+            if (typeof t === 'string' && t && !probeTerms.includes(t)) probeTerms.push(t);
+          }
+          const partition = await partitionFilterHintByRecall(
+            canonicalHint, probeTerms, activeFilters, CONFIG);
+
+          // The probes are async — a newer search may have started meanwhile.
+          if (version !== searchVersion) return;
+
+          offeredLlmFilters = partition.offered;
+          for (const [dim, val] of Object.entries(partition.applied)) {
+            llmAppliedFilters[dim] = val;
+            if (!activeFilters[dim]) {
+              activeFilters[dim] = new Set();
+            }
+            activeFilters[dim].add(val);
           }
         }
       }
@@ -2139,6 +2268,7 @@
     activeFilters = {};
     currentSortOverride = null;
     llmAppliedFilters = {};
+    offeredLlmFilters = {};
     expansionInFlight = false;
 
     // Remove search query and filter params from URL.
@@ -2435,6 +2565,12 @@
       const filterDismissEl = e.target.closest("[data-scolta-filter-dismiss]");
       if (filterDismissEl) {
         dismissLlmFilter(filterDismissEl.dataset.scoltaFilterDismiss);
+        return;
+      }
+      // Offered filter chip → apply the recall-guard-declined hint explicitly
+      const filterOfferEl = e.target.closest("[data-scolta-filter-offer-dim]");
+      if (filterOfferEl) {
+        applyOfferedLlmFilter(filterOfferEl.dataset.scoltaFilterOfferDim, filterOfferEl.dataset.scoltaFilterOfferVal);
         return;
       }
       // Follow-up submit button

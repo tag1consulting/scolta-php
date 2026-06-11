@@ -516,6 +516,23 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals(3, $js['EXPANSION_PER_TERM_TOP_K']);
     }
 
+    public function testFilterHintGuardKnobsMapAndExport(): void
+    {
+        // Defaults.
+        $js = (new ScoltaConfig())->toJsScoringConfig();
+        $this->assertEquals(5, $js['FILTER_HINT_MIN_RESULTS']);
+        $this->assertEquals(0.1, $js['FILTER_HINT_MIN_RATIO']);
+
+        // snake_case input maps; 0/0 is the documented guard-off setting.
+        $config = ScoltaConfig::fromArray([
+            'filter_hint_min_results' => 0,
+            'filter_hint_min_ratio' => 0.0,
+        ]);
+        $js = $config->toJsScoringConfig();
+        $this->assertEquals(0, $js['FILTER_HINT_MIN_RESULTS']);
+        $this->assertEquals(0.0, $js['FILTER_HINT_MIN_RATIO']);
+    }
+
     // -------------------------------------------------------------------
     // toJsScoringConfig — completeness and correctness
     // -------------------------------------------------------------------
@@ -532,7 +549,8 @@ class ScoltaConfigTest extends TestCase
             'PHRASE_NEAR_WINDOW', 'PHRASE_WINDOW', 'EXCERPT_LENGTH', 'RESULTS_PER_PAGE',
             'MAX_PAGEFIND_RESULTS', 'AI_EXPAND_QUERY', 'AI_SUMMARIZE', 'AI_SUMMARY_TOP_N',
             'AI_SUMMARY_MAX_CHARS', 'EXPAND_PRIMARY_WEIGHT', 'CROSS_LIST_BONUS', 'EXPAND_SUBWORD_MAX_FREQ',
-            'EXPAND_SUBWORD_DENYLIST', 'EXPANSION_COMBINE_MODE', 'EXPANSION_PER_TERM_TOP_K',
+            'EXPAND_SUBWORD_DENYLIST', 'FILTER_HINT_MIN_RESULTS', 'FILTER_HINT_MIN_RATIO',
+            'EXPANSION_COMBINE_MODE', 'EXPANSION_PER_TERM_TOP_K',
             'AI_MAX_FOLLOWUPS',
             'AI_LANGUAGES', 'AUTO_LANGUAGE_FILTER', 'LANGUAGE', 'CUSTOM_STOP_WORDS', 'RECENCY_STRATEGY', 'RECENCY_CURVE',
         ];
@@ -541,7 +559,7 @@ class ScoltaConfigTest extends TestCase
             $this->assertArrayHasKey($key, $js, "Missing key: {$key}");
         }
 
-        $this->assertCount(32, $js, 'Expected exactly 32 keys in toJsScoringConfig()');
+        $this->assertCount(34, $js, 'Expected exactly 34 keys in toJsScoringConfig()');
     }
 
     public function testToJsScoringConfigValuesMatchConfig(): void

@@ -83,6 +83,25 @@ class ScoltaConfig
     public array $expandSubwordDenyList = [];
 
     /**
+     * Recall guard for LLM filter hints (2026-06-09 regression): an expand
+     * response's filter_hint is auto-applied only when the filtered result
+     * union keeps at least this many results (clamped to the unfiltered count
+     * for tiny corpora). A hint that fails the guard but still matches
+     * something becomes an offered (clickable, not applied) chip; a hint that
+     * matches nothing is dropped. Set this and filterHintMinRatio to 0 to
+     * restore the previous always-apply behavior.
+     */
+    public int $filterHintMinResults = 5;
+
+    /**
+     * Companion ratio for the filter-hint recall guard: the filtered union
+     * must also keep at least this fraction of the unfiltered union. Catches
+     * collapses on large corpora where an absolute floor alone would pass
+     * (161 results narrowing to 5 is a collapse, not a refinement).
+     */
+    public float $filterHintMinRatio = 0.1;
+
+    /**
      * How the per-sub-query result sets from a multi-term expansion are combined
      * into the candidate set shown to the AI summarizer (issue #170).
      *
@@ -421,6 +440,8 @@ class ScoltaConfig
             'CROSS_LIST_BONUS' => $this->crossListBonus,
             'EXPAND_SUBWORD_MAX_FREQ' => $this->expandSubwordMaxFrequency,
             'EXPAND_SUBWORD_DENYLIST' => $this->expandSubwordDenyList,
+            'FILTER_HINT_MIN_RESULTS' => $this->filterHintMinResults,
+            'FILTER_HINT_MIN_RATIO' => $this->filterHintMinRatio,
             'EXPANSION_COMBINE_MODE' => $this->expansionCombineMode,
             'EXPANSION_PER_TERM_TOP_K' => $this->expansionPerTermTopK,
             'AI_MAX_FOLLOWUPS' => $this->maxFollowUps,
