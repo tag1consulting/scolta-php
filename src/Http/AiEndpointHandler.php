@@ -249,7 +249,7 @@ class AiEndpointHandler
      * Handle a follow-up conversation request.
      *
      * @param array $messages Conversation messages (role + content pairs).
-     * @return array{ok: bool, data?: mixed, status?: int, error?: string}
+     * @return array{ok: bool, data?: mixed, status?: int, error?: string, limit?: int, retry_after?: string}
      * @since 1.0.0
      * @stability stable
      */
