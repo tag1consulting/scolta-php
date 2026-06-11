@@ -16,12 +16,21 @@ jobs:
     strategy:
       matrix:
         include:
+          # 8.1 must resolve platform-compatible dev deps (PHPUnit ^10 —
+          # PHPUnit 11 requires PHP 8.2+), so it cannot ignore the php
+          # platform requirement like the newer rows do.
+          - php: '8.1'
+            lint: false
+            composer-args: ''
           - php: '8.2'
             lint: false
+            composer-args: '--ignore-platform-req=php'
           - php: '8.3'
             lint: false
+            composer-args: '--ignore-platform-req=php'
           - php: '8.4'
             lint: true
+            composer-args: '--ignore-platform-req=php'
     steps:
       - uses: actions/checkout@v4
 
@@ -39,7 +48,7 @@ jobs:
           coverage: none
 
       - name: Install dependencies
-        run: composer update --no-interaction --prefer-dist --ignore-platform-req=php
+        run: composer update --no-interaction --prefer-dist ${{ matrix.composer-args }}
 
       - name: Lint
         if: matrix.lint

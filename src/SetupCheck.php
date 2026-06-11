@@ -30,11 +30,11 @@ final class SetupCheck
 
         // ---- Runtime ----
         $phpVersion = PHP_VERSION;
-        $phpOk = version_compare($phpVersion, '8.2.0', '>=');
+        $phpOk = version_compare($phpVersion, '8.1.0', '>=');
         $results[] = [
             'name' => 'PHP version',
             'status' => $phpOk ? 'pass' : 'fail',
-            'message' => $phpOk ? "PHP {$phpVersion}" : "PHP {$phpVersion} — requires 8.2+",
+            'message' => $phpOk ? "PHP {$phpVersion}" : "PHP {$phpVersion} — requires 8.1+",
             'category' => 'runtime',
         ];
 
