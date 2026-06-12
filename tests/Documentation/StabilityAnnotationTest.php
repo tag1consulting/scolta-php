@@ -65,6 +65,12 @@ class StabilityAnnotationTest extends TestCase
             ),
         );
         foreach ($iterator as $file) {
+            // Vendored generated code (see src/Index/Snowball/PROVENANCE.md)
+            // is byte-stable by sha256 manifest and not part of the package's
+            // annotated public API — the Stemmer wrapper is the contract.
+            if (str_contains($file->getPathname(), '/src/Index/Snowball/')) {
+                continue;
+            }
             if ($file->getExtension() === 'php') {
                 $files[] = $file->getPathname();
             }

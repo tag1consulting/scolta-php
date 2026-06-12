@@ -292,10 +292,11 @@ class ReferenceComparisonTest extends TestCase
         // - 3 CJK compound tokens, 1 structural token (©)
         // The component words of every compound ARE in the PHP index.
         // This is an architectural difference, not a bug.
-        // Measured: 0.723. Target was 0.90 but actual data is below target;
-        // threshold set to measured - 0.02 = 0.703 per tightening policy.
+        // Measured: 0.724 (modern Snowball backend; was 0.723 with wamania).
+        // Target was 0.90 but actual data is below target; threshold set to
+        // measured - 0.02 = 0.704 per tightening policy.
         $this->assertGreaterThanOrEqual(
-            0.703,
+            0.704,
             $overlap,
             sprintf(
                 "Word overlap: %.1f%% (%d shared, %d ref-only, %d php-only).\n"
