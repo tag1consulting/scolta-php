@@ -4,13 +4,21 @@ declare(strict_types=1);
 
 namespace Tag1\Scolta\Index;
 
+use Tag1\Scolta\Index\Snowball\SnowballStemmer;
+
 /**
  * Word stemmer using Snowball algorithms.
  *
- * Wraps wamania/php-stemmer for consistent stemming across 14 languages:
+ * Wraps the vendored pure-PHP Snowball stemmers (src/Index/Snowball/ —
+ * see PROVENANCE.md there for the pinned snowball revision) for consistent
+ * stemming across 14 languages:
  * Catalan (ca), Danish (da), Dutch (nl), English (en), Finnish (fi),
  * French (fr), German (de), Italian (it), Norwegian (no), Portuguese (pt),
  * Romanian (ro), Russian (ru), Spanish (es), Swedish (sv).
+ *
+ * These stemmers are byte-compatible with pagefind_stem 1.0.0, the crate
+ * Pagefind 1.5.0 compiles into its query-time WASM — index-time stems must
+ * match query-time stems exactly or queries silently miss documents.
  *
  * For unsupported languages (Arabic, Greek, Hindi, Hungarian, Turkish, etc.),
  * words are returned unchanged — search still works, just without
@@ -21,25 +29,25 @@ namespace Tag1\Scolta\Index;
  */
 class Stemmer
 {
-    /** @var array<string, string> Language code => stemmer class. */
+    /** @var array<string, class-string<SnowballStemmer>> Language code => stemmer class. */
     private const LANGUAGE_MAP = [
-        'ca' => \Wamania\Snowball\Stemmer\Catalan::class,
-        'da' => \Wamania\Snowball\Stemmer\Danish::class,
-        'de' => \Wamania\Snowball\Stemmer\German::class,
-        'en' => \Wamania\Snowball\Stemmer\English::class,
-        'es' => \Wamania\Snowball\Stemmer\Spanish::class,
-        'fi' => \Wamania\Snowball\Stemmer\Finnish::class,
-        'fr' => \Wamania\Snowball\Stemmer\French::class,
-        'it' => \Wamania\Snowball\Stemmer\Italian::class,
-        'nl' => \Wamania\Snowball\Stemmer\Dutch::class,
-        'no' => \Wamania\Snowball\Stemmer\Norwegian::class,
-        'pt' => \Wamania\Snowball\Stemmer\Portuguese::class,
-        'ro' => \Wamania\Snowball\Stemmer\Romanian::class,
-        'ru' => \Wamania\Snowball\Stemmer\Russian::class,
-        'sv' => \Wamania\Snowball\Stemmer\Swedish::class,
+        'ca' => Snowball\CatalanStemmer::class,
+        'da' => Snowball\DanishStemmer::class,
+        'de' => Snowball\GermanStemmer::class,
+        'en' => Snowball\EnglishStemmer::class,
+        'es' => Snowball\SpanishStemmer::class,
+        'fi' => Snowball\FinnishStemmer::class,
+        'fr' => Snowball\FrenchStemmer::class,
+        'it' => Snowball\ItalianStemmer::class,
+        'nl' => Snowball\DutchStemmer::class,
+        'no' => Snowball\NorwegianStemmer::class,
+        'pt' => Snowball\PortugueseStemmer::class,
+        'ro' => Snowball\RomanianStemmer::class,
+        'ru' => Snowball\RussianStemmer::class,
+        'sv' => Snowball\SwedishStemmer::class,
     ];
 
-    private ?\Wamania\Snowball\Stemmer\Stemmer $stemmer = null;
+    private ?SnowballStemmer $stemmer = null;
 
     /**
      * Memoized stem results keyed by input word.
@@ -68,7 +76,8 @@ class Stemmer
         if (!class_exists($class)) {
             throw new \RuntimeException(
                 "Stemmer class {$class} not found. "
-                . 'Ensure wamania/php-stemmer is installed: composer require wamania/php-stemmer',
+                . 'The Snowball stemmers are vendored in tag1/scolta-php under src/Index/Snowball; '
+                . 'reinstall the package or regenerate them with scripts/generate-stemmers.sh',
             );
         }
         $this->stemmer = new $class();
@@ -90,7 +99,7 @@ class Stemmer
             return $this->cache[$word];
         }
 
-        $result = $this->stemmer === null ? $word : $this->stemmer->stem($word);
+        $result = $this->stemmer === null ? $word : $this->stemmer->stemWord($word);
 
         if (count($this->cache) < self::CACHE_MAX_ENTRIES) {
             $this->cache[$word] = $result;

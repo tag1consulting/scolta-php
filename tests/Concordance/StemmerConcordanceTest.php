@@ -10,9 +10,11 @@ use Tag1\Scolta\Index\Stemmer;
 /**
  * Stemmer concordance test.
  *
- * Validates that the PHP stemmer (wamania/php-stemmer) produces consistent
- * results across a diverse English word corpus. When Pagefind reference
- * stems are available, this test validates zero divergence.
+ * Validates that the PHP stemmer (the vendored Snowball backend in
+ * src/Index/Snowball/) reproduces Pagefind's query-time stemmer
+ * (pagefind_stem 1.0.0) byte-for-byte. Index-time stems must match
+ * query-time stems exactly or queries silently miss documents, so the
+ * corpus tests tolerate zero divergence.
  */
 class StemmerConcordanceTest extends TestCase
 {
@@ -24,10 +26,11 @@ class StemmerConcordanceTest extends TestCase
     }
 
     /**
-     * Test stemmer consistency with a large word corpus.
+     * Test stemmer consistency with a curated English word corpus.
      *
      * These words cover common English morphological patterns:
      * plurals, verb conjugations, comparatives, gerunds, etc.
+     * Expected stems are pagefind_stem 1.0.0 output (modern Snowball).
      */
     public function testStemmerConsistencyCorpus(): void
     {
@@ -43,7 +46,7 @@ class StemmerConcordanceTest extends TestCase
             'computing' => 'comput', 'searching' => 'search',
             'indexing' => 'index', 'processing' => 'process',
             // -tion/-sion
-            'organization' => 'organ', 'information' => 'inform',
+            'organization' => 'organiz', 'information' => 'inform',
             // -ly
             'quickly' => 'quick', 'carefully' => 'care',
             // -ness
@@ -74,6 +77,55 @@ class StemmerConcordanceTest extends TestCase
             $divergences,
             "Stemmer divergences found:\n" . implode("\n", $divergences),
         );
+    }
+
+    /**
+     * Guard the modern (post-3.0) Snowball direction of the backend.
+     *
+     * Each of these words stems differently under the old (pre-3.0)
+     * algorithms wamania/php-stemmer implemented, so any one of them failing
+     * means the backend regressed to old-Snowball behaviour — e.g. a silent
+     * regeneration from the wrong snowball revision (see
+     * src/Index/Snowball/PROVENANCE.md). The old stem is noted per word.
+     */
+    public function testModernSnowballDirection(): void
+    {
+        $modern = [
+            'en' => [
+                'added' => 'add',           // old: ad
+                'organic' => 'organic',     // old: organ
+                'evening' => 'evening',     // old: even
+                'paste' => 'paste',         // old: past
+                'internal' => 'internal',   // old: intern
+                'interval' => 'interval',   // old: interv
+                'emergency' => 'emergenc',  // old: emerg
+                'geologist' => 'geolog',    // old: geologist
+                'skis' => 'ski',            // old: skis-related exception differs
+            ],
+            'fr' => [
+                'aiguë' => 'aigu',          // old: aiguë
+            ],
+            'de' => [
+                'abgebildet' => 'abgebild', // old: abgebildet
+            ],
+            'es' => [
+                'constitucion' => 'constitu', // old: constitucion
+            ],
+            'ru' => [
+                'актёр' => 'актер',         // old never folds ё→е
+            ],
+        ];
+
+        foreach ($modern as $lang => $pairs) {
+            $stemmer = new Stemmer($lang);
+            foreach ($pairs as $word => $expected) {
+                $this->assertSame(
+                    $expected,
+                    $stemmer->stem($word),
+                    "Modern-Snowball tell '{$word}' ({$lang}) regressed — backend may have been regenerated from the wrong snowball revision",
+                );
+            }
+        }
     }
 
     /**
@@ -120,24 +172,19 @@ class StemmerConcordanceTest extends TestCase
     }
 
     /**
-     * Verify that a supported language with a missing class throws RuntimeException.
+     * Every supported language must have a parity corpus, so no language can
+     * ship without oracle coverage against pagefind_stem.
      */
-    public function testMissingStemmerClassThrows(): void
+    public function testEverySupportedLanguageHasCorpus(): void
     {
-        // Use reflection to test the behavior: create a subclass that
-        // references a non-existent class for a "supported" language.
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Stemmer class');
-        $this->expectExceptionMessage('composer require');
-
-        // We can't easily add to LANGUAGE_MAP, but we can test the behavior
-        // by verifying the constructor logic. Since all real classes exist,
-        // test that the exception message format is correct.
-        $class = 'Wamania\\Snowball\\Stemmer\\Klingon';
-        if (!class_exists($class)) {
-            throw new \RuntimeException(
-                "Stemmer class {$class} not found. "
-                . 'Ensure wamania/php-stemmer is installed: composer require wamania/php-stemmer',
+        foreach (Stemmer::getSupportedLanguages() as $lang) {
+            $this->assertFileExists(
+                __DIR__ . "/../fixtures/stemmer-corpus/{$lang}/words.txt",
+                "Language '{$lang}' is in LANGUAGE_MAP but has no parity corpus",
+            );
+            $this->assertFileExists(
+                __DIR__ . "/../fixtures/stemmer-corpus/{$lang}/expected-stems.txt",
+                "Language '{$lang}' is in LANGUAGE_MAP but has no golden stems",
             );
         }
     }
@@ -185,15 +232,16 @@ class StemmerConcordanceTest extends TestCase
         $refCount = count($refStemSet);
         $coverage = $refCount > 0 ? $intersection / $refCount : 1.0;
 
-        // 74% coverage. The 26% gap (112 stems of 441 reference):
+        // 74.8% coverage (330 of 441 reference stems). The gap (111 stems):
         // - 53 path-derived number stems (01,02,...,099,110 from URL paths)
-        // - 42 compound-word stems (motherinlaw, stateoftheart, etc.)
+        // - ~42 compound-word stems (motherinlaw, stateoftheart, etc.)
         // - 3 CJK compound stems, 1 structural stem
-        // - ~13 tokenization artifacts (em-dash joins, entity fragments)
-        // These are architectural differences — the component words are
-        // in PHP's index. Stemming of shared words is identical.
+        // - ~12 tokenization artifacts (em-dash joins, entity fragments)
+        // These are architectural (tokenizer) differences — the component
+        // words are in PHP's index. Stemming of shared words is identical;
+        // the per-language corpus tests above prove byte-parity.
         $this->assertGreaterThanOrEqual(
-            0.74,
+            0.748,
             $coverage,
             sprintf(
                 "Stemmer coverage: %.1f%% of reference stems found in PHP.\n"
@@ -253,19 +301,22 @@ class StemmerConcordanceTest extends TestCase
     }
 
     /**
+     * The hard parity gate: the PHP stemmer must reproduce Pagefind's own
+     * stems (pagefind_stem 1.0.0, via tools/stemmer-golden) byte-for-byte
+     * over the full corpus of every supported language. Zero tolerance —
+     * any divergent word is a query that silently misses documents.
+     *
      * @dataProvider largeCorpusProvider
      */
-    public function testStemmerMatchesSnowballReference(string $lang): void
+    public function testStemmerMatchesPagefindStem(string $lang): void
     {
         $wordsFile = __DIR__ . "/../fixtures/stemmer-corpus/{$lang}/words.txt";
         $expectedFile = __DIR__ . "/../fixtures/stemmer-corpus/{$lang}/expected-stems.txt";
 
-        if (!file_exists($wordsFile) || !file_exists($expectedFile)) {
-            $this->markTestSkipped("Stemmer corpus not available for {$lang}. Run scripts to download.");
-        }
-
         $words = file($wordsFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
         $expected = file($expectedFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        $this->assertNotFalse($words, "Missing corpus for {$lang}");
+        $this->assertNotFalse($expected, "Missing golden stems for {$lang}");
         $this->assertCount(count($words), $expected, "Corpus alignment mismatch for {$lang}");
 
         $stemmer = new Stemmer($lang);
@@ -273,67 +324,40 @@ class StemmerConcordanceTest extends TestCase
         $total = count($words);
 
         for ($i = 0; $i < $total; $i++) {
-            $word = $words[$i];
-            $expectedStem = $expected[$i];
-
-            // Skip words that start with apostrophes — these are edge cases where
-            // Snowball reference behaviour diverges from PHP stemmer handling.
-            if (str_starts_with($word, "'")) {
-                continue;
-            }
-
-            $actual = $stemmer->stem($word);
-            if ($actual !== $expectedStem) {
-                $mismatches[] = sprintf("'%s' → '%s' (expected '%s')", $word, $actual, $expectedStem);
+            $actual = $stemmer->stem($words[$i]);
+            if ($actual !== $expected[$i]) {
+                $mismatches[] = sprintf("'%s' → '%s' (expected '%s')", $words[$i], $actual, $expected[$i]);
             }
         }
 
-        $tested = $total - count(array_filter($words, fn($w) => str_starts_with($w, "'")));
-        $rate = $tested > 0 ? 1 - (count($mismatches) / $tested) : 1.0;
-
         fwrite(STDERR, sprintf(
-            "[stemmer] %s: %.2f%% concordance (%d/%d words match, %d mismatches)\n",
+            "[stemmer] %s: %d/%d words match (%d mismatches)\n",
             strtoupper($lang),
-            $rate * 100,
-            $tested - count($mismatches),
-            $tested,
+            $total - count($mismatches),
+            $total,
             count($mismatches),
         ));
 
-        // Per-language thresholds. EN/ES/RU achieve ≥99.7% concordance.
-        // DE (96.44%) and FR (95.75%) diverge due to umlaut/diaeresis handling
-        // differences between wamania/php-stemmer and the Rust Snowball reference.
-        // Thresholds for failing languages are set to measured - 0.02.
-        $thresholds = [
-            'en' => 0.97,
-            'de' => 0.94,  // measured 96.44%, target was 97%; threshold = 96.44 - 2 = 94.44 → 0.94
-            'fr' => 0.94,  // measured 95.75%, target was 97%; threshold = 95.75 - 2 = 93.75 → 0.94
-            'es' => 0.97,
-            'ru' => 0.97,
-        ];
-        $threshold = $thresholds[$lang] ?? 0.97;
-
-        $this->assertGreaterThanOrEqual(
-            $threshold,
-            $rate,
+        $this->assertSame(
+            [],
+            array_slice($mismatches, 0, 10),
             sprintf(
-                "Stemmer concordance for %s: %.2f%% (expected ≥%.0f%%). First 10 mismatches:\n%s",
+                'Stemmer parity for %s: %d of %d words diverge from pagefind_stem (first 10 shown)',
                 strtoupper($lang),
-                $rate * 100,
-                $threshold * 100,
-                implode("\n", array_slice($mismatches, 0, 10)),
+                count($mismatches),
+                $total,
             ),
         );
     }
 
+    /** @return array<string, string[]> */
     public static function largeCorpusProvider(): array
     {
-        return [
-            'english' => ['en'],
-            'german'  => ['de'],
-            'french'  => ['fr'],
-            'spanish' => ['es'],
-            'russian' => ['ru'],
-        ];
+        $cases = [];
+        foreach (Stemmer::getSupportedLanguages() as $lang) {
+            $cases[$lang] = [$lang];
+        }
+
+        return $cases;
     }
 }
