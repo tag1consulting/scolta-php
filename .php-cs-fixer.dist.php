@@ -2,7 +2,10 @@
 
 $finder = PhpCsFixer\Finder::create()
     ->in(__DIR__ . '/src')
-    ->in(__DIR__ . '/tests');
+    ->in(__DIR__ . '/tests')
+    // Vendored generated code (see src/Index/Snowball/PROVENANCE.md) must stay
+    // byte-identical to its sha256 manifest — never reformat it.
+    ->exclude('Index/Snowball');
 
 return (new PhpCsFixer\Config())
     ->setRules([

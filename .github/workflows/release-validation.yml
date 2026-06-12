@@ -296,8 +296,7 @@ jobs:
         run: composer update --no-interaction --prefer-dist --ignore-platform-req=php
 
       - name: Run pipeline smoke test
-        # Suppress E_DEPRECATED from voku/portable-utf8 (third-party, PHP 8.x nullable params).
-        run: php -d error_reporting=E_ALL~E_DEPRECATED scripts/smoke-test.php
+        run: php scripts/smoke-test.php
 
       - name: Verify index output structure
         run: |

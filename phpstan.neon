@@ -5,3 +5,7 @@ parameters:
     level: 8
     paths:
         - src
+    excludePaths:
+        # Vendored generated code (see src/Index/Snowball/PROVENANCE.md) —
+        # byte-stable by sha256 manifest, not held to this package's level.
+        - src/Index/Snowball/*
