@@ -82,7 +82,7 @@ After indexing, the `/var/www/html/pagefind/` directory contains a Pagefind-comp
 composer require tag1/scolta-php:^1.0
 ```
 
-**Requirements:** PHP 8.1+, `ext-intl` (Unicode tokenization).
+**Requirements:** PHP 8.1+, `ext-mbstring`, `ext-openssl`. Recommended: `ext-intl` (improves Unicode diacritic normalization; falls back to a built-in mapping without it).
 
 Platform adapters install this package automatically. Install it directly only when building a custom adapter or a non-CMS integration.
 

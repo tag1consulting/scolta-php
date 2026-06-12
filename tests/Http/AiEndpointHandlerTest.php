@@ -198,6 +198,73 @@ class AiEndpointHandlerTest extends TestCase
         $this->assertTrue($result['ok']);
     }
 
+    public function testFollowUpMessageCapIsCharBasedNotByteBased(): void
+    {
+        // 100,000 emoji = exactly the per-message char cap but 400,000 UTF-8
+        // bytes — a byte count would have rejected this at 4× the limit.
+        $ai = new MockAiService('ok');
+        $handler = $this->makeHandler(aiService: $ai);
+
+        $result = $handler->handleFollowUp([
+            ['role' => 'user', 'content' => str_repeat('🎉', 100000)],
+        ]);
+
+        $this->assertTrue($result['ok']);
+    }
+
+    public function testFollowUpRejectsMultibyteMessageOverCharCap(): void
+    {
+        $handler = $this->makeHandler();
+
+        $result = $handler->handleFollowUp([
+            ['role' => 'user', 'content' => str_repeat('日', 100001)],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertEquals(400, $result['status']);
+        $this->assertEquals('Message too long', $result['error']);
+    }
+
+    public function testFollowUpTotalCapIsCharBased(): void
+    {
+        // 5 × 80,000 CJK chars sit exactly at the 400,000-char total cap
+        // (1.2 MB of UTF-8 bytes — a byte count would have rejected this).
+        $ai = new MockAiService('ok');
+        $handler = $this->makeHandler(aiService: $ai, maxFollowUps: 50);
+
+        $big = str_repeat('語', 80000);
+        $messages = [];
+        for ($i = 0; $i < 2; $i++) {
+            $messages[] = ['role' => 'user', 'content' => $big];
+            $messages[] = ['role' => 'assistant', 'content' => $big];
+        }
+        $messages[] = ['role' => 'user', 'content' => $big];
+
+        $result = $handler->handleFollowUp($messages);
+
+        $this->assertTrue($result['ok']);
+    }
+
+    public function testFollowUpRejectsMultibyteConversationOverTotalCharCap(): void
+    {
+        // One char over the 400,000-char total cap.
+        $handler = $this->makeHandler(maxFollowUps: 50);
+
+        $big = str_repeat('語', 80000);
+        $messages = [];
+        for ($i = 0; $i < 2; $i++) {
+            $messages[] = ['role' => 'user', 'content' => $big];
+            $messages[] = ['role' => 'assistant', 'content' => $big];
+        }
+        $messages[] = ['role' => 'user', 'content' => $big . '語'];
+
+        $result = $handler->handleFollowUp($messages);
+
+        $this->assertFalse($result['ok']);
+        $this->assertEquals(400, $result['status']);
+        $this->assertEquals('Conversation too long', $result['error']);
+    }
+
     // ===================================================================
     // Caching
     // ===================================================================
