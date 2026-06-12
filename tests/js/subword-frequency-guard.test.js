@@ -288,3 +288,149 @@ describe('query-term exemption + guard denylist (Fix A+D)', () => {
         expect(loaded.has('dishes')).toBe(false);
     });
 });
+
+// ---------------------------------------------------------------------------
+// Corpus denominator without a match-all search (AI-Overview latency fix).
+// pagefind.search(null) downloads the ENTIRE word index (111 MB / 5,678 chunks
+// on a 6,900-page corpus) and the AI summary is gated behind the expansion
+// merge, so the guard's old denominator probe stalled the AI Overview for
+// minutes on production. The denominator must now come from cached totals
+// (pagefind-entry.json page counts / pagefind.filters() value counts) and a
+// match-all search must never be issued.
+// ---------------------------------------------------------------------------
+
+// Expose subwordCorpusSize for direct unit assertions (declaration hoisting
+// makes the pre-declaration assignment valid), mirroring the
+// __selectSummaryCandidates exposure pattern.
+const corpusExposedSource = patchedSource.replace(
+    'function subwordCorpusSize(filters) {',
+    'window.__subwordCorpusSize = subwordCorpusSize;\n  function subwordCorpusSize(filters) {'
+);
+
+function createWindowCorpus({ searchLog, entryAvailable = true, filtersResponse = {}, loadedQueries }) {
+    const dom = new JSDOM(
+        `<!DOCTYPE html><html><body><div id="scolta-search"></div></body></html>`,
+        { url: 'https://example.com', runScripts: 'dangerously' }
+    );
+    const window = dom.window;
+
+    window.__pfMock = {
+        init: () => Promise.resolve(),
+        mergeIndex: () => Promise.resolve(),
+        filters: () => Promise.resolve(filtersResponse),
+        search: (query) => {
+            searchLog.push(query);
+            return Promise.resolve(buildResults(query, loadedQueries));
+        },
+    };
+
+    window.fetch = jest.fn((url) => {
+        const u = String(url);
+        if (u.includes('pagefind-entry.json')) {
+            if (!entryAvailable) {
+                return Promise.reject(new Error('entry unavailable'));
+            }
+            return Promise.resolve({
+                ok: true, status: 200,
+                json: () => Promise.resolve({ languages: { en: { page_count: TOTAL_DOCS } } }),
+                text: () => Promise.resolve('{}'),
+            });
+        }
+        if (u === '/e') {
+            return Promise.resolve({
+                ok: true, status: 200,
+                json: () => Promise.resolve({ terms: EXPANSION_TERMS }),
+                text: () => Promise.resolve('{}'),
+            });
+        }
+        return Promise.resolve({
+            ok: true, status: 200,
+            json: () => Promise.resolve({}),
+            text: () => Promise.resolve('{}'),
+        });
+    });
+
+    window.console = { log: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() };
+    window.scrollTo = () => {};
+    global.__pfMockWindow = window;
+
+    window.eval(corpusExposedSource);
+
+    window.scolta = {
+        scoring: {
+            EXPAND_SUBWORD_MAX_FREQ: 0.05,
+            AI_EXPAND_QUERY: true,
+            AI_SUMMARIZE: false,
+        },
+        endpoints: { expand: '/e', summarize: '/s', followup: '/f' },
+        pagefindPath: '/pf.js',
+        wasmPath: '/wasm.js',
+        siteName: 'Test',
+        container: '#scolta-search',
+    };
+    window.Scolta.init('#scolta-search');
+    return window;
+}
+
+async function runSearchCorpus(opts = {}) {
+    const searchLog = [];
+    const loadedQueries = [];
+    const window = createWindowCorpus({ ...opts, searchLog, loadedQueries });
+    for (let i = 0; i < 10; i++) await tick(0);
+    const input = window.document.querySelector('#scolta-query');
+    input.value = 'chocolate desserts';
+    await window.Scolta.doSearch();
+    for (let i = 0; i < 30; i++) await tick(0);
+    return { searchLog, loaded: new Set(loadedQueries), window };
+}
+
+describe('corpus denominator without match-all search', () => {
+    test('the guard never issues a match-all (null) pagefind search', async () => {
+        const { searchLog, loaded } = await runSearchCorpus();
+        expect(searchLog).not.toContain(null);
+        expect(searchLog).not.toContain(undefined);
+        // The guard still worked, with the denominator from pagefind-entry.json:
+        // 3% passes 0.05, 100% is blocked.
+        expect(loaded.has('vegetarian')).toBe(true);
+        expect(loaded.has('recipes')).toBe(false);
+    });
+
+    test('falls back to filters() totals when pagefind-entry.json is unavailable', async () => {
+        const { searchLog, loaded } = await runSearchCorpus({
+            entryAvailable: false,
+            filtersResponse: { site: { main: TOTAL_DOCS } },
+        });
+        expect(searchLog).not.toContain(null);
+        expect(loaded.has('vegetarian')).toBe(true);
+        expect(loaded.has('recipes')).toBe(false);
+    });
+
+    test('subwordCorpusSize scopes the denominator to active filters', async () => {
+        const { window } = await runSearchCorpus({
+            filtersResponse: { language: { en: 80, fr: 20 }, topics: { a: 10, b: 5 } },
+        });
+        const size = window.__subwordCorpusSize;
+        // Sets must come from the window realm — scolta.js runs (and builds
+        // activeFilters) there, and instanceof Set is realm-sensitive.
+        const S = (...v) => new window.Set(v);
+        // One dimension: sum of the selected values.
+        expect(size({ language: S('en') })).toBe(80);
+        expect(size({ language: S('en', 'fr') })).toBe(100);
+        // Two dimensions AND together: the smallest dimension bounds the corpus.
+        expect(size({ language: S('en'), topics: S('a') })).toBe(10);
+        // No usable filters: exact total from pagefind-entry.json.
+        expect(size({})).toBe(TOTAL_DOCS);
+        expect(size({ unknownDim: S('x') })).toBe(TOTAL_DOCS);
+    });
+
+    test('with no entry json and no filters data the guard fails closed', async () => {
+        const { loaded } = await runSearchCorpus({
+            entryAvailable: false,
+            filtersResponse: {},
+        });
+        // Denominator 0 => subwordCorpusTotal > 0 is false => no sub-word is
+        // admitted (multi-word expansion terms themselves still searched).
+        expect(loaded.has('vegetarian')).toBe(false);
+        expect(loaded.has('vegetarian recipes')).toBe(true);
+    });
+});
