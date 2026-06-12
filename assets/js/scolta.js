@@ -259,6 +259,7 @@
   let offeredLlmFilters = {};        // { dimension: value } — LLM hints the recall guard declined to auto-apply
   let expansionInFlight = false;     // true while an expand-query HTTP request is pending
   let cachedPagefindFilters = null;  // { dimension: { value: count } } — from pagefind.filters()
+  let cachedPagefindPageCount = null; // total indexed pages across languages — from pagefind-entry.json
 
   // Detect default language filter from instanceConfig.currentLanguage or <html lang>.
   // Applied on every fresh search unless the URL already specifies f_language.
@@ -399,6 +400,15 @@
     try {
       const resp = await fetch(basePath + 'pagefind-entry.json?ts=' + Date.now());
       const entry = await resp.json();
+      // Record the total page count while the entry file is in hand — it is the
+      // exact corpus size the sub-word frequency guard needs, and reading it
+      // here avoids the match-all pagefind search that used to compute it (which
+      // downloads the entire word index — see subwordCorpusSize()).
+      const totalPages = Object.values(entry.languages || {})
+        .reduce((sum, l) => sum + (l.page_count || 0), 0);
+      if (totalPages > 0) {
+        cachedPagefindPageCount = totalPages;
+      }
       const primaryLang = (document.querySelector('html')?.getAttribute('lang') || 'en')
         .toLowerCase().split('-')[0];
       const absoluteBase = new URL(basePath, window.location.href).href;
@@ -1783,6 +1793,46 @@
     return results;
   }
 
+  // Corpus size for the sub-word frequency guard's denominator. This used to
+  // run pagefind.search(null, filters), but a match-all search makes pagefind
+  // download the ENTIRE word index — on a large long-form corpus that is
+  // thousands of requests (111 MB / 5,678 chunks on a 6,900-page site), and
+  // because the AI summary is gated behind the expansion merge, the AI Overview
+  // stalled for minutes on production while the index streamed in. The same
+  // totals are available without touching the word index: pagefind.filters()
+  // value counts and the per-language page counts in pagefind-entry.json, both
+  // already cached at init.
+  function subwordCorpusSize(filters) {
+    // Scoped: pagefind ORs values within a dimension and ANDs across
+    // dimensions. The AND-count is unknowable from per-value totals, so use the
+    // smallest dimension's selected-value sum as an upper bound. A too-large
+    // denominator under-measures frequency and admits a sub-word the exact
+    // count might have blocked — the recall-friendly direction.
+    const dimCounts = [];
+    if (filters && cachedPagefindFilters) {
+      for (const [dim, vals] of Object.entries(filters)) {
+        const counts = cachedPagefindFilters[dim];
+        if (!counts) continue;
+        const selected = vals instanceof Set ? [...vals] : Array.isArray(vals) ? vals : [vals];
+        if (selected.length === 0) continue;
+        dimCounts.push(selected.reduce((sum, v) => sum + (counts[v] || 0), 0));
+      }
+    }
+    if (dimCounts.length > 0) return Math.min(...dimCounts);
+    // Unscoped: exact total from pagefind-entry.json.
+    if (cachedPagefindPageCount !== null) return cachedPagefindPageCount;
+    // Last resort: the largest filter dimension's value-count sum. Exact when
+    // any dimension covers every page; an undercount otherwise, which
+    // over-measures frequency and blocks more sub-words — the fail-closed,
+    // precision-preserving direction the guard already takes on errors.
+    let max = 0;
+    for (const counts of Object.values(cachedPagefindFilters || {})) {
+      const sum = Object.values(counts).reduce((a, b) => a + b, 0);
+      if (sum > max) max = sum;
+    }
+    return max; // 0 when no data — the caller fails closed
+  }
+
   async function mergeExpandedSearchResults(expandedTerms, originalQuery, searchQuery, preserveFilters, version, sortOverride, subjectTerms) {
     const CONFIG = getInstanceConfig();
     const validTerms = expandedTerms
@@ -1811,10 +1861,13 @@
     // recall lost in v1.0.0 — but a word is only added as a search term when
     // its corpus frequency is below EXPAND_SUBWORD_MAX_FREQ. Low-frequency
     // domain words ("vegetarian", "cuisine") get added; high-frequency noise
-    // words ("recipes", "cooking") are blocked. Frequency is measured against
+    // words ("recipes", "cooking") are blocked. The numerator is probed with
     // the same active filters the real search uses (including the language
-    // partition when auto_language_filter is on), so numerator and denominator
-    // share scope. 0 reproduces v1.0.0 (no sub-words); >=1 admits all sub-words.
+    // partition when auto_language_filter is on); the denominator comes from
+    // subwordCorpusSize(), which scopes to those filters via cached totals
+    // instead of a match-all search (the match-all downloaded the entire word
+    // index and stalled the AI summary for minutes on large corpora).
+    // 0 reproduces v1.0.0 (no sub-words); >=1 admits all sub-words.
     const subwordMaxFreq = CONFIG.EXPAND_SUBWORD_MAX_FREQ;
     // Fix A+D (issue #156 follow-up): the frequency guard must never drop a word
     // the USER actually typed — frequency is a leaky proxy for "generic," and in a
@@ -1837,8 +1890,7 @@
       let allowed = false;
       try {
         if (subwordCorpusTotal === null) {
-          const all = await pagefindSearch(null, activeFilters);
-          subwordCorpusTotal = all.results.length;
+          subwordCorpusTotal = subwordCorpusSize(activeFilters);
         }
         if (subwordCorpusTotal > 0) {
           const hit = await pagefindSearch(word, activeFilters);

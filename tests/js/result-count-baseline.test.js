@@ -80,7 +80,7 @@ async function countResults(demo, query, queryData, thresholdOverride) {
     window.fetch = jest.fn((url) => {
         const u = String(url);
         if (u.includes('pagefind-entry.json')) {
-            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ languages: { en: {} } }), text: () => Promise.resolve('{}') });
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ languages: { en: { page_count: demo.totalDocs } } }), text: () => Promise.resolve('{}') });
         }
         if (u === '/e') {
             return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ terms: queryData.expansionTerms }), text: () => Promise.resolve('{}') });
