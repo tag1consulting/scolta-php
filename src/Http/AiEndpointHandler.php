@@ -33,21 +33,24 @@ use Tag1\Scolta\Prompt\PromptEnricherInterface;
 class AiEndpointHandler
 {
     /**
-     * Per-message content cap for follow-up conversations, in bytes.
+     * Per-message content cap for follow-up conversations, in characters.
      *
      * The first user turn legitimately embeds search-result context (the
      * client trims each result to aiSummaryMaxChars, ~4000 default), so this
-     * mirrors handleSummarize()'s 100k context safety net.
+     * mirrors handleSummarize()'s 100k context safety net. Measured in
+     * Unicode code points, matching scolta-core's char-based conversation
+     * limits — a byte count would shrink the budget up to 4× for CJK or
+     * emoji-heavy messages.
      */
-    private const FOLLOW_UP_MAX_MESSAGE_BYTES = 100000;
+    private const FOLLOW_UP_MAX_MESSAGE_CHARS = 100000;
 
     /**
-     * Total content cap across all follow-up messages, in bytes.
+     * Total content cap across all follow-up messages, in characters.
      *
      * A full default conversation (initial context turn + 3 follow-ups, each
      * with fresh search context) stays well under this; it only stops abuse.
      */
-    private const FOLLOW_UP_MAX_TOTAL_BYTES = 400000;
+    private const FOLLOW_UP_MAX_TOTAL_CHARS = 400000;
 
     /**
      * @param object                    $aiService                  AI service (duck-typed).
@@ -287,11 +290,13 @@ class AiEndpointHandler
         }
 
         // Validate each message has a string role and non-empty string content,
-        // within byte caps. Strict === '' comparison (not empty()) so the
-        // literal message "0" is not rejected. The sibling endpoints cap their
-        // inputs (query 500, summarize context 100k); without caps here a
-        // client could relay arbitrarily large payloads to the AI provider.
-        $totalBytes = 0;
+        // within character caps (Unicode code points via mb_strlen(), matching
+        // scolta-core's char-based conversation limits). Strict === ''
+        // comparison (not empty()) so the literal message "0" is not rejected.
+        // The sibling endpoints cap their inputs (query 500, summarize context
+        // 100k); without caps here a client could relay arbitrarily large
+        // payloads to the AI provider.
+        $totalChars = 0;
         foreach ($messages as $msg) {
             $role = is_array($msg) ? ($msg['role'] ?? null) : null;
             $content = is_array($msg) ? ($msg['content'] ?? null) : null;
@@ -301,12 +306,13 @@ class AiEndpointHandler
             if (!in_array($role, ['user', 'assistant'], true)) {
                 return ['ok' => false, 'status' => 400, 'error' => 'Invalid role'];
             }
-            if (strlen($content) > self::FOLLOW_UP_MAX_MESSAGE_BYTES) {
+            $contentChars = mb_strlen($content);
+            if ($contentChars > self::FOLLOW_UP_MAX_MESSAGE_CHARS) {
                 return ['ok' => false, 'status' => 400, 'error' => 'Message too long'];
             }
-            $totalBytes += strlen($content);
+            $totalChars += $contentChars;
         }
-        if ($totalBytes > self::FOLLOW_UP_MAX_TOTAL_BYTES) {
+        if ($totalChars > self::FOLLOW_UP_MAX_TOTAL_CHARS) {
             return ['ok' => false, 'status' => 400, 'error' => 'Conversation too long'];
         }
 
