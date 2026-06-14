@@ -339,3 +339,12 @@ jobs:
 
           [ $FAIL -eq 0 ] && echo "PASS: dist archive is clean."
           exit $FAIL
+
+  dist-archive:
+    name: Validate Composer dist archive
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Composer distribution archive
+        run: scripts/validate-dist-archive.sh
