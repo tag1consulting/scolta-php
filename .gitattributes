@@ -2,8 +2,11 @@
 /.github            export-ignore
 /phpunit.xml        export-ignore
 /.php-cs-fixer.dist.php export-ignore
+/phpstan.neon          export-ignore
+/phpstan-baseline.neon export-ignore
 /benchmarks         export-ignore
 /scripts            export-ignore
+/tools              export-ignore
 /node_modules       export-ignore
 /package.json       export-ignore
 /package-lock.json  export-ignore
