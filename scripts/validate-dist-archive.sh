@@ -60,8 +60,11 @@ EXCLUDED_PATHS=(
   ".github"
   "phpunit.xml"
   ".php-cs-fixer.dist.php"
+  "phpstan.neon"
+  "phpstan-baseline.neon"
   "benchmarks"
   "scripts"
+  "tools"
   "node_modules"
   "package.json"
   "package-lock.json"
@@ -103,11 +106,8 @@ ALLOWED_TOP_LEVEL=(
   "composer.json"
   "composer.lock"
   "docs"
-  "phpstan-baseline.neon"
-  "phpstan.neon"
   "src"
   "templates"
-  "tools"
 )
 
 # Size cap. Measured clean archive (git archive HEAD, 2026-06-14) = 2,969,600
