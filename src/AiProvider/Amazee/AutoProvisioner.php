@@ -31,6 +31,19 @@ final class AutoProvisioner
      * are the reliable signal: {@see KeyExpiryRecovery} detects them and
      * recovers through {@see reprovision()}, which bypasses this no-op.
      *
+     * Stored credentials are, however, treated as a *complete* provision only
+     * once their model names have been resolved. A provision whose `/model/info`
+     * call failed stores the token+url with no resolved models, leaving the
+     * caller to fall back to the dated config default — which the Amazee gateway
+     * rejects with HTTP 400, breaking AI permanently because this guard kept
+     * no-opping on the half-provisioned credentials. When the caller can confirm
+     * models are still unresolved (via `$hasResolvedModels`), model resolution
+     * is re-attempted against the ALREADY-STORED key — never a fresh trial,
+     * which would waste a server-side-limited trial allocation — so the
+     * incomplete-provision state self-heals. Without that callback the historical
+     * no-op stands: the caller cannot tell us, and we must not re-resolve blindly
+     * on every request.
+     *
      * On a successful first provisioning, credentials are stored via
      * `$storage` and `$onModelsResolved` is called (when provided) with the
      * best available model names resolved from the provisioned endpoint.
@@ -47,8 +60,17 @@ final class AutoProvisioner
      *   config system (e.g. Drupal CMI, WP options, Laravel DB).
      * @param AmazeeClient|null $client  Optionally inject a pre-configured
      *   client (useful for testing or custom base-URL overrides).
+     * @param callable(): bool|null $hasResolvedModels  Optional predicate the
+     *   caller supplies to report whether model names are already resolved (the
+     *   adapter knows: it persisted them via `$onModelsResolved`). When stored
+     *   credentials exist and this returns false, models are re-resolved against
+     *   the stored key and `$onModelsResolved` is fired — self-healing a
+     *   provision that stored credentials without resolved models. Omit it to
+     *   keep the legacy "stored credentials are complete" no-op.
      *
-     * @return bool True if provisioning succeeded; false if skipped or failed.
+     * @return bool True only when a fresh trial was provisioned; false when
+     *   skipped, already provisioned (including a model-only self-heal), or
+     *   failed.
      *
      * @since 0.4.0
      * @stability experimental
@@ -58,12 +80,31 @@ final class AutoProvisioner
         bool $hasExplicitApiKey = false,
         ?callable $onModelsResolved = null,
         ?AmazeeClient $client = null,
+        ?callable $hasResolvedModels = null,
     ): bool {
         if ($hasExplicitApiKey) {
             return false;
         }
 
-        if ($storage->load() !== null) {
+        $credentials = $storage->load();
+        if ($credentials !== null) {
+            // Already provisioned. Self-heal only an incomplete provision — one
+            // whose model resolution failed, leaving credentials with no models
+            // — and only when the caller can confirm that state. Re-resolve
+            // against the stored key (not a new trial) and persist the result.
+            if ($hasResolvedModels === null || $hasResolvedModels()) {
+                return false;
+            }
+
+            $models = (new AmazeeModelResolver($client ?? new AmazeeClient()))->resolve(
+                $credentials['litellm_api_url'],
+                $credentials['litellm_token'],
+            );
+            if ($onModelsResolved !== null
+                && ($models['ai_model'] !== null || $models['ai_expansion_model'] !== null)) {
+                $onModelsResolved($models['ai_model'] ?? '', $models['ai_expansion_model'] ?? '');
+            }
+
             return false;
         }
 
