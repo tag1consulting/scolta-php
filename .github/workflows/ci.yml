@@ -232,6 +232,12 @@ jobs:
       - name: Run PHPStan
         run: composer analyse
 
+      - name: Assert PHPStan baseline does not grow
+        run: |
+          sum=$(grep -oE 'count: [0-9]+' phpstan-baseline.neon | awk '{s+=$2}END{print s}')
+          echo "phpstan-baseline.neon sums to count: $sum (ratchet ceiling: 164)"
+          test "$sum" -le 164
+
   version-check:
     runs-on: ubuntu-latest
     steps:
