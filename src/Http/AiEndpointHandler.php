@@ -587,7 +587,9 @@ Available sortable fields:
 
 Only add a "sort" key when sorting results is the query's PRIMARY purpose — the user explicitly wants results ordered by a specific field's value. A sort-like word buried inside a longer descriptive or conversational query is NOT primary sort intent: it modifies the thing being described, not the ordering of results. Test: would the user feel their question was answered by an unsorted list? If yes, do NOT sort.
 Example: "looking for a meaningful gift for someone who appreciates affordable natural beauty" → "affordable" describes the gift, the user is not asking for a price ordering → no sort.
+Example: "I am looking for a gift for my friend who likes the cheapest handmade items" → "cheapest" describes the items the friend likes, not a request to order results by price; the user wants gift ideas → no sort.
 Example: "cheapest crystals" → the ENTIRE query is a sort request plus a subject → price asc.
+A HARD sort word (cheapest, most expensive, newest, oldest, longest, etc.) embedded in a conversational or descriptive frame ("I'm looking for…", "a gift for someone who likes…", "I want something that is…") is STILL NOT primary sort intent — the conversational framing dominates and OVERRIDES the STEP 4 word→field mapping below. STEP 4 fires only when ordering results is the query's whole point, not when a sort word merely describes the thing being sought.
 
 Format: {"terms": [...], "sort": {"field": "<field_name>", "direction": "asc|desc"}, "subject_terms": ["..."]}
 
@@ -624,6 +626,8 @@ If the query is asking a question, seeking advice, or requesting information, do
 - "what are the newest trends in..." (informational)
 - "best practices for..." (advice)
 - "how to find the most..." (instructional)
+- "a gift for my friend who likes the cheapest handmade items" (descriptive frame — "cheapest" modifies the items being described, not a request to order results; the conversational framing overrides STEP 4)
+- "I want a necklace that uses the most expensive gemstones" (descriptive frame — "most expensive" qualifies the necklace, not a sort request)
 
 STEP 4: CLEAR SORT-INTENT SIGNALS (classify when a matching field exists)
 If the query's primary purpose is ordering results by a measurable field, AND a matching sortable field exists, add sort. Map user language to available fields AND directions:

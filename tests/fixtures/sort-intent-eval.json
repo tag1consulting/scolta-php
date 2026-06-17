@@ -1,0 +1,32 @@
+{
+  "_comment": "Sort-intent false-positive/true-positive eval battery. These cases exercise LLM ADHERENCE to the SORT INTENT prompt block in src/Http/AiEndpointHandler.php::appendSortableFieldsInstruction(). They CANNOT be asserted by a deterministic unit test (no live model in CI); they are re-run by hand or by the browser regression eval against a demo by POSTing each query to /…/expand-query with the listed sortableFields and comparing the returned sort_hint to expectSort. expectSort null means no sort key should be returned. Keep in sync with the prompt examples; add new false positives here when found in regression.",
+  "cases": [
+    {
+      "group": "buried-conversational (must NOT sort — regression terra-collecta 2026-06-17)",
+      "items": [
+        { "query": "I am looking for a gift for my friend who likes the cheapest handmade items", "sortableFields": ["price"], "expectSort": null },
+        { "query": "a present for someone who loves the most expensive crystals", "sortableFields": ["price"], "expectSort": null },
+        { "query": "I want a necklace that uses the most expensive gemstones", "sortableFields": ["price"], "expectSort": null },
+        { "query": "show me ideas for a friend who enjoys reading the newest tarot guides", "sortableFields": ["date"], "expectSort": null }
+      ]
+    },
+    {
+      "group": "true positives — price (must still sort)",
+      "items": [
+        { "query": "most expensive stone", "sortableFields": ["price"], "expectSort": { "field": "price", "direction": "desc" } },
+        { "query": "cheapest crystals", "sortableFields": ["price"], "expectSort": { "field": "price", "direction": "asc" } },
+        { "query": "cheapest", "sortableFields": ["price"], "expectSort": { "field": "price", "direction": "asc" } },
+        { "query": "sort by price", "sortableFields": ["price"], "expectSort": { "field": "price", "direction": "asc|desc" } },
+        { "query": "pierres les moins chères", "sortableFields": ["price"], "expectSort": { "field": "price", "direction": "asc" } }
+      ]
+    },
+    {
+      "group": "true positives — date (must still sort)",
+      "items": [
+        { "query": "newest posts", "sortableFields": ["date"], "expectSort": { "field": "date", "direction": "desc" } },
+        { "query": "latest news", "sortableFields": ["date"], "expectSort": { "field": "date", "direction": "desc" } },
+        { "query": "oldest articles", "sortableFields": ["date"], "expectSort": { "field": "date", "direction": "asc" } }
+      ]
+    }
+  ]
+}

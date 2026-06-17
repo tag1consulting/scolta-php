@@ -736,6 +736,37 @@ class AiEndpointHandlerTest extends TestCase
         );
     }
 
+    public function testSortIntentPromptForbidsHardSortWordInConversationalFrame(): void
+    {
+        // Regression (terra-collecta, 2026-06-17): "I am looking for a gift for
+        // my friend who likes the cheapest handmade items" fired `price asc`.
+        // The buried-phrase guidance existed but the only negative gift example
+        // used the soft word "affordable"; the model let STEP 4's hard-word
+        // mapping ("cheapest" → price asc) override the conversational frame.
+        // The prompt must carry an explicit hard-word-buried negative example
+        // and state that conversational framing overrides the STEP 4 mapping.
+        $ai = new PromptCapturingAiService('{"terms": ["gem", "rock"]}');
+        $handler = $this->makeHandler(aiService: $ai, sortableFields: ['price']);
+
+        $handler->handleExpandQuery('test');
+
+        $this->assertStringContainsString(
+            '"I am looking for a gift for my friend who likes the cheapest handmade items"',
+            $ai->lastSystemPrompt,
+            'Sort intent prompt must include the hard-word buried gift example as a no-sort case',
+        );
+        $this->assertStringContainsString(
+            'A HARD sort word (cheapest, most expensive, newest, oldest, longest, etc.) embedded in a conversational or descriptive frame',
+            $ai->lastSystemPrompt,
+            'Sort intent prompt must name hard sort words buried in a conversational frame as not primary intent',
+        );
+        $this->assertStringContainsString(
+            'OVERRIDES the STEP 4 word→field mapping',
+            $ai->lastSystemPrompt,
+            'Sort intent prompt must state the conversational frame overrides the STEP 4 mapping',
+        );
+    }
+
     public function testSortIntentPromptForbidsCommonnessFieldSubstitution(): void
     {
         // Regression (wikipedia, 2026-06-09): "most common elements" mapped to
