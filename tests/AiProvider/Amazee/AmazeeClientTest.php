@@ -101,26 +101,6 @@ class AmazeeClientTest extends TestCase
         $client->provisionTrial('test@example.com');
     }
 
-    public function testProvisionTrialSendsRefererHeader(): void
-    {
-        $history = [];
-        $client = $this->makeClient([
-            new Response(200, [], json_encode([
-                'key' => [
-                    'litellm_token' => 'tok-ref',
-                    'litellm_api_url' => 'https://llm.amazee.ai',
-                    'region' => 'us-east',
-                ],
-            ])),
-        ], $history);
-
-        $client->provisionTrial();
-
-        $this->assertCount(1, $history);
-        $request = $history[0]['request'];
-        $this->assertSame('scolta-php', $request->getHeaderLine('Referer'));
-    }
-
     // --- signIn ---
 
     public function testSignInReturnsToken(): void
@@ -180,17 +160,26 @@ class AmazeeClientTest extends TestCase
         $this->assertSame($regions, $client->listRegions('session-tok'));
     }
 
-    public function testListRegionsSendsRefererHeader(): void
+    public function testControlPlaneRequestsSendRefererHeader(): void
     {
         $history = [];
         $client = $this->makeClient([
+            new Response(200, [], json_encode([
+                'key' => [
+                    'litellm_token' => 'lt',
+                    'litellm_api_url' => 'https://llm.amazee.ai',
+                    'region' => 'eu',
+                ],
+            ])),
             new Response(200, [], json_encode(['regions' => []])),
         ], $history);
 
-        $client->listRegions('session-tok');
+        $client->provisionTrial();          // POST /auth/generate-trial-access
+        $client->listRegions('session-tok'); // GET /regions
 
-        $this->assertCount(1, $history);
+        $this->assertCount(2, $history);
         $this->assertSame('scolta-php', $history[0]['request']->getHeaderLine('Referer'));
+        $this->assertSame('scolta-php', $history[1]['request']->getHeaderLine('Referer'));
     }
 
     // --- createPrivateKey ---
