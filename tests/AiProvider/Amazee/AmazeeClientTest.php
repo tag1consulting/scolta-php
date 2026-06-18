@@ -160,6 +160,28 @@ class AmazeeClientTest extends TestCase
         $this->assertSame($regions, $client->listRegions('session-tok'));
     }
 
+    public function testControlPlaneRequestsSendRefererHeader(): void
+    {
+        $history = [];
+        $client = $this->makeClient([
+            new Response(200, [], json_encode([
+                'key' => [
+                    'litellm_token' => 'lt',
+                    'litellm_api_url' => 'https://llm.amazee.ai',
+                    'region' => 'eu',
+                ],
+            ])),
+            new Response(200, [], json_encode(['regions' => []])),
+        ], $history);
+
+        $client->provisionTrial();          // POST /auth/generate-trial-access
+        $client->listRegions('session-tok'); // GET /regions
+
+        $this->assertCount(2, $history);
+        $this->assertSame('scolta-php', $history[0]['request']->getHeaderLine('Referer'));
+        $this->assertSame('scolta-php', $history[1]['request']->getHeaderLine('Referer'));
+    }
+
     // --- createPrivateKey ---
 
     public function testCreatePrivateKeySuccess(): void
