@@ -180,6 +180,19 @@ class AmazeeClientTest extends TestCase
         $this->assertSame($regions, $client->listRegions('session-tok'));
     }
 
+    public function testListRegionsSendsRefererHeader(): void
+    {
+        $history = [];
+        $client = $this->makeClient([
+            new Response(200, [], json_encode(['regions' => []])),
+        ], $history);
+
+        $client->listRegions('session-tok');
+
+        $this->assertCount(1, $history);
+        $this->assertSame('scolta-php', $history[0]['request']->getHeaderLine('Referer'));
+    }
+
     // --- createPrivateKey ---
 
     public function testCreatePrivateKeySuccess(): void
