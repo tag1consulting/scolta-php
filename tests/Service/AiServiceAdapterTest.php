@@ -439,27 +439,24 @@ class AiServiceAdapterTest extends TestCase
     }
 
     // -------------------------------------------------------------------
-    // Key-expiry recovery — expired Amazee trial key triggers a guarded
-    // re-provision and exactly one retry with the fresh credentials.
+    // Key-expiry recovery — an auth-class failure of the stored Amazee
+    // credentials degrades the call gracefully, records the failure for
+    // health, and flags the site for admin re-authentication. The stored
+    // credentials are left intact and no replacement credentials are requested.
     //
     // Regression (django demo, 2026-06-09): expired key → every call 400
     // expired_key → expand silently echoed the query while ensureAiAvailable
     // no-opped on the stored dead credentials.
     // -------------------------------------------------------------------
 
-    private const FRESH_TRIAL_RESPONSE = '{"key": {"litellm_token": "sk-fresh-token", "litellm_api_url": "https://llm.test.amazee.ai", "region": "test-region"}}';
-    private const MODEL_INFO_RESPONSE = '{"data": [{"model_name": "claude-sonnet-4-5"}, {"model_name": "claude-haiku-4-5"}]}';
-
     /**
      * Build an adapter whose first client throws $toThrow, with recovery wired
-     * against a mocked Amazee provisioning API. The recovered client returns
-     * 'recovered response' and records the credentials it was built from.
+     * against a credential store seeded with stored credentials.
      */
     private function makeRecoveringAdapter(
         \RuntimeException $toThrow,
-        array $provisioningResponses,
-        ?\GuzzleHttp\Handler\MockHandler &$mock = null,
         ?InMemoryAmazeeStorage &$storage = null,
+        ?\Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery &$recovery = null,
     ): AiServiceAdapter {
         $config = ScoltaConfig::fromArray([]);
 
@@ -484,8 +481,6 @@ class AiServiceAdapterTest extends TestCase
         };
 
         $adapter = new class ($config, $throwingClient) extends AiServiceAdapter {
-            public ?array $recoveredWith = null;
-
             private AiClient $initialClient;
 
             public function __construct(ScoltaConfig $config, AiClient $initialClient)
@@ -498,96 +493,70 @@ class AiServiceAdapterTest extends TestCase
             {
                 return $this->initialClient;
             }
-
-            protected function createRecoveredClient(array $credentials): AiClient
-            {
-                $this->recoveredWith = $credentials;
-
-                return new class extends AiClient {
-                    public function __construct()
-                    {
-                        parent::__construct([]);
-                    }
-
-                    public function message(string $systemPrompt, string $userMessage, int $maxTokens = 1024, ?string $model = null): string
-                    {
-                        return 'recovered response';
-                    }
-
-                    public function conversation(string $systemPrompt, array $messages, int $maxTokens = 1024, ?string $model = null): string
-                    {
-                        return 'recovered response';
-                    }
-                };
-            }
         };
 
         $storage = new InMemoryAmazeeStorage([
-            'litellm_token' => 'sk-expired-token',
+            'litellm_token' => 'sk-stored-token',
             'litellm_api_url' => 'https://llm.test.amazee.ai',
             'region' => 'test-region',
         ]);
 
-        $mock = new \GuzzleHttp\Handler\MockHandler($provisioningResponses);
-        $amazeeClient = new \Tag1\Scolta\AiProvider\Amazee\AmazeeClient(
-            'https://api.amazee.ai',
-            new \GuzzleHttp\Client(['handler' => \GuzzleHttp\HandlerStack::create($mock)]),
-        );
-
-        $adapter->setKeyExpiryRecovery(new \Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery(
+        $recovery = new \Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery(
             storage: $storage,
             cache: new InMemoryAdapterCache(),
-            client: $amazeeClient,
-        ));
+        );
+        $adapter->setKeyExpiryRecovery($recovery);
 
         return $adapter;
     }
 
-    public function testExpiredKeyReprovisionsOnceAndRetriesWithFreshCreds(): void
+    public function testExpiredCredentialsDegradeAndFlagForUpgrade(): void
     {
         $adapter = $this->makeRecoveringAdapter(
             new \RuntimeException('Scolta AI API request failed: 400 code: expired_key'),
-            [
-                new \GuzzleHttp\Psr7\Response(200, [], self::FRESH_TRIAL_RESPONSE),
-                new \GuzzleHttp\Psr7\Response(200, [], self::MODEL_INFO_RESPONSE),
-            ],
-            $mock,
             $storage,
+            $recovery,
         );
 
-        $result = $adapter->message('sys', 'user');
+        try {
+            $adapter->message('sys', 'user');
+            $this->fail('An expired-credential failure must propagate so the caller degrades gracefully');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('expired_key', $e->getMessage());
+        }
 
-        $this->assertSame('recovered response', $result);
-        $this->assertSame('sk-fresh-token', $adapter->recoveredWith['litellm_token'], 'Retry client must be built from the freshly provisioned credentials');
-        $this->assertSame('sk-fresh-token', $storage->load()['litellm_token'], 'Fresh credentials must be stored for subsequent requests');
-        $this->assertSame(0, $mock->count(), 'Re-provision attempted exactly once');
+        $this->assertSame('sk-stored-token', $storage->load()['litellm_token'], 'Stored credentials must be left intact');
+        $this->assertTrue($recovery->isAuthFailing(), 'Health must report AI as degraded');
+        $this->assertTrue($recovery->isUpgradeNeeded(), 'The site must be flagged for admin re-authentication');
     }
 
-    public function testExpiredKeyRecoveryWorksOnConversationPath(): void
+    public function testExpiredCredentialsDegradeOnConversationPath(): void
     {
         $adapter = $this->makeRecoveringAdapter(
             new \RuntimeException('Scolta AI API request failed: 401 invalid_api_key'),
-            [
-                new \GuzzleHttp\Psr7\Response(200, [], self::FRESH_TRIAL_RESPONSE),
-                new \GuzzleHttp\Psr7\Response(200, [], self::MODEL_INFO_RESPONSE),
-            ],
+            $storage,
+            $recovery,
         );
 
-        $result = $adapter->conversation('sys', [['role' => 'user', 'content' => 'hi']]);
+        try {
+            $adapter->conversation('sys', [['role' => 'user', 'content' => 'hi']]);
+            $this->fail('An expired-credential failure must propagate on the conversation path too');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('invalid_api_key', $e->getMessage());
+        }
 
-        $this->assertSame('recovered response', $result);
+        $this->assertTrue($recovery->isAuthFailing());
+        $this->assertTrue($recovery->isUpgradeNeeded());
     }
 
-    public function testBudgetExceededDoesNotTriggerReprovision(): void
+    public function testBudgetExceededIsNotTreatedAsCredentialFailure(): void
     {
-        // Budget exhaustion must route to the budget path, not re-provisioning:
-        // a fresh trial key would reset the spend ceiling, which is the upgrade
-        // flow's job. The empty MockHandler queue makes any provisioning call blow up.
+        // Budget exhaustion must route to the budget path: it must never flag
+        // the credentials as failing or mark the site for re-authentication.
         $adapter = $this->makeRecoveringAdapter(
             new \RuntimeException('Budget has been exceeded!'),
-            [],
-            $mock,
             $storage,
+            $recovery,
         );
 
         try {
@@ -597,7 +566,9 @@ class AiServiceAdapterTest extends TestCase
             $this->assertSame('Budget has been exceeded!', $e->getMessage());
         }
 
-        $this->assertSame('sk-expired-token', $storage->load()['litellm_token'], 'Storage untouched by a budget error');
+        $this->assertSame('sk-stored-token', $storage->load()['litellm_token'], 'Storage untouched by a budget error');
+        $this->assertFalse($recovery->isAuthFailing(), 'A budget error must not mark credentials as failing');
+        $this->assertFalse($recovery->isUpgradeNeeded(), 'A budget error must not flag for re-authentication');
     }
 
     public function testAuthFailureWithoutRecoveryWiredStillPropagates(): void

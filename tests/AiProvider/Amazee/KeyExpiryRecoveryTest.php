@@ -4,13 +4,8 @@ declare(strict_types=1);
 
 namespace Tag1\Scolta\Tests\AiProvider\Amazee;
 
-use GuzzleHttp\Client;
-use GuzzleHttp\Handler\MockHandler;
-use GuzzleHttp\HandlerStack;
-use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\AiProvider\Amazee\AmazeeBudgetExceededException;
-use Tag1\Scolta\AiProvider\Amazee\AmazeeClient;
 use Tag1\Scolta\AiProvider\Amazee\BudgetAwareProviderDecorator;
 use Tag1\Scolta\AiProvider\Amazee\ConfigStorageInterface;
 use Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery;
@@ -18,46 +13,30 @@ use Tag1\Scolta\Cache\CacheDriverInterface;
 use Tag1\Scolta\Exception\ApiKeyInvalidException;
 
 /**
- * Tests for expired-key detection and guarded re-provisioning.
+ * Tests for expired/revoked-credential detection and graceful degradation.
  *
- * Regression (django demo, 2026-06-09): an Amazee trial key expired
+ * Regression (django demo, 2026-06-09): Amazee credentials were revoked
  * server-side, every LiteLLM call returned 400 expired_key, and nothing
  * detected it — expand silently echoed the query for ~24h while
- * ensureAiAvailable() kept no-opping on the stored dead credentials.
+ * ensureAiAvailable() kept no-opping on the stored dead credentials. When the
+ * stored credentials stop being accepted, AI must turn off and the site must be
+ * flagged for an admin to re-authenticate; the stored credentials are left in
+ * place and no replacement credentials are requested on this path.
  */
 class KeyExpiryRecoveryTest extends TestCase
 {
-    private const FRESH_TRIAL_RESPONSE = '{"key": {"litellm_token": "sk-fresh-token", "litellm_api_url": "https://llm.test.amazee.ai", "region": "test-region"}}';
-    private const MODEL_INFO_RESPONSE = '{"data": [{"model_name": "claude-sonnet-4-5"}, {"model_name": "claude-haiku-4-5"}]}';
-
-    private function makeAmazeeClient(array $responses, ?MockHandler &$mock = null): AmazeeClient
-    {
-        $mock = new MockHandler($responses);
-        $httpClient = new Client(['handler' => HandlerStack::create($mock)]);
-
-        return new AmazeeClient('https://api.amazee.ai', $httpClient);
-    }
-
     private function makeRecovery(
-        array $httpResponses,
         ?InMemoryAmazeeStorage &$storage = null,
         ?ArrayCacheDriver &$cache = null,
-        ?MockHandler &$mock = null,
-        int $failureWindowSeconds = 600,
     ): KeyExpiryRecovery {
         $storage ??= new InMemoryAmazeeStorage([
-            'litellm_token' => 'sk-expired-token',
+            'litellm_token' => 'sk-stored-token',
             'litellm_api_url' => 'https://llm.test.amazee.ai',
             'region' => 'test-region',
         ]);
         $cache ??= new ArrayCacheDriver();
 
-        return new KeyExpiryRecovery(
-            storage: $storage,
-            cache: $cache,
-            client: $this->makeAmazeeClient($httpResponses, $mock),
-            failureWindowSeconds: $failureWindowSeconds,
-        );
+        return new KeyExpiryRecovery(storage: $storage, cache: $cache);
     }
 
     // -------------------------------------------------------------------
@@ -90,9 +69,8 @@ class KeyExpiryRecoveryTest extends TestCase
 
     public function testBudgetExceededIsNotAuthFailure(): void
     {
-        // Budget exhaustion belongs to BudgetAwareProviderDecorator and must
-        // never trigger re-provisioning (a fresh trial key would reset the
-        // spend ceiling — that is the upgrade flow's job).
+        // Budget exhaustion belongs to BudgetAwareProviderDecorator and follows
+        // the budget path, never this credential-handling path.
         $byMessage = new \RuntimeException(BudgetAwareProviderDecorator::BUDGET_MESSAGE);
         $byType = new AmazeeBudgetExceededException(new \RuntimeException('429'));
 
@@ -108,88 +86,75 @@ class KeyExpiryRecoveryTest extends TestCase
     }
 
     // -------------------------------------------------------------------
-    // handleAuthFailure() — detection, recovery, fresh credentials
+    // handleAuthFailure() — degrade, record health, flag for re-auth
     // -------------------------------------------------------------------
 
-    public function testExpiredKeyTriggersOneReprovisionAndStoresFreshCreds(): void
+    public function testExpiredCredentialsDegradeAndFlagForUpgrade(): void
     {
-        $recovery = $this->makeRecovery(
-            [new Response(200, [], self::FRESH_TRIAL_RESPONSE), new Response(200, [], self::MODEL_INFO_RESPONSE)],
-            $storage,
-            $cache,
-            $mock,
-        );
+        $storage = new InMemoryAmazeeStorage([
+            'litellm_token' => 'sk-stored-token',
+            'litellm_api_url' => 'https://llm.test.amazee.ai',
+            'region' => 'test-region',
+        ]);
+        $recovery = $this->makeRecovery($storage, $cache);
 
         $result = $recovery->handleAuthFailure(new \RuntimeException('code: expired_key'));
 
-        $this->assertTrue($result);
-        $this->assertSame('sk-fresh-token', $recovery->credentials()['litellm_token']);
-        $this->assertSame(0, $mock->count(), 'Both provisioning calls (trial + model info) should have run');
-        $this->assertFalse($recovery->isAuthFailing(), 'Successful recovery must clear the auth-failure marker');
+        $this->assertFalse($result, 'There is nothing to retry; the caller must degrade gracefully');
+        $this->assertSame(
+            'sk-stored-token',
+            $storage->load()['litellm_token'],
+            'Stored credentials must be left intact',
+        );
+        $this->assertTrue($recovery->isAuthFailing(), 'Health must report AI as degraded');
+        $this->assertTrue($recovery->isUpgradeNeeded(), 'The site must be flagged for admin re-authentication');
     }
 
-    public function testSecondFailureInWindowDoesNotReprovisionAgain(): void
+    public function testStoredCredentialsAreNeverDiscardedOnAuthFailure(): void
     {
-        $recovery = $this->makeRecovery(
-            [new Response(200, [], self::FRESH_TRIAL_RESPONSE), new Response(200, [], self::MODEL_INFO_RESPONSE)],
-            $storage,
-            $cache,
-            $mock,
-        );
+        // The credential store must not be touched: leaving it in place is what
+        // keeps the failure path from requesting any replacement credentials.
+        $storage = new TripwireStorage([
+            'litellm_token' => 'sk-stored-token',
+            'litellm_api_url' => 'https://llm.test.amazee.ai',
+            'region' => 'test-region',
+        ]);
+        $recovery = new KeyExpiryRecovery(storage: $storage, cache: new ArrayCacheDriver());
 
-        $this->assertTrue($recovery->handleAuthFailure(new \RuntimeException('code: expired_key')));
+        $recovery->handleAuthFailure(new \RuntimeException('code: expired_key'));
 
-        // A second auth failure inside the window must not hit the API again —
-        // the MockHandler queue is empty, so any HTTP call would throw.
-        $result = $recovery->handleAuthFailure(new \RuntimeException('code: expired_key'));
-
-        $this->assertFalse($result);
+        $this->assertFalse($storage->wasCleared, 'clear() must never be called on an auth failure');
+        $this->assertFalse($storage->wasStored, 'store() must never be called on an auth failure');
     }
 
-    public function testFailedReprovisionLeavesAuthFailureMarkerAndWaitsOutWindow(): void
+    public function testRepeatedFailuresKeepFlagsSetWithoutTouchingStorage(): void
     {
-        $recovery = $this->makeRecovery(
-            [new Response(500, [], '{"detail": "server error"}')],
-            $storage,
-            $cache,
-            $mock,
-        );
+        $storage = new TripwireStorage([
+            'litellm_token' => 'sk-stored-token',
+            'litellm_api_url' => 'https://llm.test.amazee.ai',
+            'region' => 'test-region',
+        ]);
+        $recovery = new KeyExpiryRecovery(storage: $storage, cache: new ArrayCacheDriver());
 
-        $first = $recovery->handleAuthFailure(new \RuntimeException('code: expired_key'));
-        $second = $recovery->handleAuthFailure(new \RuntimeException('code: expired_key'));
+        $this->assertFalse($recovery->handleAuthFailure(new \RuntimeException('code: expired_key')));
+        $this->assertFalse($recovery->handleAuthFailure(new \RuntimeException('code: expired_key')));
 
-        $this->assertFalse($first, 'Provisioning failure must report unrecovered');
-        $this->assertFalse($second, 'Second failure must wait out the window, not retry the API');
-        $this->assertTrue($recovery->isAuthFailing(), 'Health must keep seeing the failure');
-        $this->assertSame(0, $mock->count(), 'Exactly one provisioning attempt');
+        $this->assertTrue($recovery->isAuthFailing());
+        $this->assertTrue($recovery->isUpgradeNeeded());
+        $this->assertFalse($storage->wasCleared);
+        $this->assertFalse($storage->wasStored);
     }
 
     public function testNonAuthFailureIsIgnored(): void
     {
-        $recovery = $this->makeRecovery([], $storage, $cache, $mock);
+        $recovery = $this->makeRecovery($storage, $cache);
 
         $result = $recovery->handleAuthFailure(new \RuntimeException(BudgetAwareProviderDecorator::BUDGET_MESSAGE));
 
         $this->assertFalse($result);
         $this->assertFalse($recovery->isAuthFailing(), 'Budget errors must not mark auth as failing');
-        $this->assertSame('sk-expired-token', $storage->load()['litellm_token'], 'Storage untouched');
-    }
-
-    public function testModelsResolvedCallbackForwardedOnRecovery(): void
-    {
-        $recovery = $this->makeRecovery(
-            [new Response(200, [], self::FRESH_TRIAL_RESPONSE), new Response(200, [], self::MODEL_INFO_RESPONSE)],
-        );
-
-        $resolved = null;
-        $recovery->handleAuthFailure(
-            new \RuntimeException('code: expired_key'),
-            function (string $model, string $expansionModel) use (&$resolved): void {
-                $resolved = [$model, $expansionModel];
-            },
-        );
-
-        $this->assertSame(['claude-sonnet-4-5', 'claude-haiku-4-5'], $resolved);
+        $this->assertFalse($recovery->isUpgradeNeeded(), 'Budget errors must not flag for re-authentication');
+        $this->assertSame('sk-stored-token', $storage->load()['litellm_token'], 'Storage untouched');
     }
 
     // -------------------------------------------------------------------
@@ -198,7 +163,7 @@ class KeyExpiryRecoveryTest extends TestCase
 
     public function testRecordAuthFailureIsVisibleToIsAuthFailing(): void
     {
-        $recovery = $this->makeRecovery([], $storage, $cache);
+        $recovery = $this->makeRecovery($storage, $cache);
 
         $this->assertFalse($recovery->isAuthFailing());
 
@@ -206,6 +171,19 @@ class KeyExpiryRecoveryTest extends TestCase
 
         $this->assertTrue($recovery->isAuthFailing());
         $this->assertNotNull($cache->get(KeyExpiryRecovery::CACHE_KEY_AUTH_FAILURE));
+    }
+
+    public function testUpgradeNeededMarkerCanBeSetAndCleared(): void
+    {
+        $recovery = $this->makeRecovery($storage, $cache);
+
+        $this->assertFalse($recovery->isUpgradeNeeded());
+
+        $recovery->flagUpgradeNeeded();
+        $this->assertTrue($recovery->isUpgradeNeeded());
+
+        $recovery->clearUpgradeNeeded();
+        $this->assertFalse($recovery->isUpgradeNeeded(), 'A completed re-authentication must clear the prompt');
     }
 }
 
@@ -232,6 +210,40 @@ class InMemoryAmazeeStorage implements ConfigStorageInterface
 
     public function clear(): void
     {
+        $this->stored = null;
+    }
+}
+
+/**
+ * Credential store that records whether its mutators were invoked, so a test
+ * can assert the stored credentials were left untouched.
+ */
+class TripwireStorage implements ConfigStorageInterface
+{
+    public bool $wasCleared = false;
+
+    public bool $wasStored = false;
+
+    public function __construct(private ?array $stored = null) {}
+
+    public function store(string $litellmToken, string $litellmApiUrl, string $region): void
+    {
+        $this->wasStored = true;
+        $this->stored = [
+            'litellm_token' => $litellmToken,
+            'litellm_api_url' => $litellmApiUrl,
+            'region' => $region,
+        ];
+    }
+
+    public function load(): ?array
+    {
+        return $this->stored;
+    }
+
+    public function clear(): void
+    {
+        $this->wasCleared = true;
         $this->stored = null;
     }
 }

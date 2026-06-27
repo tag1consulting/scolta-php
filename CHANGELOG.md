@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Changed
+- Improved handling of expired or revoked Amazee.ai credentials in the AI recovery path, and made the `/health` AI status more accurately reflect credential state. The model-resolution self-heal is unchanged.
+
 ## [1.0.4] - 2026-06-26
 
 ### Fixed

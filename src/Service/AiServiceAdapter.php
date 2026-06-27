@@ -40,11 +40,12 @@ class AiServiceAdapter
     /**
      * Wire Amazee key-expiry recovery into the AI call path.
      *
-     * When set, an auth-class failure (expired/revoked trial key) on any AI
-     * call triggers a one-shot re-provision through the recovery's guarded
-     * path and, on success, a single retry with the fresh credentials.
-     * Without it (an explicit user-configured key, or a platform that has not
-     * adopted recovery yet) behavior is unchanged: the failure propagates.
+     * When set, an auth-class failure (expired/revoked credentials) on any AI
+     * call is recorded so `/health` reports AI as degraded and the site is
+     * flagged for admin re-authentication; the call still degrades gracefully
+     * (the original failure propagates, no retry). Without it (an explicit
+     * user-configured key, or a platform that has not adopted recovery yet)
+     * behavior is unchanged: the failure propagates.
      *
      * @since 1.0.4
      * @stability experimental
@@ -90,9 +91,7 @@ class AiServiceAdapter
             return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens);
         } catch (\RuntimeException $e) {
             $this->handlePossibleBudgetException($e);
-            if ($this->recoverFromAuthFailure($e)) {
-                return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens);
-            }
+            $this->noteAuthFailure($e);
             throw $e;
         }
     }
@@ -122,9 +121,7 @@ class AiServiceAdapter
             return $this->getClient()->conversation($systemPrompt, $messages, $maxTokens);
         } catch (\RuntimeException $e) {
             $this->handlePossibleBudgetException($e);
-            if ($this->recoverFromAuthFailure($e)) {
-                return $this->getClient()->conversation($systemPrompt, $messages, $maxTokens);
-            }
+            $this->noteAuthFailure($e);
             throw $e;
         }
     }
@@ -161,12 +158,7 @@ class AiServiceAdapter
             return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens, $model);
         } catch (\RuntimeException $e) {
             $this->handlePossibleBudgetException($e);
-            if ($this->recoverFromAuthFailure($e)) {
-                $model = ($operation === 'expand_query' && $this->config->aiExpansionModel !== '')
-                    ? $this->config->aiExpansionModel
-                    : null;
-                return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens, $model);
-            }
+            $this->noteAuthFailure($e);
             throw $e;
         }
     }
@@ -304,52 +296,17 @@ class AiServiceAdapter
     }
 
     /**
-     * Attempt expired-key recovery and prepare a fresh client for one retry.
+     * Record an auth-class failure of the stored Amazee credentials.
      *
-     * Returns true only when recovery is wired, the failure is auth-class
-     * (never budget-exhaustion — KeyExpiryRecovery excludes it), the guarded
-     * re-provision succeeded, and fresh credentials are available. The caller
-     * then retries the original request exactly once; a failure of that retry
-     * propagates normally (the recovery's window guard prevents another
-     * re-provision attempt).
+     * When recovery is wired and the failure means the stored credentials are
+     * no longer accepted (never budget-exhaustion — KeyExpiryRecovery excludes
+     * it), this marks AI as degraded for `/health` and flags the site for admin
+     * re-authentication. It never retries: the caller's original exception
+     * propagates and the request degrades gracefully (unexpanded query / no
+     * summary). A no-op when recovery is not wired.
      */
-    private function recoverFromAuthFailure(\RuntimeException $e): bool
+    private function noteAuthFailure(\RuntimeException $e): void
     {
-        if ($this->keyRecovery === null) {
-            return false;
-        }
-
-        if (!$this->keyRecovery->handleAuthFailure($e)) {
-            return false;
-        }
-
-        $credentials = $this->keyRecovery->credentials();
-        if ($credentials === null) {
-            return false;
-        }
-
-        $this->client = $this->createRecoveredClient($credentials);
-
-        return true;
-    }
-
-    /**
-     * Build an AiClient from freshly re-provisioned Amazee credentials.
-     *
-     * Recovered credentials are by definition Amazee LiteLLM ones, so the
-     * provider is the OpenAI-compatible path regardless of what the (stale)
-     * config says. Override in platform subclasses to inject a custom HTTP
-     * client, mirroring createClient().
-     *
-     * @param array{litellm_token: string, litellm_api_url: string, region: string} $credentials
-     */
-    protected function createRecoveredClient(array $credentials): AiClient
-    {
-        $config = $this->config->toAiClientConfig();
-        $config['provider'] = 'openai';
-        $config['api_key'] = $credentials['litellm_token'];
-        $config['base_url'] = $credentials['litellm_api_url'];
-
-        return new AiClient($config);
+        $this->keyRecovery?->handleAuthFailure($e);
     }
 }
