@@ -10,32 +10,38 @@ use Tag1\Scolta\Cache\CacheDriverInterface;
 use Tag1\Scolta\Exception\ApiKeyInvalidException;
 
 /**
- * Detects Amazee trial-key auth failures at call time and recovers by
- * re-provisioning through the existing provisioner path.
+ * Detects Amazee credential auth failures at call time and degrades cleanly.
  *
- * Amazee.ai trial keys are revoked server-side when the trial lifecycle ends.
- * The expiry is NOT announced at provisioning time (verified against the live
- * API: `/auth/generate-trial-access` returns only `created_at`, and the
- * LiteLLM key's own `expires` is a year out while observed trial revocation
- * is on the order of a day) — so the only reliable signal is the auth
- * failure the LiteLLM proxy returns on the next inference call. Without this
- * class that failure was swallowed by the expand/summarize graceful-degrade
- * path while `AutoProvisioner::ensureAiAvailable()` kept no-opping on the
- * stored dead credentials: AI stayed down fleet-wide with health reporting
+ * Amazee.ai credentials are revoked server-side when their lifecycle
+ * ends. The expiry is NOT announced at issue time (verified against the
+ * live API: `/auth/generate-trial-access` returns only `created_at`, and the
+ * LiteLLM key's own `expires` is a year out while observed revocation is on the
+ * order of a day) — so the only reliable signal is the auth failure the LiteLLM
+ * proxy returns on the next inference call. Without this class that failure was
+ * swallowed by the expand/summarize graceful-degrade path while
+ * {@see AutoProvisioner::ensureAiAvailable()} kept no-opping on the stored dead
+ * credentials: AI stayed down fleet-wide with health reporting
  * `ai_configured: true` (django demo outage, 2026-06-09).
  *
- * Two cache-backed markers (any {@see CacheDriverInterface}) coordinate the
- * recovery across requests:
+ * On an auth-class failure this class leaves AI off and records two
+ * cache-backed markers (any {@see CacheDriverInterface}) so the rest of the
+ * system reflects the real state across requests:
  *  - an auth-failure marker, recorded on every detected failure and read by
- *    health checks so "AI configured" stops implying "AI usable";
- *  - a re-provision-attempt marker with a TTL window, so a fleet of failing
- *    requests triggers exactly one re-provision attempt per window instead of
- *    hammering the provisioning API in a loop.
+ *    {@see \Tag1\Scolta\Health\HealthChecker} so "AI configured" stops implying
+ *    "AI usable"; it ages out so a transient blip self-clears once calls
+ *    succeed again;
+ *  - an upgrade-needed marker, set when the stored credentials are no longer
+ *    accepted, that persists until the admin re-authenticates. Adapter admin
+ *    UIs read {@see isUpgradeNeeded()} to prompt the admin to continue by
+ *    entering an email, which runs the verification flow
+ *    ({@see AmazeeClient::requestVerificationCode()} +
+ *    {@see AmazeeClient::signIn()}, used by {@see AmazeeAccountUpgrader}). On a
+ *    successful upgrade the adapter calls {@see clearUpgradeNeeded()}.
  *
- * Budget-exhaustion errors are explicitly excluded — those belong to
- * {@see BudgetAwareProviderDecorator} and must not trigger re-provisioning
- * (a re-provisioned trial key would reset the spend ceiling, which is the
- * upgrade flow's job, not an error-recovery side effect).
+ * The stored credentials are never cleared and no new credentials are requested
+ * on this path; recovery is a deliberate, admin-initiated step. Budget-
+ * exhaustion errors are excluded — those belong to
+ * {@see BudgetAwareProviderDecorator} and follow the budget path, not this one.
  *
  * @since 1.0.4
  * @stability experimental
@@ -55,18 +61,35 @@ final class KeyExpiryRecovery
     public const CACHE_KEY_AUTH_FAILURE = 'scolta_amazee_auth_failure';
 
     /**
-     * Cache key for the one-attempt-per-window re-provision guard.
+     * Cache key for the persistent "credentials no longer accepted, admin
+     * must re-authenticate" marker.
      *
-     * @since 1.0.4
+     * Unlike the auth-failure marker this does NOT age out on its own: once the
+     * stored credentials stop being accepted, AI stays off until the admin
+     * completes the email re-authentication flow and the adapter clears it via
+     * {@see clearUpgradeNeeded()}. Public so adapter admin UIs reference one
+     * definition.
+     *
+     * @since 1.0.5
      * @stability experimental
      */
-    public const CACHE_KEY_REPROVISION_ATTEMPT = 'scolta_amazee_reprovision_attempt';
+    public const CACHE_KEY_UPGRADE_NEEDED = 'scolta_amazee_upgrade_needed';
 
     /**
      * How long a recorded auth failure keeps health reporting AI unusable
      * before a fresh failing call must re-confirm it, in seconds.
      */
     private const AUTH_FAILURE_TTL = 3600;
+
+    /**
+     * How long the upgrade-needed marker is retained, in seconds.
+     *
+     * Long enough to outlast any cache backend's practical eviction window so
+     * the prompt does not disappear on its own; the marker is meant to be
+     * cleared explicitly by {@see clearUpgradeNeeded()} once the admin
+     * re-authenticates, not to expire.
+     */
+    private const UPGRADE_NEEDED_TTL = 31536000;
 
     /**
      * Message substrings that identify an auth-class failure from the LiteLLM
@@ -82,26 +105,22 @@ final class KeyExpiryRecovery
     ];
 
     /**
-     * @param ConfigStorageInterface $storage              Adapter credential store (same instance the provisioner uses).
-     * @param CacheDriverInterface   $cache                Cache for the failure/attempt markers.
-     * @param AmazeeClient|null      $client               Optional pre-configured client (testing / base-URL override).
-     * @param int                    $failureWindowSeconds Minimum spacing between re-provision attempts.
-     * @param LoggerInterface        $logger               PSR-3 logger (defaults to NullLogger).
+     * @param ConfigStorageInterface $storage Adapter credential store (same instance the provisioner uses).
+     * @param CacheDriverInterface   $cache   Cache for the failure/upgrade markers.
+     * @param LoggerInterface        $logger  PSR-3 logger (defaults to NullLogger).
      */
     public function __construct(
         private readonly ConfigStorageInterface $storage,
         private readonly CacheDriverInterface $cache,
-        private readonly ?AmazeeClient $client = null,
-        private readonly int $failureWindowSeconds = 600,
         private readonly LoggerInterface $logger = new NullLogger(),
     ) {}
 
     /**
-     * Whether an exception (anywhere in its chain) is an auth-class failure
-     * for which re-provisioning is the correct recovery.
+     * Whether an exception (anywhere in its chain) is an auth-class failure of
+     * the stored Amazee credentials.
      *
      * Budget-exhaustion errors return false even though they also surface as
-     * 4xx responses — they route to the budget path, never to re-provisioning.
+     * 4xx responses — they route to the budget path, never here.
      *
      * @since 1.0.4
      * @stability experimental
@@ -130,35 +149,38 @@ final class KeyExpiryRecovery
     }
 
     /**
-     * Record an auth failure and attempt a one-shot re-provision.
+     * Handle an AI call failure on the auto-provisioned Amazee path.
      *
-     * Returns true only when the exception is an auth failure AND a
-     * re-provision was attempted in this call AND it succeeded — i.e. fresh
-     * credentials are now in storage and a retry makes sense. Returns false
-     * for non-auth errors, when another attempt already ran inside the
-     * current failure window, or when re-provisioning failed.
+     * For an auth-class failure (the stored credentials are no longer accepted)
+     * this records the auth-failure marker so health reports AI as degraded,
+     * sets the persistent upgrade-needed marker so admin UIs can prompt the
+     * admin to re-authenticate, and leaves the stored credentials untouched.
+     * It always returns false: there is nothing to retry, so the caller
+     * degrades gracefully (unexpanded query / no summary). Non-auth errors are
+     * ignored and also return false.
      *
      * @param \Throwable $e The AI call failure.
-     * @param callable(string, string): void|null $onModelsResolved Forwarded
-     *   to the provisioner so adapters can persist resolved model names.
      *
      * @since 1.0.4
      * @stability experimental
      */
-    public function handleAuthFailure(\Throwable $e, ?callable $onModelsResolved = null): bool
+    public function handleAuthFailure(\Throwable $e): bool
     {
         if (!self::isAuthFailure($e)) {
             return false;
         }
 
         $this->recordAuthFailure();
+        $this->flagUpgradeNeeded();
 
-        return $this->attemptReprovision($onModelsResolved);
+        $this->logger->warning('Scolta: stored Amazee credentials were not accepted; AI is off until re-authentication.');
+
+        return false;
     }
 
     /**
      * Mark the stored credentials as auth-failing so health reports AI as
-     * unusable until recovery succeeds or the marker ages out.
+     * unusable until calls succeed again or the marker ages out.
      *
      * @since 1.0.4
      * @stability experimental
@@ -183,10 +205,46 @@ final class KeyExpiryRecovery
     }
 
     /**
-     * The currently stored credentials, or null when none are stored.
+     * Set the persistent upgrade-needed marker.
      *
-     * After a successful {@see handleAuthFailure()} these are the fresh
-     * post-re-provision credentials callers rebuild their client from.
+     * @since 1.0.5
+     * @stability experimental
+     */
+    public function flagUpgradeNeeded(): void
+    {
+        $this->cache->set(self::CACHE_KEY_UPGRADE_NEEDED, time(), self::UPGRADE_NEEDED_TTL);
+    }
+
+    /**
+     * Whether the stored credentials need an admin re-authentication.
+     *
+     * Adapter admin UIs read this to show the "enter your email to continue"
+     * prompt. Cache-marker read only — never a live API call.
+     *
+     * @since 1.0.5
+     * @stability experimental
+     */
+    public function isUpgradeNeeded(): bool
+    {
+        return (bool) $this->cache->get(self::CACHE_KEY_UPGRADE_NEEDED);
+    }
+
+    /**
+     * Clear the upgrade-needed marker after a successful re-authentication.
+     *
+     * Adapters call this once the admin has completed the email verification
+     * flow and fresh credentials are in storage.
+     *
+     * @since 1.0.5
+     * @stability experimental
+     */
+    public function clearUpgradeNeeded(): void
+    {
+        $this->cache->set(self::CACHE_KEY_UPGRADE_NEEDED, false, 1);
+    }
+
+    /**
+     * The currently stored credentials, or null when none are stored.
      *
      * @return array{litellm_token: string, litellm_api_url: string, region: string}|null
      *
@@ -196,36 +254,5 @@ final class KeyExpiryRecovery
     public function credentials(): ?array
     {
         return $this->storage->load();
-    }
-
-    /**
-     * Attempt one re-provision through the existing provisioner path,
-     * guarded to a single attempt per failure window.
-     *
-     * @param callable(string, string): void|null $onModelsResolved
-     */
-    private function attemptReprovision(?callable $onModelsResolved): bool
-    {
-        if ($this->cache->get(self::CACHE_KEY_REPROVISION_ATTEMPT)) {
-            return false;
-        }
-
-        // Set the guard before attempting: a failed attempt must also wait
-        // out the window, otherwise every failing request retries provisioning.
-        $this->cache->set(self::CACHE_KEY_REPROVISION_ATTEMPT, time(), $this->failureWindowSeconds);
-
-        $this->logger->warning('Scolta: stored Amazee credentials failed authentication, attempting re-provision');
-
-        $provisioned = AutoProvisioner::reprovision($this->storage, $onModelsResolved, $this->client);
-
-        if ($provisioned) {
-            // AI is usable again — stop health from reporting the old failure.
-            $this->cache->set(self::CACHE_KEY_AUTH_FAILURE, false, 1);
-            $this->logger->info('Scolta: Amazee re-provisioning succeeded, fresh credentials stored');
-        } else {
-            $this->logger->error('Scolta: Amazee re-provisioning failed, AI remains unavailable');
-        }
-
-        return $provisioned;
     }
 }

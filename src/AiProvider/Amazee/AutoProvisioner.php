@@ -28,8 +28,9 @@ final class AutoProvisioner
      * stored key still works — trial keys are revoked server-side when the
      * trial ends, and that expiry is not announced at provisioning time, so a
      * cheap install-hook/lazy-init guard cannot know. Call-time auth failures
-     * are the reliable signal: {@see KeyExpiryRecovery} detects them and
-     * recovers through {@see reprovision()}, which bypasses this no-op.
+     * are the reliable signal: {@see KeyExpiryRecovery} detects them, records
+     * the failure for health, and flags the site for admin re-authentication
+     * without requesting replacement credentials.
      *
      * Stored credentials are, however, treated as a *complete* provision only
      * once their model names have been resolved. A provision whose `/model/info`
@@ -128,39 +129,5 @@ final class AutoProvisioner
         }
 
         return true;
-    }
-
-    /**
-     * Replace stored (known-bad) credentials with a freshly provisioned trial.
-     *
-     * The expired-key recovery entry point: unlike {@see ensureAiAvailable()},
-     * stored credentials do not short-circuit — they are cleared first, then a
-     * fresh trial is provisioned and stored through the same provisioner path.
-     * Callers are responsible for rate-limiting (see {@see KeyExpiryRecovery},
-     * which guards this behind a one-attempt-per-window marker).
-     *
-     * Provisioning failures are caught internally and returned as `false`; the
-     * old credentials are already cleared at that point, which is correct —
-     * they were known-bad, and an empty store lets `ensureAiAvailable()` retry
-     * on the next lazy-init pass.
-     *
-     * @param ConfigStorageInterface $storage CMS-specific credential store.
-     * @param callable(string $aiModel, string $aiExpansionModel): void|null $onModelsResolved
-     *   Called with the resolved model names when provisioning succeeds.
-     * @param AmazeeClient|null $client Optionally inject a pre-configured client.
-     *
-     * @return bool True if fresh credentials were provisioned and stored.
-     *
-     * @since 1.0.4
-     * @stability experimental
-     */
-    public static function reprovision(
-        ConfigStorageInterface $storage,
-        ?callable $onModelsResolved = null,
-        ?AmazeeClient $client = null,
-    ): bool {
-        $storage->clear();
-
-        return self::ensureAiAvailable($storage, false, $onModelsResolved, $client);
     }
 }
