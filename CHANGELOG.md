@@ -6,6 +6,12 @@ This project uses [Semantic Versioning](https://semver.org/). Major versions are
 
 ## [Unreleased]
 
+### Added
+- **Optional `$temperature` parameter on `AiClient::message()` and `AiClient::conversation()` (`src/AiClient.php`).** A trailing `?float $temperature = null` is threaded through `sendRequest()` into both the Anthropic and OpenAI-compatible request builders. When null (the default) no `temperature` field is included in the request body and the provider default applies; when non-null it is sent to both provider shapes (the Amazee path proxies through the OpenAI-compatible endpoint and inherits that handling). The parameter is optional and trailing, so every existing caller is unaffected.
+
+### Fixed
+- **Query expansion now runs at temperature 0 for deterministic terms (`src/Service/AiServiceAdapter.php`, `messageForOperation()`).** Expansion calls went out with the provider default temperature (1.0), so the same search query produced different expansion terms on every uncached call — flush the cache and re-search, get different terms and different results. Because the displayed result count is the per-term OR-union across the primary query plus every expansion term, this also made expanded counts LLM-volatile between runs (the 2026-07-13 regression work had to re-base its count tripwires on base-only reads to work around exactly this). `messageForOperation()` now passes `temperature: 0.0` when `$operation === 'expand_query'` and null otherwise. Summarize and follow-up are creative surfaces and intentionally keep the provider default.
+
 ## [1.0.5] - 2026-06-27
 
 ### Fixed

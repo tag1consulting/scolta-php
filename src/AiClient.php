@@ -101,6 +101,9 @@ class AiClient
      * @param string $userMessage The user's message/query.
      * @param int $maxTokens Maximum response tokens.
      * @param string|null $model Model override for this call.
+     * @param float|null $temperature Sampling temperature for this call. When
+     *   null (the default) no temperature field is sent and the provider
+     *   default applies. Pass 0.0 for deterministic output.
      *
      * @return string Response text.
      *
@@ -113,10 +116,11 @@ class AiClient
         string $userMessage,
         int $maxTokens = 1024,
         ?string $model = null,
+        ?float $temperature = null,
     ): string {
         return $this->sendRequest($systemPrompt, [
             ['role' => 'user', 'content' => $userMessage],
-        ], $maxTokens, $model);
+        ], $maxTokens, $model, $temperature);
     }
 
     /**
@@ -126,6 +130,9 @@ class AiClient
      * @param array $messages Array of message objects with 'role' and 'content' keys.
      * @param int $maxTokens Maximum response tokens.
      * @param string|null $model Model override for this call.
+     * @param float|null $temperature Sampling temperature for this call. When
+     *   null (the default) no temperature field is sent and the provider
+     *   default applies. Pass 0.0 for deterministic output.
      *
      * @return string Response text.
      *
@@ -138,8 +145,9 @@ class AiClient
         array $messages,
         int $maxTokens = 1024,
         ?string $model = null,
+        ?float $temperature = null,
     ): string {
-        return $this->sendRequest($systemPrompt, $messages, $maxTokens, $model);
+        return $this->sendRequest($systemPrompt, $messages, $maxTokens, $model, $temperature);
     }
 
     /**
@@ -150,6 +158,7 @@ class AiClient
         array $messages,
         int $maxTokens,
         ?string $model,
+        ?float $temperature = null,
     ): string {
         if (empty($this->apiKey)) {
             throw new ApiKeyMissingException(
@@ -161,10 +170,10 @@ class AiClient
 
         try {
             if ($this->provider === 'openai') {
-                return $this->sendOpenAiRequest($systemPrompt, $messages, $maxTokens, $useModel);
+                return $this->sendOpenAiRequest($systemPrompt, $messages, $maxTokens, $useModel, $temperature);
             }
 
-            return $this->sendAnthropicRequest($systemPrompt, $messages, $maxTokens, $useModel);
+            return $this->sendAnthropicRequest($systemPrompt, $messages, $maxTokens, $useModel, $temperature);
         } catch (ClientException $e) {
             $status = $e->getResponse()->getStatusCode();
             if ($status === 401) {
@@ -196,19 +205,26 @@ class AiClient
         array $messages,
         int $maxTokens,
         string $model,
+        ?float $temperature = null,
     ): string {
+        $body = [
+            'model' => $model,
+            'max_tokens' => $maxTokens,
+            'system' => $systemPrompt,
+            'messages' => $messages,
+        ];
+        // Omit temperature entirely when null so the provider default applies.
+        if ($temperature !== null) {
+            $body['temperature'] = $temperature;
+        }
+
         $response = $this->httpClient->request('POST', $this->baseUrl, [
             'headers' => [
                 'x-api-key' => $this->apiKey,
                 'anthropic-version' => $this->apiVersion,
                 'Content-Type' => 'application/json',
             ],
-            'json' => [
-                'model' => $model,
-                'max_tokens' => $maxTokens,
-                'system' => $systemPrompt,
-                'messages' => $messages,
-            ],
+            'json' => $body,
             'timeout' => $this->timeout,
         ]);
 
@@ -221,6 +237,7 @@ class AiClient
         array $messages,
         int $maxTokens,
         string $model,
+        ?float $temperature = null,
     ): string {
         // Prepend system message in OpenAI format.
         $allMessages = array_merge(
@@ -228,16 +245,24 @@ class AiClient
             $messages,
         );
 
+        $body = [
+            'model' => $model,
+            'max_tokens' => $maxTokens,
+            'messages' => $allMessages,
+        ];
+        // Omit temperature entirely when null so the provider default applies.
+        // The Amazee path proxies through this OpenAI-compatible endpoint and
+        // inherits the same body handling.
+        if ($temperature !== null) {
+            $body['temperature'] = $temperature;
+        }
+
         $response = $this->httpClient->request('POST', $this->baseUrl, [
             'headers' => [
                 'Authorization' => 'Bearer ' . $this->apiKey,
                 'Content-Type' => 'application/json',
             ],
-            'json' => [
-                'model' => $model,
-                'max_tokens' => $maxTokens,
-                'messages' => $allMessages,
-            ],
+            'json' => $body,
             'timeout' => $this->timeout,
         ]);
 

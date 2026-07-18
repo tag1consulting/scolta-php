@@ -155,7 +155,13 @@ class AiServiceAdapter
                 ? $this->config->aiExpansionModel
                 : null;
 
-            return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens, $model);
+            // Query expansion is a deterministic semantic mapping: pin it to
+            // temperature 0 so the same query yields the same terms on every
+            // uncached call. Summarize and follow-up keep the provider default
+            // (null → temperature field omitted).
+            $temperature = $operation === 'expand_query' ? 0.0 : null;
+
+            return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens, $model, $temperature);
         } catch (\RuntimeException $e) {
             $this->handlePossibleBudgetException($e);
             $this->noteAuthFailure($e);
