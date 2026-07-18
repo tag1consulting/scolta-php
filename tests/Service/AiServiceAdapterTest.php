@@ -201,6 +201,68 @@ class AiServiceAdapterTest extends TestCase
         $this->assertEquals('framework-response', $result);
     }
 
+    /**
+     * Build an adapter whose built-in client records every message() call so a
+     * test can observe the model and temperature the adapter passed through.
+     */
+    private function makeRecordingAdapter(ScoltaConfig $config): AiServiceAdapter
+    {
+        $recordingClient = new class extends AiClient {
+            /** @var list<array{model: ?string, temperature: ?float}> */
+            public array $calls = [];
+
+            public function __construct()
+            {
+                parent::__construct([]);
+            }
+
+            public function message(string $systemPrompt, string $userMessage, int $maxTokens = 1024, ?string $model = null, ?float $temperature = null): string
+            {
+                $this->calls[] = ['model' => $model, 'temperature' => $temperature];
+
+                return 'recorded';
+            }
+        };
+
+        return new class ($config, $recordingClient) extends AiServiceAdapter {
+            public AiClient $recordingClient;
+
+            public function __construct(ScoltaConfig $config, AiClient $recordingClient)
+            {
+                parent::__construct($config);
+                $this->recordingClient = $recordingClient;
+            }
+
+            protected function getClient(): AiClient
+            {
+                return $this->recordingClient;
+            }
+        };
+    }
+
+    public function testExpandQueryReachesClientWithTemperatureZero(): void
+    {
+        // Expansion is a deterministic semantic mapping — it must run at
+        // temperature 0 so the same query yields the same terms every call.
+        $adapter = $this->makeRecordingAdapter(ScoltaConfig::fromArray([]));
+
+        $result = $adapter->messageForOperation('expand_query', 'sys', 'user', 512);
+
+        $this->assertEquals('recorded', $result);
+        $this->assertSame(0.0, $adapter->recordingClient->calls[0]['temperature']);
+    }
+
+    public function testNonExpansionOperationReachesClientWithNullTemperature(): void
+    {
+        // Summarize (and follow-up) are creative surfaces — they keep the
+        // provider default, i.e. no temperature is sent (null).
+        $adapter = $this->makeRecordingAdapter(ScoltaConfig::fromArray([]));
+
+        $adapter->messageForOperation('summarize', 'sys', 'user', 512);
+
+        $this->assertNull($adapter->recordingClient->calls[0]['temperature']);
+    }
+
     // -------------------------------------------------------------------
     // aiExpansionModel config property defaults and fromArray mapping
     // -------------------------------------------------------------------
@@ -257,12 +319,12 @@ class AiServiceAdapterTest extends TestCase
                 parent::__construct([]);
             }
 
-            public function message(string $systemPrompt, string $userMessage, int $maxTokens = 1024, ?string $model = null): string
+            public function message(string $systemPrompt, string $userMessage, int $maxTokens = 1024, ?string $model = null, ?float $temperature = null): string
             {
                 throw $this->toThrow;
             }
 
-            public function conversation(string $systemPrompt, array $messages, int $maxTokens = 1024, ?string $model = null): string
+            public function conversation(string $systemPrompt, array $messages, int $maxTokens = 1024, ?string $model = null, ?float $temperature = null): string
             {
                 throw $this->toThrow;
             }
@@ -361,7 +423,7 @@ class AiServiceAdapterTest extends TestCase
                 parent::__construct([]);
             }
 
-            public function message(string $systemPrompt, string $userMessage, int $maxTokens = 1024, ?string $model = null): string
+            public function message(string $systemPrompt, string $userMessage, int $maxTokens = 1024, ?string $model = null, ?float $temperature = null): string
             {
                 throw $this->toThrow;
             }
@@ -407,7 +469,7 @@ class AiServiceAdapterTest extends TestCase
                 parent::__construct([]);
             }
 
-            public function message(string $systemPrompt, string $userMessage, int $maxTokens = 1024, ?string $model = null): string
+            public function message(string $systemPrompt, string $userMessage, int $maxTokens = 1024, ?string $model = null, ?float $temperature = null): string
             {
                 throw $this->toThrow;
             }
@@ -469,12 +531,12 @@ class AiServiceAdapterTest extends TestCase
                 parent::__construct([]);
             }
 
-            public function message(string $systemPrompt, string $userMessage, int $maxTokens = 1024, ?string $model = null): string
+            public function message(string $systemPrompt, string $userMessage, int $maxTokens = 1024, ?string $model = null, ?float $temperature = null): string
             {
                 throw $this->toThrow;
             }
 
-            public function conversation(string $systemPrompt, array $messages, int $maxTokens = 1024, ?string $model = null): string
+            public function conversation(string $systemPrompt, array $messages, int $maxTokens = 1024, ?string $model = null, ?float $temperature = null): string
             {
                 throw $this->toThrow;
             }

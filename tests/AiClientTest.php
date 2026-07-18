@@ -277,6 +277,124 @@ class AiClientTest extends TestCase
     }
 
     // -------------------------------------------------------------------
+    // Temperature — included when provided, omitted (provider default) when null
+    // -------------------------------------------------------------------
+
+    public function testAnthropicIncludesTemperatureWhenProvided(): void
+    {
+        $history = [];
+        $mock = new MockHandler([
+            new Response(200, [], json_encode([
+                'content' => [['type' => 'text', 'text' => 'ok']],
+            ])),
+        ]);
+        $stack = HandlerStack::create($mock);
+        $stack->push(Middleware::history($history));
+
+        $client = new AiClient(
+            ['provider' => 'anthropic', 'api_key' => 'key'],
+            new Client(['handler' => $stack]),
+        );
+
+        $client->message('sys', 'msg', 512, null, 0.0);
+
+        $body = json_decode((string) $history[0]['request']->getBody(), true);
+        $this->assertArrayHasKey('temperature', $body);
+        $this->assertEquals(0.0, $body['temperature']);
+    }
+
+    public function testAnthropicOmitsTemperatureWhenNull(): void
+    {
+        $history = [];
+        $mock = new MockHandler([
+            new Response(200, [], json_encode([
+                'content' => [['type' => 'text', 'text' => 'ok']],
+            ])),
+        ]);
+        $stack = HandlerStack::create($mock);
+        $stack->push(Middleware::history($history));
+
+        $client = new AiClient(
+            ['provider' => 'anthropic', 'api_key' => 'key'],
+            new Client(['handler' => $stack]),
+        );
+
+        // Default call — no temperature argument.
+        $client->message('sys', 'msg');
+
+        $body = json_decode((string) $history[0]['request']->getBody(), true);
+        $this->assertArrayNotHasKey('temperature', $body);
+    }
+
+    public function testOpenAiIncludesTemperatureWhenProvided(): void
+    {
+        $history = [];
+        $mock = new MockHandler([
+            new Response(200, [], json_encode([
+                'choices' => [['message' => ['content' => 'ok']]],
+            ])),
+        ]);
+        $stack = HandlerStack::create($mock);
+        $stack->push(Middleware::history($history));
+
+        $client = new AiClient(
+            ['provider' => 'openai', 'api_key' => 'key'],
+            new Client(['handler' => $stack]),
+        );
+
+        $client->message('sys', 'msg', 512, null, 0.0);
+
+        $body = json_decode((string) $history[0]['request']->getBody(), true);
+        $this->assertArrayHasKey('temperature', $body);
+        $this->assertEquals(0.0, $body['temperature']);
+    }
+
+    public function testOpenAiOmitsTemperatureWhenNull(): void
+    {
+        $history = [];
+        $mock = new MockHandler([
+            new Response(200, [], json_encode([
+                'choices' => [['message' => ['content' => 'ok']]],
+            ])),
+        ]);
+        $stack = HandlerStack::create($mock);
+        $stack->push(Middleware::history($history));
+
+        $client = new AiClient(
+            ['provider' => 'openai', 'api_key' => 'key'],
+            new Client(['handler' => $stack]),
+        );
+
+        $client->message('sys', 'msg');
+
+        $body = json_decode((string) $history[0]['request']->getBody(), true);
+        $this->assertArrayNotHasKey('temperature', $body);
+    }
+
+    public function testConversationIncludesTemperatureWhenProvided(): void
+    {
+        $history = [];
+        $mock = new MockHandler([
+            new Response(200, [], json_encode([
+                'content' => [['type' => 'text', 'text' => 'ok']],
+            ])),
+        ]);
+        $stack = HandlerStack::create($mock);
+        $stack->push(Middleware::history($history));
+
+        $client = new AiClient(
+            ['api_key' => 'key'],
+            new Client(['handler' => $stack]),
+        );
+
+        $client->conversation('sys', [['role' => 'user', 'content' => 'hi']], 512, null, 0.0);
+
+        $body = json_decode((string) $history[0]['request']->getBody(), true);
+        $this->assertArrayHasKey('temperature', $body);
+        $this->assertEquals(0.0, $body['temperature']);
+    }
+
+    // -------------------------------------------------------------------
     // Custom base URL
     // -------------------------------------------------------------------
 
