@@ -212,8 +212,12 @@ jobs:
             $j["repositories"] = array_values($repos);
             $j["require"]["tag1/scolta-php"] = "dev-main@dev";
             // Allow Drupal core plugins required when installing Drupal as a dependency.
+            // This job runs an unpinned "composer update", so a plugin newly
+            // required by drupal/core blocks the install until it is listed
+            // here: symfony/runtime arrived with drupal/core 11.4 (Symfony 7.4).
             $j["config"]["allow-plugins"]["drupal/core-composer-scaffold"] = true;
             $j["config"]["allow-plugins"]["composer/installers"] = true;
+            $j["config"]["allow-plugins"]["symfony/runtime"] = true;
             file_put_contents("composer.json", json_encode($j, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
           '
 
