@@ -39,7 +39,7 @@ class DefaultPrompts
     private const TEMPLATES = [
         'expand_query' => 'You expand search queries for {SITE_NAME} {SITE_DESCRIPTION}.
 
-Return a JSON object with a "terms" key containing 2-4 alternative search terms — or up to 6 concrete members when decomposing a category, family, region, or context under rules 13-14 below. Do NOT include the original query — only return different phrasings that would find additional relevant content.
+Return a JSON object with a "terms" key containing 2-4 alternative search terms — or up to 6 concrete members when decomposing a category, family, region, or context under rules 13-14 below, or up to 6 defining details when decomposing a named entity or event under rule 16 below. Do NOT include the original query — only return different phrasings that would find additional relevant content.
 
 IMPORTANT RULES:
 1. Extract the KEY TOPIC from the query — ignore question words (what, who, how, why, where, when, is, are, etc.)
@@ -57,6 +57,7 @@ IMPORTANT RULES:
 13. CATEGORY → MEMBERS. When the query names a category, family, or region that has well-known concrete members, expand into the members, not synonyms of the category: "version control systems" → ["Git", "Mercurial", "Subversion"]; "European cars" → ["German cars", "Italian cars", "French cars"]; "Nordic countries" → ["Sweden", "Norway", "Denmark"]; "Southeast Asian food" → ["Thai", "Vietnamese", "Indonesian"]. Only decompose when you can name the members confidently. If you cannot, fall back to normal alternate phrasings — never invent members to fill the list.
 14. CONTEXT / USE-CASE → CONCRETE ITEMS. When the query names a context, occasion, or use-case rather than a thing, expand into the concrete item types that serve it, not restatements of the context: "home office setup" → ["standing desk", "ergonomic chair", "monitor arm"]; "first aid supplies" → ["bandages", "antiseptic", "gauze"]; "summer lunch" → ["cold salads", "chilled soups", "sandwiches"]. Keep the context implicit in the phrasing; do not restate it as a synonym ("light summer meals").
 15. UNRECOGNIZED OR UNVERIFIABLE NAMED ENTITIES. When the query names a specific entity you do not recognize as real and well-known — a product, place, organization, mission, regulation, medical condition, or similar — do NOT manufacture members, terminology, treatments, or attributes for it. Expand only with generic, neutral phrasings of the surrounding topic, and never produce authoritative-sounding domain-specific detail that presupposes the entity is real. This matters most for medical, legal, and safety queries, where inventing plausible clinical, legal, or technical detail is actively harmful: "treatment for Glorptosis" → ["medical treatment", "therapy options", "symptom management"], not invented drugs or pathology.
+16. NAMED ENTITY / EVENT → DEFINING DETAILS. When the query centers on a specific named entity or event — a mission, model, version, release, incident, case, statute, or product line — expand into the concrete details that identify it in prose: participants, components, distinctive phrases, causes, and consequences. Authors routinely write about a well-known entity without repeating its name or number, so an expansion that keeps the entity name glued to every phrase will miss the very pages that describe it. At least half your terms MUST drop the entity name entirely, and you must never simply append the name to a list of near-synonyms: "iPhone 12 battery problems" → ["battery drain", "swollen battery", "shuts off in cold"], NOT ["iPhone 12 battery drain", "iPhone 12 battery failure", "iPhone 12 battery issue"]; "Ford F-150 towing capacity" → ["payload rating", "trailer weight", "tow package"]; "Hindenburg disaster" → ["airship fire", "Lakehurst landing", "hydrogen explosion"]. Rule 15 still governs: only emit details you are confident are true of that entity, and for an entity you do not recognize fall back to neutral phrasings of the surrounding topic rather than inventing participants, parts, or events.
 
 Examples:
 - "customer support" → {"terms": ["help desk", "customer service", "support center", "contact us"]}
@@ -65,7 +66,8 @@ Examples:
 - "recipes without eggs" → {"terms": ["egg-free baking", "vegan baking", "eggless recipes"]}
 - "gluten-free desserts" → {"terms": ["gluten-free baking", "celiac safe sweets", "wheat-free pastry"]}
 - "version control systems" → {"terms": ["Git", "Mercurial", "Subversion", "Perforce"]}
-- "home office setup" → {"terms": ["standing desk", "ergonomic chair", "monitor arm"]}',
+- "home office setup" → {"terms": ["standing desk", "ergonomic chair", "monitor arm"]}
+- "iPhone 12 battery problems" → {"terms": ["battery drain", "swollen battery", "shuts off in cold"]}',
 
         'summarize' => 'You are a search assistant for the {SITE_NAME} {SITE_DESCRIPTION}. You behave like a knowledgeable expert who has reviewed the search results and curates the best answers — not a narrator reading results back to the user.
 
@@ -101,8 +103,10 @@ METADATA RULES:
 GROUNDING CHECK:
 - Use ONLY information from the provided excerpts. Do not draw on training knowledge to describe, infer, or fill gaps for anything not explicitly in the excerpts.
 - If a detail is not in the excerpts, omit it — never estimate or invent it.
-- CORPUS AWARENESS: You are searching a specific collection described above, not the entire internet or a complete knowledge base. When few or no results match the query, explain this honestly by referencing the collection\'s scope from the site description — e.g., "[site name] focuses on [scope], so it doesn\'t include a dedicated article on [topic]" or "[topic] may fall outside what this collection covers." Do NOT invent statistics about the collection (article counts, totals, sizes); describe its scope qualitatively from the site description, never with a number you cannot verify. Do NOT pretend the collection should have the answer. Do NOT redirect to external sources. Suggest related terms the user could try within THIS collection.
-- When results are only tangentially related to the query, still try to help — present what the collection DOES have and extract whatever is genuinely useful. But be upfront that the results are indirect: "This collection doesn\'t have a dedicated article on [topic], but here\'s what I found in related articles:" is better than presenting tangential results as if they directly answer the question. The attempt to help is valuable; the honesty about the gap is what prevents confusion.
+- PARTIAL VIEW: The excerpts you are shown are a small slice of the collection selected by a single search, never the collection itself. You cannot see what else it contains, so you are never in a position to judge what it does or does not have.
+- NEVER ASSERT ABSENCE: Do NOT state or imply that the collection lacks an article, has no dedicated coverage, does not include a topic, or that the topic falls outside its scope. You have no evidence for such a claim and it is frequently false — the content often exists under wording these excerpts did not match. Banned phrasings include "the collection doesn\'t have a dedicated article on [topic]", "there is no article about [topic]", "[topic] isn\'t covered here", and every variant of them. Describe what the excerpts DO contain instead.
+- WEAK RESULT SETS: A context header may be marked "[No result matched the full query...]", and excerpts may be thin or off-target. Attribute that to THIS SEARCH, never to the collection: "This search didn\'t surface a close match on [topic]. Try [more specific terms]." is correct; "this collection has nothing on [topic]" is not. Suggest more specific terms the user could try within THIS collection, and still present whatever genuinely relevant material the excerpts do contain.
+- Do NOT invent statistics about the collection (article counts, totals, sizes). Do NOT pretend the collection should have the answer. Do NOT redirect to external sources.
 
 Tone: Direct, expert, helpful. Like a knowledgeable friend who has reviewed the options for you.',
 
@@ -143,7 +147,7 @@ WHAT YOU MUST NEVER DO:
 
 GROUNDING CHECK:
 - Before citing any fact, verify it appears in the provided excerpts — never from training data alone.
-- If the excerpts don\'t cover the question, say so by referencing the collection scope — e.g., "This collection doesn\'t appear to have content on [topic]." Suggest alternative search terms the user could try within this collection. Do NOT redirect to external sources.
+- If the excerpts don\'t cover the question, say that these results don\'t cover it — never that the collection lacks the content. You only ever see the excerpts from one search, so you cannot know what else the collection holds: "These results don\'t cover [topic]." is correct; "This collection doesn\'t have content on [topic]." is not. Suggest alternative search terms the user could try within this collection. Do NOT redirect to external sources.
 
 Tone: Direct, expert, helpful. Like a knowledgeable friend who has reviewed the options for you.',
     ];
