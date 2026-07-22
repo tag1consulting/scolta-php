@@ -311,40 +311,132 @@ class DefaultPromptsTest extends TestCase
     {
         $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
 
-        $this->assertStringContainsString(
-            'CORPUS AWARENESS',
-            $template,
-            'summarize template must retain the CORPUS AWARENESS rule',
-        );
+        // The guard formerly lived under a "CORPUS AWARENESS" heading, which was
+        // removed because the surrounding rule instructed the model to assert
+        // absence (see the tests below). The no-invented-statistics guard from
+        // #33 is preserved.
         $this->assertStringContainsString(
             'Do NOT invent statistics about the collection',
             $template,
-            'CORPUS AWARENESS must explicitly forbid inventing corpus statistics',
+            'summarize must explicitly forbid inventing corpus statistics',
         );
     }
 
-    public function testSummarizeCorpusAwarenessMatchesCanonicalSnapshot(): void
+    // -------------------------------------------------------------------------
+    // Identifier / proper-noun queries — the summary must never generalize a
+    // single search's slice of the corpus into a claim about the whole corpus.
+    // -------------------------------------------------------------------------
+
+    public function testSummarizeTemplateForbidsAssertingAbsence(): void
     {
-        // Snapshot guard: pin the exact CORPUS AWARENESS bullet so any future edit
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
+
+        $this->assertStringContainsString(
+            'NEVER ASSERT ABSENCE',
+            $template,
+            'summarize must carry the NEVER ASSERT ABSENCE rule',
+        );
+        $this->assertStringContainsString(
+            'Do NOT state or imply that the collection lacks an article, has no dedicated coverage',
+            $template,
+            'the rule must forbid claiming the collection lacks coverage',
+        );
+    }
+
+    public function testSummarizeTemplateBansTheObservedAbsencePhrasings(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
+
+        // These are the exact phrasings the old CORPUS AWARENESS rule taught,
+        // and that produced the false "no dedicated article" overview.
+        foreach ([
+            'the collection doesn\'t have a dedicated article on [topic]',
+            'there is no article about [topic]',
+            '[topic] isn\'t covered here',
+        ] as $banned) {
+            $this->assertStringContainsString(
+                $banned,
+                $template,
+                sprintf('summarize must name `%s` as a banned phrasing', $banned),
+            );
+        }
+    }
+
+    public function testSummarizeTemplateNoLongerInstructsAbsenceClaims(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
+
+        // Regression guard: the template must not reintroduce wording that tells
+        // the model to report the collection as lacking a topic.
+        $this->assertStringNotContainsString(
+            'so it doesn\'t include a dedicated article on',
+            $template,
+            'summarize must not instruct the model to claim a missing article',
+        );
+        $this->assertStringNotContainsString(
+            'may fall outside what this collection covers',
+            $template,
+            'summarize must not instruct the model to claim a topic is out of scope',
+        );
+    }
+
+    public function testSummarizeTemplateFramesThinResultsAsASearchLimitation(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
+
+        $this->assertStringContainsString(
+            'PARTIAL VIEW',
+            $template,
+            'summarize must state that the excerpts are a slice, not the collection',
+        );
+        $this->assertStringContainsString(
+            'WEAK RESULT SETS',
+            $template,
+            'summarize must carry the WEAK RESULT SETS rule',
+        );
+        $this->assertStringContainsString(
+            'Attribute that to THIS SEARCH, never to the collection',
+            $template,
+            'a weak result set must be attributed to the search, not the corpus',
+        );
+    }
+
+    public function testSummarizeTemplateUnderstandsTheWeakMatchContextSignal(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
+
+        // scolta.js prepends this marker to the context when the full query
+        // matched nothing and results came from the broadened OR fallback.
+        // Guarded on the JS side by tests/js/summary-weak-match-signal.test.js.
+        $this->assertStringContainsString(
+            '[No result matched the full query...]',
+            $template,
+            'summarize must recognize the weak-match context header emitted by scolta.js',
+        );
+    }
+
+    public function testSummarizeAbsenceGroundingRulesMatchCanonicalSnapshot(): void
+    {
+        // Snapshot guard: pin the exact absence/grounding block so any future edit
         // fails loudly and surfaces as an explicit diff in review. The fixture is
-        // seeded byte-for-byte from this bullet and is kept hand-identical to the
-        // matching bullet in scolta-core's SUMMARIZE constant. The PHP source escapes
+        // seeded byte-for-byte from these bullets and is kept hand-identical to the
+        // matching bullets in scolta-core's SUMMARIZE constant. The PHP source escapes
         // apostrophes as \' inside the single-quoted template literal; getTemplate()
         // returns the resolved runtime string where those are already plain ', so the
         // fixture (plain ') compares directly with no further un-escaping.
-        // This does NOT mechanically prevent the two repos from drifting apart — a
-        // cross-repo CI diff would be needed for that — but it makes any change here
-        // deliberate and visible. Follow-up to the #33 corpus-statistic fix.
+        // This does NOT mechanically prevent the two repos from drifting apart — the
+        // cross-repo PromptTextIdentityTest covers that — but it makes any change here
+        // deliberate and visible.
         $template = DefaultPrompts::getTemplate(DefaultPrompts::SUMMARIZE);
-        $canonical = file_get_contents(__DIR__ . '/fixtures/corpus-awareness-bullet.txt');
+        $canonical = file_get_contents(__DIR__ . '/fixtures/absence-grounding-rules.txt');
 
-        $this->assertNotFalse($canonical, 'corpus-awareness snapshot fixture must be readable');
+        $this->assertNotFalse($canonical, 'absence-grounding snapshot fixture must be readable');
         $this->assertStringContainsString(
             $canonical,
             $template,
-            'summarize CORPUS AWARENESS bullet drifted from the pinned snapshot '
-            . '(tests/fixtures/corpus-awareness-bullet.txt); review the diff and, if '
-            . 'intentional, update the fixture and the matching scolta-core bullet',
+            'summarize absence/grounding rules drifted from the pinned snapshot '
+            . '(tests/fixtures/absence-grounding-rules.txt); review the diff and, if '
+            . 'intentional, update the fixture and the matching scolta-core bullets',
         );
     }
 
@@ -434,6 +526,86 @@ class DefaultPromptsTest extends TestCase
             'do NOT manufacture',
             $template,
             'rule 15 must forbid manufacturing detail for unrecognized entities',
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Rule 16 — identifier / proper-noun queries. Anchor-preserving expansion
+    // ("Apollo 13 crisis" → "Apollo 13 accident", "Apollo 13 explosion", ...)
+    // misses prose that refers to a well-known entity without naming it, which
+    // is how most authors actually write. The expansion must emit terms that
+    // drop the entity name.
+    // -------------------------------------------------------------------------
+
+    public function testExpandQueryTemplateHasEntityDetailRule(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
+
+        $this->assertStringContainsString(
+            'NAMED ENTITY / EVENT → DEFINING DETAILS',
+            $template,
+            'expand_query must contain rule 16 (NAMED ENTITY / EVENT → DEFINING DETAILS)',
+        );
+        $this->assertStringContainsString(
+            'participants, components, distinctive phrases, causes, and consequences',
+            $template,
+            'rule 16 must name the classes of defining detail to expand into',
+        );
+    }
+
+    public function testExpandQueryTemplateRequiresAnchorFreeTerms(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
+
+        $this->assertStringContainsString(
+            'At least half your terms MUST drop the entity name entirely',
+            $template,
+            'rule 16 must require that some terms drop the entity name',
+        );
+        $this->assertStringContainsString(
+            'never simply append the name to a list of near-synonyms',
+            $template,
+            'rule 16 must forbid appending the entity name to every term',
+        );
+    }
+
+    public function testExpandQueryTemplateEntityRuleExamplesAreDomainNeutral(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
+
+        // Rule 16 must generalize beyond any one corpus: a consumer-product
+        // example, a vehicle-spec example, and a historical-event example. None
+        // of them is drawn from a Scolta demo corpus, so a demo passing this
+        // behaviour cannot be explained by the prompt naming its content.
+        $this->assertStringContainsString('battery drain', $template);
+        $this->assertStringContainsString('swollen battery', $template);
+        $this->assertStringContainsString('payload rating', $template);
+        $this->assertStringContainsString('tow package', $template);
+        $this->assertStringContainsString('airship fire', $template);
+        $this->assertStringContainsString('Lakehurst landing', $template);
+    }
+
+    public function testExpandQueryTemplateEntityRuleDefersToNoFabricationGuard(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
+
+        // Rule 16 broadens expansion; rule 15 must still bound it so an
+        // unrecognized entity does not acquire invented participants or parts.
+        $this->assertStringContainsString(
+            'Rule 15 still governs: only emit details you are confident are true of that entity',
+            $template,
+            'rule 16 must defer to rule 15\'s no-fabrication guard',
+        );
+    }
+
+    public function testExpandQueryTemplateReconcilesTermCapForEntityDecomposition(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
+
+        $this->assertStringContainsString(
+            'up to 6 defining details',
+            $template,
+            'expand_query must reconcile the 2-4 term cap with rule 16',
         );
     }
 
