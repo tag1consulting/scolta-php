@@ -162,8 +162,8 @@ describe('faceting: source structure', () => {
         expect(scoltaSource).toContain('!SKIP_FILTER_DIMENSIONS.has(dim.toLowerCase())');
     });
 
-    test('renderFilters disables zero-count values unless active', () => {
-        expect(scoltaSource).toContain('const disabled = (count === 0 && !isActive) ? " disabled" : "";');
+    test('renderFilters hides zero-count values unless active', () => {
+        expect(scoltaSource).toContain('if (count === 0 && !isActive) continue;');
     });
 
     test('initPagefind merges all non-primary language instances via absolute URL', () => {
@@ -430,7 +430,7 @@ describe('faceting: index-driven static panel', () => {
         expect(groups).toEqual(['Era', 'Region']);
     });
 
-    test('shows all taxonomy values per dimension, alphabetical, with query counts', async () => {
+    test('shows only non-zero taxonomy values per dimension, alphabetical, with query counts', async () => {
         const mock = buildMockPagefind([makeResult({})], QUERY_FILTERS, TAXONOMY);
         const { window } = createWindow(mock);
         const inst = window.Scolta.defaultInstance;
@@ -438,16 +438,17 @@ describe('faceting: index-driven static panel', () => {
         await inst.doSearch();
         await settle(window);
 
+        // Zero-count values (era=Ancient, region=North America) are hidden so
+        // the useful values are not buried; non-zero values keep their counts
+        // and alphabetical order.
         expect(captureFacetTuples(window)).toEqual([
-            { dim: 'era', val: 'Ancient', count: '(0)' },
             { dim: 'era', val: 'Modern', count: '(18)' },
             { dim: 'region', val: 'Asia', count: '(40)' },
             { dim: 'region', val: 'Europe', count: '(25)' },
-            { dim: 'region', val: 'North America', count: '(0)' },
         ]);
     });
 
-    test('zero-count values are disabled, non-zero values enabled', async () => {
+    test('zero-count values are hidden, non-zero values rendered and enabled', async () => {
         const mock = buildMockPagefind([makeResult({})], QUERY_FILTERS, TAXONOMY);
         const { window } = createWindow(mock);
         const inst = window.Scolta.defaultInstance;
@@ -457,8 +458,10 @@ describe('faceting: index-driven static panel', () => {
 
         const q = (dim, val) => window.document.querySelector(
             `input[data-scolta-filter-dim="${dim}"][data-scolta-filter-val="${val}"]`);
-        expect(q('region', 'North America').disabled).toBe(true);
-        expect(q('era', 'Ancient').disabled).toBe(true);
+        // Zero-count values are not in the DOM at all.
+        expect(q('region', 'North America')).toBeNull();
+        expect(q('era', 'Ancient')).toBeNull();
+        // Non-zero values render and are enabled.
         expect(q('region', 'Asia').disabled).toBe(false);
         expect(q('era', 'Modern').disabled).toBe(false);
     });
@@ -645,10 +648,10 @@ describe('faceting: counts stable across expansion', () => {
         expect(facetCount(expanded, 'region', 'Asia')).toBe('(40)');
         expect(facetCount(primary, 'region', 'Europe')).toBe('(25)');
         expect(facetCount(expanded, 'region', 'Europe')).toBe('(25)');
-        // A value zero on the typed query stays zero — expansion does not pull
-        // warfare's matches into the count.
-        expect(facetCount(primary, 'era', 'Ancient')).toBe('(0)');
-        expect(facetCount(expanded, 'era', 'Ancient')).toBe('(0)');
+        // A value zero on the typed query stays hidden — expansion does not pull
+        // warfare's matches into the count and resurrect it.
+        expect(facetCount(primary, 'era', 'Ancient')).toBeNull();
+        expect(facetCount(expanded, 'era', 'Ancient')).toBeNull();
 
         // The entire panel — dims, values, counts, order — is byte-identical
         // before and after expansion settles.
@@ -792,7 +795,7 @@ describe('faceting: OR-fallback facet counts', () => {
         // git: doc-1 (in array) + doc-2 (scalar) = 2; vcs: doc-1 only = 1.
         expect(facetCount(tuples, 'topic', 'git')).toBe('(2)');
         expect(facetCount(tuples, 'topic', 'vcs')).toBe('(1)');
-        expect(facetCount(tuples, 'topic', 'mercurial')).toBe('(0)');
+        expect(facetCount(tuples, 'topic', 'mercurial')).toBeNull(); // zero => hidden
         expect(facetCount(tuples, 'difficulty', 'Beginner')).toBe('(1)');
         expect(facetCount(tuples, 'difficulty', 'Advanced')).toBe('(1)');
     });
@@ -808,17 +811,19 @@ describe('faceting: OR-fallback facet counts', () => {
         await settle(window);
 
         const tuples = captureFacetTuples(window);
-        expect(facetCount(tuples, 'difficulty', 'Beginner')).toBe('(0)');
-        expect(facetCount(tuples, 'difficulty', 'Intermediate')).toBe('(0)');
+        // All difficulty values are zero for a phrase that matched nothing, so
+        // none render (the whole dimension is hidden).
+        expect(facetCount(tuples, 'difficulty', 'Beginner')).toBeNull();
+        expect(facetCount(tuples, 'difficulty', 'Intermediate')).toBeNull();
         // No per-term search ('alpha' or 'beta' alone) ran — neither the result
         // OR fallback nor the count union engages for a forced phrase.
         const perTerm = mock.search.mock.calls.filter(c => c[0] === 'alpha' || c[0] === 'beta');
         expect(perTerm).toHaveLength(0);
     });
 
-    test('single meaningful term whose search is empty stays all-zero', async () => {
-        // One meaningful term → no OR fallback → zeros are truthful (the list is
-        // empty too). The query 'solo' returns nothing.
+    test('single meaningful term whose search is empty renders no facet values', async () => {
+        // One meaningful term → no OR fallback → every count is zero (the list is
+        // empty too), so no facet value renders. The query 'solo' returns nothing.
         const search = jest.fn(() => Promise.resolve({ results: [], filters: {} }));
         const mock = { init: () => Promise.resolve(), filters: () => Promise.resolve(OR_TAXONOMY), search };
         const { window } = createWindow(mock);
@@ -828,9 +833,10 @@ describe('faceting: OR-fallback facet counts', () => {
         await settle(window);
 
         const tuples = captureFacetTuples(window);
-        expect(facetCount(tuples, 'difficulty', 'Beginner')).toBe('(0)');
-        expect(facetCount(tuples, 'difficulty', 'Intermediate')).toBe('(0)');
-        expect(facetCount(tuples, 'difficulty', 'Advanced')).toBe('(0)');
+        expect(tuples).toHaveLength(0);
+        expect(facetCount(tuples, 'difficulty', 'Beginner')).toBeNull();
+        expect(facetCount(tuples, 'difficulty', 'Intermediate')).toBeNull();
+        expect(facetCount(tuples, 'difficulty', 'Advanced')).toBeNull();
     });
 });
 
