@@ -83,6 +83,36 @@ class ScoltaConfig
     public array $expandSubwordDenyList = [];
 
     /**
+     * Specificity-weighted ranking. When true, each partial-match sub-query
+     * (OR fallback, expansion terms, and expansion sub-words) is weighted by how
+     * rare its term is in the corpus, so a match on a rare, intent-bearing term
+     * ("papilledema", "vegetarian") outranks a match on a ubiquitous one
+     * ("lunar", "apollo", "dinner") instead of counting the same. This is what
+     * stops a common word — typed or leaked from an expansion phrase — from
+     * flooding the head of the result list. Corpora whose query already matches
+     * on rare terms are unaffected (a rare term's weight is ~unchanged). Set
+     * false to restore the previous flat/positional sub-query weighting.
+     */
+    public bool $specificityWeighting = true;
+
+    /**
+     * Floor for the specificity weight of a ubiquitous term. A term appearing in
+     * (nearly) every document is damped to this multiplier rather than to zero,
+     * so it still contributes to recall and ranks far below rare terms without
+     * being dropped entirely. Range 0.0–1.0; lower is more aggressive damping.
+     */
+    public float $specificityFloor = 0.15;
+
+    /**
+     * Specificity threshold at or above which a matched term counts as a strong,
+     * on-intent hit. Drives the retrieval-vs-content-gap distinction: when a
+     * term this specific matched, the partial-match banner and the AI-summary
+     * hedge stop framing the result set as a failure ("no exact matches") and
+     * attribute any gap to the search rather than the collection. Range 0.0–1.0.
+     */
+    public float $specificityStrongMatch = 0.55;
+
+    /**
      * Recall guard for LLM filter hints (2026-06-09 regression): an expand
      * response's filter_hint is auto-applied only when the filtered result
      * union keeps at least this many results (clamped to the unfiltered count
@@ -440,6 +470,9 @@ class ScoltaConfig
             'CROSS_LIST_BONUS' => $this->crossListBonus,
             'EXPAND_SUBWORD_MAX_FREQ' => $this->expandSubwordMaxFrequency,
             'EXPAND_SUBWORD_DENYLIST' => $this->expandSubwordDenyList,
+            'SPECIFICITY_WEIGHTING' => $this->specificityWeighting,
+            'SPECIFICITY_FLOOR' => $this->specificityFloor,
+            'SPECIFICITY_STRONG_MATCH' => $this->specificityStrongMatch,
             'FILTER_HINT_MIN_RESULTS' => $this->filterHintMinResults,
             'FILTER_HINT_MIN_RATIO' => $this->filterHintMinRatio,
             'EXPANSION_COMBINE_MODE' => $this->expansionCombineMode,
