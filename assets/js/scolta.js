@@ -1867,14 +1867,44 @@
       }
     }
 
+    // Some terms are passed in purely to lend co-occurrence weight and must NOT
+    // introduce documents of their own:
+    //   - typed query terms (a real "apollo 1 fire" post matches the typed
+    //     "fire" AND the crew-name expansions), because a page matching only a
+    //     typed word belongs to the primary / OR search that already seeds the
+    //     list, and emitting it here would broaden recall (e.g. the ubiquitous
+    //     apostrophe-s "scary" hits);
+    //   - agreement-only phrase sub-words ("grissom" out of "Gus Grissom"),
+    //     which exist to credit documents the real search already found without
+    //     dragging in everything that merely mentions the word.
+    // A term counts as seeding if ANY query contributed it that way, so a word
+    // that is both typed and an expansion sub-word keeps its documents. When
+    // every term seeds (the OR fallback calls this too) nothing is non-seeding.
+    const seedingTerms = new Set(
+      queries.filter(q => !q.isTyped && !q.agreementOnly).map(q => q.term)
+    );
+
+    // Load full document fragments ONLY for seeding terms. A non-seeding term
+    // never introduces a document of its own — a URL found only by non-seeding
+    // terms is not emitted — and whether it lends co-occurrence credit is
+    // decided entirely from result ids (result-set size, specificity, term
+    // class), never from any data() field. Loading its fragments therefore only
+    // inflated the per-query loaded-document count (#156, the failing
+    // result-count-baseline guard) without moving a single seeding decision.
+    // The non-seeding terms are instead reasoned about by id below: their
+    // matched-id sets are intersected against the seeded documents, and any
+    // survivor's agreement magnitude is scored against the seeded document's
+    // already-loaded fragment.
     const loadPromises = [];
     for (let i = 0; i < searches.length; i++) {
+      if (!seedingTerms.has(queries[i].term)) continue;
       const search = searches[i];
       const { term, weight } = queries[i];
       const toLoad = Math.min(search.results.length, CONFIG.MAX_PAGEFIND_RESULTS);
       for (let j = 0; j < toLoad; j++) {
+        const entry = search.results[j];
         loadPromises.push(
-          search.results[j].data().then(data => ({ data, term, weight }))
+          entry.data().then(data => ({ data, term, weight, id: entry.id }))
         );
       }
     }
@@ -1912,13 +1942,15 @@
     // loop below). 1 = flat sum, 0 = strongest agreeing term only.
     const DECAY = CONFIG.SPECIFICITY_AGREEMENT_DECAY ?? 1;
     const BONUS = CONFIG.CROSS_LIST_BONUS;
-    const seedingTerms = new Set(
-      queries.filter(q => !q.isTyped && !q.agreementOnly).map(q => q.term)
-    );
-    const byUrl = new Map();
+    // The join is keyed by the Pagefind entry id, not the loaded fragment url.
+    // The id is available on every result BEFORE data() is called, which is
+    // exactly what lets the non-seeding terms below participate without a load:
+    // they are matched into this map by id-overlap alone. Seeded documents are
+    // the only ones keyed here, so a URL found only by non-seeding terms is
+    // never created (the old explicit "drop unseeded" pass is now structural).
+    const byId = new Map();
     for (const [term, items] of byTerm) {
       const spec = specByTerm.get(term);
-      const isTypedTerm = !seedingTerms.has(term);
       const rawWeight = items[0].weight;
       const weight = rawWeight * (spec != null ? spec : 1);
       // Agreement is normalized against the term's POSITIONAL weight. That
@@ -1949,8 +1981,14 @@
       // spec == null means the frequency signal is unavailable, where behaviour
       // must stay exactly as before: full credit.
       const countsAsAgreement = (spec == null) || (spec > GATE);
-      const agreementFactor = 1;
       const loaded = items.map(i => i.data);
+      // scoreResults returns the same data objects (reordered by score), so a
+      // fragment-identity lookup recovers each scored result's Pagefind id.
+      const idByData = new Map(items.map(it => [it.data, it.id]));
+      // Stamp expansion provenance onto each loaded result so the summary
+      // candidate selector can group by sub-query (issue #170). This survives
+      // the merge (which preserves the strongest data object per URL) and is
+      // invisible to the visible ranked list — only the summarizer consults it.
       for (const d of loaded) {
         if (d) d.__scoltaSourceTerm = term;
       }
@@ -1961,34 +1999,83 @@
         const r = scoredVsTerm[idx];
         const contribution = r.score + (scoredVsOriginal[idx].score > 0
           ? Math.min(scoredVsOriginal[idx].score * 0.3, BONUS) : 0);
-        const agreementValue = contribution * agreementScale * agreementFactor;
-        const url = resolveUrl(r.data.url || '');
-        const e = byUrl.get(url);
+        const agreementValue = contribution * agreementScale;
+        const id = idByData.get(r.data);
+        const e = byId.get(id);
         if (!e) {
-          byUrl.set(url, {
+          byId.set(id, {
             data: r.data, top: contribution, topAgreement: agreementValue,
             topCounts: countsAsAgreement, rest: [],
-            seeded: !isTypedTerm,
           });
         } else if (contribution > e.top) {
+          // A stronger sub-query for this document becomes the new base; the old
+          // base demotes into the agreement pool only if its term discriminated.
+          // Keep the better-matching data object (its excerpt highlights the
+          // strongest term, matching prior render behaviour).
           if (e.topCounts) e.rest.push(e.topAgreement);
           e.top = contribution;
           e.topAgreement = agreementValue;
           e.topCounts = countsAsAgreement;
           e.data = r.data;
-          if (!isTypedTerm) e.seeded = true;
         } else if (countsAsAgreement) {
           e.rest.push(agreementValue);
-          if (!isTypedTerm) e.seeded = true;
-        } else if (!isTypedTerm) {
-          e.seeded = true;
         }
       }
     }
 
+    // Non-seeding terms (typed words, agreement-only sub-words) lend agreement
+    // by id-overlap only — no document of their own is ever loaded or emitted.
+    // For each, take its matched-id set straight from search().results and keep
+    // only the ids that overlap a seeded document. A non-overlapping candidate
+    // would be dropped anyway, so its (unloaded) fragment is never needed; a
+    // surviving one is scored against the seeded document's ALREADY-LOADED
+    // fragment (same document => same fragment, whichever term loaded it), so
+    // its magnitude reuses the seeded copy instead of a fresh data() fetch.
+    for (let i = 0; i < searches.length; i++) {
+      const { term, weight } = queries[i];
+      if (seedingTerms.has(term)) continue;
+      const spec = specByTerm.get(term);
+      // A non-seeding term below the agreement gate can be neither a second
+      // agreement axis nor a seed, so it contributes nothing — skip it whole.
+      // This is also why it never needed its documents loaded.
+      const countsAsAgreement = (spec == null) || (spec > GATE);
+      if (!countsAsAgreement) continue;
+      const search = searches[i];
+      const toLoad = Math.min(search.results.length, CONFIG.MAX_PAGEFIND_RESULTS);
+      // Survivors in this term's own relevance order, so the positional prior
+      // scoreResults applies (1 - i/(len-1)) ranks them the way this term would.
+      const survivors = [];
+      for (let j = 0; j < toLoad; j++) {
+        const e = byId.get(search.results[j].id);
+        if (e) survivors.push(e);
+      }
+      if (survivors.length === 0) continue;
+      const rawWeight = weight;
+      const wt = rawWeight * (spec != null ? spec : 1);
+      const agreementScale = rawWeight > 0 ? 1 / rawWeight : 0;
+      const frags = survivors.map(e => e.data);
+      const entryByFrag = new Map(survivors.map(e => [e.data, e]));
+      const scoredVsTerm = scoreResults(frags, term, wt, originalQuery);
+      const scoredVsOriginal = scoreResults(frags, originalQuery, wt * 0.5);
+      for (let idx = 0; idx < scoredVsTerm.length; idx++) {
+        const r = scoredVsTerm[idx];
+        const contribution = r.score + (scoredVsOriginal[idx].score > 0
+          ? Math.min(scoredVsOriginal[idx].score * 0.3, BONUS) : 0);
+        const agreementValue = contribution * agreementScale;
+        const e = entryByFrag.get(r.data);
+        if (e) e.rest.push(agreementValue);
+      }
+    }
+
+    // Every entry in byId was seeded by construction — only seeding terms build
+    // entries, and non-seeding terms merely add agreement to existing ones — so
+    // there is nothing to drop here. A URL found only by non-seeding terms was
+    // never created (it is the primary/OR search's job to seed it), and when NO
+    // seeding term exists (an empty expansion leaves only typed terms) byId is
+    // empty, leaving the count to the primary/OR path rather than inflating it
+    // with typed-only matches.
     const results = [];
-    for (const e of byUrl.values()) {
-      if (!e.seeded) continue;
+    for (const e of byId.values()) {
       // Diminishing returns on successive agreeing terms. A flat sum rewards
       // BREADTH of agreement without bound, which is not what "several terms
       // agree" is supposed to mean: the documents that match the most distinct
