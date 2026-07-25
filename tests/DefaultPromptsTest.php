@@ -609,6 +609,41 @@ class DefaultPromptsTest extends TestCase
         );
     }
 
+    // -------------------------------------------------------------------------
+    // Rule 17 — quality / experience queries. A query naming a feeling or
+    // judgment ("scary moment") was expanded into synonyms of the adjective
+    // ("frightening experience"), but authors narrate a tense episode through
+    // the concrete thing that went wrong and seldom label it "scary", so the
+    // synonym expansion shares no vocabulary with the posts that answer it.
+    // -------------------------------------------------------------------------
+
+    public function testExpandQueryTemplateHasQualityExperienceRule(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
+
+        $this->assertStringContainsString(
+            '17. QUALITY / EXPERIENCE → CONCRETE INSTANCES',
+            $template,
+            'expand_query must contain rule 17 (QUALITY / EXPERIENCE → CONCRETE INSTANCES)',
+        );
+        $this->assertStringContainsString(
+            'not synonyms of the adjective',
+            $template,
+            'rule 17 must forbid restating the query adjective as a synonym',
+        );
+    }
+
+    public function testExpandQueryTemplateReconcilesTermCapForQualityDecomposition(): void
+    {
+        $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
+
+        $this->assertStringContainsString(
+            'up to 6 concrete instances',
+            $template,
+            'expand_query must reconcile the 2-4 term cap with rule 17',
+        );
+    }
+
     public function testExpandQueryTemplateReconcilesTermCapForDecomposition(): void
     {
         $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
