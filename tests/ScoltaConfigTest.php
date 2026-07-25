@@ -554,6 +554,51 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals(0.7, $js['SPECIFICITY_STRONG_MATCH']);
     }
 
+    /**
+     * The three co-occurrence/agreement tunables must default to exactly the
+     * `??` fallbacks in scolta.js getInstanceConfig(), or the ranked order
+     * pinned by tests/js/cooccurrence-ranking.test.js (which deliberately
+     * leaves them unset) shifts and the defaults become a behavior change.
+     */
+    public function testSpecificityCooccurrenceDefaultsAndMapping(): void
+    {
+        // Defaults must match the scolta.js `??` fallbacks exactly.
+        $js = (new ScoltaConfig())->toJsScoringConfig();
+        $this->assertEquals(0.9, $js['SPECIFICITY_COOCCURRENCE']);
+        $this->assertEquals(0.45, $js['SPECIFICITY_AGREEMENT_GATE']);
+        $this->assertEquals(1.0, $js['SPECIFICITY_AGREEMENT_DECAY']);
+
+        // snake_case input maps through to the JS keys.
+        $config = ScoltaConfig::fromArray([
+            'specificity_cooccurrence' => 1.4,
+            'specificity_agreement_gate' => 0.3,
+            'specificity_agreement_decay' => 0.65,
+        ]);
+        $js = $config->toJsScoringConfig();
+        $this->assertEquals(1.4, $js['SPECIFICITY_COOCCURRENCE']);
+        $this->assertEquals(0.3, $js['SPECIFICITY_AGREEMENT_GATE']);
+        $this->assertEquals(0.65, $js['SPECIFICITY_AGREEMENT_DECAY']);
+
+        // Zero disables the co-occurrence bonus (maximum-only merge).
+        $this->assertEquals(
+            0.0,
+            ScoltaConfig::fromArray(['specificity_cooccurrence' => 0])->specificityCooccurrence,
+        );
+
+        // CMS config layers store everything as strings; they must coerce to float.
+        $config = ScoltaConfig::fromArray([
+            'specificity_cooccurrence' => '0.75',
+            'specificity_agreement_gate' => '0.5',
+            'specificity_agreement_decay' => '0.8',
+        ]);
+        $this->assertIsFloat($config->specificityCooccurrence);
+        $this->assertEquals(0.75, $config->specificityCooccurrence);
+        $this->assertIsFloat($config->specificityAgreementGate);
+        $this->assertEquals(0.5, $config->specificityAgreementGate);
+        $this->assertIsFloat($config->specificityAgreementDecay);
+        $this->assertEquals(0.8, $config->specificityAgreementDecay);
+    }
+
     // -------------------------------------------------------------------
     // toJsScoringConfig — completeness and correctness
     // -------------------------------------------------------------------
@@ -572,6 +617,7 @@ class ScoltaConfigTest extends TestCase
             'AI_SUMMARY_MAX_CHARS', 'EXPAND_PRIMARY_WEIGHT', 'CROSS_LIST_BONUS', 'EXPAND_SUBWORD_MAX_FREQ',
             'EXPAND_SUBWORD_DENYLIST',
             'SPECIFICITY_WEIGHTING', 'SPECIFICITY_FLOOR', 'SPECIFICITY_STRONG_MATCH',
+            'SPECIFICITY_COOCCURRENCE', 'SPECIFICITY_AGREEMENT_GATE', 'SPECIFICITY_AGREEMENT_DECAY',
             'FILTER_HINT_MIN_RESULTS', 'FILTER_HINT_MIN_RATIO',
             'EXPANSION_COMBINE_MODE', 'EXPANSION_PER_TERM_TOP_K',
             'AI_MAX_FOLLOWUPS',
@@ -582,7 +628,7 @@ class ScoltaConfigTest extends TestCase
             $this->assertArrayHasKey($key, $js, "Missing key: {$key}");
         }
 
-        $this->assertCount(37, $js, 'Expected exactly 37 keys in toJsScoringConfig()');
+        $this->assertCount(40, $js, 'Expected exactly 40 keys in toJsScoringConfig()');
     }
 
     public function testToJsScoringConfigValuesMatchConfig(): void
