@@ -241,6 +241,23 @@ class ScoltaConfig
      */
     public array $filterFieldDescriptions = [];
 
+    /**
+     * Hide facet values whose result count is zero for the current query.
+     *
+     * When true (default), the browser widget omits a zero-count value from the
+     * filter sidebar, and drops a dimension's whole group when all its values
+     * are zero — mainstream faceted-search behavior. An active (checked) value
+     * stays visible even at zero so it can be unchecked. When false, every value
+     * is rendered and a zero-count one shown as a disabled `(0)` row, keeping the
+     * value list positionally fixed. Emitted top-level into window.scolta and
+     * read by scolta.js renderFilters().
+     *
+     * @var bool
+     * @since 1.0.6
+     * @stability experimental
+     */
+    public bool $hideEmptyFacets = true;
+
     // -- Scoring preset --
     /** @var string Named preset to apply before explicit overrides (empty = no preset). */
     public string $preset = '';
@@ -509,6 +526,7 @@ class ScoltaConfig
             'siteName' => $this->siteName,
             'pagefindPath' => $this->pagefindIndexPath . '/pagefind.js',
             'filterFieldDescriptions' => $this->filterFieldDescriptions,
+            'hideEmptyFacets' => $this->hideEmptyFacets,
         ];
     }
 

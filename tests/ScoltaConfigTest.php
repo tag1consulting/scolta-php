@@ -48,6 +48,7 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals(4000, $config->aiSummaryMaxChars);
         $this->assertSame(1024, $config->aiSummaryMaxTokens);
         $this->assertFalse($config->autoLanguageFilter);
+        $this->assertTrue($config->hideEmptyFacets);
         $this->assertEquals('', $config->promptExpandQuery);
         $this->assertEquals('', $config->promptSummarize);
         $this->assertEquals('', $config->promptFollowUp);
@@ -917,5 +918,49 @@ class ScoltaConfigTest extends TestCase
         $this->assertFalse($js['AI_EXPAND_QUERY']);
         $this->assertFalse($js['AI_SUMMARIZE']);
         $this->assertEquals(0, $js['AI_MAX_FOLLOWUPS']);
+    }
+
+    // ------------------------------------------------------------------
+    // hideEmptyFacets — top-level facet visibility opt-out
+    // ------------------------------------------------------------------
+
+    public function testHideEmptyFacetsDefaultsToTrue(): void
+    {
+        $config = new ScoltaConfig();
+        $this->assertTrue($config->hideEmptyFacets);
+    }
+
+    public function testFromArrayMapsHideEmptyFacetsFalse(): void
+    {
+        $config = ScoltaConfig::fromArray(['hide_empty_facets' => false]);
+        $this->assertFalse($config->hideEmptyFacets);
+    }
+
+    public function testFromArrayCoercesHideEmptyFacetsStringZero(): void
+    {
+        // CMS config layers (e.g. Drupal drush config:set) store booleans as
+        // strings; fromArray() must cast "0" to a real false.
+        $config = ScoltaConfig::fromArray(['hide_empty_facets' => '0']);
+        $this->assertIsBool($config->hideEmptyFacets);
+        $this->assertFalse($config->hideEmptyFacets);
+    }
+
+    public function testHideEmptyFacetsAbsentPreservesDefault(): void
+    {
+        $config = ScoltaConfig::fromArray([]);
+        $this->assertTrue($config->hideEmptyFacets);
+    }
+
+    public function testToBrowserConfigEmitsHideEmptyFacetsTopLevel(): void
+    {
+        // The key is top-level in window.scolta, NOT nested under scoring, so
+        // scolta.js reads it via instanceConfig.hideEmptyFacets.
+        $browser = (new ScoltaConfig())->toBrowserConfig();
+        $this->assertArrayHasKey('hideEmptyFacets', $browser);
+        $this->assertTrue($browser['hideEmptyFacets']);
+        $this->assertArrayNotHasKey('hideEmptyFacets', $browser['scoring']);
+
+        $off = ScoltaConfig::fromArray(['hide_empty_facets' => false])->toBrowserConfig();
+        $this->assertFalse($off['hideEmptyFacets']);
     }
 }

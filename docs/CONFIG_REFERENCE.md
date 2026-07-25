@@ -154,6 +154,7 @@ factor before being added to the final score; the title boost is unaffected.
 | `sortableFieldDescriptions` | array | `[]` | Human-readable descriptions keyed by field name (e.g., `['price' => 'Product price in store currency', 'word_count' => 'Article length in words']`). When populated, descriptions are included in the sort-intent prompt alongside each field name so the LLM can map natural language queries to the correct field. Backward compatible — omitting this leaves existing behavior unchanged. |
 | `filterFields` | array | `[]` | Filter dimension names for filter-intent detection in the expansion prompt. Must match the filter names emitted as `data-pagefind-filter` attributes by the content gatherer (e.g., `['topic', 'era', 'region']`). When non-empty, the expansion prompt gains a FILTER INTENT section; the LLM can return a `filter_hint` that the browser applies as a Pagefind native filter before displaying results. |
 | `filterFieldDescriptions` | array | `[]` | Human-readable descriptions keyed by filter name (e.g., `['topic' => 'Subject area or domain. Values: Science (physics, chemistry, biology), History (ancient, medieval)']`). Descriptions serve two purposes: (1) they help the LLM match user language to the correct filter value in the expansion prompt, and (2) they are passed to the JS frontend via `toBrowserConfig()` where `matchSubjectToFilters()` parses parenthetical subcategory hints to map terms like "physics" → "Science" even when "physics" isn't a direct filter value. |
+| `hideEmptyFacets` | bool | `true` | Hide facet values whose result count is zero for the current query, and drop a dimension's whole group when all its values are zero — the mainstream faceted-search default. An active (checked) value stays visible even at zero so it can be unchecked. Set to `false` to render every value and show a zero-count one as a disabled `(0)` row, keeping the value list positionally fixed. Emitted top-level into `window.scolta` by `toBrowserConfig()` and read by `scolta.js` `renderFilters()`. `@stability experimental`. |
 
 ### Scoring Presets
 
@@ -292,6 +293,7 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 | `sortableFieldDescriptions` | `sortable_field_descriptions` | `sortable_field_descriptions` | `sortable_field_descriptions` |
 | `filterFields` | `filter_fields` | `filter_fields` | `filter_fields` |
 | `filterFieldDescriptions` | `filter_field_descriptions` | `filter_field_descriptions` | `filter_field_descriptions` |
+| `hideEmptyFacets` | `hide_empty_facets` | `hide_empty_facets` | `hide_empty_facets` |
 
 ## Methods
 

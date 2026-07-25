@@ -162,8 +162,17 @@ describe('faceting: source structure', () => {
         expect(scoltaSource).toContain('!SKIP_FILTER_DIMENSIONS.has(dim.toLowerCase())');
     });
 
-    test('renderFilters hides zero-count values unless active', () => {
-        expect(scoltaSource).toContain('if (count === 0 && !isActive) continue;');
+    test('renderFilters hides zero-count values unless active (default policy)', () => {
+        expect(scoltaSource).toContain('const isEmpty = count === 0 && !isActive;');
+        expect(scoltaSource).toContain('if (isEmpty && hideEmptyFacets) continue;');
+    });
+
+    test('renderFilters reads the hideEmptyFacets opt-out from instance config', () => {
+        expect(scoltaSource).toContain(
+            'const hideEmptyFacets = !(instanceConfig && instanceConfig.hideEmptyFacets === false);'
+        );
+        // Opt-out path: a zero-count value falls through and renders disabled.
+        expect(scoltaSource).toContain('const disabled = isEmpty ? " disabled" : "";');
     });
 
     test('initPagefind merges all non-primary language instances via absolute URL', () => {
@@ -294,7 +303,7 @@ function makeResult(filterObj, overrides) {
     };
 }
 
-function createWindow(mockPagefind) {
+function createWindow(mockPagefind, scoltaOverrides) {
     const dom = new JSDOM(
         '<!DOCTYPE html><html><body><div id="scolta-search"></div></body></html>',
         { url: 'https://example.com', runScripts: 'dangerously' }
@@ -318,6 +327,7 @@ function createWindow(mockPagefind) {
         container: '#scolta-search',
         allowedLinkDomains: [],
         disclaimer: '',
+        ...(scoltaOverrides || {}),
     };
     window.Scolta.init('#scolta-search');
     return { dom, window };
@@ -512,6 +522,68 @@ describe('faceting: index-driven static panel', () => {
             'input[data-scolta-filter-dim="era"][data-scolta-filter-val="Ancient"]');
         expect(ancient.disabled).toBe(false);
         expect(ancient.checked).toBe(true);
+    });
+
+    test('default policy drops a dimension group whose values are all zero', async () => {
+        // era has both values zero for this query and none active → its whole
+        // group (header included) must not render, leaving only Region.
+        const allZeroEra = { region: { Asia: 40, Europe: 25 }, era: { Ancient: 0, Modern: 0 } };
+        const mock = buildMockPagefind([makeResult({})], allZeroEra, TAXONOMY);
+        const { window } = createWindow(mock);
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'history';
+        await inst.doSearch();
+        await settle(window);
+
+        const groups = [...window.document.querySelectorAll('#scolta-filters .scolta-filter-group h3')]
+            .map(h => h.textContent);
+        expect(groups).toEqual(['Region']);
+        // No dangling era header or items.
+        expect(window.document.querySelector(
+            'input[data-scolta-filter-dim="era"]')).toBeNull();
+    });
+
+    test('opt-out (hideEmptyFacets:false) renders zero-count values disabled with (0)', async () => {
+        const mock = buildMockPagefind([makeResult({})], QUERY_FILTERS, TAXONOMY);
+        const { window } = createWindow(mock, { hideEmptyFacets: false });
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'history';
+        await inst.doSearch();
+        await settle(window);
+
+        // Every taxonomy value is now rendered, in alphabetical order, with the
+        // zero-count ones (era=Ancient, region=North America) present as (0).
+        expect(captureFacetTuples(window)).toEqual([
+            { dim: 'era', val: 'Ancient', count: '(0)' },
+            { dim: 'era', val: 'Modern', count: '(18)' },
+            { dim: 'region', val: 'Asia', count: '(40)' },
+            { dim: 'region', val: 'Europe', count: '(25)' },
+            { dim: 'region', val: 'North America', count: '(0)' },
+        ]);
+
+        const q = (dim, val) => window.document.querySelector(
+            `input[data-scolta-filter-dim="${dim}"][data-scolta-filter-val="${val}"]`);
+        // Zero-count values render disabled; non-zero values stay enabled.
+        expect(q('era', 'Ancient').disabled).toBe(true);
+        expect(q('region', 'North America').disabled).toBe(true);
+        expect(q('era', 'Modern').disabled).toBe(false);
+        expect(q('region', 'Asia').disabled).toBe(false);
+    });
+
+    test('opt-out keeps a dimension group whose values are all zero', async () => {
+        // era has both values zero here; under the opt-out its group must still
+        // render (unlike the default policy, which would drop it entirely).
+        const allZeroEra = { region: { Asia: 40, Europe: 25 }, era: { Ancient: 0, Modern: 0 } };
+        const mock = buildMockPagefind([makeResult({})], allZeroEra, TAXONOMY);
+        const { window } = createWindow(mock, { hideEmptyFacets: false });
+        const inst = window.Scolta.defaultInstance;
+        window.document.querySelector('#scolta-query').value = 'history';
+        await inst.doSearch();
+        await settle(window);
+
+        const groups = [...window.document.querySelectorAll('#scolta-filters .scolta-filter-group h3')]
+            .map(h => h.textContent);
+        expect(groups).toEqual(['Era', 'Region']);
     });
 
     test('a brand-new typed query DOES update the counts', async () => {
