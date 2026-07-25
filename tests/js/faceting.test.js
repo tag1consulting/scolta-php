@@ -150,7 +150,20 @@ describe('faceting: source structure', () => {
 
     test('doSearch computes query-fixed counts only on a fresh typed query', () => {
         // Gated on !preserveFilters so a facet toggle/sort/load-more never recomputes.
-        expect(scoltaSource).toContain('queryFacetCounts = await computeQueryFacetCounts(searchQuery, activeFilters, meaningfulTerms, isForcedPhrase);');
+        expect(scoltaSource).toContain('const counts = await computeQueryFacetCounts(searchQuery, activeFilters, meaningfulTerms, isForcedPhrase);');
+        expect(scoltaSource).toContain('queryFacetCounts = counts;');
+    });
+
+    test('doSearch paints results BEFORE the facet-count pass', () => {
+        // The count pass is a second full Pagefind search; holding first paint
+        // behind it made the user wait twice for the same work. Behavioral
+        // coverage lives in tests/js/render-order.test.js.
+        const paintIdx = scoltaSource.indexOf('// Paint the results BEFORE computing facet counts');
+        const countIdx = scoltaSource.indexOf('const counts = await computeQueryFacetCounts(');
+        expect(paintIdx).toBeGreaterThan(-1);
+        expect(countIdx).toBeGreaterThan(paintIdx);
+        // A superseded cycle's late counts must not overwrite or repaint.
+        expect(scoltaSource).toContain('Discarding stale facet counts');
     });
 
     test('renderFilters reads dimensions from the index taxonomy', () => {
