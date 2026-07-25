@@ -113,6 +113,45 @@ class ScoltaConfig
     public float $specificityStrongMatch = 0.55;
 
     /**
+     * Scales the bonus a document earns for agreeing with several query and
+     * expansion terms at once, rather than matching a single term strongly. A
+     * document that is on-topic across the whole query is usually a better
+     * answer than one that spikes on one rare word, and this multiplier is how
+     * much that breadth is worth. Set to 0 to reproduce the prior
+     * maximum-only merge exactly (each document scored purely by its single
+     * best-matching sub-query, with no co-occurrence credit). Browser-side only.
+     *
+     * @since 1.0.6
+     * @stability experimental
+     */
+    public float $specificityCooccurrence = 0.9;
+
+    /**
+     * Specificity threshold a matched term must clear before it counts toward
+     * the co-occurrence agreement bonus. Terms below the gate are too
+     * ubiquitous for their presence to be evidence of topical agreement, so
+     * they are excluded from the count rather than inflating it. Range 0.0–1.0.
+     * Browser-side only.
+     *
+     * @since 1.0.6
+     * @stability experimental
+     */
+    public float $specificityAgreementGate = 0.45;
+
+    /**
+     * Geometric factor applied to each successive agreeing axis, so the second
+     * agreeing term is worth this fraction of the first, the third this
+     * fraction of the second, and so on. Values below 1.0 make the bonus
+     * saturate, which keeps a document matching many mid-specificity terms
+     * from overtaking one matching a genuinely rare term. 1.0 weights every
+     * agreeing axis equally. Browser-side only.
+     *
+     * @since 1.0.6
+     * @stability experimental
+     */
+    public float $specificityAgreementDecay = 1.0;
+
+    /**
      * Recall guard for LLM filter hints (2026-06-09 regression): an expand
      * response's filter_hint is auto-applied only when the filtered result
      * union keeps at least this many results (clamped to the unfiltered count
@@ -490,6 +529,9 @@ class ScoltaConfig
             'SPECIFICITY_WEIGHTING' => $this->specificityWeighting,
             'SPECIFICITY_FLOOR' => $this->specificityFloor,
             'SPECIFICITY_STRONG_MATCH' => $this->specificityStrongMatch,
+            'SPECIFICITY_COOCCURRENCE' => $this->specificityCooccurrence,
+            'SPECIFICITY_AGREEMENT_GATE' => $this->specificityAgreementGate,
+            'SPECIFICITY_AGREEMENT_DECAY' => $this->specificityAgreementDecay,
             'FILTER_HINT_MIN_RESULTS' => $this->filterHintMinResults,
             'FILTER_HINT_MIN_RATIO' => $this->filterHintMinRatio,
             'EXPANSION_COMBINE_MODE' => $this->expansionCombineMode,
