@@ -151,7 +151,20 @@ class PagefindFormatWriter
             $buildDir,
             $this->collectFilterData($pages),
             array_map(
-                fn(array $page): string => $page['fragmentHash'] ?? $page['hash'],
+                function (array $page): string {
+                    // Every page gets a fragmentHash in the fragment-writing loop
+                    // above, so this is unreachable in practice — but the id table
+                    // is what posting lists index into, and a silently empty entry
+                    // would only surface much later as a browser-side mismatch.
+                    $hash = $page['fragmentHash'] ?? $page['hash'] ?? '';
+                    if (!is_string($hash) || $hash === '') {
+                        throw new \RuntimeException(
+                            'Facet index page table needs a fragment hash; page '
+                            . ($page['url'] ?? '(unknown url)') . ' has neither fragmentHash nor hash.',
+                        );
+                    }
+                    return $hash;
+                },
                 $pages,
             ),
             $metaHash,

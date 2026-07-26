@@ -308,6 +308,41 @@ describe('Pagefind is never asked for filters when the artifact is present', () 
     });
 });
 
+describe('the per-query counts stay lazy', () => {
+    // Counting every value over the full matched set is the expensive half of
+    // this work, and most searches never look at it — the warm-up search, the
+    // preload, and every per-term search on the expansion path all discard it.
+    // So `filters` must be an accessor that runs on first read, not a value
+    // computed eagerly for every search.
+    test('Object.assign would defeat it, which is why defineProperty is used', () => {
+        // The trap, demonstrated rather than asserted from memory: Object.assign
+        // copies an accessor property by READING it, so a getter passed in one of
+        // its sources fires immediately and lands as a plain data property.
+        let fired = 0;
+        const viaAssign = Object.assign({}, { results: [] }, {
+            get filters() { fired++; return {}; },
+        });
+        expect(fired).toBe(1);
+        expect(Object.getOwnPropertyDescriptor(viaAssign, 'filters').get).toBeUndefined();
+
+        // Which is why the getter is installed after the assign, not inside it.
+        expect(scoltaSource).toContain("Object.defineProperty(out, 'filters'");
+        const assignLine = scoltaSource.match(/Object\.assign\(\{\}, raw, \{[^}]*\}\)/);
+        expect(assignLine).not.toBeNull();
+        expect(assignLine[0]).not.toContain('get filters');
+    });
+
+    test('the getter survives to the caller as an accessor', async () => {
+        const { mock } = createMockPagefind(Array.from({ length: 6 }, (_, i) => i));
+        const env = await boot(mock);
+        await initAndSearch(env);
+
+        // renderFilters() read the counts, so they must have materialized —
+        // proving the accessor is reachable and correct, not merely present.
+        expect(countFor(env.window, 'topic', 'Fruit')).toBe('3');
+    });
+});
+
 describe('an index built before the artifact existed', () => {
     test('falls back to pagefind.filters(), warns, and names the rebuild', async () => {
         const taxonomy = { topic: { Fruit: 3, Veg: 197 }, level: { Beginner: 100, Advanced: 100 } };

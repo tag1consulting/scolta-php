@@ -461,9 +461,12 @@
   }
 
   function parseFacetIndex(bytes) {
+    // One decoder for the whole parse: the id table is one entry per page, and
+    // allocating a TextDecoder per line dominated the decode on a large corpus.
+    const decoder = new TextDecoder();
     const newline = bytes.indexOf(10);
     if (newline < 0) throw new Error('facet index has no header');
-    const header = JSON.parse(new TextDecoder().decode(bytes.subarray(0, newline)));
+    const header = JSON.parse(decoder.decode(bytes.subarray(0, newline)));
     if (header.format !== 'scolta-facets') {
       throw new Error('unexpected format ' + header.format);
     }
@@ -478,7 +481,7 @@
     for (let i = 0; i < header.pageCount; i++) {
       const end = bytes.indexOf(10, off);
       if (end < 0) throw new Error('facet index id table truncated');
-      pageOf.set(new TextDecoder().decode(bytes.subarray(off, end)), i);
+      pageOf.set(decoder.decode(bytes.subarray(off, end)), i);
       off = end + 1;
     }
 
@@ -1634,15 +1637,21 @@
     const index = facetIndex;
     const results = applyFacetFilters(index, raw.results, filters);
     let counts = null;
-    return Object.assign({}, raw, {
-      results: results,
-      // Lazy: only the facet-count path reads this, and counting every value
-      // over the full matched set is work no other caller needs.
-      get filters() {
+    const out = Object.assign({}, raw, { results: results });
+    // Defined separately, and deliberately NOT passed through Object.assign:
+    // Object.assign copies an accessor property by READING it, so a getter in
+    // one of its sources fires immediately and lands as a plain value. That
+    // would run the count over the full matched set on every single search,
+    // including the warm-up and preload ones that never look at it.
+    Object.defineProperty(out, 'filters', {
+      enumerable: true,
+      configurable: true,
+      get() {
         if (counts === null) counts = facetCountsFor(index, results);
         return counts;
       },
     });
+    return out;
   }
 
   // Warm the alphabetical index chunk(s) for the term being typed, so the
