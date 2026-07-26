@@ -180,11 +180,18 @@ class FacetIndexWriterTest extends TestCase
         // Pins the encoder to the fixture the JavaScript decoder test reads. If
         // this fails, the format changed: regenerate the fixture and make sure
         // the decoder still agrees.
+        //
+        // Compared after decompression, deliberately. gzip records the producing
+        // OS in byte 9 of its header (0x03 on Linux, 0x13 on macOS), so the
+        // envelope is not byte-stable across platforms even when the deflate
+        // payload is identical. The artifact format is the payload.
         [$filterData, $pageHashes] = self::fixtureData();
         $this->assertFileExists(self::FIXTURE, 'the shared facet index fixture is missing');
+        $fixture = gzdecode((string) file_get_contents(self::FIXTURE));
+        $this->assertNotFalse($fixture, 'the committed fixture must be gzipped');
         $this->assertSame(
-            file_get_contents(self::FIXTURE),
-            gzencode($this->writer->build($filterData, $pageHashes, 'en_fixture01'), 9),
+            $fixture,
+            $this->writer->build($filterData, $pageHashes, 'en_fixture01'),
             'the committed fixture no longer matches what FacetIndexWriter produces',
         );
     }
