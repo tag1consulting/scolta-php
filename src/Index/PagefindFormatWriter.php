@@ -141,6 +141,35 @@ class PagefindFormatWriter
             throw new \RuntimeException("Failed to write file: {$metaPath}");
         }
 
+        // Write the Scolta facet index — the artifact scolta.js reads instead of
+        // Pagefind's filter chunks. It carries every dimension, including the
+        // single-value ones the chunk emission above skips, because it is what
+        // applies filters now. Written after pf_meta so it can be stamped with
+        // that file's hash, which is how the browser detects a cached artifact
+        // left over from an earlier build.
+        (new FacetIndexWriter())->write(
+            $buildDir,
+            $this->collectFilterData($pages),
+            array_map(
+                function (array $page): string {
+                    // Every page gets a fragmentHash in the fragment-writing loop
+                    // above, so this is unreachable in practice — but the id table
+                    // is what posting lists index into, and a silently empty entry
+                    // would only surface much later as a browser-side mismatch.
+                    $hash = $page['fragmentHash'] ?? $page['hash'] ?? '';
+                    if (!is_string($hash) || $hash === '') {
+                        throw new \RuntimeException(
+                            'Facet index page table needs a fragment hash; page '
+                            . ($page['url'] ?? '(unknown url)') . ' has neither fragmentHash nor hash.',
+                        );
+                    }
+                    return $hash;
+                },
+                $pages,
+            ),
+            $metaHash,
+        );
+
         // Write entry.json (plain JSON, NOT gzipped).
         // The hash here MUST match the meta filename hash above.
         $entry = [
@@ -336,21 +365,18 @@ class PagefindFormatWriter
      */
     private function buildFilterIndex(array $pages): array
     {
-        $filters = [];
-        foreach ($pages as $pageNum => $page) {
-            foreach ($page['filters'] ?? [] as $filterName => $filterValue) {
-                if (!isset($filters[$filterName])) {
-                    $filters[$filterName] = [];
-                }
-                if (!isset($filters[$filterName][$filterValue])) {
-                    $filters[$filterName][$filterValue] = [];
-                }
-                $filters[$filterName][$filterValue][] = $pageNum;
-            }
-        }
+        $filters = $this->collectFilterData($pages);
 
         $result = [];
         foreach ($filters as $filterName => $values) {
+            // Single-value dimensions are dropped for the same reason
+            // StreamingFormatWriter drops them: such a dimension cannot filter
+            // (its only value matches every page), the facet panel already hides
+            // it, and every posting in a loaded chunk costs Pagefind a linear
+            // scan of the matched-result set on every later search.
+            if (count($values) < 2) {
+                continue;
+            }
             $valueTuples = [];
             foreach ($values as $value => $pageNums) {
                 $valueTuples[] = $this->cbor->encodeArray([
@@ -367,6 +393,33 @@ class PagefindFormatWriter
         }
 
         return $result;
+    }
+
+    /**
+     * Collect dimension => value => page numbers from page data.
+     *
+     * A multi-value filter field — the normal shape for a taxonomy facet — is an
+     * array, and PHP 8 raises `TypeError: Cannot access offset of type array` the
+     * moment an array is used as an array key, so the previous inline version
+     * killed the build outright on any such field. Normalized the same way
+     * StreamingFormatWriter and PagefindHtmlBuilder already normalize it.
+     *
+     * @param array<int, array<string, mixed>> $pages Page data.
+     * @return array<string, array<string, int[]>>
+     */
+    private function collectFilterData(array $pages): array
+    {
+        $filters = [];
+        foreach ($pages as $pageNum => $page) {
+            foreach ($page['filters'] ?? [] as $filterName => $filterValue) {
+                $values = is_array($filterValue) ? $filterValue : [$filterValue];
+                foreach ($values as $v) {
+                    $filters[$filterName][(string) $v][] = $pageNum;
+                }
+            }
+        }
+
+        return $filters;
     }
 
     /**
