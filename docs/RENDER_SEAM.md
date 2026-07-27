@@ -220,15 +220,19 @@ after AI query expansion resolves one to two seconds later. The second paint
 used to replace the whole container unconditionally, which threw away anything a
 platform had lazily loaded into the first one and made it do the work again.
 
-The repaint now reconciles by result identity (the result's URL). For each
-position in the new list, if a node for that result is already in the container
-it is **moved** into place rather than rebuilt; appending a node that is already
-in the document moves it, so listeners and swapped-in markup ride along. Only
-genuinely new results are built. `detail.reused` on `scolta:results-rendered`
-lists exactly which results kept their node.
+The repaint now reconciles by result identity (the result's URL). The container
+is walked in place: a node already sitting where it belongs is left completely
+alone, a node that belongs elsewhere is **moved** with `insertBefore()` (which,
+on a node already in the document, moves rather than clones or re-parses it, so
+listeners and swapped-in markup ride along), and only genuinely new results are
+built. `detail.reused` on `scolta:results-rendered` lists exactly which results
+kept their node.
 
 When the expansion pass returns the same results in the same order — the common
-case — the repaint moves nothing at all.
+case — the reconcile performs **zero DOM mutations**. Leaving an unmoved node
+untouched rather than detaching and re-attaching it is the point: a detach and
+re-attach restarts CSS transitions, reloads an iframe, and fires
+`disconnectedCallback` / `connectedCallback` on a custom element.
 
 Two limits worth knowing:
 

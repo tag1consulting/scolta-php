@@ -772,6 +772,37 @@ describe('AI expansion no longer costs a full teardown', () => {
         expect(h.cards()[0]).not.toBe(before);
     });
 
+    test('an unchanged expansion performs zero DOM mutations on the container', async () => {
+        // Node identity alone is not enough. Detaching and re-attaching a node
+        // that did not move would restart CSS transitions, reload an iframe and
+        // fire disconnected/connectedCallback on a custom element — so the
+        // reconcile has to leave an unmoved node genuinely untouched, and a
+        // MutationObserver is the only thing that can prove it did.
+        const h = expansionSetup({
+            beforeInit: (win) => {
+                win.Scolta.setResultRenderer((data) =>
+                    `<article class="platform-card" data-url="${data.url}"></article>`);
+            },
+        });
+        await h.search('alpha');
+        await ticks(20);
+        expect(h.cards()).toHaveLength(3);
+
+        const mutations = [];
+        const observer = new h.window.MutationObserver(records => mutations.push(...records));
+        observer.observe(h.$('#scolta-results'), { childList: true });
+
+        await ticks(60);
+        observer.disconnect();
+
+        const reasons = h.events
+            .filter(e => e.type === 'scolta:before-results-render')
+            .map(e => e.detail.reason);
+        expect(reasons).toContain('expansion');
+        expect(mutations).toEqual([]);
+        expect(h.cards()).toHaveLength(3);
+    });
+
     test('the results container is written twice per search, not three times', async () => {
         const h = expansionSetup({
             beforeInit: (win) => {
