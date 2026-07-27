@@ -135,6 +135,19 @@ class StreamingFormatWriter
             'meta'       => !empty($pageData['meta']) ? $pageData['meta'] : new \stdClass(),
             'anchors'    => [],
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        // Unchecked, invalid UTF-8 anywhere in the page turns json_encode()'s
+        // false into an empty string on concatenation, and the fragment file
+        // ends up holding nothing but the delimiter — which fails JSON.parse()
+        // in the browser with no error anywhere upstream. Fail the build here
+        // instead, the way FacetIndexWriter::build() already does.
+        if ($fragment === false) {
+            throw new \RuntimeException(sprintf(
+                'Failed to encode fragment for page %d (%s): %s',
+                $pageNum,
+                (string) $pageData['url'],
+                json_last_error_msg(),
+            ));
+        }
 
         $hash       = 'en_' . substr(hash('sha256', (string) $pageNum . $pageData['url']), 0, 10);
         $compressed = gzencode(self::DELIMITER . $fragment, 9);

@@ -69,6 +69,18 @@ class PagefindFormatWriter
                 'meta' => !empty($page['meta']) ? $page['meta'] : new \stdClass(),
                 'anchors' => [],
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            // See StreamingFormatWriter::writePage(): unchecked, invalid UTF-8
+            // silently produces a fragment file containing only the delimiter,
+            // which breaks JSON.parse() in the browser with nothing logged
+            // upstream. Fail the build instead.
+            if ($fragment === false) {
+                throw new \RuntimeException(sprintf(
+                    'Failed to encode fragment for page %d (%s): %s',
+                    $pageNum,
+                    (string) $page['url'],
+                    json_last_error_msg(),
+                ));
+            }
 
             $hash = 'en_' . substr(hash('sha256', (string) $pageNum . $page['url']), 0, 10);
             $page['fragmentHash'] = $hash;
