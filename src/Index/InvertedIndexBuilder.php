@@ -161,6 +161,9 @@ class InvertedIndexBuilder
             if ($itemDate !== '' && !isset($itemSortable['date'])) {
                 $itemSortable['date'] = $itemDate;
             }
+            // Not every caller passes a full ContentItem — buildFromTokenData()
+            // documents that a slim proxy is allowed — so read defensively.
+            $itemMetadata = (array) ($item->metadata ?? []);
             $pages[$pageNum] = [
                 'id'        => $item->id,
                 'url'       => $item->url,
@@ -173,10 +176,16 @@ class InvertedIndexBuilder
                     $item->language !== '' ? ['language' => $item->language] : [],
                     $item->filters,
                 ),
+                // Precedence, highest first: title/date, then sortable, then
+                // arbitrary per-item metadata. Sortable wins over metadata on a
+                // key collision because a sortable key also has to line up with
+                // the pf_meta sorts table. metadata is the cheap route to a
+                // per-item meta key (an entity id, say) — it costs one fragment
+                // field and nothing corpus-wide.
                 'meta'      => array_filter([
                     'title' => $tokenData['cleanTitle'],
                     'date'  => $item->date,
-                ] + $itemSortable, fn($v) => $v !== null && $v !== ''),
+                ] + $itemSortable + $itemMetadata, fn($v) => $v !== null && $v !== ''),
                 'sortable'  => $itemSortable,
                 'hash'      => hash('sha256', $tokenData['content']),
             ];
@@ -195,9 +204,10 @@ class InvertedIndexBuilder
      * Build a partial index from pre-tokenized item data.
      *
      * Accepts the output of tokenizeItem() paired with a metadata object for
-     * the item (id, url, date, siteName, language, filters). The object may be
-     * a ContentItem or any object with those public properties — callers may
-     * pass a slim proxy to release bodyHtml early and reduce memory pressure.
+     * the item (id, url, date, siteName, language, filters, sortable,
+     * metadata). The object may be a ContentItem or any object with those
+     * public properties — callers may pass a slim proxy to release bodyHtml
+     * early and reduce memory pressure. Missing sortable/metadata read as empty.
      * Page numbers are assigned sequentially from pageOffset.
      *
      * Page numbers MUST be sequential. pagefind.js resolves search results via
@@ -221,6 +231,9 @@ class InvertedIndexBuilder
             if ($itemDate !== '' && !isset($itemSortable['date'])) {
                 $itemSortable['date'] = $itemDate;
             }
+            // Not every caller passes a full ContentItem — buildFromTokenData()
+            // documents that a slim proxy is allowed — so read defensively.
+            $itemMetadata = (array) ($item->metadata ?? []);
             $pages[$pageNum] = [
                 'id'        => $item->id,
                 'url'       => $item->url,
@@ -233,10 +246,16 @@ class InvertedIndexBuilder
                     $item->language !== '' ? ['language' => $item->language] : [],
                     $item->filters,
                 ),
+                // Precedence, highest first: title/date, then sortable, then
+                // arbitrary per-item metadata. Sortable wins over metadata on a
+                // key collision because a sortable key also has to line up with
+                // the pf_meta sorts table. metadata is the cheap route to a
+                // per-item meta key (an entity id, say) — it costs one fragment
+                // field and nothing corpus-wide.
                 'meta'      => array_filter([
                     'title' => $tokenData['cleanTitle'],
                     'date'  => $item->date,
-                ] + $itemSortable, fn($v) => $v !== null && $v !== ''),
+                ] + $itemSortable + $itemMetadata, fn($v) => $v !== null && $v !== ''),
                 'sortable'  => $itemSortable,
                 'hash'      => hash('sha256', $tokenData['content']),
             ];

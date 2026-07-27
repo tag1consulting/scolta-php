@@ -326,6 +326,11 @@ final class IndexBuildOrchestrator
             'language' => $page->language,
             'filters'  => $page->filters,
             'sortable' => $page->sortable,
+            // Carried so ContentItem::$metadata reaches the fragment. Without
+            // it the proxy silently dropped the field and the only route to an
+            // arbitrary per-item meta key was `sortable`, which also writes a
+            // corpus-wide entry into the eagerly loaded pf_meta sorts table.
+            'metadata' => $page->metadata ?? [],
         ];
     }
 

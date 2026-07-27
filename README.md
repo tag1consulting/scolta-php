@@ -118,6 +118,8 @@ $config = ScoltaConfig::fromArray([
 
 For the full list of config keys and their defaults, see [docs/CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md).
 
+To render results with your own markup instead of Scolta's built-in card — a platform view mode, server-rendered fragments swapped in lazily, anything richer than title/excerpt/URL — see [docs/RENDER_SEAM.md](docs/RENDER_SEAM.md), which documents the render lifecycle events, `Scolta.setResultRenderer()`, and the non-destructive mount.
+
 ## What Scolta Is Built For
 
 Scolta is designed for content search on publishing platforms: pages, posts, documentation, product catalogs, and other human-authored content indexed at build time. This package is the PHP foundation shared by the Drupal, WordPress, and Laravel adapters — the platforms behind enterprise content operations, government and university portals, media publishing, and product-driven businesses.
