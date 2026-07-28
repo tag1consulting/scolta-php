@@ -14,6 +14,9 @@
  *      inside an allowed URL must not break out of the href attribute.
  *   4. stripHtml() must parse untrusted HTML in an inert document
  *      (DOMParser), not via innerHTML on a live detached div.
+ *   5. The search-as-you-type dropdown has four untrusted channels of its own
+ *      — fragment titles, fragment excerpts, LLM expansion terms, and
+ *      localStorage values the visitor typed — all of which reach innerHTML.
  */
 
 const fs = require('fs');
@@ -35,7 +38,7 @@ async function ticks(n) { for (let i = 0; i < n; i++) await tick(); }
 //   config           -> scoring config overrides
 //   expandResponse   -> body returned by the /expand endpoint
 //   summarizeResponse-> body returned by the /summarize endpoint
-function setup({ rowsFor, config = {}, expandResponse = { terms: [] }, summarizeResponse = {} } = {}) {
+function setup({ rowsFor, config = {}, sayt = {}, expandResponse = { terms: [] }, summarizeResponse = {} } = {}) {
     const dom = new JSDOM(
         `<!DOCTYPE html><html><body><div id="scolta-search"></div></body></html>`,
         { url: 'https://example.com', runScripts: 'dangerously' }
@@ -84,7 +87,7 @@ function setup({ rowsFor, config = {}, expandResponse = { terms: [] }, summarize
     window.scrollTo = () => {};
 
     window.eval(patchedSource);
-    window.scolta = {
+    window.scolta = Object.assign({
         scoring: Object.assign({
             AI_EXPAND_QUERY: false,
             AI_SUMMARIZE: false,
@@ -94,7 +97,7 @@ function setup({ rowsFor, config = {}, expandResponse = { terms: [] }, summarize
         endpoints: { expand: '/expand', summarize: '/summarize', followup: '/followup' },
         pagefindPath: '/pf.js', wasmPath: '/wasm.js',
         siteName: 'Test', container: '#scolta-search',
-    };
+    }, sayt);
     window.Scolta.init('#scolta-search');
 
     const $ = sel => window.document.querySelector(sel);
@@ -106,7 +109,17 @@ function setup({ rowsFor, config = {}, expandResponse = { terms: [] }, summarize
         return p;
     }
 
-    return { window, $, search };
+    /** Type into the box and let the suggest cycle run to completion. */
+    async function suggest(prefix) {
+        await ticks(15);
+        const input = $('#scolta-query');
+        input.value = prefix;
+        input.dispatchEvent(new window.Event('input', { bubbles: true }));
+        await new Promise(r => setTimeout(r, 80));
+        await ticks(10);
+    }
+
+    return { window, $, search, suggest };
 }
 
 describe('expanded terms — attribute escaping (escapeAttr)', () => {
@@ -228,6 +241,140 @@ describe('AI summary links — scheme gate with empty allowlist (formatInline)',
         const a = h.$('.scolta-ai-summary-text a');
         expect(a).toBeTruthy();
         expect(a.getAttribute('href')).toBe('https://example.com/page');
+    });
+});
+
+describe('search-as-you-type dropdown — every untrusted channel', () => {
+    const SAYT_FAST = { saytDebounceMs: 10 };
+    const RECENT_KEY = 'scolta:recent-searches';
+
+    test('a hostile fragment title neither renders nor executes', async () => {
+        const h = setup({
+            sayt: SAYT_FAST,
+            rowsFor: () => [{
+                url: '/a',
+                title: 'Doc <img src=x onerror="window.__pwned=true"> Title',
+                content: 'branch',
+            }],
+        });
+        await h.suggest('branch');
+
+        const dropdown = h.$('#scolta-sayt');
+        expect(dropdown.querySelectorAll('[role="option"]').length).toBeGreaterThan(0);
+        expect(h.window.__pwned).toBeUndefined();
+        expect(dropdown.querySelector('img')).toBeNull();
+        expect(dropdown.textContent).toContain('Doc');
+    });
+
+    test('a hostile fragment excerpt neither renders nor executes', async () => {
+        const h = setup({
+            sayt: SAYT_FAST,
+            rowsFor: () => [{
+                url: '/a',
+                title: 'Branching',
+                content: 'branch',
+                excerpt: 'branch <img src=x onerror="window.__pwned=true"> excerpt',
+            }],
+        });
+        await h.suggest('branch');
+
+        expect(h.window.__pwned).toBeUndefined();
+        expect(h.$('#scolta-sayt').querySelector('img')).toBeNull();
+    });
+
+    test('a `"` in a fragment title cannot mint an attribute on the option', async () => {
+        const h = setup({
+            sayt: SAYT_FAST,
+            rowsFor: () => [{
+                url: '/a',
+                title: 'Evil" onmouseover="window.__pwned=true',
+                content: 'branch',
+            }],
+        });
+        await h.suggest('branch');
+
+        const option = h.$('#scolta-sayt [role="option"]');
+        expect(option).toBeTruthy();
+        expect(option.hasAttribute('onmouseover')).toBe(false);
+        expect(option.textContent).toContain('Evil"');
+    });
+
+    test('a javascript: fragment URL never becomes a suggestion href', async () => {
+        const h = setup({
+            sayt: SAYT_FAST,
+            rowsFor: () => [{
+                url: 'javascript:alert(1)',
+                title: 'Poisoned Doc',
+                content: 'branch',
+                meta: { url: 'javascript:alert(1)' },
+            }],
+        });
+        await h.suggest('branch');
+
+        const option = h.$('#scolta-sayt [role="option"]');
+        expect(option).toBeTruthy();
+        expect(option.tagName).toBe('DIV');
+        expect(option.hasAttribute('href')).toBe(false);
+        expect(h.$('#scolta-sayt').querySelector('a')).toBeNull();
+    });
+
+    test('a hostile LLM expansion term reaches the dropdown escaped', async () => {
+        // The expansion term itself is not rendered, but the documents it finds
+        // are, and their titles travel the same path. Prove the whole enrichment
+        // channel escapes rather than trusting the expansion response.
+        const h = setup({
+            sayt: Object.assign({}, SAYT_FAST, { saytExpansionDelayMs: 10 }),
+            config: { AI_EXPAND_QUERY: true },
+            expandResponse: { terms: ['rebase" data-pwned="1'] },
+            rowsFor: (q) => (q === 'rebase" data-pwned="1'
+                ? [{ url: '/x', title: '<script>window.__pwned=true</script>Rebasing', content: 'x' }]
+                : [{ url: '/a', title: 'Branching', content: 'branch' }]),
+        });
+        await h.suggest('branch');
+        await ticks(30);
+
+        const dropdown = h.$('#scolta-sayt');
+        expect(h.window.__pwned).toBeUndefined();
+        expect(dropdown.querySelector('script')).toBeNull();
+        expect([...dropdown.querySelectorAll('[role="option"]')]
+            .some(o => o.hasAttribute('data-pwned'))).toBe(false);
+    });
+
+    test('a hostile localStorage value is escaped like any other untrusted text', async () => {
+        const h = setup({
+            sayt: SAYT_FAST,
+            rowsFor: () => [{ url: '/a', title: 'Branching', content: 'branch' }],
+        });
+        await ticks(15);
+        h.window.localStorage.setItem(RECENT_KEY, JSON.stringify([
+            'branch <img src=x onerror="window.__pwned=true">',
+        ]));
+
+        await h.suggest('branch');
+
+        const dropdown = h.$('#scolta-sayt');
+        expect(h.window.__pwned).toBeUndefined();
+        expect(dropdown.querySelector('img')).toBeNull();
+        expect(dropdown.textContent).toContain('<img src=x');
+    });
+
+    test('a non-string smuggled into stored recent searches is dropped, not rendered', async () => {
+        const h = setup({
+            sayt: SAYT_FAST,
+            rowsFor: () => [{ url: '/a', title: 'Branching', content: 'branch' }],
+        });
+        await ticks(15);
+        h.window.localStorage.setItem(RECENT_KEY, JSON.stringify([
+            { toString: 'not a string' }, 42, null, 'branch real',
+        ]));
+
+        await h.suggest('branch');
+
+        const texts = [...h.$('#scolta-sayt').querySelectorAll('[role="option"]')]
+            .map(o => o.textContent);
+        expect(texts.some(t => t.includes('branch real'))).toBe(true);
+        expect(texts.some(t => t.includes('object Object'))).toBe(false);
+        expect(texts.some(t => t.includes('42'))).toBe(false);
     });
 });
 

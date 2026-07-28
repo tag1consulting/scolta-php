@@ -1009,4 +1009,208 @@ class ScoltaConfigTest extends TestCase
         $off = ScoltaConfig::fromArray(['hide_empty_facets' => false])->toBrowserConfig();
         $this->assertFalse($off['hideEmptyFacets']);
     }
+
+    // ------------------------------------------------------------------
+    // Search as you type (SAYT) — ten top-level browser settings
+    // ------------------------------------------------------------------
+
+    /**
+     * Every SAYT default, pinned byte-equal to the fallback assets/js/scolta.js
+     * uses when the key is absent (SAYT_DEFAULTS in the bundle).
+     *
+     * These two must never drift: the browser falls back to its own literal
+     * whenever a platform omits the key, so a PHP default that disagreed would
+     * make the widget behave differently depending on which adapter rendered
+     * the page. testSaytDefaultsMatchTheBrowserBundleFallbacks() below asserts
+     * the agreement against the bundle source itself.
+     *
+     * @return array<string, array{0: string, 1: mixed}>
+     */
+    public static function saytDefaultProvider(): array
+    {
+        return [
+            'enabled'          => ['saytEnabled', true],
+            'min chars'        => ['saytMinChars', 2],
+            'debounce'         => ['saytDebounceMs', 150],
+            'max suggestions'  => ['saytMaxSuggestions', 6],
+            'recent searches'  => ['saytRecentSearches', true],
+            'max recent'       => ['saytMaxRecent', 3],
+            'expand'           => ['saytExpand', true],
+            'expand per min'   => ['saytExpandPerMinute', 6],
+            'expansion delay'  => ['saytExpansionDelayMs', 500],
+            'suggestion action' => ['saytSuggestionAction', 'navigate'],
+        ];
+    }
+
+    /**
+     * @dataProvider saytDefaultProvider
+     */
+    public function testSaytPropertyDefault(string $property, mixed $expected): void
+    {
+        $config = new ScoltaConfig();
+        $this->assertSame($expected, $config->$property);
+    }
+
+    /**
+     * @dataProvider saytDefaultProvider
+     */
+    public function testSaytPropertyIsEmittedTopLevelNotAsScoring(string $property, mixed $expected): void
+    {
+        $browser = (new ScoltaConfig())->toBrowserConfig();
+
+        $this->assertArrayHasKey($property, $browser);
+        $this->assertSame($expected, $browser[$property]);
+        // scolta.js reads these as instanceConfig.<camelCase>, so they must NOT
+        // be nested under `scoring` — that is a different read path entirely.
+        $this->assertArrayNotHasKey($property, $browser['scoring']);
+    }
+
+    /**
+     * The snake_case names a CMS settings layer supplies, mapped generically by
+     * fromArray()'s camelCase conversion.
+     *
+     * @return array<string, array{0: string, 1: string, 2: mixed, 3: mixed}>
+     */
+    public static function saytSnakeCaseProvider(): array
+    {
+        return [
+            'enabled'           => ['sayt_enabled', 'saytEnabled', false, false],
+            'min chars'         => ['sayt_min_chars', 'saytMinChars', 1, 1],
+            'debounce'          => ['sayt_debounce_ms', 'saytDebounceMs', 300, 300],
+            'max suggestions'   => ['sayt_max_suggestions', 'saytMaxSuggestions', 10, 10],
+            'recent searches'   => ['sayt_recent_searches', 'saytRecentSearches', false, false],
+            'max recent'        => ['sayt_max_recent', 'saytMaxRecent', 0, 0],
+            'expand'            => ['sayt_expand', 'saytExpand', false, false],
+            'expand per min'    => ['sayt_expand_per_minute', 'saytExpandPerMinute', 12, 12],
+            'expansion delay'   => ['sayt_expansion_delay_ms', 'saytExpansionDelayMs', 900, 900],
+            'suggestion action' => ['sayt_suggestion_action', 'saytSuggestionAction', 'search', 'search'],
+        ];
+    }
+
+    /**
+     * @dataProvider saytSnakeCaseProvider
+     */
+    public function testFromArrayMapsSaytSnakeCaseKey(
+        string $snake,
+        string $property,
+        mixed $input,
+        mixed $expected,
+    ): void {
+        $config = ScoltaConfig::fromArray([$snake => $input]);
+        $this->assertSame($expected, $config->$property);
+    }
+
+    /**
+     * @dataProvider saytDefaultProvider
+     */
+    public function testSaytAbsentKeyPreservesDefault(string $property, mixed $expected): void
+    {
+        $config = ScoltaConfig::fromArray([]);
+        $this->assertSame($expected, $config->$property);
+    }
+
+    /**
+     * CMS config layers (Drupal's config:set, WordPress options, environment
+     * variables) hand scalars over as strings. fromArray() casts by the declared
+     * property type, so every SAYT setting must survive its string form.
+     */
+    public function testFromArrayCoercesSaytStringValues(): void
+    {
+        $config = ScoltaConfig::fromArray([
+            'sayt_enabled' => '0',
+            'sayt_min_chars' => '1',
+            'sayt_debounce_ms' => '250',
+            'sayt_max_suggestions' => '8',
+            'sayt_recent_searches' => '0',
+            'sayt_max_recent' => '2',
+            'sayt_expand' => '0',
+            'sayt_expand_per_minute' => '3',
+            'sayt_expansion_delay_ms' => '750',
+        ]);
+
+        $this->assertIsBool($config->saytEnabled);
+        $this->assertFalse($config->saytEnabled);
+        $this->assertSame(1, $config->saytMinChars);
+        $this->assertSame(250, $config->saytDebounceMs);
+        $this->assertSame(8, $config->saytMaxSuggestions);
+        $this->assertIsBool($config->saytRecentSearches);
+        $this->assertFalse($config->saytRecentSearches);
+        $this->assertSame(2, $config->saytMaxRecent);
+        $this->assertIsBool($config->saytExpand);
+        $this->assertFalse($config->saytExpand);
+        $this->assertSame(3, $config->saytExpandPerMinute);
+        $this->assertSame(750, $config->saytExpansionDelayMs);
+    }
+
+    public function testSaytSuggestionActionAcceptsBothSupportedValues(): void
+    {
+        foreach (ScoltaConfig::SAYT_SUGGESTION_ACTIONS as $action) {
+            $config = ScoltaConfig::fromArray(['sayt_suggestion_action' => $action]);
+            $this->assertSame($action, $config->normalizedSaytSuggestionAction());
+            $this->assertSame($action, $config->toBrowserConfig()['saytSuggestionAction']);
+        }
+    }
+
+    public function testSaytSuggestionActionClampsUnknownValueToNavigate(): void
+    {
+        // A typo in a site's settings form must degrade to the safe default
+        // rather than reach the page payload and confuse the browser clamp.
+        $config = ScoltaConfig::fromArray(['sayt_suggestion_action' => 'teleport']);
+
+        $this->assertSame('teleport', $config->saytSuggestionAction, 'the raw property is untouched');
+        $this->assertSame('navigate', $config->normalizedSaytSuggestionAction());
+        $this->assertSame('navigate', $config->toBrowserConfig()['saytSuggestionAction']);
+    }
+
+    public function testSaytKeysDoNotChangeTheScoringKeyCount(): void
+    {
+        // SAYT settings are UI behaviour, not ranking. The 40-key scoring
+        // contract with the WASM scorer must be untouched by all ten of them.
+        $this->assertCount(40, (new ScoltaConfig())->toJsScoringConfig());
+    }
+
+    /**
+     * The PHP default and the browser fallback are one contract, so read the
+     * bundle and assert the literal it falls back to.
+     */
+    public function testSaytDefaultsMatchTheBrowserBundleFallbacks(): void
+    {
+        $bundle = file_get_contents(dirname(__DIR__) . '/assets/js/scolta.js');
+        $this->assertNotFalse($bundle);
+
+        $ok = preg_match('/const SAYT_DEFAULTS = Object\.freeze\(\{(.*?)\}\);/s', $bundle, $m);
+        $this->assertSame(
+            1,
+            $ok,
+            'Could not find the SAYT_DEFAULTS literal in assets/js/scolta.js. If it was '
+            . 'renamed or reformatted, update this test so the guard keeps working.',
+        );
+
+        $expected = [
+            'enabled' => 'true',
+            'minChars' => '2',
+            'debounceMs' => '150',
+            'maxSuggestions' => '6',
+            'recentSearches' => 'true',
+            'maxRecent' => '3',
+            'expand' => 'true',
+            'expandPerMinute' => '6',
+            'expansionDelayMs' => '500',
+            'suggestionAction' => "'navigate'",
+        ];
+
+        foreach ($expected as $key => $literal) {
+            $this->assertMatchesRegularExpression(
+                '/\b' . preg_quote($key, '/') . ':\s*' . preg_quote($literal, '/') . '\s*,/',
+                $m[1],
+                sprintf(
+                    'assets/js/scolta.js SAYT_DEFAULTS.%s must fall back to %s to match the '
+                    . 'ScoltaConfig default. A page rendered by an adapter that omits the key '
+                    . 'would otherwise behave differently from one that emits it.',
+                    $key,
+                    $literal,
+                ),
+            );
+        }
+    }
 }
