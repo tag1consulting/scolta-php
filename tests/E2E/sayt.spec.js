@@ -213,7 +213,8 @@ test('search mode: ArrowDown then Enter runs the full search for that title', as
     await page.keyboard.press('Enter');
 
     await expect(page.locator('#scolta-layout')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('#scolta-results-header')).toContainText('results for');
+    // The header pluralizes, so match the quoted query rather than the noun.
+    await expect(page.locator('#scolta-results-header')).toContainText(`for "${title}"`);
     expect(await page.locator('#scolta-query').inputValue()).toBe(title);
     await expect(page.locator('#scolta-sayt')).toBeHidden();
 });
