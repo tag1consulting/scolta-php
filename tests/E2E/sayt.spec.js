@@ -93,13 +93,25 @@ test.beforeAll(async () => {
         const candidates = [];
         if (urlPath === '/scolta.js') candidates.push(path.join(REPO_ROOT, 'assets/js/scolta.js'));
         else if (urlPath === '/scolta.css') candidates.push(path.join(REPO_ROOT, 'assets/css/scolta.css'));
-        else if (urlPath.startsWith('/wasm/')) candidates.push(path.join(REPO_ROOT, 'assets', urlPath));
-        else {
-            candidates.push(path.join(OUTPUT_DIR, urlPath));
-            candidates.push(path.join(CORPUS_DIR, path.basename(urlPath)));
+        else if (urlPath.startsWith('/wasm/')) {
+            candidates.push([path.join(REPO_ROOT, 'assets'), urlPath]);
+        } else {
+            candidates.push([OUTPUT_DIR, urlPath]);
+            candidates.push([CORPUS_DIR, path.basename(urlPath)]);
         }
 
-        for (const filePath of candidates) {
+        for (const candidate of candidates) {
+            let filePath;
+            if (Array.isArray(candidate)) {
+                // Resolve, then confirm the result is still inside its root: a
+                // request path is attacker-controlled in principle, and a
+                // `..` segment must not reach outside the served directory.
+                const [root, rel] = candidate;
+                filePath = path.resolve(root, '.' + path.posix.normalize('/' + rel));
+                if (filePath !== root && !filePath.startsWith(root + path.sep)) continue;
+            } else {
+                filePath = candidate;
+            }
             if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
                 res.writeHead(200, {
                     'Content-Type': TYPES[path.extname(filePath)] || 'application/octet-stream',

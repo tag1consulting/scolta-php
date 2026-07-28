@@ -769,6 +769,107 @@ describe('interaction with the full pipeline', () => {
         expect(h.isOpen()).toBe(false);
     });
 
+    test('a search that rejects does not wedge suggestions off for the rest of the page', async () => {
+        // searchPainting is set at the top of doSearch() and cleared at the
+        // primary paint. Without a guard, a rejected Pagefind search leaves it
+        // true and every later keystroke is silently suppressed.
+        let failNext = true;
+        const h = await boot(setup({
+            sayt: { saytDebounceMs: 10 },
+            rowsFor: () => DOCS.ka,
+            searchImpl: (q) => {
+                if (q !== '' && failNext) {
+                    failNext = false;
+                    return Promise.reject(new Error('index unavailable'));
+                }
+                return null;
+            },
+        }));
+
+        h.$('#scolta-query').value = 'kamado';
+        await h.window.Scolta.doSearch().catch(() => {});
+        await ticks(20);
+
+        // The failure is not swallowed, and suggestions still work afterwards.
+        h.type('kamado');
+        await tick(80);
+        expect(h.options()).toHaveLength(2);
+        expect(h.isOpen()).toBe(true);
+    });
+
+    test('a suggest search that fails takes the dropdown down rather than leaving a stale one', async () => {
+        let failNext = false;
+        const h = await boot(setup({
+            sayt: { saytDebounceMs: 10 },
+            rowsFor: () => DOCS.ka,
+            searchImpl: (q) => (q !== '' && failNext
+                ? Promise.reject(new Error('index unavailable'))
+                : null),
+        }));
+
+        h.type('kamado');
+        await tick(80);
+        expect(h.isOpen()).toBe(true);
+
+        // A genuine failure is not the same as "no matches"; showing the
+        // previous prefix's suggestions would claim it is.
+        failNext = true;
+        h.type('kamado joe');
+        await tick(80);
+        expect(h.isOpen()).toBe(false);
+        expect(h.options()).toHaveLength(0);
+    });
+
+    test('one failing fragment costs one suggestion, not the whole dropdown', async () => {
+        const h = await boot(setup({
+            sayt: { saytDebounceMs: 10 },
+            rowsFor: () => DOCS.ka,
+            searchImpl: (q, _opts, resultsFor) => {
+                if (q === '') return null;
+                const real = resultsFor(q);
+                return Promise.resolve({
+                    results: real.results.map((r, i) => ({
+                        id: r.id,
+                        data: () => (i === 0
+                            ? Promise.reject(new Error('fragment 404'))
+                            : r.data()),
+                    })),
+                });
+            },
+        }));
+
+        h.type('kamado');
+        await tick(80);
+
+        expect(h.options()).toHaveLength(1);
+        expect(h.options()[0].textContent).toContain('Kamado Pizza');
+    });
+
+    test('recent searches survive a total fragment-load failure', async () => {
+        const h = await boot(setup({
+            sayt: { saytDebounceMs: 10 },
+            recent: ['kamado joe pizza'],
+            rowsFor: () => DOCS.ka,
+            searchImpl: (q, _opts, resultsFor) => {
+                if (q === '') return null;
+                const real = resultsFor(q);
+                return Promise.resolve({
+                    results: real.results.map(r => ({
+                        id: r.id,
+                        data: () => Promise.reject(new Error('fragment 404')),
+                    })),
+                });
+            },
+        }));
+
+        h.type('kamado');
+        await tick(80);
+
+        // Recent searches do not depend on the index.
+        expect(h.options()).toHaveLength(1);
+        expect(h.options()[0].className).toContain('scolta-sayt-option-recent');
+    });
+
     test('the two suggestion render events fire on the dropdown and bubble', async () => {
         const h = await boot(setup({
             sayt: { saytDebounceMs: 10 },

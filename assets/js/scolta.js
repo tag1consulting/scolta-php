@@ -2053,7 +2053,11 @@
         usedOr = rows.length > 0;
       }
     } catch (e) {
+      // A genuine search failure is not the same as "no matches", and leaving
+      // the previous prefix's suggestions on screen would claim it is. Take the
+      // dropdown down instead — but only if this cycle is still the current one.
       debugLog('[scolta:sayt] suggest search failed', e);
+      if (version === suggestVersion) closeSuggestions();
       return;
     }
 
@@ -2079,20 +2083,25 @@
       // The hard cap on fragment loads for this pass. Each .data() is a network
       // fetch on a cold cache, and this runs at typing speed.
       const slice = rows.slice(0, cap);
-      let loaded;
-      try {
-        loaded = await Promise.all(slice.map(r => r.data()));
-      } catch (e) {
-        debugLog('[scolta:sayt] fragment load failed', e);
-        return null;
-      }
+      // allSettled, not all: one fragment that fails to fetch must cost the
+      // user that one suggestion, not the whole dropdown.
+      const settled = await Promise.allSettled(slice.map(r => r.data()));
       if (version !== suggestVersion) return null;
+      const loaded = [];
+      for (const outcome of settled) {
+        if (outcome.status === 'fulfilled') loaded.push(outcome.value);
+        else debugLog('[scolta:sayt] fragment load failed', outcome.reason);
+      }
 
-      const scored = scoreResults(loaded, term, usedOr ? 0.6 : 1.0);
-      scored.sort((a, b) => b.score - a.score);
-      titleSuggestions = deduplicateByTitle(scored)
-        .map(toTitleSuggestion)
-        .filter(s => s.title !== '');
+      // Every fragment failed. Fall through rather than returning: recent
+      // searches do not depend on the index and are still worth showing.
+      if (loaded.length > 0) {
+        const scored = scoreResults(loaded, term, usedOr ? 0.6 : 1.0);
+        scored.sort((a, b) => b.score - a.score);
+        titleSuggestions = deduplicateByTitle(scored)
+          .map(toTitleSuggestion)
+          .filter(s => s.title !== '');
+      }
     }
 
     return mergeSuggestions(matchingRecentSearches(term, cfg), titleSuggestions, cap);
@@ -3773,79 +3782,88 @@
       : expandQuery(query);
     expansionInFlight = !preserveFilters && CONFIG.AI_EXPAND_QUERY;
 
-    const primarySearch = await pagefindSearch(searchQuery, activeFilters);
-    allScoredResults = await loadAndScoreSearch(primarySearch, scorerQuery, 1.0);
+    // Everything from here to the primary paint runs with the suggest path
+    // suppressed, so it is wrapped: a rejected Pagefind search must not leave
+    // searchPainting stuck true and silently kill suggestions for the rest of
+    // the page's life. `finally` without `catch` still rethrows, so the caller
+    // sees the failure exactly as it did before.
+    try {
+      const primarySearch = await pagefindSearch(searchQuery, activeFilters);
+      allScoredResults = await loadAndScoreSearch(primarySearch, scorerQuery, 1.0);
 
-    // OR fallback: only activate when AND search returns ZERO results.
-    // This prevents diluting precision when the user provides many terms
-    // to find a specific piece of content. Forced-phrase queries (quoted)
-    // never fall back to OR — the user explicitly asked for phrase results.
-    usedOrFallback = false;
-    if (!isForcedPhrase && meaningfulTerms.length > 1 && primarySearch.results.length === 0) {
-      debugLog('[scolta:search] AND returned 0 results — running OR fallback');
-      const orQueries = meaningfulTerms.map(term => ({ term, weight: 0.6 }));
-      // Specificity weighting so the OR fallback leads with the rare on-intent
-      // term, not the ubiquitous typed word. Closes the typed-word exemption:
-      // a common word the user typed is still searched (recall) but no longer
-      // floods the head of the list.
-      const orSpecificity = {
-        enabled: CONFIG.SPECIFICITY_WEIGHTING,
-        corpusTotal: subwordCorpusSize(activeFilters),
-        strongMatched: false,
-      };
-      const orResults = await searchAndLoadParallel(orQueries, activeFilters, searchQuery, orSpecificity);
-      // Only adopt the specificity signal if this search is still current — a
-      // newer doSearch() resets hadSpecificMatch, and a late-resolving stale OR
-      // fallback must not repollute it.
-      if (version === searchVersion && orSpecificity.strongMatched) hadSpecificMatch = true;
-      allScoredResults = mergeResults(allScoredResults, orResults);
-      applyAgreementBonus(allScoredResults, orResults);
-      usedOrFallback = allScoredResults.length > 0;
-    }
-
-    allScoredResults.sort((a, b) => b.score - a.score);
-    allScoredResults = deduplicateByTitle(allScoredResults);
-
-    const priorityPages = getInstancePriorityPages();
-    if (priorityPages.length > 0 && scoltaWasm && scoltaWasm.match_priority_pages) {
-      try {
-        const priorityInput = JSON.stringify({ query: currentQuery, priority_pages: priorityPages });
-        const priorityMatches = JSON.parse(scoltaWasm.match_priority_pages(priorityInput));
-        if (priorityMatches && priorityMatches.length > 0) {
-          const priorityMap = {};
-          priorityMatches.forEach(pm => {
-            priorityMap[(pm.url || '').replace(/\/$/, '').toLowerCase()] = pm;
-          });
-          allScoredResults.forEach(result => {
-            const url = resolveUrl(result.data.url || '').replace(/\/$/, '').toLowerCase();
-            if (priorityMap[url]) {
-              result.score = (result.score || 0) + (priorityMap[url].boost || 100);
-            }
-          });
-          allScoredResults.sort((a, b) => b.score - a.score);
-        }
-      } catch (e) {
-        console.warn('[scolta] Priority page matching failed', e);
+      // OR fallback: only activate when AND search returns ZERO results.
+      // This prevents diluting precision when the user provides many terms
+      // to find a specific piece of content. Forced-phrase queries (quoted)
+      // never fall back to OR — the user explicitly asked for phrase results.
+      usedOrFallback = false;
+      if (!isForcedPhrase && meaningfulTerms.length > 1 && primarySearch.results.length === 0) {
+        debugLog('[scolta:search] AND returned 0 results — running OR fallback');
+        const orQueries = meaningfulTerms.map(term => ({ term, weight: 0.6 }));
+        // Specificity weighting so the OR fallback leads with the rare on-intent
+        // term, not the ubiquitous typed word. Closes the typed-word exemption:
+        // a common word the user typed is still searched (recall) but no longer
+        // floods the head of the list.
+        const orSpecificity = {
+          enabled: CONFIG.SPECIFICITY_WEIGHTING,
+          corpusTotal: subwordCorpusSize(activeFilters),
+          strongMatched: false,
+        };
+        const orResults = await searchAndLoadParallel(orQueries, activeFilters, searchQuery, orSpecificity);
+        // Only adopt the specificity signal if this search is still current — a
+        // newer doSearch() resets hadSpecificMatch, and a late-resolving stale OR
+        // fallback must not repollute it.
+        if (version === searchVersion && orSpecificity.strongMatched) hadSpecificMatch = true;
+        allScoredResults = mergeResults(allScoredResults, orResults);
+        applyAgreementBonus(allScoredResults, orResults);
+        usedOrFallback = allScoredResults.length > 0;
       }
-    }
 
-    // Paint the results BEFORE computing facet counts. The count pass below is a
-    // second full Pagefind search, and on a production-size index that is the
-    // dominant cost of the whole cycle (measured: results ready at 24,558 ms,
-    // first paint at 35,626 ms — the user waited 11 seconds for numbers in the
-    // filter panel while the list they asked for sat finished in memory).
-    //
-    // The filter panel is deliberately NOT repainted in the gap. renderFilters()
-    // is count-driven — under the default hideEmptyFacets policy a zero-count
-    // value is hidden entirely — so rendering it against counts that have not
-    // been updated yet would show the PREVIOUS query's visible value set and then
-    // reshuffle when the real counts land. Holding the last painted panel until
-    // then introduces no new visual state: it never flashes empty, and on the
-    // first search of a page load the panel simply appears when the counts
-    // arrive, exactly as it did before this reorder.
-    renderResults(false, 'search');
-    // Primary paint is up; typing may produce suggestions again.
-    searchPainting = false;
+      allScoredResults.sort((a, b) => b.score - a.score);
+      allScoredResults = deduplicateByTitle(allScoredResults);
+
+      const priorityPages = getInstancePriorityPages();
+      if (priorityPages.length > 0 && scoltaWasm && scoltaWasm.match_priority_pages) {
+        try {
+          const priorityInput = JSON.stringify({ query: currentQuery, priority_pages: priorityPages });
+          const priorityMatches = JSON.parse(scoltaWasm.match_priority_pages(priorityInput));
+          if (priorityMatches && priorityMatches.length > 0) {
+            const priorityMap = {};
+            priorityMatches.forEach(pm => {
+              priorityMap[(pm.url || '').replace(/\/$/, '').toLowerCase()] = pm;
+            });
+            allScoredResults.forEach(result => {
+              const url = resolveUrl(result.data.url || '').replace(/\/$/, '').toLowerCase();
+              if (priorityMap[url]) {
+                result.score = (result.score || 0) + (priorityMap[url].boost || 100);
+              }
+            });
+            allScoredResults.sort((a, b) => b.score - a.score);
+          }
+        } catch (e) {
+          console.warn('[scolta] Priority page matching failed', e);
+        }
+      }
+
+      // Paint the results BEFORE computing facet counts. The count pass below is a
+      // second full Pagefind search, and on a production-size index that is the
+      // dominant cost of the whole cycle (measured: results ready at 24,558 ms,
+      // first paint at 35,626 ms — the user waited 11 seconds for numbers in the
+      // filter panel while the list they asked for sat finished in memory).
+      //
+      // The filter panel is deliberately NOT repainted in the gap. renderFilters()
+      // is count-driven — under the default hideEmptyFacets policy a zero-count
+      // value is hidden entirely — so rendering it against counts that have not
+      // been updated yet would show the PREVIOUS query's visible value set and then
+      // reshuffle when the real counts land. Holding the last painted panel until
+      // then introduces no new visual state: it never flashes empty, and on the
+      // first search of a page load the panel simply appears when the counts
+      // arrive, exactly as it did before this reorder.
+      renderResults(false, 'search');
+    } finally {
+      // Primary paint is up — or the cycle died trying. Either way typing may
+      // produce suggestions again.
+      searchPainting = false;
+    }
 
     // Counts are a fixed property of the typed query: compute them once, only
     // when the typed query changes (!preserveFilters). A facet toggle, sort, or
