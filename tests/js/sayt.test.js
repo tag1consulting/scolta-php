@@ -770,9 +770,10 @@ describe('interaction with the full pipeline', () => {
     });
 
     test('a search that rejects does not wedge suggestions off for the rest of the page', async () => {
-        // searchPainting is set at the top of doSearch() and cleared at the
-        // primary paint. Without a guard, a rejected Pagefind search leaves it
-        // true and every later keystroke is silently suppressed.
+        // doSearch() suppresses the suggest path from its start until the
+        // primary paint. Without a guard covering the whole window, a rejected
+        // Pagefind search leaves it suppressed and every later keystroke is
+        // silently ignored for the life of the page.
         let failNext = true;
         const h = await boot(setup({
             sayt: { saytDebounceMs: 10 },
@@ -795,6 +796,87 @@ describe('interaction with the full pipeline', () => {
         await tick(80);
         expect(h.options()).toHaveLength(2);
         expect(h.isOpen()).toBe(true);
+    });
+
+    test('a synchronous throw before the first await does not wedge suggestions off either', async () => {
+        // The suppression window opens before any await, so guarding only the
+        // awaited region leaves the whole synchronous setup — the URL sync, the
+        // scaffold writes, the lifecycle emits — able to wedge it.
+        const h = await boot(setup({
+            sayt: { saytDebounceMs: 10 },
+            rowsFor: () => DOCS.ka,
+        }));
+
+        // Break a scaffold write that runs between opening the window and the
+        // first await. This is the shape of any DOM-side failure in that region.
+        const results = h.$('#scolta-results');
+        Object.defineProperty(results, 'innerHTML', {
+            configurable: true,
+            set() { throw new Error('paint blocked'); },
+            get() { return ''; },
+        });
+
+        h.$('#scolta-query').value = 'kamado';
+        await expect(h.window.Scolta.doSearch()).rejects.toThrow('paint blocked');
+        await ticks(10);
+
+        // Un-break it, then prove suggestions were not left suppressed.
+        delete results.innerHTML;
+        h.type('kamado');
+        await tick(80);
+        expect(h.options()).toHaveLength(2);
+        expect(h.isOpen()).toBe(true);
+    });
+
+    test('an overtaken search does not unsuppress the suggest path mid-paint', async () => {
+        // Two doSearch() cycles overlap whenever the user commits again while
+        // one is in flight. A boolean would let the FIRST cycle's exit reopen
+        // the suggest path while the second is still pre-paint; the window is
+        // owned by a version so only its owner releases it.
+        // Gate ONLY the two committed queries, one reusable gate each, so the
+        // facet-count pass shares its cycle's gate and the suggest searches
+        // used to check recovery are not gated at all.
+        const gates = new Map();
+        const gateFor = (q) => {
+            if (!gates.has(q)) gates.set(q, deferred());
+            return gates.get(q);
+        };
+        const h = await boot(setup({
+            sayt: { saytDebounceMs: 10 },
+            rowsFor: () => DOCS.ka,
+            searchImpl: (q, _opts, resultsFor) => (
+                (q === 'kamado' || q === 'kamado joe')
+                    ? gateFor(q).promise.then(() => resultsFor(q))
+                    : null
+            ),
+        }));
+
+        // Neither cycle is awaited: the overtaken one's facet-count pass runs
+        // against a memo the newer cycle already reset, so it parks on a gate
+        // that is never opened. Drive both with ticks instead.
+        h.$('#scolta-query').value = 'kamado';
+        h.window.Scolta.doSearch();
+        await ticks(5);
+        h.$('#scolta-query').value = 'kamado joe';
+        h.window.Scolta.doSearch();
+        await ticks(5);
+
+        // Let the OVERTAKEN cycle paint and exit while the newer one is still
+        // pre-paint. Its exit must not release a window it no longer owns.
+        gateFor('kamado').resolve();
+        await ticks(15);
+
+        h.type('kamado jo');
+        await tick(80);
+        expect(h.realSearches().every(c => c.query !== 'kamado jo')).toBe(true);
+        expect(h.isOpen()).toBe(false);
+
+        // Once the owner paints, suggestions come back.
+        gateFor('kamado joe').resolve();
+        await ticks(15);
+        h.type('kamado joes');
+        await tick(80);
+        expect(h.options()).toHaveLength(2);
     });
 
     test('a suggest search that fails takes the dropdown down rather than leaving a stale one', async () => {

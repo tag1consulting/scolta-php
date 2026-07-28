@@ -417,11 +417,15 @@
   let suggestBlurTimer = null;
   let saytExpandCalls = [];          // ms timestamps, for the sliding-window budget
   let saytActionWarned = false;      // warn once per instance, not once per keystroke
-  // True from the start of a doSearch() cycle until its primary paint lands. No
-  // suggest cycle runs in that window: the user has committed, and a dropdown
-  // repainting over a search that is mid-flight is noise. It clears on the next
-  // successful paint, so a rejected search cannot wedge suggestions off forever.
-  let searchPainting = false;
+  // searchVersion of the doSearch() cycle that has started but not yet painted,
+  // or 0 when none is. No suggest cycle runs while it is set: the user has
+  // committed, and a dropdown repainting over a search that is mid-flight is
+  // noise. A version rather than a boolean because doSearch() cycles overlap —
+  // the window belongs to whichever cycle opened it last, and only that cycle
+  // may release it. doSearch() releases it in a finally covering the whole
+  // pre-paint region, so a search that throws anywhere cannot wedge the suggest
+  // path off for the life of the page.
+  let paintingVersion = 0;
   // Per-search-cycle memo of in-flight Pagefind searches, keyed by
   // searchMemoKey(). Cleared at the top of every doSearch() — see the comment
   // above pagefindSearch() for why identical searches within one cycle are both
@@ -2020,7 +2024,7 @@
     const cfg = getSaytConfig();
     if (!cfg.enabled || !els.sayt || !pagefind || typeof pagefind.search !== 'function') return;
     // The user has committed and the results region is mid-paint; stand down.
-    if (searchPainting) return;
+    if (paintingVersion !== 0) return;
 
     const version = ++suggestVersion;
 
@@ -3701,93 +3705,105 @@
     // the primary paint lands.
     cancelSuggest();
     closeSuggestions();
-    searchPainting = true;
     recordRecentSearch(query);
 
     const version = ++searchVersion;
 
-    if (abortController) abortController.abort();
-    abortController = new AbortController();
+    // The suggest path stands down from here until the primary paint lands.
+    //
+    // Two things this has to get right. The window is owned by a VERSION
+    // rather than flagged by a boolean: two doSearch() cycles overlap whenever
+    // the user commits again while one is in flight, and with a boolean the
+    // first cycle's exit unsuppresses the suggest path in the middle of the
+    // second cycle's paint. And EVERYTHING inside the window lives in the try
+    // below, not just the awaits — anything that escapes without releasing the
+    // window leaves suggestions dead for the rest of the page's life, which is
+    // silent, permanent, and invisible in every test that does not fail a
+    // search on purpose (see tests/js/sayt.test.js).
+    paintingVersion = version;
 
-    currentQuery = query;
+    // Declared out here because the tail of the cycle — the facet-count pass
+    // and the expansion phase, both of which run after the window closes —
+    // still reads them.
+    let meaningfulTerms, searchQuery, isForcedPhrase, expandPromise;
 
-    displayedCount = 0;
-    allScoredResults = [];
-    hadSpecificMatch = false;
-    conversationMessages = [];
-    followUpCount = 0;
-    // Fresh cycle, fresh memo: identical searches are shared WITHIN a cycle
-    // only, so a count from an earlier query can never leak into this one.
-    searchMemo = new Map();
-    if (!preserveFilters) {
-      var effectiveFilters = initialFilters ? Object.assign({}, initialFilters) : {};
-      if (!effectiveFilters.language && defaultLangCode && CONFIG.AUTO_LANGUAGE_FILTER) {
-        var langs = CONFIG.AI_LANGUAGES || [];
-        if (langs.length > 1 && langs.includes(defaultLangCode)) {
-          effectiveFilters.language = new Set([defaultLangCode]);
-        }
-      }
-      activeFilters = effectiveFilters;
-    }
-
-    // Update URL with search query and active filter state.
     try {
-      var url = new URL(window.location.href);
-      url.searchParams.set('q', query);
-      for (const key of [...url.searchParams.keys()]) {
-        if (key.startsWith('f_')) url.searchParams.delete(key);
-      }
-      for (const [dim, vals] of Object.entries(activeFilters)) {
-        if (vals instanceof Set && vals.size > 0) {
-          url.searchParams.set('f_' + dim, [...vals].join(','));
+      if (abortController) abortController.abort();
+      abortController = new AbortController();
+
+      currentQuery = query;
+
+      displayedCount = 0;
+      allScoredResults = [];
+      hadSpecificMatch = false;
+      conversationMessages = [];
+      followUpCount = 0;
+      // Fresh cycle, fresh memo: identical searches are shared WITHIN a cycle
+      // only, so a count from an earlier query can never leak into this one.
+      searchMemo = new Map();
+      if (!preserveFilters) {
+        var effectiveFilters = initialFilters ? Object.assign({}, initialFilters) : {};
+        if (!effectiveFilters.language && defaultLangCode && CONFIG.AUTO_LANGUAGE_FILTER) {
+          var langs = CONFIG.AI_LANGUAGES || [];
+          if (langs.length > 1 && langs.includes(defaultLangCode)) {
+            effectiveFilters.language = new Set([defaultLangCode]);
+          }
         }
+        activeFilters = effectiveFilters;
       }
-      history.replaceState(null, '', url.toString());
-    } catch (e) {
-      // Silently ignore — URL sync is non-critical.
-    }
 
-    els.layout.style.display = "grid";
-    emitBeforeResults('loading');
-    els.results.innerHTML = '<p class="scolta-searching">Searching...</p>';
-    paintedEntries = [];
-    paintedHighlightSignature = null;
-    emitResultsRendered([], [], [], false);
-    els.resultsHeader.innerHTML = "";
-    els.noResults.style.display = "none";
-    els.aiSummary.style.display = "none";
-    els.loadMore.style.display = "none";
-    if (!preserveFilters) {
-      els.expandedTerms.style.display = "none";
-    }
+      // Update URL with search query and active filter state.
+      try {
+        var url = new URL(window.location.href);
+        url.searchParams.set('q', query);
+        for (const key of [...url.searchParams.keys()]) {
+          if (key.startsWith('f_')) url.searchParams.delete(key);
+        }
+        for (const [dim, vals] of Object.entries(activeFilters)) {
+          if (vals instanceof Set && vals.size > 0) {
+            url.searchParams.set('f_' + dim, [...vals].join(','));
+          }
+        }
+        history.replaceState(null, '', url.toString());
+      } catch (e) {
+        // Silently ignore — URL sync is non-critical.
+      }
 
-    const meaningfulTerms = extractSearchTerms(query);
-    const searchQuery = meaningfulTerms.length > 0 ? meaningfulTerms.join(' ') : query;
-    // Detect quoted phrase: user typed "hello world" with surrounding double-quotes.
-    // Pagefind receives the unquoted terms; the Rust scorer receives the quoted form
-    // so extract_query() can set forced_phrase = true and apply phrase multipliers.
-    const trimmedQuery = query.trim();
-    const isForcedPhrase =
-      trimmedQuery.startsWith('"') && trimmedQuery.endsWith('"') && trimmedQuery.length > 2;
-    const scorerQuery = isForcedPhrase ? trimmedQuery : searchQuery;
-    debugLog('[scolta:search] Filtered query:', JSON.stringify(sanitizeQueryForLogging(searchQuery)), '(original:', JSON.stringify(sanitizeQueryForLogging(query)), ')');
+      els.layout.style.display = "grid";
+      emitBeforeResults('loading');
+      els.results.innerHTML = '<p class="scolta-searching">Searching...</p>';
+      paintedEntries = [];
+      paintedHighlightSignature = null;
+      emitResultsRendered([], [], [], false);
+      els.resultsHeader.innerHTML = "";
+      els.noResults.style.display = "none";
+      els.aiSummary.style.display = "none";
+      els.loadMore.style.display = "none";
+      if (!preserveFilters) {
+        els.expandedTerms.style.display = "none";
+      }
 
-    allHighlightTerms = meaningfulTerms.length > 0
-      ? meaningfulTerms.filter(t => t.length > 2)
-      : query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+      meaningfulTerms = extractSearchTerms(query);
+      searchQuery = meaningfulTerms.length > 0 ? meaningfulTerms.join(' ') : query;
+      // Detect quoted phrase: user typed "hello world" with surrounding double-quotes.
+      // Pagefind receives the unquoted terms; the Rust scorer receives the quoted form
+      // so extract_query() can set forced_phrase = true and apply phrase multipliers.
+      const trimmedQuery = query.trim();
+      isForcedPhrase =
+        trimmedQuery.startsWith('"') && trimmedQuery.endsWith('"') && trimmedQuery.length > 2;
+      const scorerQuery = isForcedPhrase ? trimmedQuery : searchQuery;
+      debugLog('[scolta:search] Filtered query:', JSON.stringify(sanitizeQueryForLogging(searchQuery)), '(original:', JSON.stringify(sanitizeQueryForLogging(query)), ')');
 
-    // Phase 1: Primary search — render results IMMEDIATELY
-    const expandPromise = preserveFilters
-      ? Promise.resolve(lastExpandedTerms)
-      : expandQuery(query);
-    expansionInFlight = !preserveFilters && CONFIG.AI_EXPAND_QUERY;
+      allHighlightTerms = meaningfulTerms.length > 0
+        ? meaningfulTerms.filter(t => t.length > 2)
+        : query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
 
-    // Everything from here to the primary paint runs with the suggest path
-    // suppressed, so it is wrapped: a rejected Pagefind search must not leave
-    // searchPainting stuck true and silently kill suggestions for the rest of
-    // the page's life. `finally` without `catch` still rethrows, so the caller
-    // sees the failure exactly as it did before.
-    try {
+      // Phase 1: Primary search — render results IMMEDIATELY
+      expandPromise = preserveFilters
+        ? Promise.resolve(lastExpandedTerms)
+        : expandQuery(query);
+      expansionInFlight = !preserveFilters && CONFIG.AI_EXPAND_QUERY;
+
       const primarySearch = await pagefindSearch(searchQuery, activeFilters);
       allScoredResults = await loadAndScoreSearch(primarySearch, scorerQuery, 1.0);
 
@@ -3860,9 +3876,12 @@
       // arrive, exactly as it did before this reorder.
       renderResults(false, 'search');
     } finally {
-      // Primary paint is up — or the cycle died trying. Either way typing may
-      // produce suggestions again.
-      searchPainting = false;
+      // Only the owner releases the window. If a newer cycle started while
+      // this one was in flight it owns the window now, and releasing it here
+      // would unsuppress the suggest path in the middle of that cycle's paint.
+      // `finally` without `catch` still rethrows, so a caller sees a failed
+      // search exactly as it did before any of this existed.
+      if (paintingVersion === version) paintingVersion = 0;
     }
 
     // Counts are a fixed property of the typed query: compute them once, only
@@ -3972,7 +3991,7 @@
     cancelPreload();
     cancelSuggest();
     closeSuggestions();
-    searchPainting = false;
+    paintingVersion = 0;
     els.queryInput.value = '';
     els.searchClear.style.display = "none";
     els.layout.style.display = "none";
