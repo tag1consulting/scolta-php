@@ -213,8 +213,9 @@ class BrowserConfigParityTest extends TestCase
         preg_match_all('/instanceConfig\.([A-Za-z_][A-Za-z0-9_]*)/', $source, $matches);
         $keys = array_values(array_unique($matches[1]));
 
+        // 11 through 1.0.x, plus the ten sayt_* keys added in 1.1.0.
         $this->assertGreaterThanOrEqual(
-            11,
+            21,
             count($keys),
             'Parsed too few top-level config reads from assets/js/scolta.js — the bundle '
             . 'may have been reformatted so `instanceConfig.<key>` no longer matches. '

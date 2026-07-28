@@ -25,7 +25,7 @@ documented extension point, no platform names in the core.
 
 ## 1. Lifecycle events
 
-Four events fire on the element being written, and they bubble, so a single
+Six events fire on the element being written, and they bubble, so a single
 listener on the mount point (or on `document`) sees every render.
 
 | Event | Fires | `detail` |
@@ -34,6 +34,8 @@ listener on the mount point (or on `document`) sees every render.
 | `scolta:results-rendered` | immediately after that write completes | `{ container, results, rendered, reused, appended, query }` |
 | `scolta:before-filters-render` | immediately before the `#scolta-filters` write | `{ container }` |
 | `scolta:filters-rendered` | immediately after it | `{ container }` |
+| `scolta:before-suggestions-render` | immediately before the `#scolta-sayt` write | `{ container, query }` |
+| `scolta:suggestions-rendered` | immediately after it | `{ container, suggestions, query }` |
 
 `container` is the element being written and is always identical to
 `event.target`.
@@ -57,6 +59,23 @@ On `scolta:results-rendered`:
   was rebuilt in the first place.
 - `appended` — `true` only on the additive "show more" path.
 - `query` — the current query string.
+
+On `scolta:suggestions-rendered` (search as you type, added in 1.1.0 — see
+[`SAYT.md`](SAYT.md)):
+
+- `query` — the prefix these suggestions describe, which is **not** the
+  committed query and never appears in `#scolta-results`.
+- `suggestions` — the rendered model in DOM order. Each entry has `type`
+  (`recent` or `title`), `title`, `url`, `safeUrl` and `excerpt`. `title`, `url`
+  and `excerpt` are raw, for comparing or building a request; `safeUrl` is the
+  attribute-escaped, scheme-neutralized value the option's `href` carries.
+
+The suggest path fires only these two events. It never writes `#scolta-results`
+or `#scolta-filters`, so it never emits the four above — a listener that only
+cares about committed searches needs no filtering.
+
+There is no suggestion-renderer registration API: a suggestion row is a title
+and an excerpt, and CSS is the seam for it.
 
 The `before` events exist so you can detach your own behaviours before the nodes
 they are bound to are destroyed. They are **not cancellable**: a render a
@@ -251,4 +270,6 @@ Two limits worth knowing:
 the above: event order and `reason` values, the `detail` shape, renderer
 fallback on `null` and on a throw, `ctx` escaping, delegated handlers inside
 renderer markup, mount-point preservation, and node identity across the
-expansion repaint.
+expansion repaint. `tests/js/sayt.test.js` pins the two suggestion events the
+same way: target, bubbling, non-cancellability, `detail` shape, and that a
+listener which throws does not take the render down.

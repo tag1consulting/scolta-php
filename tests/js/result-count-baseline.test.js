@@ -143,3 +143,88 @@ describe('result-count baseline regression (issue #156)', () => {
         expect(count).toBeGreaterThan(git.queries[q].band.max);
     });
 });
+
+/**
+ * The same guard, one order of magnitude tighter, for the suggest path.
+ *
+ * A committed search may load MAX_PAGEFIND_RESULTS fragments per term because
+ * the user asked for it and waits once. A suggest cycle runs on a keystroke
+ * timer against the same corpus, so the only acceptable budget is
+ * saytMaxSuggestions fragments per pass — and there is no band here, just a
+ * ceiling. If a future change routes the suggest path through
+ * loadAndScoreSearch() or drops the slice, this is what catches it before a
+ * production index turns every keystroke into fifty fragment fetches.
+ */
+describe('suggest-cycle document-load tripwire', () => {
+    async function countSuggestLoads(sayt) {
+        const loaded = new Set();
+        const dom = new JSDOM(
+            `<!DOCTYPE html><html><body><div id="scolta-search"></div></body></html>`,
+            { url: 'https://example.com', runScripts: 'dangerously' }
+        );
+        const window = dom.window;
+        window.__pfMock = {
+            init: () => Promise.resolve(),
+            mergeIndex: () => Promise.resolve(),
+            filters: () => Promise.resolve({}),
+            preload: () => Promise.resolve(),
+            search: (q) => {
+                // 400 matches, the shape a two-letter prefix has on any real
+                // corpus. Only the cap decides how many fragments are fetched.
+                const results = [];
+                if (q !== '') {
+                    for (let i = 0; i < 400; i++) {
+                        results.push({
+                            id: `${q}-${i}`,
+                            data: () => {
+                                loaded.add(`${q}#${i}`);
+                                return Promise.resolve({
+                                    url: `/${q}/${i}`,
+                                    meta: { title: `${q} document number ${i}` },
+                                    excerpt: '', content: '', locations: [],
+                                });
+                            },
+                        });
+                    }
+                }
+                return Promise.resolve({ results });
+            },
+        };
+        window.fetch = jest.fn(() => Promise.resolve({
+            ok: true, status: 200,
+            json: () => Promise.resolve({ languages: { en: { page_count: 400 } } }),
+            text: () => Promise.resolve('{}'),
+        }));
+        window.console = { log: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() };
+        window.scrollTo = () => {};
+
+        window.eval(patchedSource);
+        window.scolta = Object.assign({
+            scoring: { AI_EXPAND_QUERY: false, AI_SUMMARIZE: false, MAX_PAGEFIND_RESULTS: MAX_PF },
+            endpoints: { expand: '/e', summarize: '/s', followup: '/f' },
+            pagefindPath: '/pf.js', wasmPath: '/wasm.js', siteName: 'Test',
+            container: '#scolta-search',
+            saytDebounceMs: 10,
+        }, sayt);
+        window.Scolta.init('#scolta-search');
+        for (let i = 0; i < 15; i++) await tick();
+
+        const input = window.document.querySelector('#scolta-query');
+        input.value = 'gi';
+        input.dispatchEvent(new window.Event('input', { bubbles: true }));
+        await new Promise(r => setTimeout(r, 80));
+        for (let i = 0; i < 20; i++) await tick();
+
+        return loaded.size;
+    }
+
+    test('a suggest cycle loads exactly saytMaxSuggestions fragments, not MAX_PAGEFIND_RESULTS', async () => {
+        expect(await countSuggestLoads({ saytMaxSuggestions: 6 })).toBe(6);
+        expect(MAX_PF).toBeGreaterThan(6);   // the cap that must NOT apply here
+    });
+
+    test('the cap tracks the setting', async () => {
+        expect(await countSuggestLoads({ saytMaxSuggestions: 2 })).toBe(2);
+        expect(await countSuggestLoads({ saytMaxSuggestions: 12 })).toBe(12);
+    });
+});

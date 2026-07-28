@@ -4,6 +4,42 @@ This document describes breaking changes and migration steps between versions of
 
 ## Unreleased
 
+### Search as you type is ON by default
+
+Typing in the search box now opens a suggestions dropdown under the input. The
+full search pipeline is unchanged and still runs only on Enter, on the search
+button, or on selecting a suggestion — but the widget gains a dropdown element,
+ARIA combobox roles on the input, a `localStorage` key for recent searches
+(`scolta:recent-searches`), and a small number of extra Pagefind searches and
+fragment loads while a visitor types.
+
+**Existing indexes need no rebuild.** Suggestions read the same fragments the
+result list already reads.
+
+**The off switch is one line:**
+
+```php
+'sayt_enabled' => false,
+```
+
+That restores the pre-1.1.0 widget exactly: no dropdown node in the scaffold, no
+combobox roles on the input, no storage access on any path, and an `input`
+listener that does what it always did.
+
+Two things to check before leaving it on:
+
+- **Theme CSS.** The dropdown is absolutely positioned inside the search input
+  wrapper and styled through `--scolta-sayt-*` custom properties. A theme that
+  overrides `.scolta-search-input-wrap` positioning, or that sets a stacking
+  context around the search box, may need `--scolta-sayt-z-index` adjusted.
+- **AI budget.** With `sayt_expand` on, SAYT makes at most `sayt_expand_per_minute`
+  (default 6) query-expansion calls per minute, and those share the platform's AI
+  flood budget with committed searches. Set `sayt_expand: false` to keep the
+  dropdown keyword-only.
+
+All ten `sayt_*` settings are documented in
+[`docs/SAYT.md`](docs/SAYT.md) and [`docs/CONFIG_REFERENCE.md`](docs/CONFIG_REFERENCE.md).
+
 ### Indexes must be rebuilt (modern Snowball stemmer backend)
 
 wamania/php-stemmer is replaced with a vendored modern Snowball backend that matches Pagefind's query-time stemming (`pagefind_stem` 1.0.0). Stored stems change on stemmer-divergent words, so **indexes built by earlier scolta-php versions must be rebuilt** — until rebuilt, those words keep missing from results. Rebuild your index after upgrading (re-run your platform's Scolta build/index command).
