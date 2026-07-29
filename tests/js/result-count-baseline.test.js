@@ -145,6 +145,94 @@ describe('result-count baseline regression (issue #156)', () => {
 });
 
 /**
+ * The facet-count path's own document-load budget.
+ *
+ * When AI expansion lands, the counts are recomputed as the typed set plus the
+ * documents expansion added, and on an index with no `scolta.facets` artifact
+ * that delta is tallied from loaded fragments. The cap is what keeps it
+ * proportional: MAX_PAGEFIND_RESULTS per term, the same cap the result path
+ * loads under, so the panel describes the documents that actually reached the
+ * list. Dropping it would turn a broad expansion term into a whole-match-set
+ * fetch — invisible in every correctness assertion, and ruinous on a production
+ * corpus where one term can match tens of thousands of pages.
+ */
+describe('facet-count-path document-load tripwire', () => {
+    const TERM_MATCHES = 400;
+
+    async function loadsByQuery() {
+        const loads = [];
+        const dom = new JSDOM(
+            `<!DOCTYPE html><html><body><div id="scolta-search"></div></body></html>`,
+            { url: 'https://example.com', runScripts: 'dangerously' }
+        );
+        const window = dom.window;
+        window.__pfMock = {
+            init: () => Promise.resolve(),
+            mergeIndex: () => Promise.resolve(),
+            filters: () => Promise.resolve({}),
+            search: (q) => {
+                const n = q === 'widgets' ? 3 : (q === 'gadgets' ? TERM_MATCHES : 0);
+                const results = [];
+                for (let i = 0; i < n; i++) {
+                    results.push({
+                        id: `${q}-${i}`,
+                        data: () => {
+                            loads.push(`${q}-${i}`);
+                            return Promise.resolve({
+                                url: `/${q}/${i}`,
+                                meta: { title: `${q} document number ${i}` },
+                                filters: { topic: q },
+                                excerpt: '', content: '', locations: [],
+                            });
+                        },
+                    });
+                }
+                return Promise.resolve({ results, filters: {} });
+            },
+        };
+        window.fetch = jest.fn((url) => {
+            const u = String(url);
+            if (u.includes('pagefind-entry.json')) {
+                return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ languages: { en: { page_count: 10000 } } }), text: () => Promise.resolve('{}') });
+            }
+            if (u === '/e') {
+                return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ terms: ['gadgets'] }), text: () => Promise.resolve('{}') });
+            }
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.resolve('{}') });
+        });
+        window.console = { log: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() };
+        window.scrollTo = () => {};
+
+        window.eval(patchedSource);
+        window.scolta = {
+            scoring: { AI_EXPAND_QUERY: true, AI_SUMMARIZE: false, MAX_PAGEFIND_RESULTS: MAX_PF },
+            endpoints: { expand: '/e', summarize: '/s', followup: '/f' },
+            pagefindPath: '/pf.js', wasmPath: '/wasm.js', siteName: 'Test', container: '#scolta-search',
+        };
+        window.Scolta.init('#scolta-search');
+        for (let i = 0; i < 10; i++) await tick();
+        window.document.querySelector('#scolta-query').value = 'widgets';
+        await window.Scolta.doSearch();
+        for (let i = 0; i < 30; i++) await tick();
+        return loads;
+    }
+
+    test('the expansion delta stays capped per term, and never fetches the whole match set', async () => {
+        const loads = await loadsByQuery();
+        const distinct = new Set(loads.filter(id => id.startsWith('gadgets-')));
+
+        // The cap applies to the count path exactly as it applies to the result
+        // path: 50 of the 400 matches, not 400.
+        expect(distinct.size).toBe(MAX_PF);
+        expect(TERM_MATCHES).toBeGreaterThan(MAX_PF);
+        // Each delta document is fetched at most once by the result path and
+        // once by the count path (Pagefind serves the second from cache).
+        const total = loads.filter(id => id.startsWith('gadgets-')).length;
+        expect(total).toBeLessThanOrEqual(2 * MAX_PF);
+    });
+});
+
+/**
  * The same guard, one order of magnitude tighter, for the suggest path.
  *
  * A committed search may load MAX_PAGEFIND_RESULTS fragments per term because
