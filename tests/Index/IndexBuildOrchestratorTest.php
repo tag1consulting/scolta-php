@@ -679,7 +679,11 @@ class IndexBuildOrchestratorTest extends TestCase
         $files     = glob($dir . '/fragment/*.pf_fragment') ?: glob($dir . '/*.pf_fragment');
 
         foreach ($files ?: [] as $file) {
-            $decompressed = gzdecode(file_get_contents($file));
+            $raw = file_get_contents($file);
+            if ($raw === false) {
+                continue;
+            }
+            $decompressed = gzdecode($raw);
             if ($decompressed === false) {
                 continue;
             }

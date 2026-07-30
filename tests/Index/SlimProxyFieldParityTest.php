@@ -57,7 +57,9 @@ class SlimProxyFieldParityTest extends TestCase
     {
         $path   = dirname(__DIR__, 2) . '/src/Index/IndexBuildOrchestrator.php';
         $source = file_get_contents($path);
-        self::assertNotFalse($source, 'Unable to read src/Index/IndexBuildOrchestrator.php');
+        if ($source === false) {
+            self::fail('Unable to read src/Index/IndexBuildOrchestrator.php');
+        }
 
         return $source;
     }
@@ -134,17 +136,26 @@ class SlimProxyFieldParityTest extends TestCase
      */
     private function extractSlimProxyKeys(string $source): array
     {
+        // fail() rather than assertNotFalse() at each step: it narrows the type for
+        // the next strpos() offset, so a parse that stops matching reports the
+        // reason it stopped instead of a TypeError three lines later.
         $start = strpos($source, 'private function makeSlimProxy(');
-        $this->assertNotFalse(
-            $start,
-            'makeSlimProxy() not found in src/Index/IndexBuildOrchestrator.php — it may have '
-            . 'been renamed. Update the parser in ' . __CLASS__ . ' so the guard keeps working.',
-        );
+        if ($start === false) {
+            $this->fail(
+                'makeSlimProxy() not found in src/Index/IndexBuildOrchestrator.php — it may have '
+                . 'been renamed. Update the parser in ' . __CLASS__ . ' so the guard keeps working.',
+            );
+        }
 
         $open = strpos($source, '[', $start);
-        $this->assertNotFalse($open, 'No array literal found in makeSlimProxy().');
+        if ($open === false) {
+            $this->fail('No array literal found in makeSlimProxy().');
+        }
+
         $close = strpos($source, '];', $open);
-        $this->assertNotFalse($close, 'Unterminated array literal in makeSlimProxy().');
+        if ($close === false) {
+            $this->fail('Unterminated array literal in makeSlimProxy().');
+        }
 
         $literal = substr($source, $open, $close - $open);
         preg_match_all("/'([A-Za-z_][A-Za-z0-9_]*)'\s*=>/", $literal, $matches);
