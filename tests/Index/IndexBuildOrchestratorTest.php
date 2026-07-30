@@ -597,6 +597,105 @@ class IndexBuildOrchestratorTest extends TestCase
     }
 
     // -------------------------------------------------------------------
+    // CachedContentReference metadata passthrough
+    // -------------------------------------------------------------------
+
+    /**
+     * The cached path must not lose ContentItem::$metadata.
+     *
+     * CachedContentReference had no metadata property, so makeSlimProxy()'s
+     * `$page->metadata ?? []` resolved to [] on every unchanged entity and any
+     * per-item meta key vanished from the whole corpus with nothing logged.
+     */
+    public function testCachedContentReferenceCarriesMetadataIntoIndex(): void
+    {
+        // Build 1: fresh index from a ContentItem carrying metadata. This
+        // populates the PageWordCache with token data keyed by content hash.
+        $item = new ContentItem(
+            id: 'article-2',
+            title: 'Cached Metadata Article',
+            bodyHtml: '<p>An article about incremental rebuilds with enough prose to tokenize into several terms.</p>',
+            url: '/node/2',
+            date: '2024-02-02',
+            siteName: 'Test',
+            metadata: ['entity_type' => 'node', 'entity_id' => '4321'],
+        );
+
+        $orch1  = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
+        $intent = BuildIntent::fresh(1, MemoryBudget::conservative());
+        $report = $orch1->build($intent, [$item]);
+        $this->assertTrue($report->success, 'Build 1 must succeed: ' . ($report->error ?? ''));
+
+        // Build 2: the incremental path. Same stateDir, so the token data cached
+        // by build 1 is found by hash and the reference stands in for the entity.
+        $hash = PhpIndexer::contentHash($item);
+        $ref  = new CachedContentReference(
+            entityKey: '2',
+            contentHash: $hash,
+            id: 'article-2',
+            url: '/node/2',
+            date: '2024-02-02',
+            siteName: 'Test',
+            language: 'en',
+            filters: [],
+            sortable: [],
+            metadata: ['entity_type' => 'node', 'entity_id' => '4321'],
+        );
+
+        $orch2   = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
+        $intent2 = BuildIntent::fresh(1, MemoryBudget::conservative());
+        $report2 = $orch2->build($intent2, [$ref]);
+        $this->assertTrue($report2->success, 'Build 2 must succeed: ' . ($report2->error ?? ''));
+
+        // Fragments are gzipped JSON, not CBOR, so the meta map is read from the
+        // fragment file rather than from pf_meta.
+        $fragments = $this->loadFragments($this->outputDir . '/pagefind');
+        $this->assertCount(1, $fragments, 'Expected one fragment from the cached-reference build');
+
+        $meta = $fragments[0]['meta'] ?? [];
+        $this->assertSame(
+            'node',
+            $meta['entity_type'] ?? null,
+            'entity_type from CachedContentReference::$metadata must survive into the fragment meta map',
+        );
+        $this->assertSame(
+            '4321',
+            $meta['entity_id'] ?? null,
+            'entity_id from CachedContentReference::$metadata must survive into the fragment meta map',
+        );
+    }
+
+    /**
+     * Decode every fragment under a pagefind output directory.
+     *
+     * Same recipe as IndexerUrlParityTest::loadFragmentsByBodyId(): gzipped
+     * JSON, optionally prefixed with a 12-byte `pagefind_dcd` delimiter.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function loadFragments(string $dir): array
+    {
+        $fragments = [];
+        $files     = glob($dir . '/fragment/*.pf_fragment') ?: glob($dir . '/*.pf_fragment');
+
+        foreach ($files ?: [] as $file) {
+            $decompressed = gzdecode(file_get_contents($file));
+            if ($decompressed === false) {
+                continue;
+            }
+            if (str_starts_with($decompressed, 'pagefind_dcd')) {
+                $decompressed = substr($decompressed, 12);
+            }
+            $json = json_decode($decompressed, true);
+            if (is_array($json)) {
+                $fragments[] = $json;
+            }
+        }
+
+        return $fragments;
+    }
+
+    // -------------------------------------------------------------------
     // Index verification
     // -------------------------------------------------------------------
 

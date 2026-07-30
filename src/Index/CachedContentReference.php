@@ -10,7 +10,10 @@ namespace Tag1\Scolta\Index;
  * A gatherer compares the entity's changed timestamp against TimestampManifest.
  * When the timestamps match, it yields this reference instead of loading the full
  * entity body. IndexBuildOrchestrator looks up pre-computed token data in
- * PageWordCache via contentHash and builds the chunk entry from the metadata here.
+ * PageWordCache via contentHash and builds the chunk entry from the fields here,
+ * including metadata, so this class has to carry every field the orchestrator's
+ * slim proxy reads off a ContentItem. A field absent here is silently lost on the
+ * cached path; SlimProxyFieldParityTest exists to catch that.
  *
  * On token cache miss the orchestrator skips markSeen(), causing pruneAndSave()
  * to remove the manifest entry. The next build treats the entity as changed,
@@ -30,6 +33,8 @@ final class CachedContentReference
      * @param string  $language    BCP-47 language code.
      * @param array   $filters     Pagefind filter key/value pairs.
      * @param array   $sortable    Sortable field values (e.g. ['word_count' => 4200]).
+     * @param array<string, mixed> $metadata Arbitrary per-item metadata that reaches the
+     *                             fragment's meta map (e.g. ['entity_id' => '4321']).
      */
     public function __construct(
         public readonly string $entityKey,
@@ -41,5 +46,6 @@ final class CachedContentReference
         public readonly string $language,
         public readonly array $filters,
         public readonly array $sortable = [],
+        public readonly array $metadata = [],
     ) {}
 }

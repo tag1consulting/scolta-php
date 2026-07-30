@@ -16,7 +16,8 @@ use Tag1\Scolta\Storage\StorageDriverInterface;
  * Each 'items' entry holds pre-computed data needed to reconstruct a chunk
  * entry without loading the entity body:
  *   ['hash' => string, 'id' => string, 'url' => string, 'date' => string,
- *    'siteName' => string, 'language' => string, 'filters' => array]
+ *    'siteName' => string, 'language' => string, 'filters' => array,
+ *    'sortable' => array, 'metadata' => array]
  *
  * Lifecycle:
  *  1. Constructed at build start — loads existing manifest from disk.
@@ -65,7 +66,8 @@ final class TimestampManifest
      *
      * @param list<array<string, mixed>> $items One entry per translation/variant:
      *   [['hash' => string, 'id' => string, 'url' => string, 'date' => string,
-     *     'siteName' => string, 'language' => string, 'filters' => array], ...]
+     *     'siteName' => string, 'language' => string, 'filters' => array,
+     *     'sortable' => array, 'metadata' => array], ...]
      *
      * @since 1.0.0
      * @stability stable
