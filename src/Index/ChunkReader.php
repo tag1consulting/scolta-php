@@ -120,6 +120,13 @@ class ChunkReader
      *   null  = not applicable (no $hmacSecret supplied; footer carries no
      *           crc32 — pre-0.3.3 chunks, backward-compatible)
      *
+     * "No $hmacSecret supplied" means null, an empty string, or a
+     * whitespace-only string — the same rule ChunkWriter::write() applies when
+     * deciding whether to tag. The two have to agree: a chunk written with
+     * `''` carries no tag, so a reader that treated `''` as a configured
+     * secret would demand a tag that was never written and report a mismatch
+     * rather than "not applicable".
+     *
      * @return array{hmac: bool|null, crc32: bool|null}
      *
      * @since 1.0.4
@@ -127,6 +134,8 @@ class ChunkReader
      */
     public function verifyFooterDigests(?string $hmacSecret = null): array
     {
+        $hmacSecret = HmacSecret::normalize($hmacSecret);
+
         $failure = ['hmac' => $hmacSecret !== null ? false : null, 'crc32' => false];
 
         $fp = fopen($this->path, 'rb');
@@ -197,11 +206,26 @@ class ChunkReader
      * Delegates to verifyFooterDigests(); use that directly when you also
      * need the CRC32 verdict, to avoid a second full-file read.
      *
+     * An empty or whitespace-only secret means "no secret configured", and
+     * this returns false for it: there is nothing to verify. Use
+     * verifyFooterDigests() when that case has to be distinguished from a
+     * genuine mismatch, since it reports the former as null.
+     *
      * @since 1.0.0
      * @stability stable
      */
     public function verifyHmac(string $hmacSecret): bool
     {
+        // The parameter stays a non-nullable string: this method is
+        // @stability stable and its signature cannot change within 1.x. So an
+        // unset secret participates by returning false rather than by being
+        // spelled null. False is the safe direction — this method collapses a
+        // three-state verdict into a boolean, and "not applicable" must never
+        // surface as "verified" to a caller using it as an integrity gate.
+        if (HmacSecret::normalize($hmacSecret) === null) {
+            return false;
+        }
+
         return $this->verifyFooterDigests($hmacSecret)['hmac'] === true;
     }
 

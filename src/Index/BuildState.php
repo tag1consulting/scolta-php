@@ -152,8 +152,13 @@ class BuildState
         // (0.3.3+); validates data integrity without a shared secret —
         // detects disk corruption or partial writes. Pre-0.3.3 chunks have
         // no CRC32 in the footer and report null (backward-compatible).
-        $digests = (new ChunkReader($path))->verifyFooterDigests($this->hmacSecret);
-        if ($this->hmacSecret !== null && $digests['hmac'] !== true) {
+        // Normalise before the guard, not just before the read: an empty or
+        // whitespace-only secret means no secret, so recordChunk() wrote this
+        // chunk without a tag. Testing the raw value here would demand a tag
+        // that was never written and fail the build on its own chunks.
+        $hmacSecret = HmacSecret::normalize($this->hmacSecret);
+        $digests    = (new ChunkReader($path))->verifyFooterDigests($hmacSecret);
+        if ($hmacSecret !== null && $digests['hmac'] !== true) {
             throw new \RuntimeException("HMAC verification failed for chunk: {$filename}");
         }
         if ($digests['crc32'] === false) {
