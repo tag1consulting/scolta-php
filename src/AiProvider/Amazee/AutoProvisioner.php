@@ -5,12 +5,16 @@ declare(strict_types=1);
 namespace Tag1\Scolta\AiProvider\Amazee;
 
 /**
- * Guards CMS install hooks and lazy-init paths against unnecessary provisioning.
+ * Keeps already-stored managed-gateway credentials usable.
  *
- * Call `ensureAiAvailable()` from a module/plugin install hook or from the
- * first AI request path. It provisions a free Amazee.ai trial and stores the
- * returned credentials so subsequent service constructions pick them up
- * automatically.
+ * This helper never establishes a managed gateway connection. Establishing one
+ * is an explicit caller action: an operator-initiated enable path calls
+ * {@see AmazeeTrialProvisioner::provision()} directly. Nothing here does it on
+ * the caller's behalf, from an install hook, from a request path, or behind a
+ * flag.
+ *
+ * What remains is `ensureAiAvailable()`: a self-heal for credentials that are
+ * already stored but whose model names were never resolved.
  *
  * @since 0.4.0
  * @stability experimental
@@ -18,47 +22,44 @@ namespace Tag1\Scolta\AiProvider\Amazee;
 final class AutoProvisioner
 {
     /**
-     * Provision a free Amazee.ai trial unless AI is already configured.
+     * Re-resolve model names for credentials that are already stored.
      *
-     * This method is idempotent: it is a no-op when:
-     *   - `$hasExplicitApiKey` is true (user has their own provider), or
-     *   - credentials are already stored in `$storage` (already provisioned).
+     * This method never establishes a managed gateway connection, and it makes
+     * no outbound call at all unless credentials are already stored. It is a
+     * no-op when:
+     *   - `$hasExplicitApiKey` is true (the caller has their own provider),
+     *   - no credentials are stored — nothing to heal, and nothing is
+     *     established here; that is {@see AmazeeTrialProvisioner::provision()},
+     *     reached only from an explicit operator action, or
+     *   - credentials are stored and `$hasResolvedModels` is absent or reports
+     *     that model names are already resolved.
      *
-     * The stored-credentials no-op deliberately does NOT validate that the
-     * stored key still works — trial keys are revoked server-side when the
-     * trial ends, and that expiry is not announced at provisioning time, so a
-     * cheap install-hook/lazy-init guard cannot know. Call-time auth failures
-     * are the reliable signal: {@see KeyExpiryRecovery} detects them, records
-     * the failure for health, and flags the site for admin re-authentication
-     * without requesting replacement credentials.
+     * The stored-credentials path deliberately does NOT validate that the
+     * stored key still works — credentials are revoked server-side when their
+     * lifecycle ends, and that is not announced at issue time, so a cheap
+     * lazy-init guard cannot know. Call-time auth failures are the reliable
+     * signal: {@see KeyExpiryRecovery} detects them, records the failure for
+     * health, and flags the site for admin re-authentication without requesting
+     * replacement credentials.
      *
-     * Stored credentials are, however, treated as a *complete* provision only
-     * once their model names have been resolved. A provision whose `/model/info`
-     * call failed stores the token+url with no resolved models, leaving the
-     * caller to fall back to the dated config default — which the Amazee gateway
-     * rejects with HTTP 400, breaking AI permanently because this guard kept
-     * no-opping on the half-provisioned credentials. When the caller can confirm
-     * models are still unresolved (via `$hasResolvedModels`), model resolution
-     * is re-attempted against the ALREADY-STORED key — never a fresh trial,
-     * which would waste a server-side-limited trial allocation — so the
-     * incomplete-provision state self-heals. Without that callback the historical
-     * no-op stands: the caller cannot tell us, and we must not re-resolve blindly
-     * on every request.
-     *
-     * On a successful first provisioning, credentials are stored via
-     * `$storage` and `$onModelsResolved` is called (when provided) with the
-     * best available model names resolved from the provisioned endpoint.
-     *
-     * Provisioning failures are caught internally and returned as `false` so
-     * the caller degrades gracefully without crashing the install or request.
+     * Stored credentials are, however, usable only once their model names have
+     * been resolved. Credentials stored while `/model/info` was unreachable
+     * carry no resolved models, leaving the caller to fall back to the dated
+     * config default — which the Amazee gateway rejects with HTTP 400, breaking
+     * AI permanently because this guard kept no-opping on the half-configured
+     * credentials. When the caller can confirm models are still unresolved (via
+     * `$hasResolvedModels`), model resolution is re-attempted against the
+     * ALREADY-STORED key, so that state self-heals. Without that callback the
+     * historical no-op stands: the caller cannot tell us, and we must not
+     * re-resolve blindly on every request.
      *
      * @param ConfigStorageInterface $storage            CMS-specific credential store.
      * @param bool                   $hasExplicitApiKey  True when the user has configured
      *                                                   their own API key or base URL.
      * @param callable(string $aiModel, string $aiExpansionModel): void|null $onModelsResolved
-     *   Called with the resolved model names when provisioning succeeds and
-     *   models are available. Use this to persist model choices in your CMS
-     *   config system (e.g. Drupal CMI, WP options, Laravel DB).
+     *   Called with the resolved model names when a self-heal resolves them.
+     *   Use this to persist model choices in your CMS config system (e.g.
+     *   Drupal CMI, WP options, Laravel DB).
      *
      *   **The resolved names are gateway-scoped and MUST NOT be written to the
      *   operator-facing model key.** They are Amazee LiteLLM aliases (e.g.
@@ -80,13 +81,13 @@ final class AutoProvisioner
      *   caller supplies to report whether model names are already resolved (the
      *   adapter knows: it persisted them via `$onModelsResolved`). When stored
      *   credentials exist and this returns false, models are re-resolved against
-     *   the stored key and `$onModelsResolved` is fired — self-healing a
-     *   provision that stored credentials without resolved models. Omit it to
-     *   keep the legacy "stored credentials are complete" no-op.
+     *   the stored key and `$onModelsResolved` is fired — self-healing
+     *   credentials stored without resolved models. Omit it to keep the
+     *   "stored credentials are complete" no-op.
      *
-     * @return bool True only when a fresh trial was provisioned; false when
-     *   skipped, already provisioned (including a model-only self-heal), or
-     *   failed.
+     * @return bool Always false. The return value is retained for callers
+     *   compiled against the previous signature; nothing is established here,
+     *   so there is no success to report.
      *
      * @since 0.4.0
      * @stability experimental
@@ -103,46 +104,33 @@ final class AutoProvisioner
         }
 
         $credentials = $storage->load();
-        if ($credentials !== null) {
-            // Already provisioned. Self-heal only an incomplete provision — one
-            // whose model resolution failed, leaving credentials with no models
-            // — and only when the caller can confirm that state. Re-resolve
-            // against the stored key (not a new trial) and persist the result.
-            if ($hasResolvedModels === null || $hasResolvedModels()) {
-                return false;
-            }
-
-            $models = (new AmazeeModelResolver($client ?? new AmazeeClient()))->resolve(
-                $credentials['litellm_api_url'],
-                $credentials['litellm_token'],
-            );
-            if ($onModelsResolved !== null
-                && ($models['ai_model'] !== null || $models['ai_expansion_model'] !== null)) {
-                $onModelsResolved($models['ai_model'] ?? '', $models['ai_expansion_model'] ?? '');
-            }
-
+        if ($credentials === null) {
+            // POLICY: nothing is established here. Automatic enrollment was
+            // removed outright — there is no automatic path and no flag-gated
+            // one. A managed gateway connection is established only by an
+            // explicit operator action that calls
+            // AmazeeTrialProvisioner::provision(). With no stored credentials
+            // this is a no-op that makes no outbound call.
             return false;
         }
 
-        $amazeeClient = $client ?? new AmazeeClient();
-        $modelResolver = new AmazeeModelResolver($amazeeClient);
-        $provisioner = new AmazeeTrialProvisioner($amazeeClient, $storage, null, $modelResolver);
-
-        try {
-            $result = $provisioner->provision();
-        } catch (AmazeeApiException) {
+        // Credentials are stored. Self-heal only the incomplete case — model
+        // resolution never completed, leaving credentials with no models — and
+        // only when the caller can confirm that state. Re-resolve against the
+        // stored key and persist the result.
+        if ($hasResolvedModels === null || $hasResolvedModels()) {
             return false;
         }
 
-        if (!$result->success || $result->status !== ProvisioningResult::STATUS_PROVISIONED) {
-            return false;
-        }
-
+        $models = (new AmazeeModelResolver($client ?? new AmazeeClient()))->resolve(
+            $credentials['litellm_api_url'],
+            $credentials['litellm_token'],
+        );
         if ($onModelsResolved !== null
-            && ($result->aiModel !== null || $result->aiExpansionModel !== null)) {
-            $onModelsResolved($result->aiModel ?? '', $result->aiExpansionModel ?? '');
+            && ($models['ai_model'] !== null || $models['ai_expansion_model'] !== null)) {
+            $onModelsResolved($models['ai_model'] ?? '', $models['ai_expansion_model'] ?? '');
         }
 
-        return true;
+        return false;
     }
 }
