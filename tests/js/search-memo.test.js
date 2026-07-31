@@ -47,18 +47,43 @@ function makeResult(filterObj, id) {
     };
 }
 
-function createWindow(mockPagefind) {
+function createWindow(mockPagefind, expansionTerms) {
     const dom = new JSDOM(
         '<!DOCTYPE html><html><body><div id="scolta-search"></div></body></html>',
         { url: 'https://example.com', runScripts: 'dangerously' }
     );
     const window = dom.window;
     // 503 on every endpoint: AI expansion must not add searches of its own.
-    window.fetch = jest.fn().mockResolvedValue({
-        ok: false, status: 503,
-        json: () => Promise.resolve({}),
-        text: () => Promise.resolve(''),
-    });
+    // Unless the test is specifically about the expansion pass, which serves the
+    // expand endpoint and the entry file the sub-word guard reads its corpus
+    // size from.
+    window.fetch = expansionTerms
+        ? jest.fn((url) => {
+            const u = String(url);
+            if (u.includes('pagefind-entry.json')) {
+                return Promise.resolve({
+                    ok: true, status: 200,
+                    json: () => Promise.resolve({ languages: { en: { page_count: 100 } } }),
+                    text: () => Promise.resolve('{}'),
+                });
+            }
+            if (u === '/e') {
+                return Promise.resolve({
+                    ok: true, status: 200,
+                    json: () => Promise.resolve({ terms: expansionTerms }),
+                    text: () => Promise.resolve('{}'),
+                });
+            }
+            return Promise.resolve({
+                ok: false, status: 503,
+                json: () => Promise.resolve({}), text: () => Promise.resolve(''),
+            });
+        })
+        : jest.fn().mockResolvedValue({
+            ok: false, status: 503,
+            json: () => Promise.resolve({}),
+            text: () => Promise.resolve(''),
+        });
     window.console = { log: jest.fn(), error: jest.fn(), warn: jest.fn() };
     window.scrollTo = () => {};
     window.mockPagefind = mockPagefind;
@@ -191,6 +216,51 @@ describe('search memo: correctness boundary — a real facet makes the two searc
         const calls = callsFor(mock, 'fractions');
         expect(calls).toHaveLength(1);
         expect(calls[0][1].filters).toEqual({ language: 'en' });
+    });
+});
+
+describe('search memo: the post-expansion facet-count pass', () => {
+    // The count pass that runs when expansion lands re-searches the typed query
+    // and every seeding expansion term under structural-only filters. When the
+    // user has applied no non-structural facet — the common case — those are
+    // byte-identical to the searches the expansion pass just ran, so the memo
+    // must serve every one of them. Without this assertion the fix would
+    // silently cost a second full search pass per expansion term, which is
+    // invisible in a correctness test and expensive on a production index.
+    test('adds ZERO additional pagefind.search calls per query string', async () => {
+        const byQuery = {
+            fractions: [makeResult({ difficulty: 'Beginner', language: 'en' }, 'doc-1')],
+            geometry: [makeResult({ difficulty: 'Advanced', language: 'en' }, 'doc-2')],
+            algebra: [makeResult({ difficulty: 'Intermediate', language: 'en' }, 'doc-3')],
+        };
+        const search = jest.fn((query) => Promise.resolve({
+            results: byQuery[query] || [],
+            filters: { difficulty: { Beginner: 1, Intermediate: 0, Advanced: 0 } },
+        }));
+        const mock = { init: () => Promise.resolve(), filters: () => Promise.resolve(TAXONOMY), search };
+        const window = createWindow(mock, ['geometry', 'algebra']);
+        const inst = await ready(window, mock);
+        window.document.querySelector('#scolta-query').value = 'fractions';
+
+        await inst.doSearch();
+        await settle(window);
+
+        // One search each: primary/count for the typed query, and one per
+        // seeding expansion term, shared between the result path and the delta.
+        expect(callsFor(mock, 'fractions')).toHaveLength(1);
+        expect(callsFor(mock, 'geometry')).toHaveLength(1);
+        expect(callsFor(mock, 'algebra')).toHaveLength(1);
+        const real = mock.search.mock.calls.filter(c => c[0] !== '');
+        expect(real).toHaveLength(3);
+
+        // And the counts did land: doc-2 and doc-3 came from expansion alone.
+        const countOf = (val) => {
+            const item = [...window.document.querySelectorAll('#scolta-filters .scolta-filter-item')]
+                .find(el => el.querySelector(`input[data-scolta-filter-val="${val}"]`));
+            return item ? item.querySelector('.scolta-filter-count').textContent.trim() : null;
+        };
+        expect(countOf('Advanced')).toBe('(1)');
+        expect(countOf('Intermediate')).toBe('(1)');
     });
 });
 

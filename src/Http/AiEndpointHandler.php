@@ -9,6 +9,7 @@ use Psr\Log\NullLogger;
 use Tag1\Scolta\Cache\CacheDriverInterface;
 use Tag1\Scolta\Exception\ApiKeyInvalidException;
 use Tag1\Scolta\Exception\ApiKeyMissingException;
+use Tag1\Scolta\Exception\ModelProviderMismatchException;
 use Tag1\Scolta\Exception\RateLimitException;
 use Tag1\Scolta\Prompt\NullEnricher;
 use Tag1\Scolta\Prompt\PromptEnricherInterface;
@@ -51,6 +52,20 @@ class AiEndpointHandler
      * with fresh search context) stays well under this; it only stops abuse.
      */
     private const FOLLOW_UP_MAX_TOTAL_CHARS = 400000;
+
+    /**
+     * Degraded reason for a model the effective provider cannot recognise.
+     *
+     * Distinct from `ai_error` on purpose. The failure it names is a
+     * configuration mismatch that no retry will clear and that an operator can
+     * fix in one edit, so collapsing it into the generic bucket costs them the
+     * only signal that says which edit. A gateway-resolved model name left
+     * behind by a provider switch is the case that motivated it.
+     *
+     * @since 1.0.6
+     * @stability experimental
+     */
+    public const REASON_MODEL_MISMATCH = 'ai_model_provider_mismatch';
 
     /**
      * @param object                    $aiService                  AI service (duck-typed).
@@ -162,6 +177,10 @@ class AiEndpointHandler
         } catch (ApiKeyMissingException $e) {
             // AI is unconfigured — an expected state, degrade silently (no log).
             return ['ok' => true, 'data' => $this->degradedExpandPayload($query, 'ai_unconfigured')];
+        } catch (ModelProviderMismatchException $e) {
+            $this->logModelProviderMismatch($e, 'query expansion');
+
+            return ['ok' => true, 'data' => $this->degradedExpandPayload($query, self::REASON_MODEL_MISMATCH)];
         } catch (\Exception $e) {
             // Query expansion is a non-essential search enhancement. Any provider
             // failure (invalid key, rate limit, transport error, malformed
@@ -188,7 +207,8 @@ class AiEndpointHandler
      * retries the AI call.
      *
      * @param string $query  The original query, echoed as the sole term.
-     * @param string $reason Machine-readable reason: 'ai_unconfigured' or 'ai_error'.
+     * @param string $reason Machine-readable reason: 'ai_unconfigured', 'ai_error',
+     *   or self::REASON_MODEL_MISMATCH.
      * @return array{terms: array<string>, expand_primary_weight: float, degraded: bool, degraded_reason: string}
      */
     private function degradedExpandPayload(string $query, string $reason): array
@@ -199,6 +219,30 @@ class AiEndpointHandler
             'degraded'              => true,
             'degraded_reason'       => $reason,
         ];
+    }
+
+    /**
+     * Log a provider/model mismatch with both values as structured context.
+     *
+     * The model and provider go in the context array as well as the message:
+     * this is the entry an operator greps for, and structured fields survive
+     * log aggregation that truncates or reformats messages.
+     *
+     * @param ModelProviderMismatchException $e         The mismatch to report.
+     * @param string                         $operation Human-readable operation name.
+     */
+    private function logModelProviderMismatch(
+        ModelProviderMismatchException $e,
+        string $operation,
+    ): void {
+        $this->logger->error(
+            'Scolta ' . $operation . ' failed: ' . $e->getMessage(),
+            [
+                'exception' => $e,
+                'ai_model' => $e->getModel(),
+                'ai_provider' => $e->getProvider(),
+            ],
+        );
     }
 
     /**
@@ -262,6 +306,10 @@ class AiEndpointHandler
         } catch (ApiKeyMissingException $e) {
             // AI is unconfigured — an expected state, degrade silently (no log).
             return ['ok' => true, 'data' => ['degraded' => true, 'degraded_reason' => 'ai_unconfigured']];
+        } catch (ModelProviderMismatchException $e) {
+            $this->logModelProviderMismatch($e, 'summarization');
+
+            return ['ok' => true, 'data' => ['degraded' => true, 'degraded_reason' => self::REASON_MODEL_MISMATCH]];
         } catch (\Exception $e) {
             // Summarization is a non-essential enhancement layered above the
             // search results. Any provider failure degrades to "no summary"
@@ -365,6 +413,13 @@ class AiEndpointHandler
             }
 
             return $result;
+        } catch (ModelProviderMismatchException $e) {
+            $this->logModelProviderMismatch($e, 'follow-up');
+
+            // Follow-up is an explicit user action rather than a background
+            // enhancement, so it reports rather than degrades. The message is
+            // the operator-facing one, not a generic failure string.
+            return ['ok' => false, 'status' => 503, 'error' => $e->getMessage()];
         } catch (\Exception $e) {
             $this->logger->error('Scolta follow-up failed', ['exception' => $e]);
 

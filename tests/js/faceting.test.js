@@ -82,19 +82,44 @@ describe('faceting: source structure', () => {
 
     test('computeQueryFacetCounts derives counts from the typed-query search and follows the OR-fallback mode', () => {
         expect(scoltaSource).toContain('async function computeQueryFacetCounts(query, baseFilters, meaningfulTerms, isForcedPhrase)');
+        // The mode decision moved into computeTypedFacetCounts, which returns the
+        // counts AND the id set they were counted over, so the expansion pass can
+        // subtract it. Mode 1: AND search matched → native .filters. Mode 2: AND
+        // empty + fallback engages → union tally. The union helper dedups by
+        // fragment id.
+        expect(scoltaSource).toContain('async function computeTypedFacetCounts(query, structuralFilters, meaningfulTerms, isForcedPhrase)');
         expect(scoltaSource).toContain('const search = await pagefindSearch(query, structuralFilters);');
-        // Mode 1: AND search matched → native .filters. Mode 2: AND empty + fallback
-        // engages → union tally. The union helper exists and dedups by fragment id.
         expect(scoltaSource).toContain('if (search && search.results && search.results.length > 0) {');
+        expect(scoltaSource).toContain('ids: new Set(search.results.map(r => r.id)),');
         expect(scoltaSource).toContain('return await computeUnionFacetCounts(terms, structuralFilters);');
-        expect(scoltaSource).toContain('async function computeUnionFacetCounts(terms, structuralFilters)');
+        expect(scoltaSource).toContain('async function computeUnionFacetCounts(terms, structuralFilters, seed)');
         expect(scoltaSource).toContain('if (seenIds.has(r.id)) continue;');
     });
 
-    test('computeQueryFacetCounts keeps only structural filter dimensions', () => {
-        // User-facing facet selections are dropped so counts never move on click.
+    test('the post-expansion pass folds the delta in rather than recounting the list', () => {
+        // counts = countsOf(typed ids) + countsOf(expansion ids \ typed ids).
+        // Counting over allScoredResults instead would lose the structural
+        // scoping; summing per-query .filters maps would double-count every
+        // document that matched more than one query. Behavioral coverage lives in
+        // tests/js/facet-count-expansion.test.js.
+        expect(scoltaSource).toContain('async function computeExpandedFacetCounts(query, baseFilters, countContext, expansionTerms)');
+        expect(scoltaSource).toContain('const delta = await computeUnionFacetCounts(terms, structuralFilters, typed);');
+        expect(scoltaSource).toContain('return addFacetCounts(typed.counts, delta.counts);');
+        // Only seeding queries: the typed and agreement-only terms introduce no
+        // documents of their own, and the list is passed through rather than rebuilt.
+        expect(scoltaSource).toContain('countTerms = queries.filter(q => !q.isTyped && !q.agreementOnly).map(q => q.term);');
+        // Gated on !preserveFilters, so a facet toggle/sort/load-more never recomputes.
+        expect(scoltaSource).toContain('if (!preserveFilters && countTerms.length > 0) {');
+        expect(scoltaSource).toContain('Discarding stale post-expansion facet counts');
+    });
+
+    test('facet counts keep only structural filter dimensions', () => {
+        // User-facing facet selections are dropped so counts never move on click,
+        // and one helper is the single definition of that scope for both passes.
+        expect(scoltaSource).toContain('function structuralFilterScope(baseFilters)');
         expect(scoltaSource).toContain('if (SKIP_FILTER_DIMENSIONS.has(dim.toLowerCase())) {');
         expect(scoltaSource).toContain('structuralFilters[dim] = vals;');
+        expect(scoltaSource).toContain('const structuralFilters = structuralFilterScope(baseFilters);');
     });
 
     test('result-derived facet helpers are removed', () => {

@@ -135,6 +135,19 @@ class StreamingFormatWriter
             'meta'       => !empty($pageData['meta']) ? $pageData['meta'] : new \stdClass(),
             'anchors'    => [],
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        // Unchecked, invalid UTF-8 anywhere in the page turns json_encode()'s
+        // false into an empty string on concatenation, and the fragment file
+        // ends up holding nothing but the delimiter — which fails JSON.parse()
+        // in the browser with no error anywhere upstream. Fail the build here
+        // instead, the way FacetIndexWriter::build() already does.
+        if ($fragment === false) {
+            throw new \RuntimeException(sprintf(
+                'Failed to encode fragment for page %d (%s): %s',
+                $pageNum,
+                (string) $pageData['url'],
+                json_last_error_msg(),
+            ));
+        }
 
         $hash       = 'en_' . substr(hash('sha256', (string) $pageNum . $pageData['url']), 0, 10);
         $compressed = gzencode(self::DELIMITER . $fragment, 9);
@@ -243,6 +256,23 @@ class StreamingFormatWriter
             throw new \RuntimeException("Failed to write file: {$metaPath}");
         }
 
+        // Write the Scolta facet index — the artifact scolta.js reads instead of
+        // Pagefind's filter chunks. It carries EVERY dimension, including the
+        // single-value ones the chunk emission above skips: a dimension Scolta
+        // can be asked to apply (AUTO_LANGUAGE_FILTER applies `language`) needs a
+        // posting list even when it is useless as a facet.
+        //
+        // Stamped with the pf_meta hash, which is why it is written here and not
+        // earlier: the browser compares that stamp against the hash in the
+        // cache-busted pagefind-entry.json and falls back to pagefind.filters()
+        // rather than trusting a cached artifact from a previous build.
+        (new FacetIndexWriter())->write(
+            $this->buildDir,
+            $this->filterData,
+            array_map(fn(array $meta): string => $meta['fragmentHash'], $this->pageMeta),
+            $metaHash,
+        );
+
         // Write pagefind-entry.json.
         $entry = [
             'version'            => $this->getVersion(),
@@ -310,6 +340,21 @@ class StreamingFormatWriter
     {
         $result = [];
         foreach ($this->filterData as $filterName => $values) {
+            // A dimension with one distinct value cannot filter anything —
+            // selecting its only value matches every page — and its count is
+            // never useful either. It is not free: on a 109,308-page corpus the
+            // auto-injected single-value `site` and `language` dimensions were
+            // 485,100 served bytes and 218,616 postings, and every posting in a
+            // loaded chunk costs Pagefind one linear scan of the matched-result
+            // set on every subsequent search. The facet panel already hides
+            // single-value dimensions, so nothing rendered changes.
+            //
+            // The Scolta facet index still carries them (see endWrite): it is
+            // what applies filters now, and it needs the posting list even for
+            // a dimension no facet renders.
+            if (count($values) < 2) {
+                continue;
+            }
             $valueTuples = [];
             foreach ($values as $value => $pageNums) {
                 $valueTuples[] = $this->cbor->encodeArray([

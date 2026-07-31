@@ -157,7 +157,24 @@ factor before being added to the final score; the title boost is unaffected.
 | `sortableFieldDescriptions` | array | `[]` | Human-readable descriptions keyed by field name (e.g., `['price' => 'Product price in store currency', 'word_count' => 'Article length in words']`). When populated, descriptions are included in the sort-intent prompt alongside each field name so the LLM can map natural language queries to the correct field. Backward compatible — omitting this leaves existing behavior unchanged. |
 | `filterFields` | array | `[]` | Filter dimension names for filter-intent detection in the expansion prompt. Must match the filter names emitted as `data-pagefind-filter` attributes by the content gatherer (e.g., `['topic', 'era', 'region']`). When non-empty, the expansion prompt gains a FILTER INTENT section; the LLM can return a `filter_hint` that the browser applies as a Pagefind native filter before displaying results. |
 | `filterFieldDescriptions` | array | `[]` | Human-readable descriptions keyed by filter name (e.g., `['topic' => 'Subject area or domain. Values: Science (physics, chemistry, biology), History (ancient, medieval)']`). Descriptions serve two purposes: (1) they help the LLM match user language to the correct filter value in the expansion prompt, and (2) they are passed to the JS frontend via `toBrowserConfig()` where `matchSubjectToFilters()` parses parenthetical subcategory hints to map terms like "physics" → "Science" even when "physics" isn't a direct filter value. |
-| `hideEmptyFacets` | bool | `true` | Hide facet values whose result count is zero for the current query, and drop a dimension's whole group when all its values are zero — the mainstream faceted-search default. An active (checked) value stays visible even at zero so it can be unchecked. Set to `false` to render every value and show a zero-count one as a disabled `(0)` row, keeping the value list positionally fixed. Emitted top-level into `window.scolta` by `toBrowserConfig()` and read by `scolta.js` `renderFilters()`. `@stability experimental`. |
+| `hideEmptyFacets` | bool | `true` | Hide facet values whose result count is zero for the current query, and drop a dimension's whole group when all its values are zero — the mainstream faceted-search default. An active (checked) value stays visible even at zero so it can be unchecked. Set to `false` to render every value and show a zero-count one as a disabled `(0)` row, keeping the value list positionally fixed. Counts describe the typed query **plus whatever AI expansion added to the result list**, computed once when the query is submitted and folded once more when expansion lands; a facet click, a sort and a load-more all reuse them, so no count moves on click and the visible value set stays stable. Emitted top-level into `window.scolta` by `toBrowserConfig()` and read by `scolta.js` `renderFilters()`. `@stability experimental`. |
+
+### Search As You Type (SAYT)
+
+Ten top-level browser settings that govern the suggestions dropdown. They are **not** scoring keys: `toJsScoringConfig()` stays at exactly 40 keys, and each of these is emitted top-level by `toBrowserConfig()` and read by `scolta.js` as `instanceConfig.<camelCase>` (the `hideEmptyFacets` pattern). Every default below is byte-equal to the fallback the browser bundle uses when the key is absent. Full behaviour, including the events and the theming custom properties: [`SAYT.md`](SAYT.md). All ten are `@since 1.1.0`, `@stability experimental`.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `saytEnabled` | bool | `true` | Master switch. When true, typing populates a suggestions dropdown under the search box; the full pipeline (AI expansion, merge, summarize, follow-up) still runs only on Enter, on the search button, or on selecting a suggestion. When `false` the widget is byte-identical to the pre-1.1.0 one: no dropdown node in the scaffold, no combobox ARIA roles on the input, no storage access, no suggest searches. |
+| `saytMinChars` | int | `2` | Minimum characters typed before suggestions are requested, counted in **graphemes** (`Intl.Segmenter` where available, spread otherwise) so an emoji or a Devanagari cluster counts as the one character the person typing it sees. CJK sites commonly want `1`: a single han character is already a meaningful query. |
+| `saytDebounceMs` | int | `150` | Trailing debounce, in milliseconds, before a suggest cycle fires. Independent of the index-chunk preload debounce, which continues to run on the same keystrokes. |
+| `saytMaxSuggestions` | int | `6` | Maximum suggestions shown, and the hard cap on fragment loads per pass. |
+| `saytRecentSearches` | bool | `true` | Offer the visitor's own recent searches, stored in `localStorage` under a single `scolta`-prefixed key. When `false`, nothing is read from or written to storage. |
+| `saytMaxRecent` | int | `3` | Maximum recent searches *shown*. How many are stored is internal to the browser bundle and deliberately larger, so the prefix filter still has something to match. |
+| `saytExpand` | bool | `true` | Enrich the dropdown with AI query-expansion term matches. Inert when the platform configures no AI endpoints or when `ai_expand_query` is off. |
+| `saytExpandPerMinute` | int | `6` | Client-side sliding-window cap on SAYT expansion calls. SAYT expansions share the platform's AI flood budget with committed searches (expansion, summarize and follow-up all count against the same per-IP limit — 60/minute by default on Drupal), so an unbudgeted suggest path would spend a visitor's whole allowance on prefixes and starve the search they actually ran. Over the cap the dropdown silently degrades to keyword-only suggestions until the window rolls. |
+| `saytExpansionDelayMs` | int | `500` | Idle delay, in milliseconds, before the AI enrichment call. Separate from and longer than the suggestion debounce: keyword suggestions should appear while typing, an AI call should not. |
+| `saytSuggestionAction` | string | `'navigate'` | What selecting a **title** suggestion does. `navigate` goes straight to that result (the option renders as a real anchor carrying the same sanitized URL the result card uses). `search` puts the suggestion's title in the box and runs the full search. A recent-search suggestion always runs the search regardless. An unrecognized value clamps to `navigate`, with a logged warning. |
 
 ### Scoring Presets
 
@@ -300,6 +317,21 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 | `filterFields` | `filter_fields` | `filter_fields` | `filter_fields` |
 | `filterFieldDescriptions` | `filter_field_descriptions` | `filter_field_descriptions` | `filter_field_descriptions` |
 | `hideEmptyFacets` | `hide_empty_facets` | `hide_empty_facets` | `hide_empty_facets` |
+
+### Search-As-You-Type Keys
+
+| ScoltaConfig Property | Drupal | Laravel | WordPress |
+|----------------------|--------|---------|-----------|
+| `saytEnabled` | `sayt_enabled` | `sayt_enabled` | `sayt_enabled` |
+| `saytMinChars` | `sayt_min_chars` | `sayt_min_chars` | `sayt_min_chars` |
+| `saytDebounceMs` | `sayt_debounce_ms` | `sayt_debounce_ms` | `sayt_debounce_ms` |
+| `saytMaxSuggestions` | `sayt_max_suggestions` | `sayt_max_suggestions` | `sayt_max_suggestions` |
+| `saytRecentSearches` | `sayt_recent_searches` | `sayt_recent_searches` | `sayt_recent_searches` |
+| `saytMaxRecent` | `sayt_max_recent` | `sayt_max_recent` | `sayt_max_recent` |
+| `saytExpand` | `sayt_expand` | `sayt_expand` | `sayt_expand` |
+| `saytExpandPerMinute` | `sayt_expand_per_minute` | `sayt_expand_per_minute` | `sayt_expand_per_minute` |
+| `saytExpansionDelayMs` | `sayt_expansion_delay_ms` | `sayt_expansion_delay_ms` | `sayt_expansion_delay_ms` |
+| `saytSuggestionAction` | `sayt_suggestion_action` | `sayt_suggestion_action` | `sayt_suggestion_action` |
 
 ## Methods
 

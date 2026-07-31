@@ -59,6 +59,21 @@ final class AutoProvisioner
      *   Called with the resolved model names when provisioning succeeds and
      *   models are available. Use this to persist model choices in your CMS
      *   config system (e.g. Drupal CMI, WP options, Laravel DB).
+     *
+     *   **The resolved names are gateway-scoped and MUST NOT be written to the
+     *   operator-facing model key.** They are Amazee LiteLLM aliases (e.g.
+     *   `claude-4-5-sonnet`), valid only against the Amazee gateway; the key an
+     *   operator uses to name a model holds provider-native IDs (e.g.
+     *   `claude-sonnet-4-5-20250929`). Persist these to a dedicated
+     *   gateway-scoped key (`amazee_model` / `amazee_expansion_model` in the
+     *   adapters that ship with Scolta, or `storeModels()` on a storage that
+     *   has one) and read it only while Amazee is the effective provider.
+     *   Writing them to the shared key breaks AI permanently the moment the
+     *   trial expires or an operator configures a direct provider key: the
+     *   provider is then `anthropic`, the stored model is still a gateway
+     *   alias, and nothing invalidates it. See
+     *   {@see \Tag1\Scolta\AiProvider\ModelIdentity} for the tripwire that
+     *   names that failure when it happens anyway.
      * @param AmazeeClient|null $client  Optionally inject a pre-configured
      *   client (useful for testing or custom base-URL overrides).
      * @param callable(): bool|null $hasResolvedModels  Optional predicate the

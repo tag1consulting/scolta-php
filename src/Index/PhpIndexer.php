@@ -128,6 +128,10 @@ class PhpIndexer
                     'language' => $item->language,
                     'filters'  => $item->filters,
                     'sortable' => $item->sortable,
+                    // See IndexBuildOrchestrator::makeSlimProxy(): the proxy has
+                    // to carry metadata or ContentItem::$metadata is dead on the
+                    // PHP indexer path.
+                    'metadata' => $item->metadata,
                 ], 'tokenData' => $tokenData];
             }
         }

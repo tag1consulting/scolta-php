@@ -297,6 +297,148 @@ class ScoltaConfig
      */
     public bool $hideEmptyFacets = true;
 
+    // -- Search as you type (SAYT) --
+    //
+    // Ten top-level browser settings, NOT scoring keys: they govern the
+    // suggestions dropdown's behaviour, not ranking, so toJsScoringConfig()
+    // stays at exactly 40 keys and these are emitted top-level by
+    // toBrowserConfig() (the hideEmptyFacets pattern). Every default below is
+    // byte-equal to the fallback assets/js/scolta.js uses when the key is
+    // absent; BrowserConfigParityTest pins the key sets together in both
+    // directions. Full behaviour: docs/SAYT.md.
+
+    /**
+     * Master switch for search as you type.
+     *
+     * When true (default), typing populates a suggestions dropdown under the
+     * search box. The full pipeline (AI expansion, merge, summarize, follow-up)
+     * still runs only on Enter, on the search button, or on selecting a
+     * suggestion. When false, the browser widget is byte-identical to the
+     * pre-1.1.0 one: no dropdown node in the scaffold, no combobox ARIA roles on
+     * the input, no storage access and no suggest searches.
+     *
+     * @var bool
+     * @since 1.1.0
+     * @stability experimental
+     */
+    public bool $saytEnabled = true;
+
+    /**
+     * Minimum characters typed before suggestions are requested.
+     *
+     * Counted in GRAPHEMES, not UTF-16 code units, so an emoji or a Devanagari
+     * cluster counts as the one character the person typing it sees. CJK sites
+     * commonly want 1: a single han character is already a meaningful query.
+     *
+     * @var int
+     * @since 1.1.0
+     * @stability experimental
+     */
+    public int $saytMinChars = 2;
+
+    /**
+     * Trailing debounce, in milliseconds, before a suggest cycle fires.
+     *
+     * @var int
+     * @since 1.1.0
+     * @stability experimental
+     */
+    public int $saytDebounceMs = 150;
+
+    /**
+     * Maximum suggestions shown, and the hard cap on fragment loads per pass.
+     *
+     * @var int
+     * @since 1.1.0
+     * @stability experimental
+     */
+    public int $saytMaxSuggestions = 6;
+
+    /**
+     * Offer the visitor's own recent searches in the dropdown.
+     *
+     * Stored in localStorage under a single `scolta`-prefixed key. When false,
+     * nothing is read from or written to storage.
+     *
+     * @var bool
+     * @since 1.1.0
+     * @stability experimental
+     */
+    public bool $saytRecentSearches = true;
+
+    /**
+     * Maximum recent searches SHOWN in the dropdown.
+     *
+     * How many are stored is internal to the browser bundle and deliberately
+     * larger, so the prefix filter still has something to match.
+     *
+     * @var int
+     * @since 1.1.0
+     * @stability experimental
+     */
+    public int $saytMaxRecent = 3;
+
+    /**
+     * Enrich the dropdown with AI query-expansion term matches.
+     *
+     * Inert when the platform configures no AI endpoints, or when
+     * `ai_expand_query` is off.
+     *
+     * @var bool
+     * @since 1.1.0
+     * @stability experimental
+     */
+    public bool $saytExpand = true;
+
+    /**
+     * Client-side sliding-window cap on SAYT expansion calls per minute.
+     *
+     * SAYT expansions share the platform's AI flood budget with committed
+     * searches (expansion, summarize and follow-up all count against the same
+     * per-IP limit — 60/minute by default on Drupal), so an unbudgeted suggest
+     * path would spend a visitor's whole allowance on prefixes and starve the
+     * search they actually ran. Over the cap the dropdown silently degrades to
+     * keyword-only suggestions until the window rolls.
+     *
+     * @var int
+     * @since 1.1.0
+     * @stability experimental
+     */
+    public int $saytExpandPerMinute = 6;
+
+    /**
+     * Idle delay, in milliseconds, before the AI enrichment call.
+     *
+     * Separate from and longer than the suggestion debounce: keyword
+     * suggestions should appear while typing, an AI call should not.
+     *
+     * @var int
+     * @since 1.1.0
+     * @stability experimental
+     */
+    public int $saytExpansionDelayMs = 500;
+
+    /**
+     * What selecting a TITLE suggestion does: 'navigate' or 'search'.
+     *
+     * 'navigate' (default) goes straight to that result. 'search' puts the
+     * suggestion's title in the box and runs the full search. A recent-search
+     * suggestion always runs the search regardless — navigating to a stored
+     * query string is meaningless. An unrecognized value clamps to 'navigate'.
+     *
+     * @var string
+     * @since 1.1.0
+     * @stability experimental
+     */
+    public string $saytSuggestionAction = 'navigate';
+
+    /**
+     * Accepted values for $saytSuggestionAction.
+     *
+     * @var string[]
+     */
+    public const SAYT_SUGGESTION_ACTIONS = ['navigate', 'search'];
+
     // -- Scoring preset --
     /** @var string Named preset to apply before explicit overrides (empty = no preset). */
     public string $preset = '';
@@ -569,7 +711,37 @@ class ScoltaConfig
             'pagefindPath' => $this->pagefindIndexPath . '/pagefind.js',
             'filterFieldDescriptions' => $this->filterFieldDescriptions,
             'hideEmptyFacets' => $this->hideEmptyFacets,
+            // SAYT — top-level, not scoring keys. scolta.js reads each as
+            // instanceConfig.<camelCase> with a fallback byte-equal to the
+            // default here, and BrowserConfigParityTest diffs the two sets.
+            'saytEnabled' => $this->saytEnabled,
+            'saytMinChars' => $this->saytMinChars,
+            'saytDebounceMs' => $this->saytDebounceMs,
+            'saytMaxSuggestions' => $this->saytMaxSuggestions,
+            'saytRecentSearches' => $this->saytRecentSearches,
+            'saytMaxRecent' => $this->saytMaxRecent,
+            'saytExpand' => $this->saytExpand,
+            'saytExpandPerMinute' => $this->saytExpandPerMinute,
+            'saytExpansionDelayMs' => $this->saytExpansionDelayMs,
+            'saytSuggestionAction' => $this->normalizedSaytSuggestionAction(),
         ];
+    }
+
+    /**
+     * The suggestion action, clamped to a value the browser understands.
+     *
+     * Validated here as well as in the browser so a typo in a site's settings
+     * never reaches the page payload. The browser clamps too (and logs), because
+     * a direct createInstance() caller bypasses this class entirely.
+     *
+     * @since 1.1.0
+     * @stability experimental
+     */
+    public function normalizedSaytSuggestionAction(): string
+    {
+        return in_array($this->saytSuggestionAction, self::SAYT_SUGGESTION_ACTIONS, true)
+            ? $this->saytSuggestionAction
+            : 'navigate';
     }
 
     /**

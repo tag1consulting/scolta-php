@@ -25,13 +25,21 @@ class ChunkWriter
      *
      * @param string      $path        Destination file path.
      * @param array       $partial     Output of InvertedIndexBuilder::build().
-     * @param string|null $hmacSecret  HMAC key; null disables integrity tagging.
+     * @param string|null $hmacSecret  HMAC key. Null disables integrity tagging, and
+     *                                 an empty or whitespace-only string means the
+     *                                 same thing: callers that forward framework
+     *                                 configuration get `''` rather than null when the
+     *                                 operator has set no key, so both spellings of
+     *                                 "unset" skip tagging instead of throwing.
+     *                                 CRC32 is computed either way.
      * @throws \RuntimeException on I/O failure.
      * @since 1.0.0
      * @stability stable
      */
     public function write(string $path, array $partial, ?string $hmacSecret = null): void
     {
+        $hmacSecret = HmacSecret::normalize($hmacSecret);
+
         $pages = $partial['pages'] ?? [];
         $index = $partial['index'] ?? [];
 

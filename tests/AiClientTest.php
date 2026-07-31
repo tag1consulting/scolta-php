@@ -13,6 +13,7 @@ use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\AiClient;
 use Tag1\Scolta\Exception\ApiKeyInvalidException;
 use Tag1\Scolta\Exception\ApiKeyMissingException;
+use Tag1\Scolta\Exception\ModelProviderMismatchException;
 use Tag1\Scolta\Exception\RateLimitException;
 
 class AiClientTest extends TestCase
@@ -521,6 +522,123 @@ class AiClientTest extends TestCase
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('API request failed');
         $client->message('sys', 'msg');
+    }
+
+    // -------------------------------------------------------------------
+    // Provider/model mismatch tripwire
+    // -------------------------------------------------------------------
+
+    public function testGatewayAliasRejectedByAnthropicNamesModelAndProvider(): void
+    {
+        // The Athenaeum failure, reproduced at the client boundary: a site
+        // switched from the Amazee gateway to a direct Anthropic key while an
+        // Amazee LiteLLM alias was still the configured model. Anthropic
+        // rejects it as an unknown model, which used to surface as a generic
+        // request failure with nothing in it to act on.
+        $mock = new MockHandler([
+            new Response(404, [], json_encode([
+                'error' => ['type' => 'not_found_error', 'message' => 'model: claude-4-5-sonnet'],
+            ])),
+        ]);
+
+        $client = new AiClient(
+            ['api_key' => 'key', 'model' => 'claude-4-5-sonnet'],
+            new Client(['handler' => HandlerStack::create($mock)]),
+        );
+
+        try {
+            $client->message('sys', 'msg');
+            $this->fail('Expected ModelProviderMismatchException');
+        } catch (ModelProviderMismatchException $e) {
+            $this->assertSame('claude-4-5-sonnet', $e->getModel());
+            $this->assertSame('anthropic', $e->getProvider());
+            $this->assertStringContainsString('claude-4-5-sonnet', $e->getMessage());
+            $this->assertStringContainsString('anthropic', $e->getMessage());
+        }
+    }
+
+    public function testNativeModelRejectionStaysAGenericFailure(): void
+    {
+        // A provider-native model can be rejected for any number of reasons
+        // that have nothing to do with the model name (deprecated snapshot,
+        // account not entitled, malformed request). Naming a mismatch there
+        // would send the operator after the wrong thing.
+        $mock = new MockHandler([
+            new Response(400, [], json_encode(['error' => ['type' => 'invalid_request_error']])),
+        ]);
+
+        $client = new AiClient(
+            ['api_key' => 'key', 'model' => 'claude-sonnet-4-5-20250929'],
+            new Client(['handler' => HandlerStack::create($mock)]),
+        );
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('API request failed');
+        $client->message('sys', 'msg');
+    }
+
+    public function testGatewayEndpointIsNeverReportedAsAMismatch(): void
+    {
+        // Traffic aimed at a gateway (a configured base_url) is *supposed* to
+        // carry that gateway's aliases. Flagging them would fire the tripwire
+        // on exactly the working configuration it exists to protect — a
+        // healthy Amazee trial — on any unrelated 4xx.
+        $mock = new MockHandler([
+            new Response(400, [], json_encode(['error' => 'bad request'])),
+        ]);
+
+        $client = new AiClient(
+            [
+                'provider' => 'openai',
+                'api_key' => 'litellm-token',
+                'model' => 'claude-4-5-sonnet',
+                'base_url' => 'https://gateway.amazee.ai',
+            ],
+            new Client(['handler' => HandlerStack::create($mock)]),
+        );
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('API request failed');
+        $client->message('sys', 'msg');
+    }
+
+    public function testAuthAndRateLimitFailuresOutrankTheMismatchCheck(): void
+    {
+        // An expired key on a poisoned site is still an expired key: the 401
+        // path must keep its own exception so the reauth flow still triggers.
+        $mock = new MockHandler([
+            new Response(401, [], json_encode(['error' => ['type' => 'authentication_error']])),
+        ]);
+
+        $client = new AiClient(
+            ['api_key' => 'bad-key', 'model' => 'claude-4-5-sonnet'],
+            new Client(['handler' => HandlerStack::create($mock)]),
+        );
+
+        $this->expectException(ApiKeyInvalidException::class);
+        $client->message('sys', 'msg');
+    }
+
+    public function testPerCallModelOverrideIsTheOneChecked(): void
+    {
+        // messageForOperation() routes expansion through a separate model, so
+        // the per-call override is what actually reaches the provider — and
+        // therefore what the error has to name.
+        $mock = new MockHandler([
+            new Response(404, [], json_encode(['error' => ['type' => 'not_found_error']])),
+        ]);
+
+        $client = new AiClient(
+            ['api_key' => 'key', 'model' => 'claude-sonnet-4-5-20250929'],
+            new Client(['handler' => HandlerStack::create($mock)]),
+        );
+
+        try {
+            $client->message('sys', 'msg', 1024, 'claude-4-5-haiku');
+            $this->fail('Expected ModelProviderMismatchException');
+        } catch (ModelProviderMismatchException $e) {
+            $this->assertSame('claude-4-5-haiku', $e->getModel());
+        }
     }
 
     public function testEmptyResponseReturnsEmptyString(): void

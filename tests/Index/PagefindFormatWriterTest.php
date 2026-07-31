@@ -51,7 +51,7 @@ class PagefindFormatWriterTest extends TestCase
                 'content' => 'All about apples and apple recipes.',
                 'wordCount' => 50,
                 'date' => '2026-01-01',
-                'filters' => ['site' => 'TestSite'],
+                'filters' => ['site' => 'TestSite', 'topic' => 'Fruit'],
                 'meta' => ['title' => 'Apple Page', 'url' => '/apple-page', 'date' => '2026-01-01'],
                 'hash' => hash('sha256', 'apple content'),
             ],
@@ -61,7 +61,7 @@ class PagefindFormatWriterTest extends TestCase
                 'content' => 'All about bananas and banana smoothies.',
                 'wordCount' => 40,
                 'date' => '2026-02-01',
-                'filters' => ['site' => 'TestSite'],
+                'filters' => ['site' => 'TestSite', 'topic' => 'Smoothies'],
                 'meta' => ['title' => 'Banana Page', 'url' => '/banana-page', 'date' => '2026-02-01'],
                 'hash' => hash('sha256', 'banana content'),
             ],
@@ -153,9 +153,14 @@ class PagefindFormatWriterTest extends TestCase
 
     public function testFilterFileCreatedWhenFiltersExist(): void
     {
+        // The fixture carries two dimensions: `topic` with two distinct values,
+        // and the auto-injected `site` with one. Only a dimension that can
+        // actually filter gets a chunk.
         $this->writer->write($this->sampleIndex(), $this->samplePages(), $this->tmpDir);
         $filterFiles = glob($this->tmpDir . '/.scolta-building/filter/*.pf_filter');
         $this->assertCount(1, $filterFiles);
+        $decoded = CborDecoder::decodePfFile($filterFiles[0]);
+        $this->assertSame('topic', $decoded[0]);
     }
 
     public function testNoFilterFileWithoutFilters(): void
@@ -284,9 +289,13 @@ class PagefindFormatWriterTest extends TestCase
 
         $this->writer->write([], $pages, $this->tmpDir);
 
-        // Pagefind native: one file per dimension (2 dimensions = 2 files).
+        // Pagefind native: one file per dimension that can actually filter. Of the
+        // two dimensions here, `language` has three distinct values and `site` has
+        // one, and a single-value dimension is skipped: selecting its only value
+        // matches every page, so it filters nothing while still costing Pagefind a
+        // linear scan of the matched-result set per posting on every search.
         $filterFiles = glob($this->tmpDir . '/.scolta-building/filter/*.pf_filter');
-        $this->assertCount(2, $filterFiles, 'Expected one filter file per dimension');
+        $this->assertCount(1, $filterFiles, 'Expected one filter file per filterable dimension');
 
         // Index files by dimension name.
         $dimensions = [];
@@ -300,17 +309,12 @@ class PagefindFormatWriterTest extends TestCase
             $dimensions[$decoded[0]] = $decoded[1];
         }
 
-        $this->assertArrayHasKey('site', $dimensions, 'site dimension must exist');
+        $this->assertArrayNotHasKey(
+            'site',
+            $dimensions,
+            'site has one distinct value across every page, so it must not be emitted as a filter',
+        );
         $this->assertArrayHasKey('language', $dimensions, 'language dimension must exist');
-
-        // site: 1 value (TestSite) → [[TestSite, [1, 2, 3]]].
-        $siteValues = $dimensions['site'];
-        $this->assertCount(1, $siteValues, 'site has 1 value');
-        $this->assertIsArray($siteValues[0], 'site entry must be a [value, pages] tuple');
-        $this->assertCount(2, $siteValues[0], 'site tuple must have 2 elements');
-        $this->assertSame('TestSite', $siteValues[0][0]);
-        $this->assertIsArray($siteValues[0][1], 'site pages must be an array');
-        $this->assertCount(3, $siteValues[0][1], 'TestSite maps to all 3 pages');
 
         // language: 3 values (en, fr, de), each with 1 page.
         $langValues = $dimensions['language'];

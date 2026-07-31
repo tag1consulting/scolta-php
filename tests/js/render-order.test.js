@@ -47,17 +47,39 @@ function makeResult(filterObj, id) {
     };
 }
 
-function createWindow(mockPagefind) {
+function createWindow(mockPagefind, expansionTerms) {
     const dom = new JSDOM(
         '<!DOCTYPE html><html><body><div id="scolta-search"></div></body></html>',
         { url: 'https://example.com', runScripts: 'dangerously' }
     );
     const window = dom.window;
-    window.fetch = jest.fn().mockResolvedValue({
-        ok: false, status: 503,
-        json: () => Promise.resolve({}),
-        text: () => Promise.resolve(''),
-    });
+    window.fetch = expansionTerms
+        ? jest.fn((url) => {
+            const u = String(url);
+            if (u.includes('pagefind-entry.json')) {
+                return Promise.resolve({
+                    ok: true, status: 200,
+                    json: () => Promise.resolve({ languages: { en: { page_count: 100 } } }),
+                    text: () => Promise.resolve('{}'),
+                });
+            }
+            if (u === '/e') {
+                return Promise.resolve({
+                    ok: true, status: 200,
+                    json: () => Promise.resolve({ terms: expansionTerms }),
+                    text: () => Promise.resolve('{}'),
+                });
+            }
+            return Promise.resolve({
+                ok: false, status: 503,
+                json: () => Promise.resolve({}), text: () => Promise.resolve(''),
+            });
+        })
+        : jest.fn().mockResolvedValue({
+            ok: false, status: 503,
+            json: () => Promise.resolve({}),
+            text: () => Promise.resolve(''),
+        });
     window.console = { log: jest.fn(), error: jest.fn(), warn: jest.fn() };
     window.scrollTo = () => {};
     window.mockPagefind = mockPagefind;
@@ -162,6 +184,57 @@ describe('render ordering: results paint before the facet-count pass', () => {
             { dim: 'difficulty', val: 'Beginner', count: '(7)' },
         ]);
         // Results are untouched by the count pass.
+        expect(resultCards(window)).toBe(2);
+    });
+
+    test('the same order holds for the expansion pass: merged results paint, then counts', async () => {
+        // Expansion now recomputes the counts too, so the second half of the
+        // cycle has the identical hazard: awaiting the count pass before
+        // painting would hold the merged list behind it.
+        const typed = [makeResult({ difficulty: 'Beginner', language: 'en' }, 'doc-1')];
+        const expanded = [makeResult({ difficulty: 'Advanced', language: 'en' }, 'doc-2')];
+        let release;
+        const gate = new Promise(r => { release = r; });
+        const search = jest.fn((query, opts) => {
+            const hasUserFacet = !!(opts && opts.filters && opts.filters.difficulty);
+            if (query === 'geometry') {
+                // The unfiltered search is the count path's; the filtered one is
+                // the expansion pass's own and must not block.
+                return hasUserFacet
+                    ? Promise.resolve({ results: expanded, filters: {} })
+                    : gate.then(() => ({ results: expanded, filters: {} }));
+            }
+            return Promise.resolve({
+                results: typed,
+                filters: { difficulty: { Beginner: 7, Intermediate: 0, Advanced: 0 } },
+            });
+        });
+        const mock = { init: () => Promise.resolve(), filters: () => Promise.resolve(TAXONOMY), search };
+        const window = createWindow(mock, ['geometry']);
+        const inst = await ready(window, mock);
+        window.document.querySelector('#scolta-query').value = 'fractions';
+
+        await inst.doSearch(false, { difficulty: new window.Set(['Beginner']) });
+        await settle(window);
+
+        // The merged list is painted and announced while the count pass is still
+        // blocked, and the panel holds its pre-expansion state rather than
+        // flashing a value set that is about to change.
+        expect(window.document.querySelector('#scolta-results-header').textContent)
+            .toContain('with expanded terms');
+        expect(resultCards(window)).toBe(2);
+        expect(captureFacetTuples(window)).toEqual([
+            { dim: 'difficulty', val: 'Beginner', count: '(7)' },
+        ]);
+
+        release();
+        await settle(window);
+
+        // Now the expansion's own document is in the panel.
+        expect(captureFacetTuples(window)).toEqual([
+            { dim: 'difficulty', val: 'Advanced', count: '(1)' },
+            { dim: 'difficulty', val: 'Beginner', count: '(7)' },
+        ]);
         expect(resultCards(window)).toBe(2);
     });
 

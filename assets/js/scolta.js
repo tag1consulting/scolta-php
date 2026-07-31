@@ -25,6 +25,16 @@
  *                                            zero for the current query (and their now-empty groups).
  *                                            Set false to render zero-count values as disabled (0) rows.
  *                                            An active value stays visible even at zero either way.
+ *   saytEnabled: true                      — Optional: search as you type. See docs/SAYT.md for the
+ *   saytMinChars: 2                          full behaviour and for when to change each of these.
+ *   saytDebounceMs: 150                      Suggestions populate a dropdown while typing; the full
+ *   saytMaxSuggestions: 6                    pipeline still runs only on Enter or on selecting a
+ *   saytRecentSearches: true                 suggestion. saytEnabled:false restores the pre-1.1.0
+ *   saytMaxRecent: 3                         widget exactly: no dropdown node, no combobox roles,
+ *   saytExpand: true                         no storage access, no suggest searches.
+ *   saytExpandPerMinute: 6
+ *   saytExpansionDelayMs: 500
+ *   saytSuggestionAction: 'navigate'       — 'navigate' | 'search'
  *
  * Entry point: Scolta.init(containerSelector)
  *
@@ -230,6 +240,99 @@
   const PRELOAD_DEBOUNCE_MS = 150;
   const PRELOAD_MIN_CHARS = 2;
 
+  // ==========================================================================
+  // SEARCH AS YOU TYPE (SAYT)
+  // ==========================================================================
+  //
+  // Suggestions populate a dropdown while the user types; the full pipeline
+  // (expand -> merge -> summarize -> follow-up) still runs only on Enter, on the
+  // search button, or on selecting a suggestion. The two paths are deliberately
+  // separate machines: doSearch() owns searchVersion, the abortController, the
+  // per-cycle search memo, history and every results-region element, and the
+  // suggest path owns none of them. See docs/SAYT.md.
+  //
+  // Every default below is byte-equal to the corresponding ScoltaConfig PHP
+  // default; BrowserConfigParityTest pins the two key sets together in both
+  // directions, and ScoltaConfigTest pins the values.
+  const SAYT_DEFAULTS = Object.freeze({
+    enabled: true,
+    minChars: 2,
+    debounceMs: 150,
+    maxSuggestions: 6,
+    recentSearches: true,
+    maxRecent: 3,
+    expand: true,
+    expandPerMinute: 6,
+    expansionDelayMs: 500,
+    suggestionAction: 'navigate',
+  });
+
+  const SAYT_ACTIONS = ['navigate', 'search'];
+
+  // localStorage is per-origin, so every Scolta instance on one origin shares
+  // one recent-search history. That is deliberate (a visitor's recent searches
+  // are a property of the visitor, not of the widget) and documented.
+  const SAYT_RECENT_KEY = 'scolta:recent-searches';
+
+  // How many recent searches are STORED, independent of how many are shown
+  // (sayt_max_recent). Keeping a couple of spares means the prefix filter still
+  // has something to match after the newest entries stop matching.
+  const SAYT_RECENT_STORED_MAX = 5;
+
+  // How long an enrichment call stays in the sliding window, in ms.
+  const SAYT_EXPAND_WINDOW_MS = 60000;
+
+  // Weight applied when scoring documents an AI expansion term found, rather
+  // than the prefix the user typed. Same reduction the result path's OR
+  // fallback uses: an expansion hit is real but it is not what was typed, so it
+  // must not outrank a direct prefix match in a six-row dropdown.
+  const SAYT_EXPANDED_WEIGHT = 0.6;
+
+  // Lazily built once: constructing an Intl.Segmenter is expensive relative to
+  // the keystroke path it runs on. null means "not tried yet", false means
+  // "unavailable in this engine".
+  let saytSegmenter = null;
+
+  // Count USER-PERCEIVED characters, not UTF-16 code units. "\u{1F1EE}\u{1F1F9}"
+  // is one flag to a reader and four to `.length`, and a Devanagari or Hangul
+  // cluster is one character to the person typing it. Intl.Segmenter is the
+  // correct answer; the spread fallback at least collapses surrogate pairs.
+  function saytGraphemeLength(str) {
+    const s = String(str == null ? '' : str);
+    if (saytSegmenter === null) {
+      try {
+        saytSegmenter = (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function')
+          ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+          : false;
+      } catch (e) {
+        saytSegmenter = false;
+      }
+    }
+    if (saytSegmenter) {
+      try {
+        let n = 0;
+        for (const _ of saytSegmenter.segment(s)) n++;
+        return n;
+      } catch (e) {
+        // Fall through to the spread count.
+      }
+    }
+    return [...s].length;
+  }
+
+  // Coerce a config value that a CMS settings layer may hand over as a string.
+  function saytBool(value, fallback) {
+    if (value === undefined || value === null || value === '') return fallback;
+    if (typeof value === 'string') return value !== '0' && value.toLowerCase() !== 'false';
+    return !!value;
+  }
+
+  function saytInt(value, fallback, min) {
+    const n = parseInt(value, 10);
+    if (!isFinite(n)) return fallback;
+    return (min !== undefined && n < min) ? min : n;
+  }
+
   function filterDisplayValue(dimension, value) {
     if (dimension === 'language') return LANGUAGE_NAMES[value] || value;
     return value;
@@ -253,6 +356,20 @@
   // so every createInstance() call shares it without re-calling init().
   let pagefindInstance = null;
 
+  // Platform-supplied result renderer, registered through
+  // Scolta.setResultRenderer(). Module-scoped rather than per-instance so
+  // registration works before any instance exists — the common case, since a
+  // platform registers on script load and Scolta.init() runs on DOMContentLoaded.
+  // An instance that registers its own (instance.setResultRenderer) overrides it.
+  //
+  // Deliberately a registration function and NOT a config key: a function cannot
+  // survive the PHP → ScoltaConfig::toBrowserConfig() → drupalSettings → JSON
+  // round trip, and a browser config key that no PHP layer emits would need a
+  // BrowserConfigParityTest::REVERSE_ALLOWLIST entry with a written
+  // justification. Registration keeps the config surface untouched. Do not
+  // "simplify" this into a config key.
+  let globalResultRenderer = null;
+
   function createInstance(containerSelector, instanceConfig) {
 
   // --- Instance state (local to this closure) ---
@@ -263,7 +380,7 @@
   let conversationMessages = [];
   let followUpCount = 0;
   let abortController = null;
-  let queryFacetCounts = {};   // { dimension: { value: count } } — fixed per typed query
+  let queryFacetCounts = {};   // { dimension: { value: count } } — per typed query, folded once when expansion lands
   let currentQuery = "";
   let allHighlightTerms = [];
   let lastExpandedTerms = null;
@@ -283,6 +400,32 @@
   let cachedPagefindPageCount = null; // total indexed pages across languages — from pagefind-entry.json
   let preloadTimer = null;           // trailing-debounce handle for schedulePreload()
   let lastPreloadedTerm = '';        // last term handed to pagefind.preload(); skips repeat work
+
+  // --- SAYT state ---
+  // suggestVersion is to the suggest path what searchVersion is to doSearch():
+  // incremented at the start of every cycle and re-checked after every await, so
+  // a late-resolving cycle whose input has moved on performs ZERO DOM writes.
+  // Cancelling is just an increment (cancelSuggest), which is why nothing here
+  // needs an AbortController of its own.
+  let suggestVersion = 0;
+  let suggestTimer = null;           // trailing-debounce handle for scheduleSuggest()
+  let suggestExpandTimer = null;     // idle handle for the AI enrichment call
+  let suggestions = [];              // the rendered dropdown model, in DOM order
+  let activeSuggestion = -1;         // index into suggestions; -1 = nothing active
+  let suggestOpen = false;
+  let suggestQuery = '';             // the prefix the open dropdown describes
+  let suggestBlurTimer = null;
+  let saytExpandCalls = [];          // ms timestamps, for the sliding-window budget
+  let saytActionWarned = false;      // warn once per instance, not once per keystroke
+  // searchVersion of the doSearch() cycle that has started but not yet painted,
+  // or 0 when none is. No suggest cycle runs while it is set: the user has
+  // committed, and a dropdown repainting over a search that is mid-flight is
+  // noise. A version rather than a boolean because doSearch() cycles overlap —
+  // the window belongs to whichever cycle opened it last, and only that cycle
+  // may release it. doSearch() releases it in a finally covering the whole
+  // pre-paint region, so a search that throws anywhere cannot wedge the suggest
+  // path off for the life of the page.
+  let paintingVersion = 0;
   // Per-search-cycle memo of in-flight Pagefind searches, keyed by
   // searchMemoKey(). Cleared at the top of every doSearch() — see the comment
   // above pagefindSearch() for why identical searches within one cycle are both
@@ -305,6 +448,17 @@
 
   // --- DOM references (set during init) ---
   let els = {};
+  let rootEl = null;                    // mount point; lifecycle events bubble through it
+  let scaffoldNodes = [];               // exactly the nodes init() inserted — destroy() removes these and nothing else
+  let instanceResultRenderer = null;    // per-instance override of globalResultRenderer
+  // What is currently painted in #scolta-results, in DOM order:
+  // [{ key, nodes: [Node, ...] }]. Drives the keyed reconcile in renderResults()
+  // so a repaint that changes nothing moves no nodes.
+  let paintedEntries = [];
+  // Highlight terms the painted built-in cards were built with. Expansion grows
+  // allHighlightTerms, so a card painted before it carries stale <mark> spans and
+  // must be rebuilt even when its position and identity are unchanged.
+  let paintedHighlightSignature = null;
 
   // Instance-specific config readers that use the provided config object.
   function getInstanceConfig() {
@@ -378,6 +532,43 @@
     return (instanceConfig && instanceConfig.priority_pages) || [];
   }
 
+  // SAYT settings are TOP-LEVEL instance config, not `scoring` keys — the
+  // hideEmptyFacets pattern. They govern UI behaviour, not ranking, and
+  // toJsScoringConfig() stays at exactly 40 keys.
+  function getSaytConfig() {
+    if (!instanceConfig) return SAYT_DEFAULTS;
+
+    let action = instanceConfig.saytSuggestionAction;
+    if (action === undefined || action === null || action === '') {
+      action = SAYT_DEFAULTS.suggestionAction;
+    } else if (SAYT_ACTIONS.indexOf(String(action)) === -1) {
+      // Clamp rather than throw: a typo in a site's settings form must degrade
+      // to the safe default, not break the search box.
+      if (!saytActionWarned) {
+        saytActionWarned = true;
+        console.warn('[scolta:sayt] Unknown sayt_suggestion_action', JSON.stringify(String(action)) +
+          '; expected one of ' + SAYT_ACTIONS.join(', ') + '. Falling back to ' +
+          SAYT_DEFAULTS.suggestionAction + '.');
+      }
+      action = SAYT_DEFAULTS.suggestionAction;
+    } else {
+      action = String(action);
+    }
+
+    return {
+      enabled: saytBool(instanceConfig.saytEnabled, SAYT_DEFAULTS.enabled),
+      minChars: saytInt(instanceConfig.saytMinChars, SAYT_DEFAULTS.minChars, 1),
+      debounceMs: saytInt(instanceConfig.saytDebounceMs, SAYT_DEFAULTS.debounceMs, 0),
+      maxSuggestions: saytInt(instanceConfig.saytMaxSuggestions, SAYT_DEFAULTS.maxSuggestions, 1),
+      recentSearches: saytBool(instanceConfig.saytRecentSearches, SAYT_DEFAULTS.recentSearches),
+      maxRecent: saytInt(instanceConfig.saytMaxRecent, SAYT_DEFAULTS.maxRecent, 0),
+      expand: saytBool(instanceConfig.saytExpand, SAYT_DEFAULTS.expand),
+      expandPerMinute: saytInt(instanceConfig.saytExpandPerMinute, SAYT_DEFAULTS.expandPerMinute, 0),
+      expansionDelayMs: saytInt(instanceConfig.saytExpansionDelayMs, SAYT_DEFAULTS.expansionDelayMs, 0),
+      suggestionAction: action,
+    };
+  }
+
   // Sanitize a query before logging to strip PII (emails, phones, SSNs, etc.).
   // Use sanitizeQueryForLogging(query) whenever logging search queries.
   function sanitizeQueryForLogging(query) {
@@ -386,6 +577,296 @@
       return scoltaWasm.sanitize_query(JSON.stringify({ query: query }));
     } catch (e) {
       return query;
+    }
+  }
+
+  // --- Scolta facet index ---
+  //
+  // Scolta needs exactly two things from Pagefind's filter feature: the values
+  // of each dimension with their corpus-wide totals, and per-query counts. Both
+  // come from `scolta.facets`, an artifact the index build emits, and reading it
+  // means no `.pf_filter` chunk is ever fetched.
+  //
+  // Why it is worth an artifact: Pagefind's get_filters counts by scanning the
+  // matched-result set linearly for every (value, page) posting in every LOADED
+  // filter chunk, and it runs twice per search. So the moment any chunk is
+  // loaded, every later search costs `matched results x loaded postings` — and
+  // there is no unload path short of pagefind.destroy(). Measured on a
+  // 109,308-page corpus (3,208,134 postings across ten dimensions), a query
+  // matching 7,789 results took 155 ms with no chunk loaded and 18,589 ms with
+  // all ten loaded. The cost tracks postings, not distinct values: a 19-value
+  // dimension carrying 491,074 postings cost 2,859 ms, while a 55-value
+  // dimension carrying 6,468 postings cost 104 ms, and collapsing a 3,421-value
+  // dimension to 4 values while keeping every posting changed nothing
+  // (10,151 ms to 10,178 ms). Doing the same counting here against the same
+  // matched set takes about 4 ms.
+  //
+  // Two consequences for the code below. Counts must be computed over the FULL
+  // matched set, not the ~75 fragments Scolta loads, or facet counts would move.
+  // And filter application has to move too, not just counting: passing anything
+  // in searchOpts.filters makes Pagefind lazily fetch that dimension's chunk,
+  // after which every subsequent search pays the per-result cost for the life of
+  // the page.
+  //
+  // Wire format, whole file gzipped:
+  //   <json header>\n
+  //   <one fragment hash per line, pageCount lines>
+  //   <posting bodies, dimension order then value order from the header>
+  // Each body is self-delimiting: tag 0x00 is a varint count then that many
+  // varint deltas of ascending page indices, tag 0x01 is a ceil(pageCount / 8)
+  // byte bitmap. The header carries every value's total, so the facet panel's
+  // value list needs no posting decode at all.
+  let facetIndex = null;
+  // pf_meta hash of the index actually loaded, read from the cache-busted
+  // pagefind-entry.json, and whether a secondary language index was merged in.
+  let facetIndexExpectedHash = null;
+  let facetIndexMergedLanguages = false;
+
+  // Resolve the directory the index files live in, from the pagefind.js path.
+  function facetIndexBase(pagefindPath) {
+    return String(pagefindPath || '').replace(/pagefind\.js(\?.*)?$/, '');
+  }
+
+  async function gunzipToBytes(buffer) {
+    const bytes = new Uint8Array(buffer);
+    // A server may or may not have applied transport compression of its own. The
+    // header is JSON, so an opening brace means the bytes arrived decompressed.
+    if (bytes[0] === 0x7b) return bytes;
+    if (typeof DecompressionStream !== 'function') {
+      throw new Error('DecompressionStream unavailable');
+    }
+    const stream = new Response(bytes).body.pipeThrough(new DecompressionStream('gzip'));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+
+  function readVarint(state) {
+    let value = 0;
+    let shift = 1;
+    for (;;) {
+      const byte = state.bytes[state.off++];
+      if (byte === undefined) throw new Error('facet index truncated');
+      value += (byte & 0x7f) * shift;
+      if (byte < 0x80) return value;
+      shift *= 128;
+    }
+  }
+
+  function parseFacetIndex(bytes) {
+    // One decoder for the whole parse: the id table is one entry per page, and
+    // allocating a TextDecoder per line dominated the decode on a large corpus.
+    const decoder = new TextDecoder();
+    const newline = bytes.indexOf(10);
+    if (newline < 0) throw new Error('facet index has no header');
+    const header = JSON.parse(decoder.decode(bytes.subarray(0, newline)));
+    if (header.format !== 'scolta-facets') {
+      throw new Error('unexpected format ' + header.format);
+    }
+    if (header.version !== 1) {
+      throw new Error('unsupported facet index version ' + header.version);
+    }
+
+    // The id table: pageCount newline-separated fragment hashes. Page index is
+    // the line number, and that is the numbering the posting lists refer to.
+    let off = newline + 1;
+    const pageOf = new Map();
+    for (let i = 0; i < header.pageCount; i++) {
+      const end = bytes.indexOf(10, off);
+      if (end < 0) throw new Error('facet index id table truncated');
+      pageOf.set(decoder.decode(bytes.subarray(off, end)), i);
+      off = end + 1;
+    }
+
+    const bitmapBytes = (header.pageCount + 7) >> 3;
+    const state = { bytes: bytes, off: off };
+    const postings = {};
+    for (const dim of header.dimensions) {
+      const values = header.values[dim] || [];
+      const decoded = [];
+      for (let v = 0; v < values.length; v++) {
+        const tag = state.bytes[state.off++];
+        if (tag === 1) {
+          decoded.push({
+            value: values[v][0],
+            bitmap: state.bytes.subarray(state.off, state.off + bitmapBytes),
+          });
+          state.off += bitmapBytes;
+        } else if (tag === 0) {
+          const count = readVarint(state);
+          const pages = new Int32Array(count);
+          let prev = 0;
+          for (let i = 0; i < count; i++) {
+            prev += readVarint(state);
+            pages[i] = prev;
+          }
+          decoded.push({ value: values[v][0], pages: pages });
+        } else {
+          throw new Error('facet index has unknown posting tag ' + tag);
+        }
+      }
+      postings[dim] = decoded;
+    }
+
+    return {
+      indexHash: header.indexHash || '',
+      pageCount: header.pageCount,
+      dimensions: header.dimensions,
+      values: header.values,
+      pageOf: pageOf,
+      postings: postings,
+      mask: new Uint8Array(header.pageCount),
+    };
+  }
+
+  async function loadFacetIndex(basePath) {
+    if (typeof fetch !== 'function') throw new Error('fetch unavailable');
+    const url = basePath + 'scolta.facets';
+    const resp = await fetch(url);
+    if (!resp || !resp.ok) throw new Error('HTTP ' + (resp && resp.status));
+    return parseFacetIndex(await gunzipToBytes(await resp.arrayBuffer()));
+  }
+
+  // The value list plus corpus-wide totals — byte for byte what
+  // pagefind.filters() returned, since Pagefind reports posting-list lengths.
+  function facetIndexTotals(index) {
+    const totals = {};
+    for (const dim of index.dimensions) {
+      const map = {};
+      for (const [value, total] of (index.values[dim] || [])) map[value] = total;
+      totals[dim] = map;
+    }
+    return totals;
+  }
+
+  // Page indices of a result list, skipping ids the index does not know (an
+  // index older than the artifact, or a merged secondary language index).
+  function facetPageIndices(index, results) {
+    const pages = [];
+    for (const r of (results || [])) {
+      const p = index.pageOf.get(r.id);
+      if (p !== undefined) pages.push(p);
+    }
+    return pages;
+  }
+
+  function postingHasPage(posting, page) {
+    if (posting.bitmap) return (posting.bitmap[page >> 3] & (1 << (page & 7))) !== 0;
+    const pages = posting.pages;
+    let lo = 0;
+    let hi = pages.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const v = pages[mid];
+      if (v === page) return true;
+      if (v < page) lo = mid + 1; else hi = mid - 1;
+    }
+    return false;
+  }
+
+  // Per-value counts over the full matched set — the replacement for
+  // search.filters. Every value is reported, including at zero, exactly as
+  // Pagefind reported it.
+  function facetCountsFor(index, results) {
+    const pages = facetPageIndices(index, results);
+    const mask = index.mask;
+    mask.fill(0);
+    for (let i = 0; i < pages.length; i++) mask[pages[i]] = 1;
+    const counts = {};
+    for (const dim of index.dimensions) {
+      const dimCounts = {};
+      for (const posting of index.postings[dim]) {
+        let n = 0;
+        if (posting.bitmap) {
+          // Walk the smaller side: the matched set, testing the bitmap.
+          const bitmap = posting.bitmap;
+          for (let i = 0; i < pages.length; i++) {
+            const p = pages[i];
+            if (bitmap[p >> 3] & (1 << (p & 7))) n++;
+          }
+        } else {
+          const list = posting.pages;
+          for (let i = 0; i < list.length; i++) if (mask[list[i]]) n++;
+        }
+        dimCounts[posting.value] = n;
+      }
+      counts[dim] = dimCounts;
+    }
+    return counts;
+  }
+
+  // Apply the user's facet selection: OR within a dimension, AND across
+  // dimensions — the same semantics Pagefind applies, just without handing it a
+  // filter object and triggering a chunk load.
+  function applyFacetFilters(index, results, filters) {
+    if (!filters || typeof filters !== 'object') return results;
+    const active = [];
+    for (const [dim, vals] of Object.entries(filters)) {
+      const selected = vals instanceof Set ? [...vals]
+        : Array.isArray(vals) ? vals
+          : (vals === undefined || vals === null || vals === '') ? [] : [vals];
+      if (selected.length === 0) continue;
+      // An unknown dimension matches nothing, which is what Pagefind does with
+      // a filter it has no index for. A stale saved facet must not silently
+      // widen the result set.
+      const dimPostings = index.postings[dim] || [];
+      const chosen = dimPostings.filter(p => selected.indexOf(p.value) !== -1);
+      active.push(chosen);
+    }
+    if (active.length === 0) return results;
+    return (results || []).filter(r => {
+      const page = index.pageOf.get(r.id);
+      // An id the artifact does not describe cannot be evaluated. The merge
+      // guard and the index-hash check make that unreachable in practice; if it
+      // happens anyway, keep the result. Admitting one result the facet should
+      // have hidden is a smaller failure than silently dropping results the user
+      // searched for.
+      if (page === undefined) return true;
+      for (const chosen of active) {
+        let hit = false;
+        for (const posting of chosen) {
+          if (postingHasPage(posting, page)) { hit = true; break; }
+        }
+        if (!hit) return false;
+      }
+      return true;
+    });
+  }
+
+  // Load the facet taxonomy. The artifact is the fast path; an index built
+  // before it existed has none, and then Pagefind's own filters() is used so
+  // facets keep working — slowly — rather than disappearing.
+  async function loadFacetTaxonomy(pagefindPath) {
+    try {
+      // pagefind.mergeIndex() adds a second language index whose result ids the
+      // artifact does not describe, and there is one artifact per built index.
+      // Counting or filtering a merged corpus against it would be wrong in a way
+      // the user would see, so the slow path is the correct path there.
+      if (facetIndexMergedLanguages) {
+        throw new Error('a secondary language index was merged in');
+      }
+      facetIndex = await loadFacetIndex(facetIndexBase(pagefindPath));
+      if (facetIndexExpectedHash && facetIndex.indexHash
+          && facetIndex.indexHash !== facetIndexExpectedHash) {
+        throw new Error('artifact was built against index ' + facetIndex.indexHash
+          + ' but the loaded index is ' + facetIndexExpectedHash + ' (stale cached artifact)');
+      }
+      cachedPagefindFilters = facetIndexTotals(facetIndex);
+      debugLog('[scolta] Scolta facet index loaded:', facetIndex.dimensions.join(', '),
+        '(' + facetIndex.pageCount + ' pages)');
+      return;
+    } catch (e) {
+      facetIndex = null;
+      console.warn(
+        '[scolta] No Scolta facet index at ' + facetIndexBase(pagefindPath) + 'scolta.facets ('
+        + (e && e.message ? e.message : e) + '). Falling back to pagefind.filters(), which loads '
+        + 'every filter chunk and makes each subsequent search cost time proportional to matched '
+        + 'results times filter postings. Rebuild the search index to emit the facet index.',
+      );
+    }
+    try {
+      cachedPagefindFilters = await pagefind.filters();
+      debugLog('[scolta] Pagefind filters cached:', Object.keys(cachedPagefindFilters));
+    } catch (e) {
+      console.warn('[scolta] Failed to cache Pagefind filters:', e.message);
     }
   }
 
@@ -399,10 +880,11 @@
       try {
         pagefindBase = base.startsWith('http') ? new URL(base).pathname : base;
       } catch (_) { pagefindBase = base; }
-      if (!cachedPagefindFilters) {
-        try {
-          cachedPagefindFilters = await pagefind.filters();
-        } catch (_) { /* ignore — filters are optional */ }
+      // Re-entry against an instance a previous init() already created (a second
+      // container on the page, or a re-mount). The taxonomy is module state, so
+      // it is only loaded when it is not already in hand.
+      if (!cachedPagefindFilters && !facetIndex) {
+        await loadFacetTaxonomy(pagefindPath);
       }
       return;
     }
@@ -445,10 +927,17 @@
       }
       const primaryLang = (document.querySelector('html')?.getAttribute('lang') || 'en')
         .toLowerCase().split('-')[0];
+      // The facet index is stamped with the pf_meta hash it was built against.
+      // This entry file is cache-busted, so it is the trustworthy statement of
+      // which index the browser is actually using.
+      const primaryEntry = (entry.languages || {})[primaryLang]
+        || Object.values(entry.languages || {})[0];
+      facetIndexExpectedHash = (primaryEntry && primaryEntry.hash) || null;
       const absoluteBase = new URL(basePath, window.location.href).href;
       for (const lang of Object.keys(entry.languages || {})) {
         if (lang !== primaryLang) {
           await pagefind.mergeIndex(absoluteBase, { language: lang });
+          facetIndexMergedLanguages = true;
         }
       }
     } catch (e) {
@@ -458,12 +947,7 @@
     // Warm the index: triggers WASM compilation + fragment download.
     await pagefind.search("");
 
-    try {
-      cachedPagefindFilters = await pagefind.filters();
-      debugLog('[scolta] Pagefind filters cached:', Object.keys(cachedPagefindFilters));
-    } catch (e) {
-      console.warn('[scolta] Failed to cache Pagefind filters:', e.message);
-    }
+    await loadFacetTaxonomy(pagefindPath);
 
     debugLog("[scolta] Pagefind index preloaded");
   }
@@ -1304,9 +1788,20 @@
   // the correctness boundary, because structuralFilters drops the user's facet
   // selections and collapsing it into the primary search would silently change
   // the facet counts.
+  // When the facet index is present NOTHING is ever put in searchOpts.filters:
+  // naming a dimension there makes Pagefind's browser client lazily fetch that
+  // dimension's chunk before running the search, and from then on get_filters
+  // iterates it on every subsequent search for the life of the page. So the
+  // first facet click would reintroduce the whole cost the artifact exists to
+  // remove. Scolta applies the selection itself instead, against the artifact,
+  // before the result list is sliced and fragments are loaded.
+  //
+  // A useful side effect: with filters out of the search options, the same query
+  // under different facet selections is ONE Pagefind search, shared through the
+  // memo, and only the cheap post-filter differs.
   async function pagefindSearch(query, filters, sortHint) {
     const searchOpts = {};
-    if (filters && typeof filters === 'object') {
+    if (!facetIndex && filters && typeof filters === 'object') {
       const pagefindFilters = {};
       for (const [dim, vals] of Object.entries(filters)) {
         if (vals instanceof Set && vals.size > 0) {
@@ -1322,11 +1817,32 @@
       searchOpts.sort = { [sortHint.field]: sortHint.direction };
     }
     const key = searchMemoKey(query, searchOpts);
-    const memoized = searchMemo.get(key);
-    if (memoized) return memoized;
-    const search = pagefind.search(query, searchOpts);
-    searchMemo.set(key, search);
-    return search;
+    let search = searchMemo.get(key);
+    if (!search) {
+      search = pagefind.search(query, searchOpts);
+      searchMemo.set(key, search);
+    }
+    if (!facetIndex) return search;
+
+    const raw = await search;
+    const index = facetIndex;
+    const results = applyFacetFilters(index, raw.results, filters);
+    let counts = null;
+    const out = Object.assign({}, raw, { results: results });
+    // Defined separately, and deliberately NOT passed through Object.assign:
+    // Object.assign copies an accessor property by READING it, so a getter in
+    // one of its sources fires immediately and lands as a plain value. That
+    // would run the count over the full matched set on every single search,
+    // including the warm-up and preload ones that never look at it.
+    Object.defineProperty(out, 'filters', {
+      enumerable: true,
+      configurable: true,
+      get() {
+        if (counts === null) counts = facetCountsFor(index, results);
+        return counts;
+      },
+    });
+    return out;
   }
 
   // Warm the alphabetical index chunk(s) for the term being typed, so the
@@ -1339,8 +1855,11 @@
   // searchVersion staleness guards that protect the multi-phase pipeline
   // (expand → merge → summarize → follow-up).
   //
-  // No filters are passed: initPagefind() already calls pagefind.filters(),
-  // which loads every filter chunk, so filters here would only duplicate work.
+  // No filters are passed, and that is load-bearing rather than an optimization:
+  // naming a dimension in a search's filter object makes Pagefind fetch that
+  // dimension's filter chunk, and once a chunk is loaded every later search pays
+  // a per-matched-result counting cost that nothing can unload. Scolta applies
+  // facets itself against the facet index, so a warm-up never needs them.
   function schedulePreload(raw) {
     if (preloadTimer) {
       clearTimeout(preloadTimer);
@@ -1373,6 +1892,557 @@
       preloadTimer = null;
     }
     lastPreloadedTerm = '';
+  }
+
+  // ==========================================================================
+  // SEARCH AS YOU TYPE — suggest cycle, dropdown, recent searches, enrichment
+  // ==========================================================================
+
+  // --- Recent searches (localStorage) ---
+  //
+  // Every access is wrapped: Safari private browsing throws on setItem, some
+  // enterprise policies throw on getItem, and a storage failure must never take
+  // the search box with it. Stored values are user-typed strings and are treated
+  // as untrusted on render, exactly like index metadata.
+
+  function readRecentSearches() {
+    if (!getSaytConfig().recentSearches) return [];
+    try {
+      const store = global.localStorage;
+      if (!store) return [];
+      const raw = store.getItem(SAYT_RECENT_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .filter(v => typeof v === 'string' && v.trim() !== '')
+        .slice(0, SAYT_RECENT_STORED_MAX);
+    } catch (e) {
+      debugLog('[scolta:sayt] recent-search read failed', e);
+      return [];
+    }
+  }
+
+  // Record a COMMITTED query. Called from doSearch(), never from the suggest
+  // path: a prefix the user typed on the way to a real query is not a search.
+  function recordRecentSearch(query) {
+    const cfg = getSaytConfig();
+    if (!cfg.enabled || !cfg.recentSearches) return;
+    const q = String(query || '').trim();
+    if (!q) return;
+    try {
+      const store = global.localStorage;
+      if (!store) return;
+      const lower = q.toLowerCase();
+      const next = [q].concat(
+        readRecentSearches().filter(v => v.toLowerCase() !== lower)
+      ).slice(0, SAYT_RECENT_STORED_MAX);
+      store.setItem(SAYT_RECENT_KEY, JSON.stringify(next));
+    } catch (e) {
+      debugLog('[scolta:sayt] recent-search write failed', e);
+    }
+  }
+
+  // Recent searches that relate to what is being typed. Prefix matches come
+  // first because they are what the user is most likely completing; substring
+  // matches follow. The typed term itself is never offered back.
+  function matchingRecentSearches(term, cfg) {
+    if (!cfg.recentSearches || cfg.maxRecent <= 0) return [];
+    const lower = term.toLowerCase();
+    const prefix = [];
+    const substring = [];
+    for (const value of readRecentSearches()) {
+      const v = value.toLowerCase();
+      if (v === lower) continue;
+      if (v.startsWith(lower)) prefix.push(value);
+      else if (v.indexOf(lower) !== -1) substring.push(value);
+    }
+    return prefix.concat(substring).slice(0, cfg.maxRecent).map(value => ({
+      type: 'recent',
+      title: value,
+      url: '',
+      excerpt: '',
+    }));
+  }
+
+  // --- Suggest cycle ---
+
+  // Invalidate any pending or in-flight suggest work. Bumping the version is
+  // the whole cancellation mechanism: every await in the cycle re-checks it, so
+  // a search already in flight simply throws its results away on return.
+  function cancelSuggest() {
+    if (suggestTimer) {
+      clearTimeout(suggestTimer);
+      suggestTimer = null;
+    }
+    if (suggestExpandTimer) {
+      clearTimeout(suggestExpandTimer);
+      suggestExpandTimer = null;
+    }
+    if (suggestBlurTimer) {
+      clearTimeout(suggestBlurTimer);
+      suggestBlurTimer = null;
+    }
+    suggestVersion++;
+  }
+
+  // Extend the typing path. schedulePreload() still runs alongside this and is
+  // untouched: it warms index chunks, this produces suggestions, and the two
+  // debounces are independent by design (a site may want suggestions slower or
+  // faster than chunk warm-up).
+  function scheduleSuggest(raw) {
+    const cfg = getSaytConfig();
+    if (!cfg.enabled || !els.sayt) return;
+
+    cancelSuggest();
+
+    const term = (raw || '').trim();
+    if (saytGraphemeLength(term) < cfg.minChars) {
+      // Below the floor is a close, not a no-op: the user backspaced out of a
+      // query that had a dropdown open.
+      closeSuggestions();
+      return;
+    }
+
+    suggestTimer = setTimeout(() => {
+      suggestTimer = null;
+      runSuggestCycle(term);
+    }, cfg.debounceMs);
+  }
+
+  // Run one suggest cycle for `term`.
+  //
+  // Never uses pagefindSearch(): that memo belongs to the doSearch() cycle and
+  // applies the user's facet selections. Suggestions are query completion, not
+  // a filtered result list, so they run against the whole index — and the
+  // options object is ALWAYS `{}`. Naming a dimension in a search's filters
+  // makes Pagefind fetch that dimension's filter chunk, and on an index without
+  // the scolta.facets artifact a loaded chunk taxes every later search with a
+  // per-matched-result scan that nothing can unload short of destroy(). A
+  // keystroke-rate path must never be what triggers that.
+  async function runSuggestCycle(term) {
+    const cfg = getSaytConfig();
+    if (!cfg.enabled || !els.sayt || !pagefind || typeof pagefind.search !== 'function') return;
+    // The user has committed and the results region is mid-paint; stand down.
+    if (paintingVersion !== 0) return;
+
+    const version = ++suggestVersion;
+
+    let rows = [];
+    let usedOr = false;
+    try {
+      const search = await pagefind.search(term, {});
+      if (version !== suggestVersion) return;
+      rows = (search && search.results) || [];
+
+      // Pagefind ANDs every word, so a multi-word prefix ("chocolate br") often
+      // matches nothing until the last word is complete. Same shape as the
+      // result path's OR fallback: search each word, union by fragment id, and
+      // score the union at the reduced weight the fallback uses.
+      const words = term.split(/\s+/).filter(w => w.length > 0);
+      if (rows.length === 0 && words.length > 1) {
+        const perTerm = await Promise.all(words.map(
+          w => Promise.resolve(pagefind.search(w, {})).catch(() => ({ results: [] }))
+        ));
+        if (version !== suggestVersion) return;
+        const seenIds = new Set();
+        rows = [];
+        for (const s of perTerm) {
+          for (const r of ((s && s.results) || [])) {
+            if (seenIds.has(r.id)) continue;
+            seenIds.add(r.id);
+            rows.push(r);
+          }
+        }
+        usedOr = rows.length > 0;
+      }
+    } catch (e) {
+      // A genuine search failure is not the same as "no matches", and leaving
+      // the previous prefix's suggestions on screen would claim it is. Take the
+      // dropdown down instead — but only if this cycle is still the current one.
+      debugLog('[scolta:sayt] suggest search failed', e);
+      if (version === suggestVersion) closeSuggestions();
+      return;
+    }
+
+    const merged = await buildSuggestions(term, rows, usedOr, version, cfg);
+    if (merged === null) return;   // superseded mid-load
+
+    renderSuggestions(merged, term);
+
+    // Enrichment is scheduled from here rather than from the input handler so
+    // it measures idle time from the settled prefix, not from the last
+    // keystroke of a query the user is still extending.
+    scheduleSuggestExpansion(term, version, cfg);
+  }
+
+  // Load fragments for at most maxSuggestions rows, score them through the same
+  // path the result list uses, dedupe by title, and merge recent searches ahead
+  // of them. Returns null if the cycle was superseded while loading.
+  async function buildSuggestions(term, rows, usedOr, version, cfg) {
+    const cap = cfg.maxSuggestions;
+    let titleSuggestions = [];
+
+    if (rows.length > 0) {
+      // The hard cap on fragment loads for this pass. Each .data() is a network
+      // fetch on a cold cache, and this runs at typing speed.
+      const slice = rows.slice(0, cap);
+      // allSettled, not all: one fragment that fails to fetch must cost the
+      // user that one suggestion, not the whole dropdown.
+      const settled = await Promise.allSettled(slice.map(r => r.data()));
+      if (version !== suggestVersion) return null;
+      const loaded = [];
+      for (const outcome of settled) {
+        if (outcome.status === 'fulfilled') loaded.push(outcome.value);
+        else debugLog('[scolta:sayt] fragment load failed', outcome.reason);
+      }
+
+      // Every fragment failed. Fall through rather than returning: recent
+      // searches do not depend on the index and are still worth showing.
+      if (loaded.length > 0) {
+        const scored = scoreResults(loaded, term, usedOr ? 0.6 : 1.0);
+        scored.sort((a, b) => b.score - a.score);
+        titleSuggestions = deduplicateByTitle(scored)
+          .map(toTitleSuggestion)
+          .filter(s => s.title !== '');
+      }
+    }
+
+    return mergeSuggestions(matchingRecentSearches(term, cfg), titleSuggestions, cap);
+  }
+
+  // A scored result becomes a suggestion. `url` stays raw for the safety gate
+  // and `safeUrl` is the same attribute-escaped, scheme-neutralized value the
+  // result card puts in its href — one sanitizer, one behaviour.
+  function toTitleSuggestion(scored) {
+    const data = scored.data || {};
+    const rawUrl = data.meta?.url || resolveUrl(data.url || '') || data.url || '';
+    return {
+      type: 'title',
+      title: String(data.meta?.title || '').trim(),
+      url: rawUrl,
+      safeUrl: sanitizeUrlAttr(rawUrl),
+      excerpt: data.excerpt || '',
+    };
+  }
+
+  // Recent searches first (they are what the user already wanted), then title
+  // suggestions, deduped case-insensitively by title across both groups, total
+  // capped at `cap`.
+  function mergeSuggestions(recents, titles, cap) {
+    const out = [];
+    const seen = new Set();
+    for (const list of [recents, titles]) {
+      for (const s of list) {
+        if (out.length >= cap) break;
+        const key = s.title.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(s);
+      }
+    }
+    return out;
+  }
+
+  // --- Dropdown rendering ---
+
+  function suggestOptionId(index) {
+    return 'scolta-sayt-option-' + index;
+  }
+
+  // Render lifecycle events for the suggest path, matching the result-render
+  // seam exactly: dispatched on the element being written, bubbling,
+  // non-cancellable, listener exceptions caught and logged. Documented in
+  // docs/RENDER_SEAM.md.
+  function emitBeforeSuggestions(query) {
+    emitLifecycle(els.sayt, 'scolta:before-suggestions-render', {
+      container: els.sayt,
+      query: query,
+    });
+  }
+
+  function emitSuggestionsRendered(list, query) {
+    emitLifecycle(els.sayt, 'scolta:suggestions-rendered', {
+      container: els.sayt,
+      suggestions: list,
+      query: query,
+    });
+  }
+
+  function renderSuggestions(list, query) {
+    if (!els.sayt) return;
+
+    if (list.length === 0) {
+      emitBeforeSuggestions(query);
+      suggestions = [];
+      activeSuggestion = -1;
+      suggestQuery = query;
+      els.sayt.innerHTML = '';
+      setSuggestOpen(false);
+      emitSuggestionsRendered([], query);
+      return;
+    }
+
+    emitBeforeSuggestions(query);
+
+    const navigates = getSaytConfig().suggestionAction === 'navigate';
+    let html = '';
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      const isRecent = s.type === 'recent';
+      const cls = 'scolta-sayt-option' + (isRecent ? ' scolta-sayt-option-recent' : '');
+      // In `navigate` mode a title suggestion is a real anchor, so middle-click,
+      // ctrl-click and the browser's own link affordances all work and the href
+      // is the card's sanitized URL rather than something JS assembles at click
+      // time. Recent searches are never links: navigating to a stored query
+      // string is meaningless, so they always run the search.
+      const asLink = !isRecent && navigates && isSafeLinkUrl(s.url);
+      const tag = asLink ? 'a' : 'div';
+      const href = asLink ? ` href="${s.safeUrl}"` : '';
+      const excerpt = (!isRecent && s.excerpt) ? truncateExcerpt(s.excerpt, 120) : '';
+      html += `<${tag} class="${cls}" role="option" id="${suggestOptionId(i)}"`
+        + ` aria-selected="false" data-scolta-sayt-index="${i}"${href}>`
+        + `<span class="scolta-sayt-kind" aria-hidden="true">${isRecent ? '&#8635;' : '&#8250;'}</span>`
+        + `<span class="scolta-sayt-title">${escapeHtml(s.title)}</span>`
+        + (excerpt ? `<span class="scolta-sayt-excerpt">${excerpt}</span>` : '')
+        + `</${tag}>`;
+    }
+    els.sayt.innerHTML = html;
+
+    suggestions = list;
+    suggestQuery = query;
+    activeSuggestion = -1;
+    els.queryInput.removeAttribute('aria-activedescendant');
+    setSuggestOpen(true);
+
+    emitSuggestionsRendered(list, query);
+  }
+
+  function setSuggestOpen(open) {
+    if (!els.sayt) return;
+    suggestOpen = open;
+    els.sayt.style.display = open ? 'block' : 'none';
+    els.queryInput.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (!open) els.queryInput.removeAttribute('aria-activedescendant');
+  }
+
+  function closeSuggestions() {
+    if (!els.sayt) return;
+    if (suggestBlurTimer) {
+      clearTimeout(suggestBlurTimer);
+      suggestBlurTimer = null;
+    }
+    suggestions = [];
+    activeSuggestion = -1;
+    suggestQuery = '';
+    els.sayt.innerHTML = '';
+    setSuggestOpen(false);
+  }
+
+  // Move the active option. DOM focus never leaves the input — the combobox
+  // pattern tracks the active option through aria-activedescendant, so screen
+  // readers announce it while typing keeps working.
+  function setActiveSuggestion(index) {
+    if (!els.sayt) return;
+    const options = els.sayt.querySelectorAll('[role="option"]');
+    if (options.length === 0) return;
+    activeSuggestion = index;
+    for (let i = 0; i < options.length; i++) {
+      const on = i === index;
+      options[i].setAttribute('aria-selected', on ? 'true' : 'false');
+      if (on) options[i].classList.add('scolta-sayt-option-active');
+      else options[i].classList.remove('scolta-sayt-option-active');
+    }
+    if (index >= 0 && options[index]) {
+      els.queryInput.setAttribute('aria-activedescendant', options[index].id);
+    } else {
+      els.queryInput.removeAttribute('aria-activedescendant');
+    }
+  }
+
+  // --- Acting on a suggestion ---
+
+  function actOnSuggestion(index) {
+    const s = suggestions[index];
+    if (!s) return;
+    const cfg = getSaytConfig();
+    const runsSearch = s.type === 'recent' || cfg.suggestionAction !== 'navigate';
+
+    if (runsSearch) {
+      els.queryInput.value = s.title;
+      els.searchClear.style.display = 'block';
+      closeSuggestions();
+      cancelSuggest();
+      doSearch();
+      return;
+    }
+
+    // navigate: follow the option's own anchor, whose href is the card's
+    // sanitized URL. A title suggestion whose URL failed isSafeLinkUrl() was
+    // never rendered as a link, so there is nothing to follow and the dropdown
+    // simply closes.
+    // Follow the link while it is still in the document — a detached anchor's
+    // activation behaviour is not something to rely on — then tear down.
+    const el = els.sayt.querySelector('[data-scolta-sayt-index="' + index + '"]');
+    if (el && typeof el.click === 'function' && el.hasAttribute('href')) el.click();
+    closeSuggestions();
+    cancelSuggest();
+  }
+
+  // --- Keyboard ---
+  //
+  // Returns true when the event was consumed, so the caller leaves the existing
+  // Enter-runs-doSearch handler untouched for every case SAYT does not claim.
+  function handleSuggestKeydown(e) {
+    if (!getSaytConfig().enabled || !els.sayt) return false;
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!suggestOpen || suggestions.length === 0) return false;
+      e.preventDefault();
+      const n = suggestions.length;
+      const delta = e.key === 'ArrowDown' ? 1 : -1;
+      const next = activeSuggestion < 0
+        ? (delta > 0 ? 0 : n - 1)
+        : (activeSuggestion + delta + n) % n;   // wraps at both ends
+      setActiveSuggestion(next);
+      return true;
+    }
+
+    if (e.key === 'Escape') {
+      // Close without clearing the input. A second Escape falls through to
+      // whatever the host page does with it.
+      if (!suggestOpen) return false;
+      e.preventDefault();
+      closeSuggestions();
+      cancelSuggest();
+      return true;
+    }
+
+    if (e.key === 'Enter') {
+      // Enter with NO active option runs doSearch() exactly as it always has.
+      if (!suggestOpen || activeSuggestion < 0) return false;
+      e.preventDefault();
+      actOnSuggestion(activeSuggestion);
+      return true;
+    }
+
+    return false;
+  }
+
+  // --- AI enrichment ---
+
+  // Sliding-window budget. SAYT expansions share the platform's AI flood bucket
+  // with committed searches (expand + summarize + follow-up all count against
+  // the same per-IP limit), so an unbudgeted suggest path would spend a
+  // visitor's whole allowance on prefixes and starve the search they actually
+  // ran. Over budget, the dropdown silently stays keyword-only.
+  function saytExpandBudgetAllows(cfg) {
+    if (cfg.expandPerMinute <= 0) return false;
+    const cutoff = Date.now() - SAYT_EXPAND_WINDOW_MS;
+    saytExpandCalls = saytExpandCalls.filter(t => t > cutoff);
+    return saytExpandCalls.length < cfg.expandPerMinute;
+  }
+
+  function scheduleSuggestExpansion(term, version, cfg) {
+    if (!cfg.expand || !getInstanceConfig().AI_EXPAND_QUERY) return;
+    if (suggestExpandTimer) {
+      clearTimeout(suggestExpandTimer);
+      suggestExpandTimer = null;
+    }
+    suggestExpandTimer = setTimeout(() => {
+      suggestExpandTimer = null;
+      enrichSuggestions(term, version, cfg);
+    }, cfg.expansionDelayMs);
+  }
+
+  // One expandQuery() call for a prefix the user has stopped typing, then merge
+  // the expansion terms' title matches into the open dropdown. Every failure
+  // mode — over budget, network error, degraded server response, no new terms,
+  // superseded cycle — degrades silently to the keyword suggestions already on
+  // screen, because there is nothing useful to tell a user mid-keystroke.
+  async function enrichSuggestions(term, version, cfg) {
+    if (version !== suggestVersion || !suggestOpen || !els.sayt) return;
+    if (!saytExpandBudgetAllows(cfg)) {
+      debugLog('[scolta:sayt] expansion budget spent (' + cfg.expandPerMinute +
+        '/min); keyword suggestions only until the window rolls');
+      return;
+    }
+    saytExpandCalls.push(Date.now());
+
+    let expansion;
+    try {
+      expansion = await expandQuery(term);
+    } catch (e) {
+      debugLog('[scolta:sayt] expansion failed', e);
+      return;
+    }
+    if (version !== suggestVersion || !suggestOpen) return;
+
+    const rawTerms = Array.isArray(expansion) ? expansion : ((expansion && expansion.terms) || []);
+    const lower = term.toLowerCase();
+    const fresh = [];
+    for (const t of rawTerms) {
+      if (typeof t !== 'string') continue;
+      const trimmed = t.trim();
+      if (!trimmed || trimmed.toLowerCase() === lower) continue;
+      if (fresh.indexOf(trimmed) === -1) fresh.push(trimmed);
+    }
+    if (fresh.length === 0) return;
+
+    let rows = [];
+    try {
+      const searches = await Promise.all(fresh.map(
+        t => Promise.resolve(pagefind.search(t, {})).catch(() => ({ results: [] }))
+      ));
+      if (version !== suggestVersion || !suggestOpen) return;
+      const seenIds = new Set();
+      for (const s of searches) {
+        for (const r of ((s && s.results) || [])) {
+          if (seenIds.has(r.id)) continue;
+          seenIds.add(r.id);
+          rows.push(r);
+        }
+      }
+    } catch (e) {
+      debugLog('[scolta:sayt] expansion search failed', e);
+      return;
+    }
+    if (rows.length === 0) return;
+
+    // Same per-pass fragment cap as the keyword pass.
+    const slice = rows.slice(0, cfg.maxSuggestions);
+    let loaded;
+    try {
+      loaded = await Promise.all(slice.map(r => r.data()));
+    } catch (e) {
+      debugLog('[scolta:sayt] expansion fragment load failed', e);
+      return;
+    }
+    if (version !== suggestVersion || !suggestOpen) return;
+
+    const scored = scoreResults(loaded, term, SAYT_EXPANDED_WEIGHT);
+    scored.sort((a, b) => b.score - a.score);
+    const expandedSuggestions = deduplicateByTitle(scored)
+      .map(toTitleSuggestion)
+      .filter(s => s.title !== '');
+
+    const active = activeSuggestion >= 0 ? suggestions[activeSuggestion] : null;
+    const merged = mergeSuggestions(
+      suggestions,
+      expandedSuggestions,
+      cfg.maxSuggestions
+    );
+    if (merged.length === suggestions.length) return;   // nothing new survived the cap
+
+    renderSuggestions(merged, term);
+
+    // The list grew around the user's selection; keep it selected rather than
+    // silently dropping them back to "nothing active" mid-keyboard-navigation.
+    if (active) {
+      const activeKey = active.title.toLowerCase();
+      const idx = merged.findIndex(s => s.title.toLowerCase() === activeKey);
+      if (idx >= 0) setActiveSuggestion(idx);
+    }
   }
 
   // Count distinct results across the union of search terms under the given
@@ -1636,19 +2706,49 @@
     }
   }
 
-  // Compute the query-fixed facet counts for a typed query.
+  // The structural-only projection of a filter object: the dimensions that
+  // scope the corpus (language/site/etc. in SKIP_FILTER_DIMENSIONS — typically
+  // the auto-language default) with every user-facing facet selection dropped.
+  // Every facet count in this file is computed under this scope and never under
+  // activeFilters, so the numbers are independent of which facets the user has
+  // clicked. Counting under the user's selection is the obvious shortcut and it
+  // is wrong: a page loaded with ?f_difficulty=Beginner would report 0 for every
+  // other value, hideEmptyFacets would hide them all, and the user could never
+  // switch facet value.
+  function structuralFilterScope(baseFilters) {
+    const structuralFilters = {};
+    for (const [dim, vals] of Object.entries(baseFilters || {})) {
+      if (SKIP_FILTER_DIMENSIONS.has(dim.toLowerCase())) {
+        structuralFilters[dim] = vals;
+      }
+    }
+    return structuralFilters;
+  }
+
+  // Add two count maps, per dimension per value. A value present in one and
+  // absent from the other starts at 0. Neither input is mutated.
+  function addFacetCounts(base, extra) {
+    const out = {};
+    for (const [dim, vals] of Object.entries(base || {})) {
+      out[dim] = Object.assign({}, vals);
+    }
+    for (const [dim, vals] of Object.entries(extra || {})) {
+      if (!out[dim]) out[dim] = {};
+      for (const [value, n] of Object.entries(vals)) {
+        out[dim][value] = (out[dim][value] || 0) + n;
+      }
+    }
+    return out;
+  }
+
+  // The typed query's facet counts AND the identity of the documents they were
+  // counted over, so the expansion pass can fold its own contribution in
+  // without counting any document twice. Returns
+  // { counts: { dimension: { value: count } }, ids: Set, urls: Set }.
   //
-  // Counts are a fixed property of the typed query: computed once when the query
-  // is submitted, never recomputed on a facet toggle or after AI expansion. A
-  // single Pagefind search returns per-value counts for every dimension in one
+  // A single Pagefind search returns per-value counts for every dimension in one
   // shot (`.filters`); the count next to a value means "N of the results for
-  // your search are tagged this." To keep counts stable yet correctly scoped,
-  // the search keeps only STRUCTURAL filter dimensions (language/site/etc. in
-  // SKIP_FILTER_DIMENSIONS — typically the auto-language default) and drops
-  // every user-facing facet selection, so the numbers are independent of which
-  // facets the user has clicked. Expansion is LLM-driven and nondeterministic,
-  // so deriving counts from the deterministic typed query keeps them stable
-  // run-to-run. Returns { dimension: { value: count } }.
+  // your search are tagged this."
   //
   // The count source must follow the same query-mode decision the result list
   // makes (see the OR fallback in doSearch). Pagefind ANDs every word of a
@@ -1669,50 +2769,149 @@
   // search — they can diverge (a user-applied facet may empty the primary search
   // while the structural search still matches), and counts describe the typed
   // query against structural scope, so the structural search's verdict governs.
-  async function computeQueryFacetCounts(query, baseFilters, meaningfulTerms, isForcedPhrase) {
-    const structuralFilters = {};
-    for (const [dim, vals] of Object.entries(baseFilters || {})) {
-      if (SKIP_FILTER_DIMENSIONS.has(dim.toLowerCase())) {
-        structuralFilters[dim] = vals;
-      }
+  //
+  // `urls` is populated only where fragments were loaded anyway (mode 2), so the
+  // expansion delta can collapse a document the result list collapses by URL. In
+  // mode 1 nothing is loaded — `search.filters` counts the FULL matched set
+  // without touching a fragment, which is the property that makes this pass
+  // nearly free — so `urls` is empty there and the delta dedups by fragment id
+  // alone. Two fragment ids sharing one normalized URL therefore still count
+  // twice across the typed/expansion boundary in mode 1, exactly as Pagefind's
+  // own native counts already do within it.
+  async function computeTypedFacetCounts(query, structuralFilters, meaningfulTerms, isForcedPhrase) {
+    const search = await pagefindSearch(query, structuralFilters);
+    // Mode 1: AND search matched — native per-value counts, exact.
+    if (search && search.results && search.results.length > 0) {
+      return {
+        counts: search.filters || {},
+        // Uncapped and free: `results` carries every match, and only `.data()`
+        // costs anything.
+        ids: new Set(search.results.map(r => r.id)),
+        urls: new Set(),
+      };
     }
+    // Mode 2: AND search empty but the OR fallback would populate the list —
+    // counts must follow the same union the result path shows.
+    const terms = Array.isArray(meaningfulTerms) ? meaningfulTerms : [];
+    if (!isForcedPhrase && terms.length > 1) {
+      return await computeUnionFacetCounts(terms, structuralFilters);
+    }
+    // Mode 3: empty and no fallback — zeros are truthful.
+    return {
+      counts: (search && search.filters) ? search.filters : {},
+      ids: new Set(),
+      urls: new Set(),
+    };
+  }
+
+  // Compute the query-fixed facet counts for a typed query, before expansion.
+  //
+  // Counts are a fixed property of the search: computed once when the query is
+  // submitted and never recomputed on a facet toggle, a sort or a load-more, so
+  // the panel numbers never move on click. They are recomputed exactly once
+  // more, when AI expansion lands and changes the result list under them — see
+  // computeExpandedFacetCounts(). Returns { dimension: { value: count } }.
+  //
+  // The mode decision and the scoping rules live in computeTypedFacetCounts();
+  // this is the thin caller the primary pass uses, which wants the counts alone.
+  async function computeQueryFacetCounts(query, baseFilters, meaningfulTerms, isForcedPhrase) {
+    const structuralFilters = structuralFilterScope(baseFilters);
     try {
-      const search = await pagefindSearch(query, structuralFilters);
-      // Mode 1: AND search matched — native per-value counts, exact.
-      if (search && search.results && search.results.length > 0) {
-        return search.filters || {};
-      }
-      // Mode 2: AND search empty but the OR fallback would populate the list —
-      // counts must follow the same union the result path shows.
-      const terms = Array.isArray(meaningfulTerms) ? meaningfulTerms : [];
-      if (!isForcedPhrase && terms.length > 1) {
-        return await computeUnionFacetCounts(terms, structuralFilters);
-      }
-      // Mode 3: empty and no fallback — zeros are truthful.
-      return (search && search.filters) ? search.filters : {};
+      const typed = await computeTypedFacetCounts(
+        query, structuralFilters, meaningfulTerms, isForcedPhrase);
+      return typed.counts;
     } catch (_) {
       return {};   // facet counts are best-effort — never block render
     }
   }
 
-  // Tally facet counts from the UNION of per-term matches — the count-path
-  // mirror of the result path's OR fallback. Runs one structural-only-filtered
-  // search per meaningful term, unions the results by fragment id (so a document
-  // matching several terms is counted ONCE — never sum per-term `.filters`, which
-  // double-counts), caps each term's results at MAX_PAGEFIND_RESULTS (the same
-  // cap the result path loads under), then tallies each unique fragment's
-  // `data.filters` into { dimension: { value: count } }. Fragment filter values
-  // may be a scalar or an array — both are handled. Every dimension found is
-  // tallied (renderFilters skips structural dims anyway). Fragment loads are
-  // Pagefind-cached by hash, and the result path loads largely the same
-  // fragments, so the marginal cost is small.
-  async function computeUnionFacetCounts(terms, structuralFilters) {
+  // Fold the AI expansion's contribution into the typed query's counts:
+  //
+  //   counts = countsOf(typed ids) + countsOf(expansion ids \ typed ids)
+  //
+  // Subtracting the typed set is what satisfies "never count the same document
+  // twice", and it is why the delta is computed against the id set the typed
+  // pass ended with rather than as a second independent tally. Both terms are
+  // computed under structuralFilters, never under activeFilters — see
+  // structuralFilterScope() for why.
+  //
+  // `expansionTerms` is the SEEDING query list, passed through from
+  // mergeExpandedSearchResults() rather than rebuilt here: it is assembled
+  // behind an async sub-word admission guard, and a second copy of that logic
+  // would drift from the one that decided the result list. Terms that only lend
+  // co-occurrence score (the user's typed words, agreement-only phrase
+  // sub-words) introduce no documents of their own and are excluded upstream —
+  // counting them would report documents that are not in the list.
+  //
+  // Returns the merged count map, or null when the typed pass itself failed, in
+  // which case the caller keeps whatever the panel already shows rather than
+  // blanking it.
+  async function computeExpandedFacetCounts(query, baseFilters, countContext, expansionTerms) {
+    const structuralFilters = structuralFilterScope(baseFilters);
+    const ctx = countContext || {};
+    let typed;
+    try {
+      typed = await computeTypedFacetCounts(
+        query, structuralFilters, ctx.meaningfulTerms, ctx.isForcedPhrase);
+    } catch (_) {
+      return null;   // best-effort — never blank a panel that is already right
+    }
+    const terms = [];
+    for (const term of (expansionTerms || [])) {
+      // The typed query is already counted; searching it again would be a memo
+      // hit but its documents are all in `typed.ids` anyway.
+      if (typeof term === 'string' && term && term !== query && terms.indexOf(term) === -1) {
+        terms.push(term);
+      }
+    }
+    if (terms.length === 0) return typed.counts;
+    try {
+      const delta = await computeUnionFacetCounts(terms, structuralFilters, typed);
+      return addFacetCounts(typed.counts, delta.counts);
+    } catch (_) {
+      return typed.counts;
+    }
+  }
+
+  // Tally facet counts from the UNION of per-term matches, over the documents a
+  // caller has not already counted. Two callers: the count-path mirror of the
+  // result path's OR fallback (no seed — the union IS the count), and the
+  // expansion delta (seeded with the typed pass's ids, so only documents
+  // expansion actually added are counted).
+  //
+  // Runs one structural-only-filtered search per term, unions the results by
+  // fragment id (so a document matching several terms is counted ONCE — never
+  // sum per-term `.filters`, which double-counts every document that matched
+  // more than one query), and caps each term's results at MAX_PAGEFIND_RESULTS,
+  // the same cap the result path loads under, so the tally describes the
+  // documents that actually reached the list.
+  //
+  // How the unique documents are then counted depends on the facet index:
+  //   - With the artifact: facetCountsFor() reads nothing but `r.id`, so the
+  //     delta costs ZERO fragment loads and is exact.
+  //   - Without it: load each unique fragment and tally `data.filters`. Filter
+  //     values may be a scalar or an array — both are handled — and a Set per
+  //     document guards against a repeated value within one document's array, so
+  //     a document carrying two values in one dimension adds one to each of
+  //     those two values and never two to one. Every dimension found is tallied
+  //     (renderFilters skips structural dims anyway). Fragment loads are
+  //     Pagefind-cached by hash, and the result path loads largely the same
+  //     fragments, so the marginal cost is small. Since the fragments are loaded
+  //     here anyway, documents are additionally collapsed by the normalized URL
+  //     mergeResults() dedups the RESULT list by, so the panel and the list
+  //     agree when one page is indexed under two fragment ids.
+  //
+  // `seed` is an optional { ids, urls } to start from — both sets are copied,
+  // never mutated. Returns { counts, ids, urls }: the counts for the documents
+  // this call added, and the sets it ended with.
+  async function computeUnionFacetCounts(terms, structuralFilters, seed) {
     const CONFIG = getInstanceConfig();
     const searches = await Promise.all(
       terms.map(term => pagefindSearch(term, structuralFilters))
     );
-    const seenIds = new Set();
-    const dataPromises = [];
+    const seenIds = new Set((seed && seed.ids) ? seed.ids : []);
+    const seenUrls = new Set((seed && seed.urls) ? seed.urls : []);
+    const fresh = [];
     for (const search of searches) {
       if (!search || !search.results) continue;
       const toLoad = Math.min(search.results.length, CONFIG.MAX_PAGEFIND_RESULTS);
@@ -1720,17 +2919,23 @@
         const r = search.results[j];
         if (seenIds.has(r.id)) continue;   // union by id — count each doc once
         seenIds.add(r.id);
-        dataPromises.push(r.data());
+        fresh.push(r);
       }
     }
-    const fragments = await Promise.all(dataPromises);
+    if (facetIndex) {
+      return { counts: facetCountsFor(facetIndex, fresh), ids: seenIds, urls: seenUrls };
+    }
+    const fragments = await Promise.all(fresh.map(r => r.data()));
     const counts = {};
     for (const data of fragments) {
+      const url = normalizeResultUrl(resolveUrl((data && data.url) || ''));
+      if (url) {
+        if (seenUrls.has(url)) continue;   // one page, however many fragment ids
+        seenUrls.add(url);
+      }
       const filters = data && data.filters;
       if (!filters) continue;
       for (const [dim, vals] of Object.entries(filters)) {
-        // Fragment filter values may be a scalar or an array; a Set per doc
-        // guards against a repeated value within one document's array.
         const values = new Set(Array.isArray(vals) ? vals : [vals]);
         if (!counts[dim]) counts[dim] = {};
         for (const v of values) {
@@ -1738,7 +2943,16 @@
         }
       }
     }
-    return counts;
+    return { counts, ids: seenIds, urls: seenUrls };
+  }
+
+  // The URL identity the result list is deduplicated by: strip `.html`, strip a
+  // trailing slash, lowercase — the same normalization the Rust merge applies
+  // before it dedups. Shared with the facet-count path so the panel collapses
+  // exactly the documents the list collapses, rather than a second, drifting
+  // definition of "the same page".
+  function normalizeResultUrl(u) {
+    return (u || '').replace(/\.html$/, '').replace(/\/$/, '').toLowerCase();
   }
 
   // Deduplicate results with near-identical titles using Jaccard similarity.
@@ -1821,7 +3035,7 @@
         // deduplication, so its output URLs may not match the raw keys from pagefind.
         // Build a multi-key map with normalized variants so we can always find the
         // original result object to attach its full data.
-        const normalizeUrl = u => (u || '').replace(/\.html$/, '').replace(/\/$/, '').toLowerCase();
+        const normalizeUrl = normalizeResultUrl;
         const dataByUrl = new Map();
         for (const r of [...currentResults, ...newResults]) {
           const rawUrl = resolveUrl(r.data.url || '');
@@ -1849,11 +3063,15 @@
         console.warn("[scolta] WASM merge_results failed, using fallback:", e.message);
       }
     }
-    // JS fallback merge
+    // JS fallback merge. Keyed by the SAME normalized URL the Rust merge dedups
+    // by (`normalize_urls: true` above), not the raw one: keeping two identities
+    // for "the same page" meant /foo and /foo.html stayed two results here and
+    // collapsed to one under WASM, and the facet-count path — which collapses
+    // them — would then agree with only one of the two merges.
     const BONUS = getInstanceConfig().CROSS_LIST_BONUS;
     const urlMap = new Map();
     for (const r of currentResults) {
-      const url = resolveUrl(r.data.url || '');
+      const url = normalizeResultUrl(resolveUrl(r.data.url || ''));
       if (!urlMap.has(url)) {
         urlMap.set(url, { ...r });
       } else {
@@ -1862,7 +3080,7 @@
       }
     }
     for (const r of newResults) {
-      const url = resolveUrl(r.data.url || '');
+      const url = normalizeResultUrl(resolveUrl(r.data.url || ''));
       if (!urlMap.has(url)) {
         urlMap.set(url, { ...r });
       } else {
@@ -2261,8 +3479,14 @@
     return max; // 0 when no data — the caller fails closed
   }
 
-  async function mergeExpandedSearchResults(expandedTerms, originalQuery, searchQuery, preserveFilters, version, sortOverride, subjectTerms) {
+  async function mergeExpandedSearchResults(expandedTerms, originalQuery, searchQuery, preserveFilters, version, sortOverride, subjectTerms, countContext) {
     const CONFIG = getInstanceConfig();
+    // The seeding queries this pass ends up running — the ones that introduce
+    // documents into the result list, and therefore the ones the facet counts
+    // have to cover. Filled by whichever branch below builds the list, and
+    // deliberately taken from the list that was actually searched rather than
+    // rebuilt at the point of use.
+    let countTerms = [];
     const validTerms = expandedTerms
       ? expandedTerms.filter(t => t.toLowerCase() !== originalQuery.toLowerCase())
       : [];
@@ -2492,7 +3716,13 @@
       if (withField.length === 0) {
         debugLog('[scolta:sort] Sort field "' + field + '" absent from all results, falling back to relevance');
         currentSortOverride = null;
+        // The union never replaced the list — allScoredResults is still the
+        // primary typed search — so the typed counts still describe it exactly.
       } else {
+        // Every term in the sorted union seeds: each one's documents go into
+        // urlMap and out to the list. The typed query is counted by the typed
+        // pass, so only the rest is the delta.
+        countTerms = [...termSet].filter(t => t !== searchQuery);
         withField.sort((a, b) => {
           const av = parseFloat(a.meta[field]);
           const bv = parseFloat(b.meta[field]);
@@ -2583,6 +3813,13 @@
         corpusTotal: subwordCorpusSize(activeFilters),
         strongMatched: false,
       };
+      // The same seeding test searchAndLoadParallel() applies, over the same
+      // array: a typed term or an agreement-only sub-word lends co-occurrence
+      // score to documents another query already found and never emits a URL of
+      // its own, so counting it would put documents in the panel that are not in
+      // the list.
+      countTerms = queries.filter(q => !q.isTyped && !q.agreementOnly).map(q => q.term);
+
       const expandedResults = await searchAndLoadParallel(queries, activeFilters, searchQuery, expandSpecificity);
 
       if (version !== searchVersion) {
@@ -2607,13 +3844,50 @@
 
     displayedCount = 0;
 
-    // queryFacetCounts is fixed for the typed query — computed once in doSearch's
-    // primary pass and deliberately NOT recomputed here. The panel (dimensions,
-    // values, counts, order) is therefore byte-identical before and after AI
-    // expansion; only the result list and header count change.
-    renderFilters();
+    // renderResults() reconciles the container by result identity, so when the
+    // expansion pass produces the same ordered list as the first paint this
+    // costs zero node churn: the header gains its "(with expanded terms)" label
+    // and every result node — with whatever a platform swapped into it — stays
+    // exactly where it is.
+    //
+    // Painted BEFORE the count pass below, for the reason doSearch() paints
+    // before its own: the count pass awaits searches, and the list is what the
+    // user is waiting for. The panel holds its pre-expansion state across the
+    // gap rather than being repainted against counts that are about to change.
+    renderResults(true, 'expansion');
 
-    renderResults(true);
+    // Expansion changed the result list, so the counts describing it are
+    // recomputed here — the one and only time they move within a typed query.
+    //
+    // They used to be left alone, on the argument that a panel derived from the
+    // deterministic typed query stays stable run-to-run while an LLM expansion
+    // does not. But the LIST is equally LLM-driven, and a panel that disagrees
+    // with the list beside it is worse than one that varies with it: every count
+    // read low, so filtering by a value returned more results than promised, and
+    // under the default hideEmptyFacets policy a value whose only matches came
+    // from expansion counted 0 and was hidden outright — taking its whole
+    // dimension group with it when every value was expansion-derived, which left
+    // the user unable to filter on content sitting in front of them.
+    //
+    // Still fixed against everything else: a facet click, a sort and a load-more
+    // are all preserveFilters cycles, which skip this and reuse the stored
+    // counts, so no count moves when the user clicks. Counts also stay
+    // selection-independent (structural scope only), which means an LLM-applied
+    // filter hint can narrow the list without narrowing the panel — a known and
+    // deliberate gap, since making counts follow that selection would reintroduce
+    // exactly the "every other value reads 0 and disappears" failure.
+    if (!preserveFilters && countTerms.length > 0) {
+      const counts = await computeExpandedFacetCounts(
+        searchQuery, activeFilters, countContext, countTerms);
+      // Several awaits deep: a newer doSearch() may own the panel by now, and
+      // late counts from an abandoned query must neither be stored nor rendered.
+      if (version !== searchVersion) {
+        debugLog('[scolta:expand] Discarding stale post-expansion facet counts (version', version, 'vs current', searchVersion, ')');
+        return;
+      }
+      if (counts) queryFacetCounts = counts;
+    }
+    renderFilters();
     debugLog(`[scolta:expand] ${sortOverride ? 'Native sort' : 'Merged'}: ${allScoredResults.length} results`);
   }
 
@@ -2625,156 +3899,196 @@
     const query = els.queryInput.value.trim();
     if (!query || !pagefind) return;
 
+    // The user committed. Any pending or in-flight suggest work is now noise:
+    // cancel it, take the dropdown down, and hold the suggest path off until
+    // the primary paint lands.
+    cancelSuggest();
+    closeSuggestions();
+    recordRecentSearch(query);
+
     const version = ++searchVersion;
 
-    if (abortController) abortController.abort();
-    abortController = new AbortController();
-
-    currentQuery = query;
-
-    displayedCount = 0;
-    allScoredResults = [];
-    hadSpecificMatch = false;
-    conversationMessages = [];
-    followUpCount = 0;
-    // Fresh cycle, fresh memo: identical searches are shared WITHIN a cycle
-    // only, so a count from an earlier query can never leak into this one.
-    searchMemo = new Map();
-    if (!preserveFilters) {
-      var effectiveFilters = initialFilters ? Object.assign({}, initialFilters) : {};
-      if (!effectiveFilters.language && defaultLangCode && CONFIG.AUTO_LANGUAGE_FILTER) {
-        var langs = CONFIG.AI_LANGUAGES || [];
-        if (langs.length > 1 && langs.includes(defaultLangCode)) {
-          effectiveFilters.language = new Set([defaultLangCode]);
-        }
-      }
-      activeFilters = effectiveFilters;
-    }
-
-    // Update URL with search query and active filter state.
-    try {
-      var url = new URL(window.location.href);
-      url.searchParams.set('q', query);
-      for (const key of [...url.searchParams.keys()]) {
-        if (key.startsWith('f_')) url.searchParams.delete(key);
-      }
-      for (const [dim, vals] of Object.entries(activeFilters)) {
-        if (vals instanceof Set && vals.size > 0) {
-          url.searchParams.set('f_' + dim, [...vals].join(','));
-        }
-      }
-      history.replaceState(null, '', url.toString());
-    } catch (e) {
-      // Silently ignore — URL sync is non-critical.
-    }
-
-    els.layout.style.display = "grid";
-    els.results.innerHTML = '<p class="scolta-searching">Searching...</p>';
-    els.resultsHeader.innerHTML = "";
-    els.noResults.style.display = "none";
-    els.aiSummary.style.display = "none";
-    els.loadMore.style.display = "none";
-    if (!preserveFilters) {
-      els.expandedTerms.style.display = "none";
-    }
-
-    const meaningfulTerms = extractSearchTerms(query);
-    const searchQuery = meaningfulTerms.length > 0 ? meaningfulTerms.join(' ') : query;
-    // Detect quoted phrase: user typed "hello world" with surrounding double-quotes.
-    // Pagefind receives the unquoted terms; the Rust scorer receives the quoted form
-    // so extract_query() can set forced_phrase = true and apply phrase multipliers.
-    const trimmedQuery = query.trim();
-    const isForcedPhrase =
-      trimmedQuery.startsWith('"') && trimmedQuery.endsWith('"') && trimmedQuery.length > 2;
-    const scorerQuery = isForcedPhrase ? trimmedQuery : searchQuery;
-    debugLog('[scolta:search] Filtered query:', JSON.stringify(sanitizeQueryForLogging(searchQuery)), '(original:', JSON.stringify(sanitizeQueryForLogging(query)), ')');
-
-    allHighlightTerms = meaningfulTerms.length > 0
-      ? meaningfulTerms.filter(t => t.length > 2)
-      : query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
-
-    // Phase 1: Primary search — render results IMMEDIATELY
-    const expandPromise = preserveFilters
-      ? Promise.resolve(lastExpandedTerms)
-      : expandQuery(query);
-    expansionInFlight = !preserveFilters && CONFIG.AI_EXPAND_QUERY;
-
-    const primarySearch = await pagefindSearch(searchQuery, activeFilters);
-    allScoredResults = await loadAndScoreSearch(primarySearch, scorerQuery, 1.0);
-
-    // OR fallback: only activate when AND search returns ZERO results.
-    // This prevents diluting precision when the user provides many terms
-    // to find a specific piece of content. Forced-phrase queries (quoted)
-    // never fall back to OR — the user explicitly asked for phrase results.
-    usedOrFallback = false;
-    if (!isForcedPhrase && meaningfulTerms.length > 1 && primarySearch.results.length === 0) {
-      debugLog('[scolta:search] AND returned 0 results — running OR fallback');
-      const orQueries = meaningfulTerms.map(term => ({ term, weight: 0.6 }));
-      // Specificity weighting so the OR fallback leads with the rare on-intent
-      // term, not the ubiquitous typed word. Closes the typed-word exemption:
-      // a common word the user typed is still searched (recall) but no longer
-      // floods the head of the list.
-      const orSpecificity = {
-        enabled: CONFIG.SPECIFICITY_WEIGHTING,
-        corpusTotal: subwordCorpusSize(activeFilters),
-        strongMatched: false,
-      };
-      const orResults = await searchAndLoadParallel(orQueries, activeFilters, searchQuery, orSpecificity);
-      // Only adopt the specificity signal if this search is still current — a
-      // newer doSearch() resets hadSpecificMatch, and a late-resolving stale OR
-      // fallback must not repollute it.
-      if (version === searchVersion && orSpecificity.strongMatched) hadSpecificMatch = true;
-      allScoredResults = mergeResults(allScoredResults, orResults);
-      applyAgreementBonus(allScoredResults, orResults);
-      usedOrFallback = allScoredResults.length > 0;
-    }
-
-    allScoredResults.sort((a, b) => b.score - a.score);
-    allScoredResults = deduplicateByTitle(allScoredResults);
-
-    const priorityPages = getInstancePriorityPages();
-    if (priorityPages.length > 0 && scoltaWasm && scoltaWasm.match_priority_pages) {
-      try {
-        const priorityInput = JSON.stringify({ query: currentQuery, priority_pages: priorityPages });
-        const priorityMatches = JSON.parse(scoltaWasm.match_priority_pages(priorityInput));
-        if (priorityMatches && priorityMatches.length > 0) {
-          const priorityMap = {};
-          priorityMatches.forEach(pm => {
-            priorityMap[(pm.url || '').replace(/\/$/, '').toLowerCase()] = pm;
-          });
-          allScoredResults.forEach(result => {
-            const url = resolveUrl(result.data.url || '').replace(/\/$/, '').toLowerCase();
-            if (priorityMap[url]) {
-              result.score = (result.score || 0) + (priorityMap[url].boost || 100);
-            }
-          });
-          allScoredResults.sort((a, b) => b.score - a.score);
-        }
-      } catch (e) {
-        console.warn('[scolta] Priority page matching failed', e);
-      }
-    }
-
-    // Paint the results BEFORE computing facet counts. The count pass below is a
-    // second full Pagefind search, and on a production-size index that is the
-    // dominant cost of the whole cycle (measured: results ready at 24,558 ms,
-    // first paint at 35,626 ms — the user waited 11 seconds for numbers in the
-    // filter panel while the list they asked for sat finished in memory).
+    // The suggest path stands down from here until the primary paint lands.
     //
-    // The filter panel is deliberately NOT repainted in the gap. renderFilters()
-    // is count-driven — under the default hideEmptyFacets policy a zero-count
-    // value is hidden entirely — so rendering it against counts that have not
-    // been updated yet would show the PREVIOUS query's visible value set and then
-    // reshuffle when the real counts land. Holding the last painted panel until
-    // then introduces no new visual state: it never flashes empty, and on the
-    // first search of a page load the panel simply appears when the counts
-    // arrive, exactly as it did before this reorder.
-    renderResults();
+    // Two things this has to get right. The window is owned by a VERSION
+    // rather than flagged by a boolean: two doSearch() cycles overlap whenever
+    // the user commits again while one is in flight, and with a boolean the
+    // first cycle's exit unsuppresses the suggest path in the middle of the
+    // second cycle's paint. And EVERYTHING inside the window lives in the try
+    // below, not just the awaits — anything that escapes without releasing the
+    // window leaves suggestions dead for the rest of the page's life, which is
+    // silent, permanent, and invisible in every test that does not fail a
+    // search on purpose (see tests/js/sayt.test.js).
+    paintingVersion = version;
 
-    // Counts are a fixed property of the typed query: compute them once, only
-    // when the typed query changes (!preserveFilters). A facet toggle, sort, or
+    // Declared out here because the tail of the cycle — the facet-count pass
+    // and the expansion phase, both of which run after the window closes —
+    // still reads them.
+    let meaningfulTerms, searchQuery, isForcedPhrase, expandPromise;
+
+    try {
+      if (abortController) abortController.abort();
+      abortController = new AbortController();
+
+      currentQuery = query;
+
+      displayedCount = 0;
+      allScoredResults = [];
+      hadSpecificMatch = false;
+      conversationMessages = [];
+      followUpCount = 0;
+      // Fresh cycle, fresh memo: identical searches are shared WITHIN a cycle
+      // only, so a count from an earlier query can never leak into this one.
+      searchMemo = new Map();
+      if (!preserveFilters) {
+        var effectiveFilters = initialFilters ? Object.assign({}, initialFilters) : {};
+        if (!effectiveFilters.language && defaultLangCode && CONFIG.AUTO_LANGUAGE_FILTER) {
+          var langs = CONFIG.AI_LANGUAGES || [];
+          if (langs.length > 1 && langs.includes(defaultLangCode)) {
+            effectiveFilters.language = new Set([defaultLangCode]);
+          }
+        }
+        activeFilters = effectiveFilters;
+      }
+
+      // Update URL with search query and active filter state.
+      try {
+        var url = new URL(window.location.href);
+        url.searchParams.set('q', query);
+        for (const key of [...url.searchParams.keys()]) {
+          if (key.startsWith('f_')) url.searchParams.delete(key);
+        }
+        for (const [dim, vals] of Object.entries(activeFilters)) {
+          if (vals instanceof Set && vals.size > 0) {
+            url.searchParams.set('f_' + dim, [...vals].join(','));
+          }
+        }
+        history.replaceState(null, '', url.toString());
+      } catch (e) {
+        // Silently ignore — URL sync is non-critical.
+      }
+
+      els.layout.style.display = "grid";
+      emitBeforeResults('loading');
+      els.results.innerHTML = '<p class="scolta-searching">Searching...</p>';
+      paintedEntries = [];
+      paintedHighlightSignature = null;
+      emitResultsRendered([], [], [], false);
+      els.resultsHeader.innerHTML = "";
+      els.noResults.style.display = "none";
+      els.aiSummary.style.display = "none";
+      els.loadMore.style.display = "none";
+      if (!preserveFilters) {
+        els.expandedTerms.style.display = "none";
+      }
+
+      meaningfulTerms = extractSearchTerms(query);
+      searchQuery = meaningfulTerms.length > 0 ? meaningfulTerms.join(' ') : query;
+      // Detect quoted phrase: user typed "hello world" with surrounding double-quotes.
+      // Pagefind receives the unquoted terms; the Rust scorer receives the quoted form
+      // so extract_query() can set forced_phrase = true and apply phrase multipliers.
+      const trimmedQuery = query.trim();
+      isForcedPhrase =
+        trimmedQuery.startsWith('"') && trimmedQuery.endsWith('"') && trimmedQuery.length > 2;
+      const scorerQuery = isForcedPhrase ? trimmedQuery : searchQuery;
+      debugLog('[scolta:search] Filtered query:', JSON.stringify(sanitizeQueryForLogging(searchQuery)), '(original:', JSON.stringify(sanitizeQueryForLogging(query)), ')');
+
+      allHighlightTerms = meaningfulTerms.length > 0
+        ? meaningfulTerms.filter(t => t.length > 2)
+        : query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+
+      // Phase 1: Primary search — render results IMMEDIATELY
+      expandPromise = preserveFilters
+        ? Promise.resolve(lastExpandedTerms)
+        : expandQuery(query);
+      expansionInFlight = !preserveFilters && CONFIG.AI_EXPAND_QUERY;
+
+      const primarySearch = await pagefindSearch(searchQuery, activeFilters);
+      allScoredResults = await loadAndScoreSearch(primarySearch, scorerQuery, 1.0);
+
+      // OR fallback: only activate when AND search returns ZERO results.
+      // This prevents diluting precision when the user provides many terms
+      // to find a specific piece of content. Forced-phrase queries (quoted)
+      // never fall back to OR — the user explicitly asked for phrase results.
+      usedOrFallback = false;
+      if (!isForcedPhrase && meaningfulTerms.length > 1 && primarySearch.results.length === 0) {
+        debugLog('[scolta:search] AND returned 0 results — running OR fallback');
+        const orQueries = meaningfulTerms.map(term => ({ term, weight: 0.6 }));
+        // Specificity weighting so the OR fallback leads with the rare on-intent
+        // term, not the ubiquitous typed word. Closes the typed-word exemption:
+        // a common word the user typed is still searched (recall) but no longer
+        // floods the head of the list.
+        const orSpecificity = {
+          enabled: CONFIG.SPECIFICITY_WEIGHTING,
+          corpusTotal: subwordCorpusSize(activeFilters),
+          strongMatched: false,
+        };
+        const orResults = await searchAndLoadParallel(orQueries, activeFilters, searchQuery, orSpecificity);
+        // Only adopt the specificity signal if this search is still current — a
+        // newer doSearch() resets hadSpecificMatch, and a late-resolving stale OR
+        // fallback must not repollute it.
+        if (version === searchVersion && orSpecificity.strongMatched) hadSpecificMatch = true;
+        allScoredResults = mergeResults(allScoredResults, orResults);
+        applyAgreementBonus(allScoredResults, orResults);
+        usedOrFallback = allScoredResults.length > 0;
+      }
+
+      allScoredResults.sort((a, b) => b.score - a.score);
+      allScoredResults = deduplicateByTitle(allScoredResults);
+
+      const priorityPages = getInstancePriorityPages();
+      if (priorityPages.length > 0 && scoltaWasm && scoltaWasm.match_priority_pages) {
+        try {
+          const priorityInput = JSON.stringify({ query: currentQuery, priority_pages: priorityPages });
+          const priorityMatches = JSON.parse(scoltaWasm.match_priority_pages(priorityInput));
+          if (priorityMatches && priorityMatches.length > 0) {
+            const priorityMap = {};
+            priorityMatches.forEach(pm => {
+              priorityMap[(pm.url || '').replace(/\/$/, '').toLowerCase()] = pm;
+            });
+            allScoredResults.forEach(result => {
+              const url = resolveUrl(result.data.url || '').replace(/\/$/, '').toLowerCase();
+              if (priorityMap[url]) {
+                result.score = (result.score || 0) + (priorityMap[url].boost || 100);
+              }
+            });
+            allScoredResults.sort((a, b) => b.score - a.score);
+          }
+        } catch (e) {
+          console.warn('[scolta] Priority page matching failed', e);
+        }
+      }
+
+      // Paint the results BEFORE computing facet counts. The count pass below is a
+      // second full Pagefind search, and on a production-size index that is the
+      // dominant cost of the whole cycle (measured: results ready at 24,558 ms,
+      // first paint at 35,626 ms — the user waited 11 seconds for numbers in the
+      // filter panel while the list they asked for sat finished in memory).
+      //
+      // The filter panel is deliberately NOT repainted in the gap. renderFilters()
+      // is count-driven — under the default hideEmptyFacets policy a zero-count
+      // value is hidden entirely — so rendering it against counts that have not
+      // been updated yet would show the PREVIOUS query's visible value set and then
+      // reshuffle when the real counts land. Holding the last painted panel until
+      // then introduces no new visual state: it never flashes empty, and on the
+      // first search of a page load the panel simply appears when the counts
+      // arrive, exactly as it did before this reorder.
+      renderResults(false, 'search');
+    } finally {
+      // Only the owner releases the window. If a newer cycle started while
+      // this one was in flight it owns the window now, and releasing it here
+      // would unsuppress the suggest path in the middle of that cycle's paint.
+      // `finally` without `catch` still rethrows, so a caller sees a failed
+      // search exactly as it did before any of this existed.
+      if (paintingVersion === version) paintingVersion = 0;
+    }
+
+    // Counts are a fixed property of the search: compute them once, only when
+    // the typed query changes (!preserveFilters). A facet toggle, sort, or
     // load-more (preserveFilters === true) reuses the stored counts so the panel
-    // numbers never move on click.
+    // numbers never move on click. They are folded over exactly once more, in
+    // mergeExpandedSearchResults(), when AI expansion changes the list they
+    // describe.
     if (!preserveFilters) {
       const counts = await computeQueryFacetCounts(searchQuery, activeFilters, meaningfulTerms, isForcedPhrase);
       // The count pass is async, so a newer doSearch() may have superseded this
@@ -2852,14 +4166,18 @@
         }
       }
       renderExpandedTerms(expandedTerms, query);
-      await mergeExpandedSearchResults(expandedTerms, query, searchQuery, preserveFilters, version, currentSortOverride, subjectTerms);
+      // meaningfulTerms / isForcedPhrase ride along so the post-expansion count
+      // pass can reproduce the typed query's own counts under the same
+      // AND-or-OR-union mode decision this cycle made, without re-deriving
+      // either from the query string.
+      await mergeExpandedSearchResults(expandedTerms, query, searchQuery, preserveFilters, version, currentSortOverride, subjectTerms, { meaningfulTerms, isForcedPhrase });
 
       if (version !== searchVersion) return;
 
       // If mergeExpandedSearchResults returned early (no valid terms, no sort override),
       // it did not call renderResults(); show the final state now.
       if (allScoredResults.length === 0) {
-        renderResults();
+        renderResults(false, 'expansion');
       }
 
       renderSortIndicator(currentSortOverride);
@@ -2876,6 +4194,9 @@
     if (abortController) abortController.abort();
     abortController = null;
     cancelPreload();
+    cancelSuggest();
+    closeSuggestions();
+    paintingVersion = 0;
     els.queryInput.value = '';
     els.searchClear.style.display = "none";
     els.layout.style.display = "none";
@@ -2890,6 +4211,8 @@
     }
     allScoredResults = [];
     displayedCount = 0;
+    paintedEntries = [];
+    paintedHighlightSignature = null;
     conversationMessages = [];
     followUpCount = 0;
     activeFilters = {};
@@ -2914,6 +4237,88 @@
     els.queryInput.focus();
   }
 
+  // --- Result renderer registration ---
+  //
+  // Register a function that returns the markup for one result, replacing the
+  // built-in card. See the documented contract on Scolta.setResultRenderer()
+  // below; this is the per-instance form and takes precedence over the global
+  // one for this instance only. Pass null to go back to the built-in card.
+  function setResultRenderer(fn) {
+    if (fn !== null && fn !== undefined && typeof fn !== 'function') {
+      throw new TypeError('[scolta] setResultRenderer expects a function or null');
+    }
+    instanceResultRenderer = fn || null;
+    return instanceResultRenderer;
+  }
+
+  function activeResultRenderer() {
+    return instanceResultRenderer || globalResultRenderer;
+  }
+
+  // --- Render lifecycle events ---
+  //
+  // Scolta owns the search UI, so a platform that decorates result markup
+  // (server-rendered cards, a lazily swapped fragment, behaviours bound to a
+  // card) needs to know when that markup is about to be destroyed and when it
+  // has been rebuilt. These four events are that seam, and they are the only
+  // supported one. Nothing here knows about any particular host platform.
+  //
+  //   scolta:before-results-render  { container, reason }
+  //   scolta:results-rendered       { container, results, rendered, reused, appended, query }
+  //   scolta:before-filters-render  { container }
+  //   scolta:filters-rendered       { container }
+  //
+  // `container` is always the element being written and is identical to
+  // event.target. The events bubble, so one listener on the mount point or on
+  // document sees every render. They are deliberately NOT cancellable: a render
+  // a consumer could veto would make every state assumption downstream
+  // conditional, for a use case nobody has yet.
+  function emitLifecycle(target, name, detail) {
+    if (!target || typeof target.dispatchEvent !== 'function') return;
+    if (typeof global.CustomEvent !== 'function') return;
+    try {
+      target.dispatchEvent(new global.CustomEvent(name, {
+        bubbles: true,
+        cancelable: false,
+        detail: detail,
+      }));
+    } catch (e) {
+      // A broken listener must never take the render down with it.
+      console.warn('[scolta] lifecycle listener failed for', name, e);
+    }
+  }
+
+  function emitBeforeResults(reason) {
+    emitLifecycle(els.results, 'scolta:before-results-render', {
+      container: els.results,
+      reason: reason,
+    });
+  }
+
+  // `results` is everything in the DOM after this write, in DOM order.
+  // `rendered` is the slice this write produced. `reused` lists the results
+  // whose DOM node was carried over rather than rebuilt — a superset check on
+  // `appended` for consumers that initialise nodes once. `appended` is true only
+  // on the additive "show more" path.
+  function emitResultsRendered(results, rendered, reused, appended) {
+    emitLifecycle(els.results, 'scolta:results-rendered', {
+      container: els.results,
+      results: results,
+      rendered: rendered,
+      reused: reused,
+      appended: appended,
+      query: currentQuery,
+    });
+  }
+
+  function emitBeforeFilters() {
+    emitLifecycle(els.filters, 'scolta:before-filters-render', { container: els.filters });
+  }
+
+  function emitFiltersRendered() {
+    emitLifecycle(els.filters, 'scolta:filters-rendered', { container: els.filters });
+  }
+
   // --- Filter handling ---
 
   function renderFilters() {
@@ -2934,8 +4339,10 @@
     dims.sort((a, b) => filterDimLabel(a).localeCompare(filterDimLabel(b)));
 
     if (dims.length === 0) {
+      emitBeforeFilters();
       container.innerHTML = "";
       els.layout.classList.remove("has-filters");
+      emitFiltersRendered();
       return;
     }
 
@@ -2986,7 +4393,9 @@
       if (itemsHtml === "") continue;
       html += `<div class="scolta-filter-group"><h3>${escapeHtml(filterDimLabel(dim))}</h3>${itemsHtml}</div>`;
     }
+    emitBeforeFilters();
     container.innerHTML = html;
+    emitFiltersRendered();
   }
 
   async function toggleFilter(dimension, value) {
@@ -3024,8 +4433,95 @@
     return (lastSpace > maxLen * 0.8 ? truncated.substring(0, lastSpace) : truncated) + "\u2026";
   }
 
-  function renderResults(isExpanded) {
+  // Identity of a scored result for DOM reconciliation. deduplicateByTitle() has
+  // already collapsed near-duplicates by the time a list is painted, so the URL
+  // a card links to is unique within it; the title is the fallback for a
+  // fragment carrying no URL at all.
+  function resultKey(scored) {
+    const data = (scored && scored.data) || {};
+    const meta = data.meta || {};
+    return String(meta.url || data.url || meta.title || '');
+  }
+
+  // The built-in result card. Every value it interpolates arrives pre-escaped in
+  // `parts`, which is the same object handed to a platform renderer as `ctx` —
+  // so the markup below IS the reference implementation of the renderer
+  // contract, and a platform that wants the default look plus one extra element
+  // can reproduce it exactly without redoing any escaping.
+  function buildDefaultCard(parts) {
+    return `<div class="scolta-result-card">
+        <a class="scolta-result-title" href="${parts.safeUrl}" target="_blank" rel="noopener"
+           title="${parts.titleAttr}">${parts.titleHtml}</a>
+        <div class="scolta-result-meta">
+          ${parts.siteHtml ? `<span class="scolta-site-badge">${parts.siteHtml}</span>` : ""}
+          ${parts.dateHtml ? `<span class="scolta-result-date">${parts.dateHtml}</span>` : ""}
+        </div>
+        <a class="scolta-result-url" href="${parts.safeUrl}" target="_blank" rel="noopener">${parts.urlText}</a>
+        <div class="scolta-result-excerpt">${parts.excerptHtml}</div>
+      </div>`;
+  }
+
+  // Build the markup for one result: the registered platform renderer if there
+  // is one, the built-in card otherwise. A renderer that returns anything other
+  // than a string — null, undefined, a mistake — falls back to the built-in card
+  // for THAT result only, so a platform able to render some entity types and not
+  // others does not have to render any of them.
+  function buildResultHtml(scored, index, renderer, CONFIG) {
+    const data = scored.data;
+    const title = data.meta?.title || "Untitled";
+    const url = data.meta?.url || resolveUrl(data.url || '') || data.url || "#";
+    const site = data.meta?.site || "";
+    const date = data.meta?.date || "";
+    const excerpt = truncateExcerpt(data.excerpt || "", CONFIG.EXCERPT_LENGTH);
+    const safeTitle = escapeHtml(stripHtml(title));
+    const displayTitle = safeTitle.length > 90 ? safeTitle.substring(0, 87) + "\u2026" : safeTitle;
+
+    const parts = {
+      index: index,
+      // Raw user input, NOT html-escaped: it is here so a renderer can build a
+      // request URL or compare terms, not to be pasted into markup. Every value
+      // whose name ends in Html/Attr/Text, plus safeUrl, is already escaped
+      // exactly as the built-in card escapes it.
+      query: currentQuery,
+      highlightTerms: allHighlightTerms.slice(),
+      excerptHtml: highlightTerms(excerpt),
+      titleHtml: highlightTerms(displayTitle),
+      titleAttr: escapeAttr(stripHtml(title)),
+      // URLs come from index metadata; attribute-escaped and with non-http(s)
+      // schemes neutralized so a poisoned document can't plant a javascript: link.
+      safeUrl: sanitizeUrlAttr(url),
+      urlText: escapeHtml(url),
+      siteHtml: site ? escapeHtml(site) : "",
+      dateHtml: date ? escapeHtml(date) : "",
+      score: scored.score,
+    };
+
+    if (renderer) {
+      let out = null;
+      try {
+        out = renderer(data, parts);
+      } catch (e) {
+        console.warn('[scolta] result renderer threw; falling back to the built-in card', e);
+        out = null;
+      }
+      if (typeof out === 'string') return out;
+    }
+    return buildDefaultCard(parts);
+  }
+
+  // Parse one result's markup into detached nodes. <template> rather than a
+  // detached div because a platform renderer is free to return markup a div
+  // cannot host (a <tr>, say) and free to return more than one top-level node,
+  // so a result is a GROUP of nodes, not necessarily a single element.
+  function parseResultNodes(html) {
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    return Array.prototype.slice.call(tpl.content.childNodes);
+  }
+
+  function renderResults(isExpanded, renderReason) {
     isExpanded = isExpanded || false;
+    const reason = renderReason || 'search';
     const CONFIG = getInstanceConfig();
     const container = els.results;
     const header = els.resultsHeader;
@@ -3045,21 +4541,31 @@
         // expansion adds hits. The terminal state (results or "No results
         // found.") is rendered by the final renderResults() call after the
         // expand promise settles.
+        emitBeforeResults('loading');
         container.innerHTML = '<p class="scolta-searching">Searching…</p>';
+        paintedEntries = [];
+        paintedHighlightSignature = null;
         header.innerHTML = "";
         noResults.style.display = "none";
         loadMore.style.display = "none";
+        emitResultsRendered([], [], [], false);
         return;
       }
+      emitBeforeResults(reason);
       container.innerHTML = "";
+      paintedEntries = [];
+      paintedHighlightSignature = null;
       header.innerHTML = "";
       noResults.style.display = "block";
       loadMore.style.display = "none";
+      emitResultsRendered([], [], [], false);
       return;
     }
 
     noResults.style.display = "none";
-    const showing = Math.min(displayedCount + CONFIG.RESULTS_PER_PAGE, filtered.length);
+    const startIndex = displayedCount;
+    const appended = startIndex > 0;
+    const showing = Math.min(startIndex + CONFIG.RESULTS_PER_PAGE, filtered.length);
     const expandLabel = isExpanded ? ' (with expanded terms)' : '';
     const filterLabel = Object.keys(activeFilters).length > 0
       ? ' in ' + Object.entries(activeFilters)
@@ -3078,50 +4584,128 @@
     header.innerHTML = `<span>${filtered.length.toLocaleString()} ${resultNoun} for "${escapeHtml(displayQuery(currentQuery))}"${filterLabel}${expandLabel}${orFallbackLabel}</span>
                         <span>Showing ${showing}</span>`;
 
-    let html = "";
-    for (let i = displayedCount; i < showing; i++) {
-      const { data } = filtered[i];
-      const title = data.meta?.title || "Untitled";
-      const url = data.meta?.url || resolveUrl(data.url || '') || data.url || "#";
-      const site = data.meta?.site || "";
-      const date = data.meta?.date || "";
-      const excerpt = truncateExcerpt(data.excerpt || "", CONFIG.EXCERPT_LENGTH);
-      const highlighted = highlightTerms(excerpt);
+    const renderer = activeResultRenderer();
+    // Cheap identity of the current highlight set. Expansion grows
+    // allHighlightTerms, so a built-in card painted before it carries <mark>
+    // spans that no longer match the terms in play.
+    const highlightSignature = allHighlightTerms.join(' ');
 
-      const safeTitle = escapeHtml(stripHtml(title));
-      const displayTitle = safeTitle.length > 90 ? safeTitle.substring(0, 87) + "\u2026" : safeTitle;
-      // URLs come from index metadata; attribute-escape them and neutralize
-      // non-http(s) schemes so a poisoned document can't plant a
-      // javascript: link.
-      const safeUrl = sanitizeUrlAttr(url);
-
-      html += `<div class="scolta-result-card">
-        <a class="scolta-result-title" href="${safeUrl}" target="_blank" rel="noopener"
-           title="${escapeAttr(stripHtml(title))}">${highlightTerms(displayTitle)}</a>
-        <div class="scolta-result-meta">
-          ${site ? `<span class="scolta-site-badge">${escapeHtml(site)}</span>` : ""}
-          ${date ? `<span class="scolta-result-date">${escapeHtml(date)}</span>` : ""}
-        </div>
-        <a class="scolta-result-url" href="${safeUrl}" target="_blank" rel="noopener">${escapeHtml(url)}</a>
-        <div class="scolta-result-excerpt">${highlighted}</div>
-      </div>`;
+    if (appended) {
+      // "Show more" is strictly additive: existing nodes are never re-parsed,
+      // so a platform's already-initialised cards survive untouched. That is
+      // what `appended: true` on the event promises.
+      // Parse each result's markup on its own so the node-to-result grouping
+      // stays exact: a platform renderer may emit any number of top-level nodes,
+      // and the renderer is called exactly once per result either way.
+      const addedEntries = [];
+      for (let i = startIndex; i < showing; i++) {
+        addedEntries.push({
+          key: resultKey(filtered[i]),
+          nodes: parseResultNodes(buildResultHtml(filtered[i], i, renderer, CONFIG)),
+        });
+      }
+      emitBeforeResults('append');
+      const addFrag = document.createDocumentFragment();
+      for (const entry of addedEntries) {
+        for (const node of entry.nodes) addFrag.appendChild(node);
+      }
+      container.appendChild(addFrag);
+      paintedEntries = paintedEntries.concat(addedEntries);
+      paintedHighlightSignature = highlightSignature;
+      displayedCount = showing;
+      loadMore.style.display = (showing < filtered.length) ? "block" : "none";
+      emitResultsRendered(
+        filtered.slice(0, showing),
+        filtered.slice(startIndex, showing),
+        [],
+        true,
+      );
+      return;
     }
 
-    if (displayedCount === 0) {
-      container.innerHTML = html;
-    } else {
-      // Append without re-parsing existing DOM nodes (avoids tearing down
-      // and rebuilding all existing result cards on "show more").
-      container.insertAdjacentHTML('beforeend', html);
+    // Full repaint. Reconcile by result identity rather than blowing the
+    // container away: after AI query expansion resolves,
+    // mergeExpandedSearchResults() repaints from index 0, and on most queries
+    // the expansion pass returns the same results in the same order. Rebuilding
+    // every node there destroyed whatever a platform had lazily swapped in one
+    // to two seconds earlier and made it do the work over again — the entire
+    // reason this seam exists.
+    //
+    // A carried-over node keeps its markup. That is exactly right when a
+    // platform renderer owns it, and exactly wrong for the built-in card once
+    // the highlight terms have moved, so built-in cards are only reused while
+    // the highlight signature is unchanged (a facet toggle or sort change,
+    // where every card's content is genuinely identical).
+    const reusable = new Map();
+    if (renderer || highlightSignature === paintedHighlightSignature) {
+      for (const entry of paintedEntries) {
+        if (!entry.key || reusable.has(entry.key)) continue;
+        // A node the platform detached itself is not ours to move back.
+        if (!entry.nodes.length || entry.nodes.some(n => n.parentNode !== container)) continue;
+        reusable.set(entry.key, entry.nodes);
+      }
     }
+
+    const nextEntries = [];
+    const reusedResults = [];
+    for (let i = 0; i < showing; i++) {
+      const key = resultKey(filtered[i]);
+      const carried = key ? reusable.get(key) : undefined;
+      if (carried) {
+        reusable.delete(key);
+        nextEntries.push({ key: key, nodes: carried });
+        reusedResults.push(filtered[i]);
+      } else {
+        nextEntries.push({
+          key: key,
+          nodes: parseResultNodes(buildResultHtml(filtered[i], i, renderer, CONFIG)),
+        });
+      }
+    }
+
+    emitBeforeResults(reason);
+    // Sync the container in place, touching only what actually has to move. A
+    // node already sitting where it belongs is left completely alone — not
+    // detached and re-attached, which would restart CSS transitions, reload an
+    // iframe and fire disconnected/connectedCallback on a custom element, all
+    // for a list that did not change. When the expansion pass reorders nothing,
+    // this loop performs zero DOM mutations.
+    //
+    // insertBefore() on a node that is already in the document MOVES it: the
+    // browser does not clone or re-parse it, so listeners, lazily swapped server
+    // markup and any other platform state ride along through a genuine reorder.
+    let cursor = container.firstChild;
+    for (const entry of nextEntries) {
+      for (const node of entry.nodes) {
+        if (cursor === node) {
+          cursor = cursor.nextSibling;
+        } else {
+          container.insertBefore(node, cursor);
+        }
+      }
+    }
+    // Whatever the walk did not claim is leaving.
+    while (cursor) {
+      const leaving = cursor;
+      cursor = cursor.nextSibling;
+      container.removeChild(leaving);
+    }
+
+    paintedEntries = nextEntries;
+    paintedHighlightSignature = highlightSignature;
     displayedCount = showing;
-
     loadMore.style.display = (showing < filtered.length) ? "block" : "none";
+    emitResultsRendered(
+      filtered.slice(0, showing),
+      filtered.slice(startIndex, showing),
+      reusedResults,
+      false,
+    );
   }
 
   function showMore() {
     const terms = Array.isArray(lastExpandedTerms) ? lastExpandedTerms : lastExpandedTerms?.terms;
-    renderResults(terms && terms.length > 0);
+    renderResults(terms && terms.length > 0, 'append');
   }
 
   // ==========================================================================
@@ -3135,21 +4719,43 @@
       return;
     }
 
+    rootEl = root;
+
     // Build the search UI inside the container.
-    root.innerHTML = `
-      <div class="scolta-search-box">
+    //
+    // Every top-level node carries data-scolta-scaffold: it marks what this
+    // instance owns, so a re-init can remove its own previous UI (duplicate ids
+    // would be worse than useless) and destroy() can take out exactly that and
+    // nothing else.
+    // Search as you type is part of the scaffold only when it is on. With
+    // sayt_enabled false the input carries no combobox roles and no dropdown
+    // node exists, so the widget is byte-identical to the pre-1.1.0 one.
+    const saytCfg = getSaytConfig();
+    const comboAttrs = saytCfg.enabled
+      ? ` role="combobox" aria-autocomplete="list" aria-haspopup="listbox"`
+        + ` aria-expanded="false" aria-controls="scolta-sayt"`
+      : '';
+    const saytHtml = saytCfg.enabled
+      ? `<div class="scolta-sayt" id="scolta-sayt" role="listbox"
+                 aria-label="Search suggestions" style="display:none;"
+                 data-scolta-scaffold></div>`
+      : '';
+
+    const scaffoldHtml = `
+      <div class="scolta-search-box" data-scolta-scaffold>
         <div class="scolta-search-input-wrap">
           <input type="text" id="scolta-query" placeholder="Search..."
-                 autofocus autocomplete="off">
+                 autofocus autocomplete="off"${comboAttrs}>
           <button class="scolta-search-clear" id="scolta-search-clear"
                   style="display:none;" aria-label="Clear search">&times;</button>
+          ${saytHtml}
         </div>
         <button class="scolta-search-btn" id="scolta-search-btn">Search</button>
       </div>
 
-      <div id="scolta-expanded-terms" class="scolta-expanded-terms" style="display:none;"></div>
+      <div id="scolta-expanded-terms" class="scolta-expanded-terms" style="display:none;" data-scolta-scaffold></div>
 
-      <div class="scolta-layout" id="scolta-layout" style="display:none;">
+      <div class="scolta-layout" id="scolta-layout" style="display:none;" data-scolta-scaffold>
         <aside class="scolta-filters" id="scolta-filters"></aside>
         <div>
           <div id="scolta-ai-summary" style="display:none;"></div>
@@ -3161,11 +4767,47 @@
         </div>
       </div>
 
-      <div class="scolta-no-results" id="scolta-no-results" style="display:none;">
+      <div class="scolta-no-results" id="scolta-no-results" style="display:none;" data-scolta-scaffold>
         <p style="font-size:1.2rem;">No results found.</p>
         <p style="margin-top:0.5rem;">Try different keywords or clear your site filters.</p>
       </div>
     `;
+
+    // Non-destructive mount. init() used to run `root.innerHTML = scaffold`,
+    // which destroyed whatever the server had already rendered inside the mount
+    // point — and a platform bridge calling Scolta.init() directly bypasses
+    // autoInit()'s guard entirely, so any platform attempting server-side
+    // rendering into the container silently lost it. It is a trap for exactly
+    // the integration this render seam exists to support.
+    //
+    // Now: a previous Scolta scaffold in this container is removed, and
+    // everything else is left where it is with its node identity intact. The
+    // scaffold goes in at the top, so the search box still sits above whatever
+    // the platform put there.
+    //
+    // Opt out with data-scolta-replace on the mount element to get the old
+    // clear-everything behaviour back. That is a DOM attribute rather than a
+    // config key: markup decisions belong on the platform side of the seam, and
+    // it keeps the browser config surface — and BrowserConfigParityTest —
+    // untouched.
+    if (root.hasAttribute('data-scolta-replace')) {
+      root.innerHTML = '';
+    } else {
+      const stale = [];
+      for (let i = 0; i < root.children.length; i++) {
+        if (root.children[i].hasAttribute('data-scolta-scaffold')) stale.push(root.children[i]);
+      }
+      for (const node of stale) root.removeChild(node);
+    }
+
+    const scaffold = document.createElement('template');
+    scaffold.innerHTML = scaffoldHtml;
+    scaffoldNodes = Array.prototype.slice.call(scaffold.content.childNodes);
+    if (root.firstChild) {
+      root.insertBefore(scaffold.content, root.firstChild);
+    } else {
+      root.appendChild(scaffold.content);
+    }
 
     // Cache DOM references.
     els = {
@@ -3182,17 +4824,65 @@
       results: root.querySelector('#scolta-results'),
       loadMore: root.querySelector('#scolta-load-more'),
       noResults: root.querySelector('#scolta-no-results'),
+      sayt: root.querySelector('#scolta-sayt'),
     };
 
     // Event listeners.
     els.queryInput.addEventListener("keydown", (e) => {
+      // SAYT claims Arrow keys, Escape while the dropdown is open, and Enter
+      // while an option is active. Everything else — including Enter with no
+      // active option — falls through to the behaviour that shipped before it.
+      if (handleSuggestKeydown(e)) return;
       if (e.key === "Enter") doSearch();
     });
 
     els.queryInput.addEventListener("input", () => {
       els.searchClear.style.display = els.queryInput.value.length > 0 ? "block" : "none";
       schedulePreload(els.queryInput.value);
+      scheduleSuggest(els.queryInput.value);
     });
+
+    if (els.sayt) {
+      // mousedown, not click: preventing the default here stops the input from
+      // losing focus at all, so the option's own click still lands and the blur
+      // timer below never has to race it.
+      els.sayt.addEventListener("mousedown", (e) => {
+        if (e.target.closest('[data-scolta-sayt-index]')) e.preventDefault();
+      });
+
+      els.sayt.addEventListener("click", (e) => {
+        const optionEl = e.target.closest('[data-scolta-sayt-index]');
+        if (!optionEl) return;
+        const index = parseInt(optionEl.dataset.scoltaSaytIndex, 10);
+        if (!isFinite(index)) return;
+        // In navigate mode the option IS an anchor and the browser is already
+        // handling this click; only tidy up. Any other mode acts explicitly.
+        if (optionEl.hasAttribute('href')) {
+          closeSuggestions();
+          cancelSuggest();
+          return;
+        }
+        e.preventDefault();
+        actOnSuggestion(index);
+      });
+
+      els.sayt.addEventListener("mouseover", (e) => {
+        const optionEl = e.target.closest('[data-scolta-sayt-index]');
+        if (!optionEl) return;
+        const index = parseInt(optionEl.dataset.scoltaSaytIndex, 10);
+        if (isFinite(index)) setActiveSuggestion(index);
+      });
+
+      // Close on blur, but only after a beat: a click that started inside the
+      // dropdown must still land.
+      els.queryInput.addEventListener("blur", () => {
+        if (suggestBlurTimer) clearTimeout(suggestBlurTimer);
+        suggestBlurTimer = setTimeout(() => {
+          suggestBlurTimer = null;
+          closeSuggestions();
+        }, 150);
+      });
+    }
 
     els.searchClear.addEventListener("click", clearSearch);
     els.searchBtn.addEventListener("click", () => doSearch());
@@ -3314,9 +5004,10 @@
 
   // Initialize the instance by building the UI inside the container.
   init(containerSelector);
-  // If init failed to find the container, root will be empty.
-  var root = document.querySelector(containerSelector || '#scolta-search');
-  if (!root || !root.hasChildNodes()) {
+  // If init failed to find the container it never cached any DOM reference.
+  // (The old check — root.hasChildNodes() — no longer distinguishes success from
+  // failure now that init() leaves pre-existing platform markup in place.)
+  if (!rootEl || !els.results) {
     return null;
   }
 
@@ -3329,9 +5020,22 @@
     doSearch,
     batchScoreResults,
     showMore,
+    setResultRenderer,
     destroy: function() {
       if (abortController) abortController.abort();
-      root.innerHTML = '';
+      // Timers outlive the DOM they would write to; cancelSuggest() clears the
+      // debounce, the enrichment idle timer and the blur timer in one place.
+      cancelPreload();
+      cancelSuggest();
+      // Remove only what init() inserted. Clearing the whole mount point would
+      // take out platform markup this instance never owned — the same bug the
+      // non-destructive init() fixes at the other end of the lifecycle.
+      for (const node of scaffoldNodes) {
+        if (node.parentNode) node.parentNode.removeChild(node);
+      }
+      scaffoldNodes = [];
+      paintedEntries = [];
+      paintedHighlightSignature = null;
       els = {};
     },
   };
@@ -3350,6 +5054,61 @@
     return createInstance(containerSelector, config);
   };
 
+  /**
+   * Register the platform's result renderer.
+   *
+   *   Scolta.setResultRenderer(function (data, ctx) { return html || null; });
+   *
+   * Called once per result in place of the built-in card. `data` is the raw
+   * Pagefind fragment object. `ctx` carries:
+   *
+   *   index          — position of this result in the full list
+   *   query          — the current query, RAW (not escaped): it is here to build
+   *                    a request or compare terms, not to be pasted into markup
+   *   highlightTerms — array of raw highlight terms, same caveat
+   *   excerptHtml    — the escaped, <mark>-wrapped excerpt the built-in card
+   *                    would have shown, ready to drop into a slot
+   *   titleHtml      — the escaped, truncated, <mark>-wrapped title text
+   *   titleAttr      — attribute-escaped full title, for title="…"
+   *   safeUrl        — attribute-escaped URL with non-http(s) schemes neutralized
+   *   urlText        — html-escaped URL, as link text
+   *   siteHtml       — html-escaped site badge value, or ""
+   *   dateHtml       — html-escaped date, or ""
+   *   score          — this result's score
+   *
+   * Return an HTML string, or null to fall back to the built-in card for that
+   * one result — the right answer when a platform can render some result types
+   * and not others. A renderer that throws also falls back, with a console
+   * warning; one bad result never takes the list down.
+   *
+   * Two parts of the contract matter:
+   *
+   *   - ESCAPING. The returned string is inserted as markup, so from that point
+   *     the platform owns its own escaping. Every ctx value whose name ends in
+   *     Html/Attr/Text, plus safeUrl, is already escaped exactly as the built-in
+   *     card escapes it, so composing from those is the safe path AND the easy
+   *     one. `query` and `highlightTerms` are raw; escape them yourself.
+   *   - DELEGATED HANDLERS. Scolta's click and change handlers are bound once on
+   *     the mount point and dispatch on data-scolta-* attributes, so platform
+   *     markup carrying those attributes keeps working with no re-binding after
+   *     any render.
+   *
+   * Pass null to restore the built-in card. This is deliberately a registration
+   * function, not a config key: a function cannot travel through
+   * ScoltaConfig::toBrowserConfig() and the platform's settings JSON, and a
+   * browser config key PHP never emits would be dead weight the parity test has
+   * to be told to ignore.
+   *
+   * Applies to every instance that has not registered its own renderer via
+   * instance.setResultRenderer(); safe to call before Scolta.init().
+   */
+  global.Scolta.setResultRenderer = function(fn) {
+    if (fn !== null && fn !== undefined && typeof fn !== 'function') {
+      throw new TypeError('[scolta] Scolta.setResultRenderer expects a function or null');
+    }
+    globalResultRenderer = fn || null;
+  };
+
   // Backward-compatible init: creates a default instance from window.scolta.
   global.Scolta.init = function(containerSelector) {
     if (global.Scolta.defaultInstance) return; // already initialized
@@ -3357,7 +5116,10 @@
       containerSelector || '#scolta-search',
       global.scolta
     );
-    // Expose instance methods on Scolta for backward compat.
+    // Expose instance methods on Scolta for backward compat. setResultRenderer
+    // is deliberately NOT among them: Scolta.setResultRenderer is the global
+    // registration, which must keep working when it is called before init() —
+    // the usual order, since a platform registers on script load.
     if (global.Scolta.defaultInstance) {
       var inst = global.Scolta.defaultInstance;
       global.Scolta.searchTerm = inst.searchTerm;
@@ -3374,7 +5136,12 @@
   function autoInit() {
     if (global.scolta && global.scolta.container) {
       var container = document.querySelector(global.scolta.container);
-      if (container && !container.hasChildNodes()) {
+      // Guard against double-init, not against pre-existing markup. The old
+      // !hasChildNodes() test also blocked auto-init on any mount point holding
+      // server-rendered content, which is why platform bridges call
+      // Scolta.init() directly and bypass this guard. init() is non-destructive
+      // now, so the only thing worth refusing is a second scaffold.
+      if (container && !container.querySelector('[data-scolta-scaffold]')) {
         global.Scolta.init(global.scolta.container);
       }
     }
