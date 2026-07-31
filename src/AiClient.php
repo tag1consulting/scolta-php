@@ -8,8 +8,10 @@ use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Exception\GuzzleException;
+use Tag1\Scolta\AiProvider\ModelIdentity;
 use Tag1\Scolta\Exception\ApiKeyInvalidException;
 use Tag1\Scolta\Exception\ApiKeyMissingException;
+use Tag1\Scolta\Exception\ModelProviderMismatchException;
 use Tag1\Scolta\Exception\RateLimitException;
 
 /**
@@ -51,6 +53,18 @@ class AiClient
     private int $timeout;
 
     /**
+     * Whether requests go to the provider's own API rather than a proxy.
+     *
+     * A configured `base_url` means the traffic is aimed at a gateway (the
+     * Amazee.ai LiteLLM proxy, a self-hosted OpenAI-compatible server, an
+     * enterprise egress proxy). Those endpoints define their own model
+     * namespaces, so the provider-native model check must not run against
+     * them — only against the vendor's own API, where "is this one of your
+     * model IDs" is a question with a knowable answer.
+     */
+    private bool $usesProviderEndpoint;
+
+    /**
      * @param array $config Configuration array with keys:
      *   - provider: 'anthropic' or 'openai' (default: 'anthropic')
      *   - api_key: API key (required)
@@ -76,6 +90,10 @@ class AiClient
         $this->model = $config['model'] ?? self::DEFAULT_MODEL;
         $this->apiVersion = $config['api_version'] ?? self::ANTHROPIC_API_VERSION;
         $this->timeout = (int) ($config['timeout'] ?? 30);
+        // Recorded before the OpenAI path rewrites $baseUrl below, which would
+        // otherwise make an unset base_url indistinguishable from a configured
+        // one.
+        $this->usesProviderEndpoint = ($config['base_url'] ?? '') === '';
 
         if ($this->provider === 'openai') {
             $baseUrl = $config['base_url'] ?? self::OPENAI_API_URL;
@@ -192,12 +210,39 @@ class AiClient
                     $e,
                 );
             }
+            // The provider rejected the request for some reason other than auth
+            // or rate limiting. If the model we sent is not one this provider
+            // could have recognised, say so: an unknown-model rejection is
+            // otherwise indistinguishable from any other 4xx, and the operator
+            // gets nothing actionable. Classifying an already-failed request is
+            // the only safe use of this check — see ModelIdentity.
+            if ($this->modelIsForeignToProvider($useModel)) {
+                throw new ModelProviderMismatchException(
+                    $useModel,
+                    $this->provider,
+                    ModelIdentity::describeMismatch($this->provider, $useModel),
+                    $e,
+                );
+            }
             throw new \RuntimeException('Scolta AI API request failed: ' . $e->getMessage(), 0, $e);
         } catch (GuzzleException $e) {
             throw new \RuntimeException('Scolta AI API request failed: ' . $e->getMessage(), 0, $e);
         } catch (\JsonException $e) {
             throw new \RuntimeException('Scolta AI API returned malformed JSON: ' . $e->getMessage(), 0, $e);
         }
+    }
+
+    /**
+     * Whether the model just rejected could not have belonged to this provider.
+     *
+     * Scoped to requests aimed at the provider's own API: a configured
+     * `base_url` means a gateway with its own model namespace, where a
+     * non-vendor model name is expected rather than wrong.
+     */
+    private function modelIsForeignToProvider(string $model): bool
+    {
+        return $this->usesProviderEndpoint
+            && !ModelIdentity::looksNativeFor($this->provider, $model);
     }
 
     private function sendAnthropicRequest(
