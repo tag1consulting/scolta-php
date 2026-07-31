@@ -43,9 +43,11 @@ class AiServiceAdapter
      * When set, an auth-class failure (expired/revoked credentials) on any AI
      * call is recorded so `/health` reports AI as degraded and the site is
      * flagged for admin re-authentication; the call still degrades gracefully
-     * (the original failure propagates, no retry). Without it (an explicit
-     * user-configured key, or a platform that has not adopted recovery yet)
-     * behavior is unchanged: the failure propagates.
+     * (the original failure propagates, no retry). A successful call clears
+     * the recorded auth failure, so health stops reporting one as soon as the
+     * credentials work again rather than waiting out the marker's TTL. Without
+     * it (an explicit user-configured key, or a platform that has not adopted
+     * recovery yet) behavior is unchanged: the failure propagates.
      *
      * @since 1.0.4
      * @stability experimental
@@ -82,18 +84,14 @@ class AiServiceAdapter
      */
     public function message(string $systemPrompt, string $userMessage, int $maxTokens = 512): string
     {
-        try {
+        return $this->guardedCall(function () use ($systemPrompt, $userMessage, $maxTokens): string {
             $result = $this->tryFrameworkAi($systemPrompt, $userMessage, $maxTokens);
             if ($result !== null) {
                 return $result;
             }
 
             return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens);
-        } catch (\RuntimeException $e) {
-            $this->handlePossibleBudgetException($e);
-            $this->noteAuthFailure($e);
-            throw $e;
-        }
+        });
     }
 
     /**
@@ -112,18 +110,14 @@ class AiServiceAdapter
      */
     public function conversation(string $systemPrompt, array $messages, int $maxTokens = 512): string
     {
-        try {
+        return $this->guardedCall(function () use ($systemPrompt, $messages, $maxTokens): string {
             $result = $this->tryFrameworkConversation($systemPrompt, $messages, $maxTokens);
             if ($result !== null) {
                 return $result;
             }
 
             return $this->getClient()->conversation($systemPrompt, $messages, $maxTokens);
-        } catch (\RuntimeException $e) {
-            $this->handlePossibleBudgetException($e);
-            $this->noteAuthFailure($e);
-            throw $e;
-        }
+        });
     }
 
     /**
@@ -145,7 +139,7 @@ class AiServiceAdapter
      */
     public function messageForOperation(string $operation, string $systemPrompt, string $userMessage, int $maxTokens = 512): string
     {
-        try {
+        return $this->guardedCall(function () use ($operation, $systemPrompt, $userMessage, $maxTokens): string {
             $result = $this->tryFrameworkAi($systemPrompt, $userMessage, $maxTokens);
             if ($result !== null) {
                 return $result;
@@ -162,11 +156,7 @@ class AiServiceAdapter
             $temperature = $operation === 'expand_query' ? 0.0 : null;
 
             return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens, $model, $temperature);
-        } catch (\RuntimeException $e) {
-            $this->handlePossibleBudgetException($e);
-            $this->noteAuthFailure($e);
-            throw $e;
-        }
+        });
     }
 
     /**
@@ -299,6 +289,45 @@ class AiServiceAdapter
     {
         // No-op by default. Platform adapters override to convert/notify on
         // budget-exhaustion errors before the exception propagates.
+    }
+
+    /**
+     * Run an AI call with the shared failure and success bookkeeping.
+     *
+     * Every AI call this class makes goes through here, which is the point:
+     * both the outcome hooks used to be attached per method, and the success
+     * side was simply missing. Wrapping the call means a new call path cannot
+     * be added that records failures but never reports a recovery, and the
+     * framework-AI path and the built-in-client path are both covered without
+     * either caller knowing about the marker.
+     *
+     * @param callable(): string $call The AI call to run.
+     */
+    private function guardedCall(callable $call): string
+    {
+        try {
+            $result = $call();
+        } catch (\RuntimeException $e) {
+            $this->handlePossibleBudgetException($e);
+            $this->noteAuthFailure($e);
+            throw $e;
+        }
+
+        $this->noteCallSuccess();
+
+        return $result;
+    }
+
+    /**
+     * Report a successful AI call to key-expiry recovery.
+     *
+     * The provider accepted the request, so the stored credentials
+     * authenticate and any recorded auth failure is stale by definition.
+     * A no-op when recovery is not wired.
+     */
+    private function noteCallSuccess(): void
+    {
+        $this->keyRecovery?->noteCallSucceeded();
     }
 
     /**

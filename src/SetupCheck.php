@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tag1\Scolta;
 
 use Tag1\Scolta\Binary\PagefindBinary;
+use Tag1\Scolta\Config\ResolvedApiKey;
 
 /**
  * Runs pre-flight dependency checks for Scolta.
@@ -16,6 +17,12 @@ final class SetupCheck
     /**
      * Run all checks and return results.
      *
+     * @param ResolvedApiKey|null $resolvedKey The resolution the client
+     *   actually performs. When provided, the AI-key row names the source and
+     *   says so when stored Amazee.ai credentials were overridden, so
+     *   `check-setup` cannot describe the key differently from the settings
+     *   UI and /health. $aiApiKey remains for adapters that have not been
+     *   moved over; it answers "is there a key" and nothing more.
      * @return array<array{name: string, status: string, message: string, category: string}>
      * @since 1.0.0
      * @stability stable
@@ -25,6 +32,7 @@ final class SetupCheck
         ?string $projectDir = null,
         ?string $aiApiKey = null,
         ?string $browserWasmDir = null,
+        ?ResolvedApiKey $resolvedKey = null,
     ): array {
         $results = [];
 
@@ -38,13 +46,22 @@ final class SetupCheck
             'category' => 'runtime',
         ];
 
-        $hasKey = !empty($aiApiKey);
-        $results[] = [
-            'name' => 'AI API key',
-            'status' => $hasKey ? 'pass' : 'warn',
-            'message' => $hasKey ? 'AI API key configured' : 'AI API key not set — AI features disabled',
-            'category' => 'runtime',
-        ];
+        if ($resolvedKey !== null) {
+            $results[] = [
+                'name' => 'AI API key',
+                'status' => $resolvedKey->severity() === 'ok' ? 'pass' : 'warn',
+                'message' => $resolvedKey->describe(),
+                'category' => 'runtime',
+            ];
+        } else {
+            $hasKey = !empty($aiApiKey);
+            $results[] = [
+                'name' => 'AI API key',
+                'status' => $hasKey ? 'pass' : 'warn',
+                'message' => $hasKey ? 'AI API key configured' : 'AI API key not set — AI features disabled',
+                'category' => 'runtime',
+            ];
+        }
 
         $browserDir = $browserWasmDir ?? dirname(__DIR__) . '/assets/wasm';
         $browserWasmExists = file_exists($browserDir . '/scolta_core_bg.wasm');

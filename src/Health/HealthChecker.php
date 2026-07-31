@@ -7,6 +7,7 @@ namespace Tag1\Scolta\Health;
 use Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery;
 use Tag1\Scolta\Binary\PagefindBinary;
 use Tag1\Scolta\Cache\CacheDriverInterface;
+use Tag1\Scolta\Config\ResolvedApiKey;
 use Tag1\Scolta\Config\ScoltaConfig;
 
 /**
@@ -29,6 +30,11 @@ final class HealthChecker
      *   health request). When null, `ai_usable` mirrors `ai_configured`,
      *   preserving the previous behavior for adapters that have not wired
      *   recovery yet.
+     * @param ResolvedApiKey|null $resolvedKey The resolution the client
+     *   actually performs, from {@see \Tag1\Scolta\Config\ApiKeyResolver}.
+     *   When provided, the payload reports the key's source, so /health and
+     *   the settings UI cannot disagree about it. When null, the payload
+     *   falls back to the key already on the config and omits the source.
      */
     public function __construct(
         private readonly ScoltaConfig $config,
@@ -36,6 +42,7 @@ final class HealthChecker
         private readonly ?string $pagefindBinaryPath,
         private readonly ?string $projectDir,
         private readonly ?CacheDriverInterface $cache = null,
+        private readonly ?ResolvedApiKey $resolvedKey = null,
     ) {}
 
     /**
@@ -47,7 +54,21 @@ final class HealthChecker
      * `ai_configured: true` for ~24h while every AI call failed (django demo
      * outage, 2026-06-09).
      *
-     * @return array{status: string, ai_configured: bool, ai_usable: bool, ai_auth_failing: bool, ai_provider: string, pagefind_available: bool, wasm_available: bool, index_exists: bool, pagefind: array, wasm: array}
+     * `ai_key_source` is the backing value of the resolved
+     * {@see \Tag1\Scolta\Config\ApiKeySource}, or NULL when the adapter passed
+     * no resolution. `ai_amazee_overridden` reports credentials that exist but
+     * lost to an explicit key, which is otherwise invisible to an operator.
+     *
+     * `ai_auth_failing` is a cached marker, not a live probe, so it is reported
+     * with its age: `ai_auth_failing_since` is the Unix timestamp of the failed
+     * call that recorded it and `ai_auth_failing_ttl` the seconds it survives
+     * without a further failing call. Both are NULL when no failure is
+     * recorded, and `ai_auth_failing_since` is also NULL for a marker written
+     * before the timestamp was read back. A successful AI call clears the
+     * marker, so an operator who sees one with an old `since` and a working
+     * site is looking at a site that has not made an AI call since the fix.
+     *
+     * @return array{status: string, ai_configured: bool, ai_usable: bool, ai_auth_failing: bool, ai_auth_failing_since: int|null, ai_auth_failing_ttl: int|null, ai_key_source: string|null, ai_amazee_overridden: bool, ai_provider: string, pagefind_available: bool, wasm_available: bool, index_exists: bool, pagefind: array, wasm: array}
      * @since 1.0.0
      * @stability stable
      */
@@ -66,15 +87,30 @@ final class HealthChecker
         $indexExists = file_exists($this->indexOutputDir . '/pagefind/pagefind.js')
             || file_exists($this->indexOutputDir . '/pagefind.js');
 
-        $aiConfigured = trim($this->config->aiApiKey) !== '';
+        // An Amazee resolution counts as configured even when it withholds the
+        // key: the credentials are what the site is running on, and a
+        // half-provisioned install is degraded rather than unconfigured.
+        $aiConfigured = $this->resolvedKey !== null
+            ? ($this->resolvedKey->isConfigured() || $this->resolvedKey->isAmazee())
+            : trim($this->config->aiApiKey) !== '';
 
         // "Configured" must not imply "usable": stored credentials can be
         // expired/revoked server-side. KeyExpiryRecovery records auth failures
         // in the cache at call time; reading that marker here keeps health
         // truthful without adding a live API call per health request.
+        //
+        // The marker's age travels with it. A boolean alone cannot distinguish
+        // a failure from a second ago from one whose cause was fixed and whose
+        // marker has not aged out, and this payload is the first place an
+        // operator looks when AI is reported down.
         $aiAuthFailing = $this->cache !== null
             && (bool) $this->cache->get(KeyExpiryRecovery::CACHE_KEY_AUTH_FAILURE);
-        $aiUsable = $aiConfigured && !$aiAuthFailing;
+        $aiAuthFailingSince = $aiAuthFailing
+            ? KeyExpiryRecovery::readFailureTimestamp($this->cache)
+            : null;
+        $aiUsable = $aiConfigured
+            && !$aiAuthFailing
+            && !($this->resolvedKey !== null && $this->resolvedKey->awaitingAmazeeModelResolution);
 
         $status = 'ok';
         if (!$indexExists || !$aiUsable) {
@@ -95,10 +131,14 @@ final class HealthChecker
 
         return [
             'status' => $status,
-            'ai_provider' => $this->config->aiProvider ?: 'anthropic',
+            'ai_provider' => $this->resolvedKey?->provider ?: ($this->config->aiProvider ?: 'anthropic'),
             'ai_configured' => $aiConfigured,
             'ai_usable' => $aiUsable,
             'ai_auth_failing' => $aiAuthFailing,
+            'ai_auth_failing_since' => $aiAuthFailingSince,
+            'ai_auth_failing_ttl' => $aiAuthFailing ? KeyExpiryRecovery::AUTH_FAILURE_TTL : null,
+            'ai_key_source' => $this->resolvedKey?->source->value,
+            'ai_amazee_overridden' => $this->resolvedKey?->amazeeOverridden() ?? false,
             'pagefind_available' => $binaryStatus['available'],
             'wasm_available' => false,
             'index_exists' => $indexExists,

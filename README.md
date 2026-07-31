@@ -120,6 +120,10 @@ For the full list of config keys and their defaults, see [docs/CONFIG_REFERENCE.
 
 To render results with your own markup instead of Scolta's built-in card — a platform view mode, server-rendered fragments swapped in lazily, anything richer than title/excerpt/URL — see [docs/RENDER_SEAM.md](docs/RENDER_SEAM.md), which documents the render lifecycle events, `Scolta.setResultRenderer()`, and the non-destructive mount.
 
+The AI API key can come from an environment variable, a platform settings file or store, or stored Amazee.ai credentials. `Tag1\Scolta\Config\ApiKeyResolver` decides which one wins and returns the key together with its source, so an adapter's settings form, health payload and CLI cannot describe the key differently from the client that sends it. The order, the source vocabulary, and the rules adapters follow are in [docs/API_KEY_PRECEDENCE.md](docs/API_KEY_PRECEDENCE.md).
+
+`HealthChecker` builds the payload every adapter serves from its health endpoint. The AI fields, and in particular how to read `ai_auth_failing` — a cached marker reported with its age, cleared by the first successful AI call, and clearable by hand when no call can succeed — are documented in [docs/HEALTH_REFERENCE.md](docs/HEALTH_REFERENCE.md).
+
 Search as you type is on by default: typing opens a dropdown of suggestions and recent searches, while the full pipeline still runs only on Enter or on selecting a suggestion. Turn it off with `sayt_enabled: false`. See [docs/SAYT.md](docs/SAYT.md) for the ten settings, the two suggestion modes, the AI expansion budget, the render events and the theming custom properties.
 
 ## What Scolta Is Built For
