@@ -219,6 +219,19 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 | `aiModel` | `ai_model` | `ai_model` / `SCOLTA_AI_MODEL` | `ai_model` |
 | `aiBaseUrl` | `ai_base_url` | `ai_base_url` / `SCOLTA_AI_BASE_URL` | `ai_base_url` |
 
+`aiApiKey` is the one property an adapter does not simply copy across. Several
+places can supply it, and which one wins is decided by
+`Tag1\Scolta\Config\ApiKeyResolver`, not by the adapter: explicit keys in the
+platform's own order, then stored Amazee.ai credentials, then nothing. The
+resolver returns a `ResolvedApiKey` carrying the key, its `ApiKeySource` and
+the effective provider together, so a settings form, a health payload and a
+`status` command cannot describe the key differently from the client that
+sends it. Pass that object to `HealthChecker` and `SetupCheck::run()` and both
+report the source rather than merely whether a key exists.
+
+The full order, the source vocabulary and the rules adapters follow are in
+[API_KEY_PRECEDENCE.md](API_KEY_PRECEDENCE.md).
+
 ### Site Identity Keys
 
 | ScoltaConfig Property | Drupal | Laravel | WordPress |
