@@ -59,7 +59,16 @@ final class HealthChecker
      * no resolution. `ai_amazee_overridden` reports credentials that exist but
      * lost to an explicit key, which is otherwise invisible to an operator.
      *
-     * @return array{status: string, ai_configured: bool, ai_usable: bool, ai_auth_failing: bool, ai_key_source: string|null, ai_amazee_overridden: bool, ai_provider: string, pagefind_available: bool, wasm_available: bool, index_exists: bool, pagefind: array, wasm: array}
+     * `ai_auth_failing` is a cached marker, not a live probe, so it is reported
+     * with its age: `ai_auth_failing_since` is the Unix timestamp of the failed
+     * call that recorded it and `ai_auth_failing_ttl` the seconds it survives
+     * without a further failing call. Both are NULL when no failure is
+     * recorded, and `ai_auth_failing_since` is also NULL for a marker written
+     * before the timestamp was read back. A successful AI call clears the
+     * marker, so an operator who sees one with an old `since` and a working
+     * site is looking at a site that has not made an AI call since the fix.
+     *
+     * @return array{status: string, ai_configured: bool, ai_usable: bool, ai_auth_failing: bool, ai_auth_failing_since: int|null, ai_auth_failing_ttl: int|null, ai_key_source: string|null, ai_amazee_overridden: bool, ai_provider: string, pagefind_available: bool, wasm_available: bool, index_exists: bool, pagefind: array, wasm: array}
      * @since 1.0.0
      * @stability stable
      */
@@ -89,8 +98,16 @@ final class HealthChecker
         // expired/revoked server-side. KeyExpiryRecovery records auth failures
         // in the cache at call time; reading that marker here keeps health
         // truthful without adding a live API call per health request.
+        //
+        // The marker's age travels with it. A boolean alone cannot distinguish
+        // a failure from a second ago from one whose cause was fixed and whose
+        // marker has not aged out, and this payload is the first place an
+        // operator looks when AI is reported down.
         $aiAuthFailing = $this->cache !== null
             && (bool) $this->cache->get(KeyExpiryRecovery::CACHE_KEY_AUTH_FAILURE);
+        $aiAuthFailingSince = $aiAuthFailing
+            ? KeyExpiryRecovery::readFailureTimestamp($this->cache)
+            : null;
         $aiUsable = $aiConfigured
             && !$aiAuthFailing
             && !($this->resolvedKey !== null && $this->resolvedKey->awaitingAmazeeModelResolution);
@@ -118,6 +135,8 @@ final class HealthChecker
             'ai_configured' => $aiConfigured,
             'ai_usable' => $aiUsable,
             'ai_auth_failing' => $aiAuthFailing,
+            'ai_auth_failing_since' => $aiAuthFailingSince,
+            'ai_auth_failing_ttl' => $aiAuthFailing ? KeyExpiryRecovery::AUTH_FAILURE_TTL : null,
             'ai_key_source' => $this->resolvedKey?->source->value,
             'ai_amazee_overridden' => $this->resolvedKey?->amazeeOverridden() ?? false,
             'pagefind_available' => $binaryStatus['available'],

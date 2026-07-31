@@ -8,6 +8,7 @@ use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Tag1\Scolta\Cache\CacheDriverInterface;
 use Tag1\Scolta\Exception\ApiKeyInvalidException;
+use Tag1\Scolta\Exception\ModelProviderMismatchException;
 
 /**
  * Detects Amazee credential auth failures at call time and degrades cleanly.
@@ -78,8 +79,17 @@ final class KeyExpiryRecovery
     /**
      * How long a recorded auth failure keeps health reporting AI unusable
      * before a fresh failing call must re-confirm it, in seconds.
+     *
+     * Public so {@see \Tag1\Scolta\Health\HealthChecker} can state the window
+     * in the health payload. A marker with no stated lifetime is a marker an
+     * operator has to guess at: paired with `ai_auth_failing_since` this says
+     * how long the report can outlive the condition when no AI call has
+     * succeeded in the meantime.
+     *
+     * @since 1.1.0
+     * @stability experimental
      */
-    private const AUTH_FAILURE_TTL = 3600;
+    public const AUTH_FAILURE_TTL = 3600;
 
     /**
      * How long the upgrade-needed marker is retained, in seconds.
@@ -119,8 +129,27 @@ final class KeyExpiryRecovery
      * Whether an exception (anywhere in its chain) is an auth-class failure of
      * the stored Amazee credentials.
      *
-     * Budget-exhaustion errors return false even though they also surface as
-     * 4xx responses — they route to the budget path, never here.
+     * Two error classes return false even though they also surface as 4xx
+     * responses, because each already has a signal of its own and the marker
+     * this feeds is named for authentication specifically:
+     *  - budget exhaustion, which routes to {@see BudgetAwareProviderDecorator};
+     *  - a provider/model mismatch, which routes to
+     *    {@see \Tag1\Scolta\Http\AiEndpointHandler::REASON_MODEL_MISMATCH}.
+     *
+     * The mismatch exclusion is by exception type and is checked before the
+     * message chain is walked, because the chain is exactly what mis-classified
+     * it: {@see ModelProviderMismatchException} carries the provider's original
+     * 4xx as its previous, and Guzzle puts a summary of the response body into
+     * that exception's message. A gateway that words an unknown-model rejection
+     * as an authentication error therefore matched
+     * {@see self::AUTH_FAILURE_MARKERS} and set the auth-failure marker for a
+     * failure that had nothing to do with credentials (Athenaeum Drupal demo:
+     * health reported `ai_auth_failing: true` while the real fault was a
+     * configured model the effective provider does not recognise).
+     *
+     * The marker list itself is deliberately unchanged. Its narrowness is what
+     * keeps the marker meaning what its name says, and widening or trimming it
+     * would trade one kind of wrong report for another.
      *
      * @since 1.0.4
      * @stability experimental
@@ -128,6 +157,10 @@ final class KeyExpiryRecovery
     public static function isAuthFailure(\Throwable $e): bool
     {
         if (BudgetAwareProviderDecorator::isBudgetError($e)) {
+            return false;
+        }
+
+        if ($e instanceof ModelProviderMismatchException) {
             return false;
         }
 
@@ -182,6 +215,11 @@ final class KeyExpiryRecovery
      * Mark the stored credentials as auth-failing so health reports AI as
      * unusable until calls succeed again or the marker ages out.
      *
+     * Both halves of that sentence are implemented: {@see noteCallSucceeded()}
+     * clears the marker on the first successful call, and it otherwise expires
+     * after {@see self::AUTH_FAILURE_TTL} seconds. The stored `time()` is what
+     * health reports as `ai_auth_failing_since`.
+     *
      * @since 1.0.4
      * @stability experimental
      */
@@ -202,6 +240,98 @@ final class KeyExpiryRecovery
     public function isAuthFailing(): bool
     {
         return (bool) $this->cache->get(self::CACHE_KEY_AUTH_FAILURE);
+    }
+
+    /**
+     * When the recorded auth failure was observed, as a Unix timestamp, or
+     * NULL when no failure is recorded.
+     *
+     * {@see recordAuthFailure()} has always stored `time()`, and both readers
+     * then cast it to bool and threw the age away. Health reports the age so a
+     * marker that outlived its cause is visibly stale to whoever is reading
+     * the payload, rather than looking exactly like a failure from a second
+     * ago.
+     *
+     * @since 1.1.0
+     * @stability experimental
+     */
+    public function authFailingSince(): ?int
+    {
+        return self::readFailureTimestamp($this->cache);
+    }
+
+    /**
+     * Read the auth-failure timestamp from a cache, or NULL when unset.
+     *
+     * Static and cache-taking so {@see \Tag1\Scolta\Health\HealthChecker},
+     * which is constructed with a bare cache and no credential storage, reads
+     * the marker through the class that owns it instead of decoding the raw
+     * value itself.
+     *
+     * A truthy value that is not an integer counts as failing with an unknown
+     * age: the marker predates the timestamp being read back, and reporting an
+     * invented timestamp would be worse than reporting none.
+     *
+     * @since 1.1.0
+     * @stability experimental
+     */
+    public static function readFailureTimestamp(CacheDriverInterface $cache): ?int
+    {
+        $value = $cache->get(self::CACHE_KEY_AUTH_FAILURE);
+
+        return is_int($value) && $value > 0 ? $value : null;
+    }
+
+    /**
+     * Clear the auth-failure marker.
+     *
+     * The counterpart {@see recordAuthFailure()} never had. The marker's own
+     * docblock promised health would report AI unusable "until calls succeed
+     * again or the marker ages out", but only the ageing half existed: nothing
+     * in the repository unset it, so a site that recovered kept reporting
+     * `ai_auth_failing: true`, `ai_usable: false` and `status: degraded` for up
+     * to {@see self::AUTH_FAILURE_TTL} seconds after the cause was fixed.
+     *
+     * This deliberately leaves {@see self::CACHE_KEY_UPGRADE_NEEDED} alone.
+     * That marker means an admin still has to re-authenticate and is cleared
+     * only by {@see clearUpgradeNeeded()} once they have.
+     *
+     * Called on every successful AI call via {@see noteCallSucceeded()}, and
+     * available directly for an operator who has to force the marker down on a
+     * site that cannot make a successful call at all.
+     *
+     * @since 1.1.0
+     * @stability experimental
+     */
+    public function clearAuthFailure(): void
+    {
+        $this->cache->set(self::CACHE_KEY_AUTH_FAILURE, false, 1);
+    }
+
+    /**
+     * Record that an AI call succeeded, clearing any auth-failure marker.
+     *
+     * A call that the provider accepted is proof the stored credentials
+     * authenticate, which is the whole of what the marker claims. Wired into
+     * {@see \Tag1\Scolta\Service\AiServiceAdapter} so recovery needs no
+     * operator action.
+     *
+     * Reads before writing so the overwhelmingly common case — a healthy site
+     * whose marker is already clear — costs a cache read rather than a cache
+     * write on every AI call.
+     *
+     * @since 1.1.0
+     * @stability experimental
+     */
+    public function noteCallSucceeded(): void
+    {
+        if (!$this->isAuthFailing()) {
+            return;
+        }
+
+        $this->clearAuthFailure();
+
+        $this->logger->info('Scolta: an AI call succeeded; clearing the recorded Amazee auth failure.');
     }
 
     /**
