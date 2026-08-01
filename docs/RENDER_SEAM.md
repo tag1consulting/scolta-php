@@ -220,19 +220,33 @@ Scolta.setSuggestionRenderer(function (suggestion, ctx) {
   if (suggestion.type === 'recent') return null;          // built-in row is fine
   const img = suggestion.meta.image;                      // raw — escape it
   return `${img ? `<img class="my-sayt__thumb" src="${escapeAttr(img)}" alt="">` : ''}
-          <span class="my-sayt__title">${ctx.titleHtml}</span>`;
+          <span class="my-sayt__title">${ctx.titleHtml}</span>
+          <span class="my-sayt__excerpt">${ctx.excerptHtml}</span>`;
 });
 ```
 
 `suggestion` is the same object `scolta:suggestions-rendered` carries: `type`,
 `title`, `url`, `safeUrl`, `excerpt` and `meta`, described above. `ctx` carries:
 
-| Key | What it is |
-|---|---|
-| `index` | position of this suggestion in the dropdown |
-| `query` | the prefix being suggested on, **raw** |
-| `titleHtml` | the escaped title the built-in row would have shown |
-| `excerptHtml` | the escaped, truncated excerpt, or `""` on a recent search |
+| Key | What it is | Result-renderer twin |
+|---|---|---|
+| `index` | position of this suggestion in the dropdown | `index` |
+| `query` | the prefix being suggested on, **raw** | `query` |
+| `titleHtml` | the escaped title the built-in row would have shown | `titleHtml` |
+| `excerptHtml` | the escaped, truncated excerpt, or `""` on a recent search | `excerptHtml` |
+| `safeUrl` | attribute-escaped URL with non-`http(s)` schemes neutralized, the same value the option's `href` carries in navigate mode; `""` on a recent search | `safeUrl` |
+
+The names are the result renderer's, and mean the same things. The result `ctx`
+keys with no suggestion counterpart are the ones a suggestion row has no
+equivalent for: `highlightTerms` (the suggest path does not highlight, and the
+terms on the instance belong to the committed search cycle, not to this one),
+`score`, and the `titleAttr`, `urlText`, `siteHtml` and `dateHtml` values the
+built-in card renders and the built-in row does not.
+
+A recent-search suggestion gets `safeUrl: ""` rather than a URL. It has no
+destination: acting on one runs the search in place, so there is no href
+anywhere in the bundle for it, and minting one here would hand a renderer a link
+that navigates where clicking the row does not.
 
 Return an HTML string, or `null` to fall back to the built-in row **for that one
 suggestion** — the example above uses that to keep Scolta's row for recent
@@ -255,10 +269,12 @@ navigation and screen-reader announcement silently, on a path nobody tests by
 hand. Style the row through `.scolta-sayt-option` and the custom properties in
 [`SAYT.md`](SAYT.md#theming); build what goes inside it with the renderer.
 
-Escaping works exactly as it does for the result renderer: `ctx.titleHtml` and
-`ctx.excerptHtml` arrive escaped, and everything on `suggestion` — including
-every `meta` value — is raw index or visitor content that your renderer must
-escape before it reaches markup.
+Escaping works exactly as it does for the result renderer, and the rule is the
+same one: every `ctx` value whose name ends in `Html`, `Attr` or `Text`, plus
+`safeUrl`, is **already escaped** exactly as the built-in row escapes it, and
+everything else is raw. Raw here means `ctx.query` and everything on
+`suggestion` — `title`, `url`, `excerpt` and every `meta` value — all of which
+is index or visitor content your renderer must escape before it reaches markup.
 
 Like `setResultRenderer`, this is a registration function and **not** a config
 key, for the reason given above. Registering nothing changes nothing: the

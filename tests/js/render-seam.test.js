@@ -605,13 +605,64 @@ describe('setSuggestionRenderer', () => {
         expect(s.safeUrl).toBe('/alpha');
         expect(ctx.index).toBe(0);
         expect(ctx.query).toBe('alpha');
-        // titleHtml and excerptHtml arrive escaped exactly as the built-in row
-        // escapes them, so composing from them is the safe path and the easy one.
+        // titleHtml, excerptHtml and safeUrl arrive escaped exactly as the
+        // built-in row escapes them, so composing from them is the safe path and
+        // the easy one. Same names, same meanings, as the result renderer's ctx.
         expect(ctx.titleHtml).toContain('&amp;');
         expect(ctx.titleHtml).not.toContain('<b>');
         expect(ctx.excerptHtml).toContain('alpha widgets');
+        expect(ctx.safeUrl).toBe('/alpha');
+        expect(Object.keys(ctx).sort())
+            .toEqual(['excerptHtml', 'index', 'query', 'safeUrl', 'titleHtml']);
         expect(h.$('.platform-row').textContent).toContain('Alpha & <b>Co</b>');
         expect(h.$('.platform-row b')).toBeNull();
+    });
+
+    test('ctx.safeUrl neutralizes a javascript: URL before the renderer sees it', async () => {
+        const seen = [];
+        const h = setup({
+            rowsFor: () => [{
+                url: 'javascript:alert(1)',
+                title: 'Poisoned',
+                excerpt: 'alpha widgets here',
+                content: 'alpha widgets here',
+                meta: { url: 'javascript:alert(1)' },
+            }],
+            sayt: SAYT,
+            beforeInit: (win) => {
+                win.Scolta.setSuggestionRenderer((s, ctx) => {
+                    seen.push(ctx.safeUrl);
+                    return `<a class="platform-row" href="${ctx.safeUrl}">x</a>`;
+                });
+            },
+        });
+        await h.type('alpha');
+
+        // Same sanitizer, same answer as the result seam's ctx.safeUrl.
+        expect(seen).toEqual(['#']);
+        expect(h.$('.platform-row').getAttribute('href')).toBe('#');
+    });
+
+    test('a recent suggestion gets an empty safeUrl, not an invented one', async () => {
+        const seen = [];
+        const h = setup({
+            rowsFor: () => [],
+            sayt: SAYT,
+            beforeInit: (win) => {
+                win.localStorage.setItem(
+                    'scolta:recent-searches', JSON.stringify(['alpha widgets'])
+                );
+                win.Scolta.setSuggestionRenderer((s, ctx) => {
+                    seen.push({ type: s.type, safeUrl: ctx.safeUrl, excerptHtml: ctx.excerptHtml });
+                    return '<span class="platform-row">x</span>';
+                });
+            },
+        });
+        await h.type('alpha');
+
+        // Acting on a recent search runs the search in place; there is no href
+        // for it anywhere in the bundle, so ctx does not mint one.
+        expect(seen).toEqual([{ type: 'recent', safeUrl: '', excerptHtml: '' }]);
     });
 
     test('the option element keeps its ARIA and dispatch attributes', async () => {

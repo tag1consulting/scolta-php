@@ -1969,10 +1969,11 @@
       type: 'recent',
       title: value,
       url: '',
+      // Nothing to navigate to: acting on a recent search runs the search in
+      // place. The field is present, and empty, so every suggestion has one
+      // shape and a consumer never has to feature-test safeUrl or meta.
+      safeUrl: '',
       excerpt: '',
-      // No fragment behind a recent search, but the field is present anyway so
-      // every suggestion has one shape and a consumer never has to feature-test
-      // it before reading suggestion.meta.
       meta: {},
     }));
   }
@@ -2217,11 +2218,17 @@
       index: index,
       // The prefix being suggested on, RAW and not html-escaped: it is here so
       // a renderer can build a request or compare terms, not to be pasted into
-      // markup. titleHtml and excerptHtml are already escaped exactly as the
-      // built-in row escapes them.
+      // markup. Every value below whose name ends in Html, plus safeUrl, is
+      // already escaped exactly as the built-in row escapes it — the same
+      // division the result renderer's ctx draws.
       query: query,
       titleHtml: escapeHtml(s.title),
       excerptHtml: (!isRecent && s.excerpt) ? truncateExcerpt(s.excerpt, 120) : '',
+      // The same attribute-escaped, scheme-neutralized value the option's href
+      // carries in navigate mode. A recent search has no destination — acting
+      // on one runs the search in place rather than navigating — so it gets ''
+      // rather than a URL invented here that nothing else in the bundle emits.
+      safeUrl: s.safeUrl || '',
     };
 
     if (renderer) {
@@ -5219,6 +5226,14 @@
    *                 request or compare terms, not to be pasted into markup
    *   titleHtml   — the escaped title the built-in row would have shown
    *   excerptHtml — the escaped, truncated excerpt, or "" on a recent search
+   *   safeUrl     — attribute-escaped URL with non-http(s) schemes neutralized,
+   *                 the same value the option's href carries in navigate mode;
+   *                 "" on a recent search, which has no destination
+   *
+   * The naming is the result renderer's: every ctx value whose name ends in
+   * Html, plus safeUrl, is pre-escaped, and everything else is raw. There is no
+   * highlightTerms here because the suggest path does not highlight — the terms
+   * on the instance belong to the committed search cycle, not to this one.
    *
    * Return an HTML string, or null to fall back to the built-in row for that
    * one suggestion. A renderer that throws also falls back, with a console

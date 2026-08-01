@@ -1048,8 +1048,11 @@ describe('suggestion metadata', () => {
         expect(list).toHaveLength(1);
         expect(list[0].type).toBe('recent');
         // Same shape as every other suggestion, so a listener never has to
-        // feature-test the field before reading it.
+        // feature-test a field before reading it. safeUrl is empty rather than
+        // invented: acting on a recent search runs the search in place, so it
+        // has no destination to point at.
         expect(list[0].meta).toEqual({});
+        expect(list[0].safeUrl).toBe('');
     });
 
     test('the enrichment merge preserves meta on suggestions from both passes', async () => {
