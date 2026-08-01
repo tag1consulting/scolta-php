@@ -17,6 +17,8 @@
  *   5. The search-as-you-type dropdown has four untrusted channels of its own
  *      — fragment titles, fragment excerpts, LLM expansion terms, and
  *      localStorage values the visitor typed — all of which reach innerHTML.
+ *      Fragment metadata is a fifth channel offered to consumers but never
+ *      rendered by the built-in row, including on the renderer fallback path.
  */
 
 const fs = require('fs');
@@ -297,6 +299,65 @@ describe('search-as-you-type dropdown — every untrusted channel', () => {
         expect(option).toBeTruthy();
         expect(option.hasAttribute('onmouseover')).toBe(false);
         expect(option.textContent).toContain('Evil"');
+    });
+
+    test('a hostile meta value never reaches the built-in row', async () => {
+        // Fragment metadata is now carried onto the suggestion object for
+        // renderers and listeners to read. The built-in row still renders only
+        // the title and the excerpt, so a poisoned metadata key has no path to
+        // markup at all unless a consumer opts into rendering it.
+        const h = setup({
+            sayt: SAYT_FAST,
+            rowsFor: () => [{
+                url: '/a',
+                title: 'Branching',
+                content: 'branch',
+                meta: { image: '"><img src=x onerror="window.__pwned=true">' },
+            }],
+        });
+        await h.suggest('branch');
+
+        const dropdown = h.$('#scolta-sayt');
+        expect(dropdown.querySelectorAll('[role="option"]').length).toBe(1);
+        expect(h.window.__pwned).toBeUndefined();
+        expect(dropdown.querySelector('img')).toBeNull();
+        expect(dropdown.innerHTML).not.toContain('onerror');
+    });
+
+    test('a renderer that returns null leaves the built-in row escaping intact', async () => {
+        // The fallback path is the one a platform hits for every suggestion type
+        // it does not handle, so it has to be as safe as it was before any
+        // renderer existed — including for a renderer that reads meta and then
+        // declines to render.
+        const h = setup({
+            sayt: SAYT_FAST,
+            rowsFor: () => [{
+                url: '/a',
+                title: 'Doc <img src=x onerror="window.__pwned=true"> Title',
+                content: 'branch',
+                excerpt: 'branch <img src=y onerror="window.__pwned2=true"> excerpt',
+                meta: { image: 'javascript:alert(1)' },
+            }],
+        });
+        const seen = [];
+        h.window.Scolta.setSuggestionRenderer((s) => {
+            seen.push(s.meta.image);
+            return null;
+        });
+        await h.suggest('branch');
+
+        // The renderer saw the raw metadata…
+        expect(seen).toEqual(['javascript:alert(1)']);
+        // …and declining to render put back the fully escaped built-in row.
+        const dropdown = h.$('#scolta-sayt');
+        expect(dropdown.querySelectorAll('[role="option"]').length).toBe(1);
+        expect(h.window.__pwned).toBeUndefined();
+        expect(h.window.__pwned2).toBeUndefined();
+        expect(dropdown.querySelector('img')).toBeNull();
+        expect(dropdown.querySelector('.scolta-sayt-title').textContent).toContain('Doc');
+        expect(dropdown.innerHTML).not.toContain('javascript:alert(1)');
+
+        h.window.Scolta.setSuggestionRenderer(null);
     });
 
     test('a javascript: fragment URL never becomes a suggestion href', async () => {
