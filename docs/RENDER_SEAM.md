@@ -13,8 +13,9 @@ The render seam is how a platform takes over. It has three parts:
 
 1. **Lifecycle events** so you know when the list is about to change and when it
    has changed.
-2. **A result renderer** so you supply the markup for each result in the first
-   place, instead of rewriting Scolta's markup after the fact.
+2. **A result renderer, and a suggestion renderer** so you supply the markup for
+   each result and each search-as-you-type row in the first place, instead of
+   rewriting Scolta's markup after the fact.
 3. **A non-destructive mount** so server-rendered markup inside the container
    survives initialisation.
 
@@ -66,16 +67,19 @@ On `scolta:suggestions-rendered` (search as you type, added in 1.1.0 — see
 - `query` — the prefix these suggestions describe, which is **not** the
   committed query and never appears in `#scolta-results`.
 - `suggestions` — the rendered model in DOM order. Each entry has `type`
-  (`recent` or `title`), `title`, `url`, `safeUrl` and `excerpt`. `title`, `url`
-  and `excerpt` are raw, for comparing or building a request; `safeUrl` is the
-  attribute-escaped, scheme-neutralized value the option's `href` carries.
+  (`recent` or `title`), `title`, `url`, `safeUrl`, `excerpt` and `meta`.
+  `title`, `url` and `excerpt` are raw, for comparing or building a request;
+  `safeUrl` is the attribute-escaped, scheme-neutralized value the option's
+  `href` carries.
+- `meta` is the fragment's whole metadata map — a thumbnail URL, an entity id,
+  anything the index carries — the same surface the result renderer sees as
+  `data.meta`. It is **raw** index content, so escape any value you put into
+  markup. A recent-search suggestion has no fragment behind it and carries
+  `meta: {}`, so the field is always present and never needs feature-testing.
 
 The suggest path fires only these two events. It never writes `#scolta-results`
 or `#scolta-filters`, so it never emits the four above — a listener that only
 cares about committed searches needs no filtering.
-
-There is no suggestion-renderer registration API: a suggestion row is a title
-and an excerpt, and CSS is the seam for it.
 
 The `before` events exist so you can detach your own behaviours before the nodes
 they are bound to are destroyed. They are **not cancellable**: a render a
@@ -204,6 +208,62 @@ document.addEventListener('scolta:results-rendered', (e) => {
 });
 ```
 
+### The suggestion renderer
+
+The search-as-you-type dropdown has the same seam, for the same reason: a
+platform that wants a thumbnail, a content-type badge or a price on each
+suggestion row should paint it, rather than wait for Scolta's row and rewrite
+it. See [`SAYT.md`](SAYT.md) for the feature itself.
+
+```js
+Scolta.setSuggestionRenderer(function (suggestion, ctx) {
+  if (suggestion.type === 'recent') return null;          // built-in row is fine
+  const img = suggestion.meta.image;                      // raw — escape it
+  return `${img ? `<img class="my-sayt__thumb" src="${escapeAttr(img)}" alt="">` : ''}
+          <span class="my-sayt__title">${ctx.titleHtml}</span>`;
+});
+```
+
+`suggestion` is the same object `scolta:suggestions-rendered` carries: `type`,
+`title`, `url`, `safeUrl`, `excerpt` and `meta`, described above. `ctx` carries:
+
+| Key | What it is |
+|---|---|
+| `index` | position of this suggestion in the dropdown |
+| `query` | the prefix being suggested on, **raw** |
+| `titleHtml` | the escaped title the built-in row would have shown |
+| `excerptHtml` | the escaped, truncated excerpt, or `""` on a recent search |
+
+Return an HTML string, or `null` to fall back to the built-in row **for that one
+suggestion** — the example above uses that to keep Scolta's row for recent
+searches and own only the index matches. A renderer that throws also falls back,
+with a console warning.
+
+There is a per-instance form, and `null` restores the built-in row:
+
+```js
+inst.setSuggestionRenderer(fn);
+Scolta.setSuggestionRenderer(null);
+```
+
+**You own the inside of the row, not the row.** Scolta keeps the option element
+itself: `role="option"`, the stable `id` the input's `aria-activedescendant`
+points at, `aria-selected`, `data-scolta-sayt-index`, and in `navigate` mode the
+anchor and its sanitized `href`. Those are the ARIA combobox and keyboard
+contract, and a renderer that forgot one of them would break arrow-key
+navigation and screen-reader announcement silently, on a path nobody tests by
+hand. Style the row through `.scolta-sayt-option` and the custom properties in
+[`SAYT.md`](SAYT.md#theming); build what goes inside it with the renderer.
+
+Escaping works exactly as it does for the result renderer: `ctx.titleHtml` and
+`ctx.excerptHtml` arrive escaped, and everything on `suggestion` — including
+every `meta` value — is raw index or visitor content that your renderer must
+escape before it reaches markup.
+
+Like `setResultRenderer`, this is a registration function and **not** a config
+key, for the reason given above. Registering nothing changes nothing: the
+built-in row is byte-identical to the one Scolta shipped before this API existed.
+
 ## 3. Non-destructive mount
 
 `init()` used to run `root.innerHTML = scaffold`, destroying anything already
@@ -270,6 +330,9 @@ Two limits worth knowing:
 the above: event order and `reason` values, the `detail` shape, renderer
 fallback on `null` and on a throw, `ctx` escaping, delegated handlers inside
 renderer markup, mount-point preservation, and node identity across the
-expansion repaint. `tests/js/sayt.test.js` pins the two suggestion events the
-same way: target, bubbling, non-cancellability, `detail` shape, and that a
-listener which throws does not take the render down.
+expansion repaint. It also pins the suggestion renderer: one call per row,
+fallback on a null return and on a throw, global-versus-instance precedence, and
+that the ARIA and keyboard attributes survive a renderer that returns markup of
+its own. `tests/js/sayt.test.js` pins the two suggestion events the same way —
+target, bubbling, non-cancellability, `detail` shape, a listener which throws not
+taking the render down — plus `suggestion.meta` reaching a listener intact.

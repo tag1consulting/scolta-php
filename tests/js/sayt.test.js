@@ -993,6 +993,101 @@ describe('interaction with the full pipeline', () => {
 
 // ---------------------------------------------------------------------------
 
+describe('suggestion metadata', () => {
+    // `image` is the key the demos want on a suggestion row. The ampersand is
+    // there to prove the value arrives RAW: escaping at the source would corrupt
+    // a value a consumer wants for a request URL or a comparison, so the
+    // contract is escape-at-use and this test pins it.
+    const WITH_META = [{
+        url: '/kamado-basics',
+        title: 'Kamado Basics',
+        excerpt: 'ceramic grill',
+        meta: { image: '/img/kamado.jpg?a=1&b=2', kind: 'guide' },
+    }];
+
+    function captureSuggestions(h) {
+        const seen = [];
+        h.window.document.addEventListener('scolta:suggestions-rendered', (e) => {
+            seen.push(e.detail.suggestions);
+        });
+        return seen;
+    }
+
+    test('a title suggestion carries its fragment meta map, raw, to a listener', async () => {
+        const h = await boot(setup({
+            sayt: { saytDebounceMs: 10 },
+            rowsFor: () => WITH_META,
+        }));
+        const seen = captureSuggestions(h);
+
+        h.type('kamado');
+        await tick(80);
+
+        const list = seen[seen.length - 1];
+        expect(list).toHaveLength(1);
+        expect(list[0].type).toBe('title');
+        expect(list[0].meta).toEqual({
+            title: 'Kamado Basics',
+            image: '/img/kamado.jpg?a=1&b=2',
+            kind: 'guide',
+        });
+    });
+
+    test('a recent suggestion carries an empty meta rather than no field at all', async () => {
+        const h = await boot(setup({
+            sayt: { saytDebounceMs: 10 },
+            recent: ['kamado pizza dough'],
+            rowsFor: () => [],
+        }));
+        const seen = captureSuggestions(h);
+
+        h.type('kamado');
+        await tick(80);
+
+        const list = seen[seen.length - 1];
+        expect(list).toHaveLength(1);
+        expect(list[0].type).toBe('recent');
+        // Same shape as every other suggestion, so a listener never has to
+        // feature-test the field before reading it.
+        expect(list[0].meta).toEqual({});
+    });
+
+    test('the enrichment merge preserves meta on suggestions from both passes', async () => {
+        const h = await boot(setup({
+            sayt: { saytDebounceMs: 10, saytExpansionDelayMs: 20, saytExpandPerMinute: 2 },
+            scoring: { AI_EXPAND_QUERY: true, AI_SUMMARIZE: false },
+            recent: ['kamado pizza dough'],
+            expandResponse: { terms: ['ceramic smoker'] },
+            rowsFor: q => (q === 'ceramic smoker'
+                ? [{
+                    url: '/smoker',
+                    title: 'Ceramic Smoker Guide',
+                    excerpt: 'low and slow',
+                    meta: { image: '/img/smoker.jpg' },
+                }]
+                : WITH_META),
+        }));
+        const seen = captureSuggestions(h);
+
+        h.type('kamado');
+        await tick(200);
+
+        const list = seen[seen.length - 1];
+        // A recent search, a keyword match and an expansion match, all merged.
+        expect(list.map(s => s.title)).toEqual(
+            expect.arrayContaining(['kamado pizza dough', 'Kamado Basics', 'Ceramic Smoker Guide'])
+        );
+        // mergeSuggestions() copies whole suggestion objects, so nothing loses
+        // its meta on the way through the merge.
+        const byTitle = Object.fromEntries(list.map(s => [s.title, s.meta]));
+        expect(byTitle['Kamado Basics'].image).toBe('/img/kamado.jpg?a=1&b=2');
+        expect(byTitle['Ceramic Smoker Guide'].image).toBe('/img/smoker.jpg');
+        expect(byTitle['kamado pizza dough']).toEqual({});
+    });
+});
+
+// ---------------------------------------------------------------------------
+
 describe('AI enrichment', () => {
     const AI = {
         sayt: { saytDebounceMs: 10, saytExpansionDelayMs: 20, saytExpandPerMinute: 2 },

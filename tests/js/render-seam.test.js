@@ -32,6 +32,9 @@ const patchedSource = scoltaSource.replace(
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 async function ticks(n) { for (let i = 0; i < n; i++) await tick(); }
+// Real elapsed time, for the SAYT debounce — the suggest path is the one thing
+// in this file that is driven by a timer rather than by promise resolution.
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
 // Boot the real scolta.js against a synthetic corpus.
 //   rowsFor(query)  -> array of { url, title, excerpt, content, meta, filters }
@@ -41,6 +44,7 @@ async function ticks(n) { for (let i = 0; i < n; i++) await tick(); }
 function setup({
     rowsFor,
     config = {},
+    sayt = {},
     expandResponse = { terms: [] },
     mountHtml = '',
     mountAttrs = '',
@@ -89,7 +93,7 @@ function setup({
     window.scrollTo = () => {};
 
     window.eval(patchedSource);
-    window.scolta = {
+    window.scolta = Object.assign({
         scoring: Object.assign({
             AI_EXPAND_QUERY: false,
             AI_SUMMARIZE: false,
@@ -100,7 +104,7 @@ function setup({
         endpoints: { expand: '/expand', summarize: '/summarize', followup: '/followup' },
         pagefindPath: '/pf.js', wasmPath: '/wasm.js',
         siteName: 'Test', container: '#scolta-search',
-    };
+    }, sayt);
 
     if (beforeInit) beforeInit(window);
     if (!autoInit) window.Scolta.init('#scolta-search');
@@ -129,7 +133,28 @@ function setup({
 
     const cards = () => $$('#scolta-results > *');
 
-    return { window, $, $$, search, events, cards };
+    // The suggest path: typing is an `input` event, never a doSearch(). Nothing
+    // above dispatches one, so no existing test in this file opens a dropdown.
+    async function type(value) {
+        await ticks(15);
+        const input = $('#scolta-query');
+        input.value = value;
+        input.dispatchEvent(new window.Event('input', { bubbles: true }));
+        await wait(80);
+    }
+
+    function key(name) {
+        const input = $('#scolta-query');
+        const e = new window.KeyboardEvent('keydown', {
+            key: name, bubbles: true, cancelable: true,
+        });
+        input.dispatchEvent(e);
+        return e;
+    }
+
+    const options = () => $$('#scolta-sayt [role="option"]');
+
+    return { window, $, $$, search, events, cards, type, key, options };
 }
 
 const PAGED_ROWS = ['Widgets', 'Gadgets', 'Sprockets', 'Cogwheels', 'Levers'].map((name, i) => ({
@@ -503,6 +528,270 @@ describe('setResultRenderer', () => {
         await h.search('alpha');
         await ticks(20);
         expect(calls).toEqual(['/alpha', '/beta', '/gamma']);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// 2b. The suggestion renderer
+// ---------------------------------------------------------------------------
+//
+// Same seam, one layer down: a renderer owns the INSIDE of a search-as-you-type
+// row while Scolta keeps the option element, because that element carries the
+// ARIA combobox and keyboard contract. Every test below drives the real suggest
+// path — an `input` event, the debounce, a real dropdown write.
+
+const SAYT = { saytDebounceMs: 10 };
+
+describe('setSuggestionRenderer', () => {
+    test('a registered renderer replaces the built-in row content', async () => {
+        const h = setup({
+            rowsFor: () => ROWS,
+            sayt: SAYT,
+            beforeInit: (win) => {
+                win.Scolta.setSuggestionRenderer((s) =>
+                    `<span class="platform-row" data-url="${s.url}">${s.title}</span>`);
+            },
+        });
+        await h.type('alpha');
+
+        expect(h.options()).toHaveLength(3);
+        expect(h.$$('.platform-row')).toHaveLength(3);
+        expect(h.$$('.scolta-sayt-title')).toHaveLength(0);
+        expect(h.$$('.platform-row').map(n => n.getAttribute('data-url')))
+            .toEqual(['/alpha', '/beta', '/gamma']);
+    });
+
+    test('registration works before Scolta.init() runs', async () => {
+        const h = setup({
+            rowsFor: () => ROWS,
+            sayt: SAYT,
+            autoInit: true,
+            beforeInit: (win) => {
+                win.Scolta.setSuggestionRenderer(() => '<span class="platform-row"></span>');
+                win.Scolta.init('#scolta-search');
+            },
+        });
+        await h.type('alpha');
+        expect(h.$$('.platform-row')).toHaveLength(3);
+    });
+
+    test('the renderer is called once per suggestion with (suggestion, ctx)', async () => {
+        const calls = [];
+        const h = setup({
+            rowsFor: () => [{
+                url: '/alpha',
+                title: 'Alpha & <b>Co</b>',
+                excerpt: 'alpha widgets here',
+                content: 'alpha widgets here',
+                meta: { image: '/img/a.jpg?x=1&y=2' },
+            }],
+            sayt: SAYT,
+            beforeInit: (win) => {
+                win.Scolta.setSuggestionRenderer((s, ctx) => {
+                    calls.push({ s, ctx });
+                    return `<span class="platform-row">${ctx.titleHtml}</span>`;
+                });
+            },
+        });
+        await h.type('alpha');
+
+        expect(calls).toHaveLength(1);
+        const { s, ctx } = calls[0];
+        // The suggestion is the same object the suggestions-rendered event
+        // carries, meta included and raw.
+        expect(s.type).toBe('title');
+        expect(s.title).toBe('Alpha & <b>Co</b>');
+        expect(s.meta.image).toBe('/img/a.jpg?x=1&y=2');
+        expect(s.safeUrl).toBe('/alpha');
+        expect(ctx.index).toBe(0);
+        expect(ctx.query).toBe('alpha');
+        // titleHtml and excerptHtml arrive escaped exactly as the built-in row
+        // escapes them, so composing from them is the safe path and the easy one.
+        expect(ctx.titleHtml).toContain('&amp;');
+        expect(ctx.titleHtml).not.toContain('<b>');
+        expect(ctx.excerptHtml).toContain('alpha widgets');
+        expect(h.$('.platform-row').textContent).toContain('Alpha & <b>Co</b>');
+        expect(h.$('.platform-row b')).toBeNull();
+    });
+
+    test('the option element keeps its ARIA and dispatch attributes', async () => {
+        const h = setup({
+            rowsFor: () => ROWS,
+            sayt: SAYT,
+            beforeInit: (win) => {
+                // A renderer that sets none of them, which is the whole point:
+                // it cannot break the contract by omission.
+                win.Scolta.setSuggestionRenderer(() => '<span class="platform-row">x</span>');
+            },
+        });
+        await h.type('alpha');
+
+        h.options().forEach((opt, i) => {
+            expect(opt.getAttribute('role')).toBe('option');
+            expect(opt.id).toBe(`scolta-sayt-option-${i}`);
+            expect(opt.getAttribute('aria-selected')).toBe('false');
+            expect(opt.getAttribute('data-scolta-sayt-index')).toBe(String(i));
+            expect(opt.className).toContain('scolta-sayt-option');
+        });
+    });
+
+    test('keyboard navigation still tracks aria-activedescendant over renderer rows', async () => {
+        const h = setup({
+            rowsFor: () => ROWS,
+            sayt: SAYT,
+            beforeInit: (win) => {
+                win.Scolta.setSuggestionRenderer(() => '<span class="platform-row">x</span>');
+            },
+        });
+        await h.type('alpha');
+        const input = h.$('#scolta-query');
+
+        h.key('ArrowDown');
+        expect(input.getAttribute('aria-activedescendant')).toBe('scolta-sayt-option-0');
+        expect(h.options()[0].getAttribute('aria-selected')).toBe('true');
+
+        h.key('ArrowDown');
+        expect(input.getAttribute('aria-activedescendant')).toBe('scolta-sayt-option-1');
+        expect(h.options()[0].getAttribute('aria-selected')).toBe('false');
+        expect(h.options()[1].getAttribute('aria-selected')).toBe('true');
+
+        // ArrowUp past the top wraps to the last option, renderer or not.
+        h.key('ArrowUp');
+        h.key('ArrowUp');
+        expect(input.getAttribute('aria-activedescendant')).toBe('scolta-sayt-option-2');
+    });
+
+    test('navigate mode still wraps renderer markup in the sanitized anchor', async () => {
+        const h = setup({
+            rowsFor: () => [{
+                url: '/alpha',
+                title: 'Alpha Doc',
+                excerpt: 'alpha widgets here',
+                content: 'alpha widgets here',
+            }, {
+                url: 'javascript:alert(1)',
+                title: 'Poisoned Doc',
+                excerpt: 'alpha gadgets here',
+                content: 'alpha gadgets here',
+                meta: { url: 'javascript:alert(1)' },
+            }],
+            sayt: Object.assign({ saytSuggestionAction: 'navigate' }, SAYT),
+            beforeInit: (win) => {
+                win.Scolta.setSuggestionRenderer(() => '<span class="platform-row">x</span>');
+            },
+        });
+        await h.type('alpha');
+
+        const opts = h.options();
+        expect(opts[0].tagName).toBe('A');
+        expect(opts[0].getAttribute('href')).toBe('/alpha');
+        // A renderer does not widen the URL gate: an unsafe URL is still not a
+        // link, exactly as with the built-in row.
+        expect(opts[1].tagName).toBe('DIV');
+        expect(opts[1].hasAttribute('href')).toBe(false);
+    });
+
+    test('returning null falls back to the built-in row for that suggestion only', async () => {
+        const h = setup({
+            rowsFor: () => ROWS,
+            sayt: SAYT,
+            beforeInit: (win) => {
+                win.Scolta.setSuggestionRenderer((s) =>
+                    s.url === '/beta' ? null : '<span class="platform-row">x</span>');
+            },
+        });
+        await h.type('alpha');
+
+        expect(h.$$('.platform-row')).toHaveLength(2);
+        expect(h.$$('.scolta-sayt-title')).toHaveLength(1);
+        // …and the fallback row is the real one, glyph and all.
+        expect(h.$('.scolta-sayt-title').textContent).toBe('Beta Doc');
+        expect(h.$$('.scolta-sayt-kind')).toHaveLength(1);
+    });
+
+    test('a renderer that throws falls back rather than taking the dropdown down', async () => {
+        const h = setup({
+            rowsFor: () => ROWS,
+            sayt: SAYT,
+            beforeInit: (win) => {
+                win.Scolta.setSuggestionRenderer((s) => {
+                    if (s.url === '/beta') throw new Error('renderer bug');
+                    return '<span class="platform-row">x</span>';
+                });
+            },
+        });
+        await h.type('alpha');
+
+        expect(h.options()).toHaveLength(3);
+        expect(h.$$('.platform-row')).toHaveLength(2);
+        expect(h.$$('.scolta-sayt-title')).toHaveLength(1);
+        expect(h.window.console.warn).toHaveBeenCalled();
+    });
+
+    test('the per-instance renderer wins over the global one', async () => {
+        const h = setup({
+            rowsFor: () => ROWS,
+            sayt: SAYT,
+            beforeInit: (win) => {
+                win.Scolta.setSuggestionRenderer(() => '<span class="global-row">x</span>');
+            },
+        });
+        h.window.Scolta.defaultInstance.setSuggestionRenderer(
+            () => '<span class="instance-row">x</span>');
+        await h.type('alpha');
+
+        expect(h.$$('.instance-row')).toHaveLength(3);
+        expect(h.$$('.global-row')).toHaveLength(0);
+    });
+
+    test('passing null restores the built-in row', async () => {
+        const h = setup({
+            rowsFor: () => ROWS,
+            sayt: SAYT,
+            beforeInit: (win) => {
+                win.Scolta.setSuggestionRenderer(() => '<span class="platform-row">x</span>');
+            },
+        });
+        h.window.Scolta.setSuggestionRenderer(null);
+        await h.type('alpha');
+
+        expect(h.$$('.platform-row')).toHaveLength(0);
+        expect(h.$$('.scolta-sayt-title')).toHaveLength(3);
+    });
+
+    test('a non-function registration is rejected loudly', () => {
+        const h = setup({ rowsFor: () => ROWS });
+        // Matched by message: the TypeError is constructed inside the JSDOM
+        // realm, so it is not an instance of this realm's TypeError.
+        expect(() => h.window.Scolta.setSuggestionRenderer('nope'))
+            .toThrow(/expects a function or null/);
+        expect(() => h.window.Scolta.defaultInstance.setSuggestionRenderer(42))
+            .toThrow(/expects a function or null/);
+    });
+
+    test('Scolta.setSuggestionRenderer is not shadowed by the instance copy', () => {
+        // Same reason setResultRenderer is kept off the backward-compat copy
+        // list: the global registration usually runs before init().
+        const h = setup({ rowsFor: () => ROWS });
+        expect(h.window.Scolta.setSuggestionRenderer.length).toBe(1);
+        h.window.Scolta.setSuggestionRenderer(() => '<span></span>');
+        // Registering globally must not have touched the instance override.
+        expect(h.window.Scolta.defaultInstance.setSuggestionRenderer(null)).toBeNull();
+    });
+
+    test('the result renderer and the suggestion renderer are independent', async () => {
+        const h = setup({
+            rowsFor: () => ROWS,
+            sayt: SAYT,
+            beforeInit: (win) => {
+                win.Scolta.setResultRenderer(() => '<article class="platform-card"></article>');
+            },
+        });
+        await h.type('alpha');
+
+        // A registered RESULT renderer never touches the dropdown.
+        expect(h.$$('.scolta-sayt-title')).toHaveLength(3);
+        expect(h.$$('#scolta-sayt .platform-card')).toHaveLength(0);
     });
 });
 
