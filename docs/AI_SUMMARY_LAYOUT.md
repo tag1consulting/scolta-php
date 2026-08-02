@@ -42,6 +42,16 @@ find-in-page and assistive tech reach all of it in either state. Expanding is
 user-initiated, so the resulting shift is excluded from the metric by
 definition and the whole summary stays reachable for free.
 
+### The clamp follows the width
+
+Whether to clamp is a **measurement** (`scrollHeight` against `clientHeight`), so its answer is only true for the width it measured at. A `ResizeObserver` on the text region recomputes it whenever that width changes.
+
+Without it the decision froze at resolve-time width: rotate a phone to portrait, or shrink a responsive column, and a summary that fitted reflows to more lines and overflows the reserved height. The text is still clipped (`overflow: hidden` while reserved), but with no clamped class there is no fade and the control stays hidden, so a sighted reader sees text cut off at the box edge with no way to open it. The full text is in the DOM throughout, so find-in-page and assistive tech were never affected; the visible affordance was. Widening had the mirror problem: a pointless control on a summary that now fits.
+
+The observer is feature-detected (older engines and JSDOM have none, and the resolved path must not throw for want of it), there is never more than one, and it is disconnected when the slot is released and when the user expands the summary — re-established on collapse. It does not install when the AI summary is off.
+
+**Recomputing costs no layout shift.** It toggles a mask class and the control's `hidden` flag, and the control lives inside the fixed-height, `overflow: hidden` panel, so nothing outside the box can move. The reserved height is derived from a line count and a font size, not from the width, so the box is the same height at every width.
+
 ### States
 
 | State | Slot |
@@ -135,7 +145,11 @@ layout shift documented at the top of this file; it is your call.
 
 - `tests/js/summary-cls-reservation.test.js` — the contract in JSDOM: which
   state reserves, the clamp and its ARIA, the full text present in both states,
-  the follow-up release.
+  the follow-up release, and the resize recompute (driven through a fake
+  `ResizeObserver`, since JSDOM has neither layout nor the real one).
+- `tests/js/summary-strand-guard.test.js` — a summarize failure *before* the
+  request collapses the slot instead of shimmering forever, and an abandoned
+  cycle never collapses a newer search's slot.
 - `tests/E2E/summary-cls.spec.js` — the pixel truth in real Chromium, reading
   the browser's own layout-shift entries with realistic expansion latency.
   JSDOM has no layout and cannot see any of this.
