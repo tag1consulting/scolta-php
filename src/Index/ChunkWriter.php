@@ -43,8 +43,28 @@ class ChunkWriter
         $pages = $partial['pages'] ?? [];
         $index = $partial['index'] ?? [];
 
-        // Terms must be sorted alphabetically for the streaming merge.
-        ksort($index);
+        // Terms must arrive at the streaming merge in the order that merge
+        // compares them in, which is SplMinHeap's — PHP's standard comparison.
+        //
+        // ksort() with SORT_REGULAR is not that order on every PHP version. A
+        // numeric-looking term ("41" from a title like "Part 41", or a url's
+        // numeric suffix) becomes an INT array key, so this array has mixed
+        // int and string keys, and the two orderings disagree:
+        //
+        //   PHP 8.1   ksort: alpha,beta,part,zulu,2,9,10,41   (strings first)
+        //   PHP 8.2+  ksort: 2,9,10,41,alpha,beta,part,zulu   (ints first)
+        //   SplMinHeap, every version: 2,9,10,41,alpha,…       (ints first)
+        //
+        // On 8.1 that broke IndexMerger's precondition that each chunk's term
+        // stream is ascending. The merge groups equal terms by walking the heap
+        // top, so an out-of-order stream lets one logical term be emitted more
+        // than once and lands terms in the wrong pf_index chunk. It produced a
+        // subtly wrong index rather than an error, and nothing noticed until
+        // the round-trip and differential tests started comparing bytes.
+        //
+        // uksort with the same comparison the heap uses matches it on every
+        // version, and is a no-op on 8.2+ — output there is byte-identical.
+        uksort($index, static fn(int|string $a, int|string $b): int => $a <=> $b);
 
         $fp = fopen($path, 'wb');
         if ($fp === false) {
