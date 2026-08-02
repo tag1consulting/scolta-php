@@ -70,6 +70,9 @@ class StreamingFormatWriter
     /** Active flush threshold (bytes), derived from the MemoryBudget. */
     private int $flushBytes;
 
+    /** Build-scoped instrumentation; null disables phase emission. */
+    private ?MemoryTelemetry $telemetry = null;
+
     // ───────────────────────────────────────────────────────────────────────
 
     public function __construct(
@@ -78,6 +81,23 @@ class StreamingFormatWriter
         ?MemoryBudget $budget = null,
     ) {
         $this->flushBytes = $budget?->fragmentFlushBytes() ?? self::DEFAULT_FLUSH_BYTES;
+    }
+
+    /**
+     * Attach build-scoped telemetry so endWrite() reports its internal phases.
+     *
+     * Setter rather than constructor injection: the constructor is part of the
+     * stable surface and this class is not final, so a new parameter would
+     * break subclasses. Filters, pf_meta, the facet index and the asset copy
+     * are four separate whole-corpus writes with no boundary between them
+     * otherwise.
+     *
+     * @since 1.2.0
+     * @stability experimental
+     */
+    public function setTelemetry(?MemoryTelemetry $telemetry): void
+    {
+        $this->telemetry = $telemetry;
     }
 
     private function getVersion(): string
@@ -189,6 +209,50 @@ class StreamingFormatWriter
     }
 
     /**
+     * Write an empty fragment for every ordinal below $pageTableSize that no
+     * page claimed.
+     *
+     * A delete releases its ordinal but does not renumber, so the page table
+     * keeps a row there. `pf_meta[1]` is positional and `FacetIndexWriter`
+     * refuses a table with a hole ("Facet index needs a contiguous page
+     * table"), so the row has to exist. A tombstone is a real fragment with no
+     * content, `word_count` 0, and no posting anywhere referencing its ordinal:
+     * the page table stays dense, nothing downstream grows a hole case, and the
+     * ordinal is simply unreachable by search.
+     *
+     * Call after every writePage() and before endWrite(). A no-op when the
+     * table is already dense, which is every build that has never deleted.
+     *
+     * @param int $pageTableSize Total ordinals in the table, live plus tombstoned.
+     * @return int Number of tombstones written.
+     * @since 1.2.0
+     * @stability experimental
+     */
+    public function fillTombstones(int $pageTableSize): int
+    {
+        $written = 0;
+        for ($pageNum = 0; $pageNum < $pageTableSize; $pageNum++) {
+            if (isset($this->pageMeta[$pageNum])) {
+                continue;
+            }
+            $this->writePage($pageNum, [
+                'url'       => '',
+                'content'   => '',
+                'wordCount' => 0,
+                'filters'   => [],
+                'meta'      => [],
+                'sortable'  => [],
+                'date'      => '',
+            ]);
+            $written++;
+        }
+
+        $this->telemetry?->emit('tombstones_filled', ['items' => $written]);
+
+        return $written;
+    }
+
+    /**
      * Encode one term entry and append it to the current index chunk.
      *
      * Flushes the chunk to disk when it reaches ~40 KB.
@@ -229,75 +293,23 @@ class StreamingFormatWriter
         // Flush any remaining terms.
         $this->flushIndexChunk();
 
-        // Write filter index — one file per dimension, Pagefind native format.
-        $filterDataMap = $this->buildFilterIndex();
-        $filterHashes  = [];
-        if (!empty($filterDataMap)) {
-            $this->ensureDir($this->buildDir . '/filter');
-            foreach ($filterDataMap as $filterName => $filterData) {
-                $hash       = 'en_' . substr(hash('sha256', $filterData), 0, 10);
-                $compressed = gzencode(self::DELIMITER . $filterData, 9);
-                $filterPath = $this->buildDir . "/filter/{$hash}.pf_filter";
-                if (file_put_contents($filterPath, $compressed) === false) {
-                    throw new \RuntimeException("Failed to write file: {$filterPath}");
-                }
-                $filterHashes[$filterName] = $hash;
-            }
-        }
+        // pf_meta[1] is a positional array: pagefind.js resolves a result via
+        // pf_meta[1][page_num]. The metadata writer emits it in ordinal order,
+        // which is only the same as accumulation order while page numbers come
+        // from a running counter over the gather order. Nothing enforced that;
+        // it held by accident. Sorting is done inside the metadata writer so
+        // the requirement has one home.
+        $this->telemetry?->emit('endwrite_metadata', ['items' => count($this->pageMeta)]);
 
-        $metaFields = array_keys($this->collectedMetaFields);
-
-        // Write pf_meta.
-        $metaCbor = $this->buildMetadata($filterHashes, $metaFields);
-        $metaHash   = 'en_' . substr(hash('sha256', $metaCbor), 0, 10);
-        $compressed = gzencode(self::DELIMITER . $metaCbor, 9);
-        $metaPath   = $this->buildDir . "/pagefind.{$metaHash}.pf_meta";
-        if (file_put_contents($metaPath, $compressed) === false) {
-            throw new \RuntimeException("Failed to write file: {$metaPath}");
-        }
-
-        // Write the Scolta facet index — the artifact scolta.js reads instead of
-        // Pagefind's filter chunks. It carries EVERY dimension, including the
-        // single-value ones the chunk emission above skips: a dimension Scolta
-        // can be asked to apply (AUTO_LANGUAGE_FILTER applies `language`) needs a
-        // posting list even when it is useless as a facet.
-        //
-        // Stamped with the pf_meta hash, which is why it is written here and not
-        // earlier: the browser compares that stamp against the hash in the
-        // cache-busted pagefind-entry.json and falls back to pagefind.filters()
-        // rather than trusting a cached artifact from a previous build.
-        (new FacetIndexWriter())->write(
+        (new IndexMetadataWriter($this->cbor))->write(
             $this->buildDir,
+            $this->pageMeta,
             $this->filterData,
-            array_map(fn(array $meta): string => $meta['fragmentHash'], $this->pageMeta),
-            $metaHash,
+            $this->sortFields,
+            array_values($this->indexChunkMeta),
+            array_keys($this->collectedMetaFields),
+            $this->getVersion(),
         );
-
-        // Write pagefind-entry.json.
-        $entry = [
-            'version'            => $this->getVersion(),
-            'languages'          => [
-                'en' => [
-                    'hash'       => $metaHash,
-                    'wasm'       => 'en',
-                    'page_count' => count($this->pageMeta),
-                ],
-            ],
-            'include_characters' => [],
-        ];
-        $entryPath = $this->buildDir . '/pagefind-entry.json';
-        if (file_put_contents($entryPath, json_encode($entry, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) === false) {
-            throw new \RuntimeException("Failed to write file: {$entryPath}");
-        }
-
-        // Copy bundled runtime assets.
-        $assetsDir = dirname(__DIR__, 2) . '/assets/pagefind';
-        foreach (['pagefind.js', 'pagefind-worker.js', 'wasm.en.pagefind', 'wasm.unknown.pagefind'] as $asset) {
-            $src = $assetsDir . '/' . $asset;
-            if (file_exists($src)) {
-                copy($src, $this->buildDir . '/' . $asset);
-            }
-        }
     }
 
     // ── Private helpers ─────────────────────────────────────────────────────
@@ -332,218 +344,16 @@ class StreamingFormatWriter
     }
 
     /**
-     * Build the filter index CBOR — one file per dimension, Pagefind native format.
-     *
-     * @return array<string, string> Map of filterName → CBOR bytes.
-     */
-    private function buildFilterIndex(): array
-    {
-        $result = [];
-        foreach ($this->filterData as $filterName => $values) {
-            // A dimension with one distinct value cannot filter anything —
-            // selecting its only value matches every page — and its count is
-            // never useful either. It is not free: on a 109,308-page corpus the
-            // auto-injected single-value `site` and `language` dimensions were
-            // 485,100 served bytes and 218,616 postings, and every posting in a
-            // loaded chunk costs Pagefind one linear scan of the matched-result
-            // set on every subsequent search. The facet panel already hides
-            // single-value dimensions, so nothing rendered changes.
-            //
-            // The Scolta facet index still carries them (see endWrite): it is
-            // what applies filters now, and it needs the posting list even for
-            // a dimension no facet renders.
-            if (count($values) < 2) {
-                continue;
-            }
-            $valueTuples = [];
-            foreach ($values as $value => $pageNums) {
-                $valueTuples[] = $this->cbor->encodeArray([
-                    $this->cbor->encodeString((string) $value),
-                    $this->cbor->encodeArray(
-                        array_map(fn(int $p) => $this->cbor->encodeUint($p), $pageNums),
-                    ),
-                ]);
-            }
-            $result[$filterName] = $this->cbor->encodeArray([
-                $this->cbor->encodeString($filterName),
-                $this->cbor->encodeArray($valueTuples),
-            ]);
-        }
-
-        return $result;
-    }
-
-    /**
-     * Build the pf_meta CBOR structure.
-     *
-     * @param array<string,string> $filterHashes Map of filterName → file hash for each dimension.
-     * @param string[]             $metaFields   Meta field names (e.g. ['title', 'date']).
-     */
-    private function buildMetadata(
-        array $filterHashes,
-        array $metaFields,
-    ): string {
-        $pageItems = [];
-        foreach ($this->pageMeta as $meta) {
-            $pageItems[] = $this->cbor->encodeArray([
-                $this->cbor->encodeString($meta['fragmentHash']),
-                $this->cbor->encodeUint($meta['wordCount']),
-            ]);
-        }
-
-        $chunkItems = [];
-        foreach ($this->indexChunkMeta as $chunk) {
-            $chunkItems[] = $this->cbor->encodeArray([
-                $this->cbor->encodeString($chunk['from']),
-                $this->cbor->encodeString($chunk['to']),
-                $this->cbor->encodeString($chunk['hash']),
-            ]);
-        }
-
-        $filterItems = [];
-        foreach ($filterHashes as $filterName => $hash) {
-            $filterItems[] = $this->cbor->encodeArray([
-                $this->cbor->encodeString($filterName),
-                $this->cbor->encodeString($hash),
-            ]);
-        }
-
-        $metaFieldItems = [];
-        foreach ($metaFields as $field) {
-            $metaFieldItems[] = $this->cbor->encodeString($field);
-        }
-
-        return $this->cbor->encodeArray([
-            $this->cbor->encodeString($this->getVersion()),
-            $this->cbor->encodeArray($pageItems),
-            $this->cbor->encodeArray($chunkItems),
-            $this->cbor->encodeArray($filterItems),
-            $this->buildSortsArray(),
-            $this->cbor->encodeArray($metaFieldItems),
-        ]);
-    }
-
-    /**
-     * Build CBOR sorts array for pf_meta position [4].
-     *
-     * For each sort field, produces a pre-sorted array of page indices ordered
-     * by that field's value. Numeric values are sorted numerically; non-numeric
-     * values are sorted lexicographically. Pages missing a value for a given
-     * sort field are excluded from that field's sorted index.
-     *
-     * Sort data is accumulated directly in transposed form (field → pageNum → value)
-     * during writePage(), so no intermediate transposition allocation is needed here.
-     */
-    private function buildSortsArray(): string
-    {
-        if (empty($this->sortFields)) {
-            return $this->cbor->encodeArray([]);
-        }
-
-        $sortItems = [];
-        foreach ($this->sortFields as $field => $pageValues) {
-            $allNumeric = array_reduce(
-                $pageValues,
-                fn(bool $carry, string $v) => $carry && is_numeric($v),
-                true,
-            );
-
-            if ($allNumeric) {
-                asort($pageValues, SORT_NUMERIC);
-            } else {
-                asort($pageValues, SORT_STRING);
-            }
-
-            $sortedPageIndices = array_map(
-                fn(int $p) => $this->cbor->encodeUint($p),
-                array_keys($pageValues),
-            );
-
-            $sortItems[] = $this->cbor->encodeArray([
-                $this->cbor->encodeString($field),
-                $this->cbor->encodeArray($sortedPageIndices),
-            ]);
-        }
-
-        return $this->cbor->encodeArray($sortItems);
-    }
-
-    /**
      * Encode a single word entry as CBOR.
      *
-     * Identical logic to PagefindFormatWriter::encodeWordEntry().
+     * Delegates to PfIndexCodec, which owns both directions of the chunk
+     * format. Keeping the encoder here and a decoder elsewhere would be two
+     * descriptions of one format, free to drift; the round-trip test only
+     * means something while there is exactly one.
      */
     private function encodeWordEntry(string $word, array $pageEntries): string
     {
-        $variants = $pageEntries['_variants'] ?? [];
-        unset($pageEntries['_variants']);
-
-        $pageNums   = array_keys($pageEntries);
-        sort($pageNums, SORT_NUMERIC);
-        $deltaPages = DeltaEncoder::deltaEncode($pageNums);
-
-        $encodedPages = [];
-        foreach ($pageNums as $idx => $pageNum) {
-            $entry     = $pageEntries[$pageNum];
-            $pageItems = [$this->cbor->encodeUint($deltaPages[$idx])];
-
-            $allBodyPositions = [];
-            foreach ($entry['positions'] as $positions) {
-                sort($positions);
-                $allBodyPositions = array_merge($allBodyPositions, $positions);
-            }
-            sort($allBodyPositions);
-
-            $posItems = [];
-            if (!empty($allBodyPositions)) {
-                $posItems[] = $this->cbor->encodeNegInt(-25); // body weight marker
-                $deltaPos   = DeltaEncoder::deltaEncode($allBodyPositions);
-                foreach ($deltaPos as $dp) {
-                    $posItems[] = $dp >= 0
-                        ? $this->cbor->encodeUint($dp)
-                        : $this->cbor->encodeNegInt($dp);
-                }
-            }
-            $pageItems[] = $this->cbor->encodeArray($posItems);
-
-            $metaPositions = $entry['meta_positions'] ?? [];
-            $metaItems     = [];
-            if (!empty($metaPositions)) {
-                sort($metaPositions);
-                $metaItems[] = $this->cbor->encodeNegInt(-1); // title field marker (index 0)
-                $deltaMetaPos = DeltaEncoder::deltaEncode($metaPositions);
-                foreach ($deltaMetaPos as $mp) {
-                    $metaItems[] = $mp >= 0
-                        ? $this->cbor->encodeUint($mp)
-                        : $this->cbor->encodeNegInt($mp);
-                }
-            }
-            $pageItems[] = $this->cbor->encodeArray($metaItems);
-
-            $encodedPages[] = $this->cbor->encodeArray($pageItems);
-        }
-
-        $encodedVariants = [];
-        foreach ($variants as $form => $variantPages) {
-            $variantPageEntries = [];
-            foreach ($variantPages as $vp) {
-                $variantPageEntries[] = $this->cbor->encodeArray([
-                    $this->cbor->encodeUint($vp),
-                    $this->cbor->encodeArray([]),
-                    $this->cbor->encodeArray([]),
-                ]);
-            }
-            $encodedVariants[] = $this->cbor->encodeArray([
-                $this->cbor->encodeString((string) $form),
-                $this->cbor->encodeArray($variantPageEntries),
-            ]);
-        }
-
-        return $this->cbor->encodeArray([
-            $this->cbor->encodeString($word),
-            $this->cbor->encodeArray($encodedPages),
-            $this->cbor->encodeArray($encodedVariants),
-        ]);
+        return PfIndexCodec::encodeWordEntry($this->cbor, $word, $pageEntries);
     }
 
     /**
