@@ -13,6 +13,28 @@ namespace Tag1\Scolta\Index;
  */
 class IndexMerger
 {
+    /** Build-scoped instrumentation; null disables phase emission. */
+    private ?MemoryTelemetry $telemetry = null;
+
+    /**
+     * Attach build-scoped telemetry so the merge reports its internal phases.
+     *
+     * Injected through a setter rather than the constructor or mergeStreaming()
+     * because both are `@stability stable` and this class is not final: adding
+     * a parameter to either would break any subclass that overrides them.
+     *
+     * Without this, nothing between `writer_start` and `writer_complete` is
+     * attributable — that span covers the page phase, the pre-merge and the
+     * whole N-way term merge.
+     *
+     * @since 1.2.0
+     * @stability experimental
+     */
+    public function setTelemetry(?MemoryTelemetry $telemetry): void
+    {
+        $this->telemetry = $telemetry;
+    }
+
     /**
      * Merge partial index files into a complete inverted index.
      *
@@ -138,12 +160,16 @@ class IndexMerger
     ): void {
         // ── Phase 1: stream pages from ALL original chunks ────────────────
         // Always uses sequential access (one handle at a time) — no fan-in issue.
+        $this->telemetry?->emit('merge_pages_start', ['chunks' => count($chunkPaths)]);
+        $pagesWritten = 0;
         foreach ($chunkPaths as $path) {
             $reader = new ChunkReader($path);
             foreach ($reader->openPages() as $pageNum => $pageData) {
                 $writer->writePage($pageNum, $pageData);
+                $pagesWritten++;
             }
         }
+        $this->telemetry?->emit('merge_pages_complete', ['items' => $pagesWritten]);
 
         // ── Phase 2: N-way merge of sorted term streams ───────────────────
         $cap         = $budget?->mergeOpenFileHandles() ?? PHP_INT_MAX;
@@ -153,7 +179,9 @@ class IndexMerger
             : $chunkPaths;
 
         try {
-            $this->nWayTermMerge($termPaths, $writer);
+            $this->telemetry?->emit('term_merge_start', ['streams' => count($termPaths)]);
+            $terms = $this->nWayTermMerge($termPaths, $writer);
+            $this->telemetry?->emit('term_merge_complete', ['items' => $terms]);
         } finally {
             // Batch temp dirs are only needed until the final merge has
             // consumed them — delete them even when the merge throws.
@@ -181,11 +209,13 @@ class IndexMerger
      * @param string[] $tmpDirs    Collects every temp dir created (out param).
      * @return string[] Reduced set of (possibly temporary) paths for phase 2.
      */
-    private function preMergeTerms(array $chunkPaths, int $cap, array &$tmpDirs): array
+    private function preMergeTerms(array $chunkPaths, int $cap, array &$tmpDirs, int $level = 0): array
     {
         if (count($chunkPaths) <= $cap) {
             return $chunkPaths;
         }
+
+        $this->telemetry?->emit("premerge_start({$level})", ['streams' => count($chunkPaths)]);
 
         $tmpDir = sys_get_temp_dir() . '/scolta-premerge-' . bin2hex(random_bytes(8));
         if (!mkdir($tmpDir, 0755, true) && !is_dir($tmpDir)) {
@@ -207,8 +237,10 @@ class IndexMerger
             $outPaths[] = $tmpPath;
         }
 
+        $this->telemetry?->emit("premerge_complete({$level})", ['items' => count($outPaths)]);
+
         // Recurse until fan-in ≤ cap.
-        return $this->preMergeTerms($outPaths, $cap, $tmpDirs);
+        return $this->preMergeTerms($outPaths, $cap, $tmpDirs, $level + 1);
     }
 
     /**
@@ -316,8 +348,10 @@ class IndexMerger
 
     /**
      * N-way heap merge of term streams from the given chunk paths.
+     *
+     * @return int Number of distinct terms written (the merged vocabulary size).
      */
-    private function nWayTermMerge(array $chunkPaths, StreamingFormatWriter $writer): void
+    private function nWayTermMerge(array $chunkPaths, StreamingFormatWriter $writer): int
     {
         /** @var \Generator[] $iterators */
         $iterators = [];
@@ -332,6 +366,7 @@ class IndexMerger
             }
         }
 
+        $termCount = 0;
         while (!$heap->isEmpty()) {
             [$minTerm] = $heap->top();
 
@@ -348,7 +383,10 @@ class IndexMerger
 
             $merged = $this->mergeEntries($allEntries);
             $writer->writeTerm($minTerm, $merged);
+            $termCount++;
         }
+
+        return $termCount;
     }
 
     /**
