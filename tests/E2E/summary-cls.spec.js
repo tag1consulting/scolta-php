@@ -46,6 +46,19 @@ const SUMMARIZE_DELAY_MS = 900;
 const SHORT_SUMMARY =
     'The concordance corpus collects short reference pages. These results cover the topic directly.';
 
+// Sized to straddle the reserved height: it fits inside the collapsed box at a
+// desktop width and reflows past it at a phone width. That is the whole point
+// of the resize test — the clamp decision was frozen at resolve-time width, so
+// a summary that fitted when it landed had its overflow silently clipped with
+// no fade and no control once the column narrowed.
+const MEDIUM_SUMMARY =
+    'The corpus gathers short reference pages that each describe one facet of the subject, '
+    + 'and the excerpts above are drawn from the closest of them. Together they cover the '
+    + 'question directly, with the remaining pages adding supporting detail rather than new '
+    + 'claims of their own. Several entries restate the same definition in different words, '
+    + 'which is why the ranked list groups them, and the rest extend it with the specific '
+    + 'cases a reader is most likely to be looking for when they search this phrase.';
+
 // Comfortably taller than any sane reserved height, so the clamp path is
 // exercised rather than the fits-inside path.
 const LONG_SUMMARY = Array.from(
@@ -152,7 +165,10 @@ test.beforeAll(async () => {
                 sendJson(res, 200, {}, SUMMARIZE_DELAY_MS);
                 return;
             }
-            sendJson(res, 200, { summary: mode === 'long' ? LONG_SUMMARY : SHORT_SUMMARY }, SUMMARIZE_DELAY_MS);
+            const body = mode === 'long' ? LONG_SUMMARY
+                : mode === 'medium' ? MEDIUM_SUMMARY
+                    : SHORT_SUMMARY;
+            sendJson(res, 200, { summary: body }, SUMMARIZE_DELAY_MS);
             return;
         }
 
@@ -379,3 +395,68 @@ test('an empty summary collapses the slot rather than leaving a dead box', async
     await expect(page.locator('#scolta-ai-summary')).toBeHidden();
     expect(cls - floor).toBeLessThan(0.25);
 });
+
+/**
+ * The clamp decision is a measurement, so it is only true for the width it was
+ * measured at. These two pin that it follows the width instead of freezing at
+ * resolve time.
+ *
+ * Note on CLS here: changing the viewport reflows the entire page, and those
+ * shifts are real and large and have nothing to do with the summary. So what
+ * is asserted is the claim that actually matters and is actually attributable
+ * — the reserved box is the same height before and after, so revealing the
+ * control moves nothing outside it.
+ */
+test('narrowing the viewport reveals the control without resizing the box', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openAndArm(page, { mode: 'medium' });
+    await runSearch(page);
+
+    const toggle = page.locator('[data-scolta-summary-toggle]');
+    const panel = page.locator('#scolta-ai-summary');
+
+    // Resolved at a width where it fits: clipped nothing, offered nothing.
+    await expect(toggle).toBeHidden();
+    await expect(panel).not.toHaveClass(/scolta-ai-summary--clamped/);
+    const heightWide = (await panel.boundingBox()).height;
+
+    await page.setViewportSize({ width: 420, height: 900 });
+    await page.waitForTimeout(1200);
+
+    // Same text, more lines, now past the reserved height — so the fade and
+    // the control must appear. Without the resize recompute this stayed
+    // hidden and the overflow was clipped with no way to open it.
+    await expect(toggle).toBeVisible();
+    await expect(panel).toHaveClass(/scolta-ai-summary--clamped/);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+    const heightNarrow = (await panel.boundingBox()).height;
+    console.log(`[cls] resize reveal: panel wide=${heightWide} narrow=${heightNarrow}`);
+
+    // The reservation is derived from a line count and a font size, not from
+    // the width, so the box is the same height at both widths and the reveal
+    // itself costs nothing.
+    expect(Math.abs(heightNarrow - heightWide)).toBeLessThan(2);
+
+    // And it is still a working control at the new width.
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(panel).not.toHaveClass(/scolta-ai-summary--reserved/);
+});
+
+test('widening again retracts the control', async ({ page }) => {
+    await page.setViewportSize({ width: 420, height: 900 });
+    await openAndArm(page, { mode: 'medium' });
+    await runSearch(page);
+
+    const toggle = page.locator('[data-scolta-summary-toggle]');
+    await expect(toggle).toBeVisible();
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.waitForTimeout(1200);
+
+    // A control on a summary that no longer overflows is just clutter.
+    await expect(toggle).toBeHidden();
+    await expect(page.locator('#scolta-ai-summary')).not.toHaveClass(/scolta-ai-summary--clamped/);
+});
+

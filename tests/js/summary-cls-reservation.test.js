@@ -50,6 +50,8 @@ const exposedSource = patchedSource.replace(
     + '  window.__summarizeResults = summarizeResults;\n'
     + '  window.__reserveSummarySlot = reserveSummarySlot;\n'
     + '  window.__updateSummaryClamp = updateSummaryClamp;\n'
+    + '  window.__observeSummaryClamp = observeSummaryClamp;\n'
+    + '  window.__releaseSummarySlot = releaseSummarySlot;\n'
     + '  window.__submitFollowUp = submitFollowUp;'
 );
 
@@ -58,12 +60,49 @@ const CLAMPED = 'scolta-ai-summary--clamped';
 
 const LONG_SUMMARY = 'A very long summary. '.repeat(200);
 
-function createWin({ summarize = true, response = { summary: 'A useful summary.' }, ok = true, disclaimer = '' } = {}) {
+/**
+ * A stand-in for the real ResizeObserver, which JSDOM does not implement.
+ *
+ * Installed on the window BEFORE the bundle is evaluated, so the bundle's
+ * feature detection sees it. Recording the instances lets a test assert the
+ * wiring — what is observed, and that it is disconnected — and firing a
+ * recorded callback simulates the width change itself, which is the whole
+ * behaviour under test and is otherwise unreachable without layout.
+ */
+function installFakeResizeObserver(win) {
+    const instances = [];
+    win.ResizeObserver = class {
+        constructor(callback) {
+            this.callback = callback;
+            this.targets = [];
+            this.disconnected = false;
+            instances.push(this);
+        }
+        observe(target) { this.targets.push(target); }
+        disconnect() { this.disconnected = true; }
+    };
+    return instances;
+}
+
+/** The observer still connected, if any. */
+const liveObserver = (instances) => instances.filter(o => !o.disconnected).pop() || null;
+
+function createWin({
+    summarize = true,
+    response = { summary: 'A useful summary.' },
+    ok = true,
+    disclaimer = '',
+    resizeObserver = false,
+} = {}) {
     const dom = new JSDOM(
         '<!DOCTYPE html><html><body><div id="scolta-search"></div></body></html>',
         { url: 'https://example.com', runScripts: 'dangerously' }
     );
     const win = dom.window;
+    // Default off, mirroring JSDOM and older engines: every pre-existing test
+    // in this file runs with no ResizeObserver at all, which is itself the
+    // feature-detect coverage.
+    win.__resizeObservers = resizeObserver ? installFakeResizeObserver(win) : null;
     win.fetch = jest.fn().mockResolvedValue({
         ok,
         status: ok ? 200 : 500,
@@ -252,6 +291,110 @@ describe('AI summary layout reservation', () => {
         expect(panel(win).classList.contains(RESERVED)).toBe(false);
         expect(panel(win).classList.contains(CLAMPED)).toBe(false);
         expect(toggle(win).getAttribute('aria-expanded')).toBe('true');
+    });
+
+    test('the clamp is recomputed when the text region is resized', async () => {
+        const win = createWin({ response: { summary: LONG_SUMMARY }, resizeObserver: true });
+        await win.__summarizeResults('q', makeResults(), []);
+
+        // Resolved at a width where it fits: no clamp, no control.
+        forceOverflow(win, false);
+        expect(panel(win).classList.contains(CLAMPED)).toBe(false);
+        expect(toggle(win).hidden).toBe(true);
+
+        const observer = liveObserver(win.__resizeObservers);
+        expect(observer).not.toBeNull();
+        expect(observer.targets).toContain(panel(win).querySelector('.scolta-ai-summary-text'));
+
+        // Narrow the column: the same text now reflows past the reserved box.
+        const textEl = panel(win).querySelector('.scolta-ai-summary-text');
+        Object.defineProperty(textEl, 'scrollHeight', { value: 900, configurable: true });
+        observer.callback();
+
+        // Without this the text would be clipped with no fade and no way to
+        // open it — the defect this fixes.
+        expect(panel(win).classList.contains(CLAMPED)).toBe(true);
+        expect(toggle(win).hidden).toBe(false);
+    });
+
+    test('widening again drops the clamp and re-hides the control', async () => {
+        const win = createWin({ response: { summary: LONG_SUMMARY }, resizeObserver: true });
+        await win.__summarizeResults('q', makeResults(), []);
+        forceOverflow(win, true);
+        expect(panel(win).classList.contains(CLAMPED)).toBe(true);
+
+        const textEl = panel(win).querySelector('.scolta-ai-summary-text');
+        Object.defineProperty(textEl, 'scrollHeight', { value: 100, configurable: true });
+        liveObserver(win.__resizeObservers).callback();
+
+        expect(panel(win).classList.contains(CLAMPED)).toBe(false);
+        expect(toggle(win).hidden).toBe(true);
+    });
+
+    test('the panel stays reserved across a resize recompute, so nothing moves', async () => {
+        const win = createWin({ response: { summary: LONG_SUMMARY }, resizeObserver: true });
+        await win.__summarizeResults('q', makeResults(), []);
+        forceOverflow(win, false);
+
+        const textEl = panel(win).querySelector('.scolta-ai-summary-text');
+        Object.defineProperty(textEl, 'scrollHeight', { value: 900, configurable: true });
+        liveObserver(win.__resizeObservers).callback();
+
+        // The recompute toggles a mask class and a hidden flag, both inside a
+        // fixed-height overflow-hidden panel. The reservation itself is
+        // untouched, which is what keeps the recompute free of layout shift.
+        expect(panel(win).classList.contains(RESERVED)).toBe(true);
+        expect(panel(win).style.display).toBe('');
+    });
+
+    test('only one observer is live, and it is replaced rather than stacked', async () => {
+        const win = createWin({ response: { summary: LONG_SUMMARY }, resizeObserver: true });
+        await win.__summarizeResults('q', makeResults(), []);
+        await win.__summarizeResults('q', makeResults(), []);
+
+        expect(win.__resizeObservers.length).toBeGreaterThan(1);
+        expect(win.__resizeObservers.filter(o => !o.disconnected)).toHaveLength(1);
+    });
+
+    test('expanding disconnects the observer, collapsing re-establishes it', async () => {
+        const win = createWin({ response: { summary: LONG_SUMMARY }, resizeObserver: true });
+        await win.__summarizeResults('q', makeResults(), []);
+        forceOverflow(win, true);
+        expect(liveObserver(win.__resizeObservers)).not.toBeNull();
+
+        toggle(win).dispatchEvent(new win.Event('click', { bubbles: true }));
+        expect(liveObserver(win.__resizeObservers)).toBeNull();
+
+        toggle(win).dispatchEvent(new win.Event('click', { bubbles: true }));
+        expect(liveObserver(win.__resizeObservers)).not.toBeNull();
+    });
+
+    test('collapsing the slot disconnects the observer', async () => {
+        const win = createWin({ response: { summary: LONG_SUMMARY }, resizeObserver: true });
+        await win.__summarizeResults('q', makeResults(), []);
+        expect(liveObserver(win.__resizeObservers)).not.toBeNull();
+
+        win.__releaseSummarySlot();
+        expect(liveObserver(win.__resizeObservers)).toBeNull();
+    });
+
+    test('no observer is installed when the summary feature is off', () => {
+        const win = createWin({ summarize: false, resizeObserver: true });
+        win.__observeSummaryClamp();
+
+        expect(win.__resizeObservers).toHaveLength(0);
+    });
+
+    test('resolving without ResizeObserver does not throw and still reserves', async () => {
+        // The default for every test in this file, stated explicitly here:
+        // JSDOM has no ResizeObserver, and neither do older engines.
+        const win = createWin({ response: { summary: LONG_SUMMARY } });
+        expect(win.ResizeObserver).toBeUndefined();
+
+        await expect(win.__summarizeResults('q', makeResults(), [])).resolves.not.toThrow();
+
+        expect(panel(win).classList.contains(RESERVED)).toBe(true);
+        expect(panel(win).querySelectorAll('.scolta-ai-shimmer')).toHaveLength(0);
     });
 
     test('a disclaimer still renders, inside the reserved panel', async () => {
