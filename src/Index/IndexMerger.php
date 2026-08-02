@@ -27,7 +27,7 @@ class IndexMerger
      * attributable — that span covers the page phase, the pre-merge and the
      * whole N-way term merge.
      *
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function setTelemetry(?MemoryTelemetry $telemetry): void

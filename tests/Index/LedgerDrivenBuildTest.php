@@ -196,6 +196,84 @@ final class LedgerDrivenBuildTest extends TestCase
         $this->assertSame(39, $ledger->ordinalFor('item-40'));
     }
 
+    /**
+     * The same delete-and-rebuild as above, on a corpus whose ids are bare
+     * numbers — which is what a Drupal node id is, and therefore the common
+     * case rather than the exotic one.
+     *
+     * This is the caller that made the ledger's key-normalization bug a
+     * production crash: build() accumulates $seenIds over the corpus and ends
+     * with releaseAllExcept($seenIds), so any id deleted at the source since
+     * the last build gets passed to release(string $id) as an int and the
+     * build dies at the merge boundary with no index written. The existing
+     * delete coverage above missed it only because 'item-20' is not a decimal
+     * integer and so keeps its string key.
+     */
+    public function testAFullRebuildPrunesADeletedNumericIdWithoutCrashing(): void
+    {
+        $items = SyntheticCorpus::generate(40, seed: 3, idPrefix: '');
+        $this->build($items);
+        $this->assertSame(19, $this->ledger()->ordinalFor('20'));
+
+        $survivors = array_values(array_filter(
+            $items,
+            static fn(\Tag1\Scolta\Export\ContentItem $i): bool => $i->id !== '20',
+        ));
+
+        // Before the fix this build throws TypeError out of releaseAllExcept()
+        // rather than returning a failed StatusReport, so the assertion that
+        // matters is that build() returns at all.
+        $this->build($survivors);
+
+        $ledger = $this->ledger();
+        $this->assertNull($ledger->ordinalFor('20'), 'Deleted numeric id must lose its assignment.');
+        $this->assertSame([19], $ledger->tombstones());
+        $this->assertSame(40, $ledger->pageTableSize(), 'Table must stay dense, not shrink.');
+        $this->assertSame(39, $ledger->liveCount());
+        $this->assertSame(20, $ledger->ordinalFor('21'), 'Survivors keep their ordinals.');
+
+        $fragments = glob($this->outputDir . '/pagefind/fragment/*.pf_fragment') ?: [];
+        $this->assertCount(40, $fragments, 'Tombstone must occupy a real fragment slot.');
+    }
+
+    /**
+     * Numeric and translation-suffixed ids in one corpus, pruned together —
+     * the multilingual Drupal shape, where the two id forms take different
+     * array-key types inside the same ledger.
+     */
+    public function testAFullRebuildPrunesMixedNumericAndSuffixedIds(): void
+    {
+        $items = SyntheticCorpus::generate(20, seed: 5, idPrefix: '');
+        foreach (SyntheticCorpus::generate(20, seed: 5, idPrefix: '') as $item) {
+            $items[] = new \Tag1\Scolta\Export\ContentItem(
+                id: $item->id . '-es',
+                title: $item->title,
+                bodyHtml: $item->bodyHtml,
+                url: $item->url . '/es',
+                date: $item->date,
+                siteName: $item->siteName,
+                language: $item->language,
+                filters: $item->filters,
+            );
+        }
+        $this->build($items);
+        $this->assertSame(40, $this->ledger()->liveCount());
+
+        // Drop one of each id shape.
+        $survivors = array_values(array_filter(
+            $items,
+            static fn(\Tag1\Scolta\Export\ContentItem $i): bool => $i->id !== '7' && $i->id !== '12-es',
+        ));
+        $this->build($survivors);
+
+        $ledger = $this->ledger();
+        $this->assertNull($ledger->ordinalFor('7'));
+        $this->assertNull($ledger->ordinalFor('12-es'));
+        $this->assertSame(38, $ledger->liveCount());
+        $this->assertCount(2, $ledger->tombstones());
+        $this->assertSame(40, $ledger->pageTableSize());
+    }
+
     public function testAFreedOrdinalIsReusedByTheNextNewPage(): void
     {
         $items = SyntheticCorpus::generate(30, seed: 3);

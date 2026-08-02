@@ -216,7 +216,7 @@ class InvertedIndexBuilder
      * @param array<int, array{item: object, tokenData: array<string, mixed>, ordinal: int}> $tokenDataList
      * @return array{index: array<int|string, mixed>, pages: array<int|string, mixed>}
      * @throws \InvalidArgumentException When two items in the chunk share an ordinal.
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function buildFromTokenDataWithOrdinals(array $tokenDataList): array
@@ -253,7 +253,7 @@ class InvertedIndexBuilder
      * which pages carry which filter.
      *
      * @return array<string, mixed>
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public static function effectiveFilters(object $item): array
@@ -272,7 +272,7 @@ class InvertedIndexBuilder
      * durable page table have to agree on it.
      *
      * @return array<string, mixed>
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public static function effectiveSortable(object $item): array

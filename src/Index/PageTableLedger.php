@@ -31,7 +31,7 @@ use Tag1\Scolta\Storage\StorageDriverInterface;
  * artifact at once, so it is an operation an operator asks for, never a
  * side effect of a delete.
  *
- * @since 1.2.0
+ * @since 1.1.1
  * @stability experimental
  */
 final class PageTableLedger
@@ -61,6 +61,15 @@ final class PageTableLedger
      * neighbours' fragments, which is subtler than storing the value, and the
      * differential test against a full rebuild is precisely the check that
      * catches drift.
+     *
+     * **The key type here is a lie PHP tells.** PHP normalizes a decimal-integer
+     * string array key to an int at insertion, so allocate('42', …) stores the
+     * row under int `42` while allocate('42-es', …) stores it under string
+     * `'42-es'`. Writes and lookups are unaffected, because the same
+     * normalization applies to the subscript. Reading a key *back out* is where
+     * it bites, and a Drupal node id is exactly the numeric case. Never iterate
+     * this array's keys directly; go through {@see self::assignedIds()}, which
+     * is the one place the type is restored.
      *
      * @var array<string, array{ordinal: int, url: string, filters: array<string, mixed>, sortable: array<string, mixed>, contentHash: string}>
      */
@@ -101,7 +110,7 @@ final class PageTableLedger
      *
      * @param array<string, mixed> $filters  Merged filter map, from InvertedIndexBuilder::effectiveFilters().
      * @param array<string, mixed> $sortable Merged sortable map, from InvertedIndexBuilder::effectiveSortable().
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function allocate(
@@ -151,7 +160,7 @@ final class PageTableLedger
      * Release $id's ordinal to the free list and mark it as a tombstone.
      *
      * @return int|null The released ordinal, or null when $id was not assigned.
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function release(string $id): ?int
@@ -179,7 +188,7 @@ final class PageTableLedger
      *
      * @param array<string, true>|list<string> $seenIds Ids present in this build.
      * @return list<int> Ordinals released.
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function releaseAllExcept(array $seenIds): array
@@ -187,7 +196,7 @@ final class PageTableLedger
         $seen = array_is_list($seenIds) ? array_fill_keys($seenIds, true) : $seenIds;
 
         $released = [];
-        foreach (array_keys($this->byId) as $id) {
+        foreach ($this->assignedIds() as $id) {
             if (!isset($seen[$id])) {
                 $ordinal = $this->release($id);
                 if ($ordinal !== null) {
@@ -202,7 +211,7 @@ final class PageTableLedger
     /**
      * The ordinal assigned to $id, or null when it has none.
      *
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function ordinalFor(string $id): ?int
@@ -216,7 +225,7 @@ final class PageTableLedger
      * Callers compare this with the incoming url to decide whether the
      * fragment file needs renaming.
      *
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function urlFor(string $id): ?string
@@ -228,7 +237,7 @@ final class PageTableLedger
      * Filter values recorded against $id, or an empty array.
      *
      * @return array<string, mixed>
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function filtersFor(string $id): array
@@ -240,7 +249,7 @@ final class PageTableLedger
      * Sortable values recorded against $id, or an empty array.
      *
      * @return array<string, mixed>
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function sortableFor(string $id): array
@@ -257,7 +266,7 @@ final class PageTableLedger
      * needed. Returns '' when unknown, which the updater treats as "cannot do
      * this incrementally" rather than guessing.
      *
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function contentHashFor(string $id): string
@@ -270,13 +279,14 @@ final class PageTableLedger
      *
      * @return array<int, array{id: string, url: string, filters: array<string, mixed>, sortable: array<string, mixed>, contentHash: string}>
      *         Keyed by ordinal, ascending. Tombstoned ordinals are absent.
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function rowsByOrdinal(): array
     {
         $rows = [];
-        foreach ($this->byId as $id => $row) {
+        foreach ($this->assignedIds() as $id) {
+            $row                   = $this->byId[$id];
             $rows[$row['ordinal']] = [
                 'id'          => $id,
                 'url'         => $row['url'],
@@ -297,7 +307,7 @@ final class PageTableLedger
      * index writer needs: the table stays dense across deletes so nothing
      * downstream grows a hole case.
      *
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function pageTableSize(): int
@@ -308,8 +318,12 @@ final class PageTableLedger
     /**
      * Ordinals that currently hold a tombstone.
      *
+     * Unlike {@see self::assignedIds()} this needs no cast: $tombstones is
+     * keyed by ordinal, which is already an int at the point of insertion, so
+     * PHP's key normalization is a no-op here rather than a lossy conversion.
+     *
      * @return list<int>
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function tombstones(): array
@@ -325,7 +339,7 @@ final class PageTableLedger
      * rebuild, which is exactly the hour-long surprise incremental updates
      * exist to remove.
      *
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function tombstoneRatio(): float
@@ -340,7 +354,7 @@ final class PageTableLedger
     /**
      * Number of live (non-tombstone) pages.
      *
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function liveCount(): int
@@ -354,7 +368,7 @@ final class PageTableLedger
      * A build with an empty ledger numbers from zero in gather order, which is
      * byte-for-byte what the pipeline did before this class existed.
      *
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function isEmpty(): bool
@@ -365,7 +379,7 @@ final class PageTableLedger
     /**
      * Persist atomically, if anything changed.
      *
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function save(): void
@@ -396,7 +410,7 @@ final class PageTableLedger
      * and it invalidates every fragment filename in the index, so the caller
      * must follow it with a full build before serving the result.
      *
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function reset(): void
@@ -406,6 +420,24 @@ final class PageTableLedger
         $this->free       = [];
         $this->tombstones = [];
         $this->dirty      = true;
+    }
+
+    /**
+     * Every assigned id, with its declared string type restored.
+     *
+     * This exists so that no code path can read a raw $byId key. PHP stores a
+     * decimal-integer id like a Drupal node id under an int key, so
+     * `array_keys($this->byId)` returns `int|string` however the property is
+     * annotated — and handing that to any of the `string $id` methods here is a
+     * TypeError, not a coercion, under strict_types. Routing every read through
+     * one accessor makes that unrepresentable rather than a rule each new
+     * caller has to remember.
+     *
+     * @return list<string>
+     */
+    private function assignedIds(): array
+    {
+        return array_map(strval(...), array_keys($this->byId));
     }
 
     private function loadFromDisk(): void

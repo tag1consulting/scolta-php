@@ -106,7 +106,7 @@ final class IndexBuildOrchestrator
      * Exposed so an adapter can report the tombstone ratio, and so a
      * compaction can reset it before running a full build.
      *
-     * @since 1.2.0
+     * @since 1.1.1
      * @stability experimental
      */
     public function pageTableLedger(): PageTableLedger
