@@ -22,9 +22,6 @@ final class AmazeeCredentials
     /**
      * @param string $token          The LiteLLM bearer token.
      * @param string $baseUrl        The LiteLLM API base URL.
-     * @param bool   $operatorChosen TRUE when the operator selected Amazee as
-     *   the provider; FALSE when the credentials came from automatic
-     *   free-trial provisioning. Only affects how the source is reported.
      * @param bool   $modelResolved  Whether model resolution has succeeded.
      *   A half-provisioned install (credentials stored, `/model/info` never
      *   answered) must not send the shipped dated default to the gateway,
@@ -35,7 +32,6 @@ final class AmazeeCredentials
     public function __construct(
         public readonly string $token,
         public readonly string $baseUrl = '',
-        public readonly bool $operatorChosen = false,
         public readonly bool $modelResolved = true,
     ) {}
 
@@ -47,7 +43,6 @@ final class AmazeeCredentials
      */
     public static function fromStorage(
         ConfigStorageInterface $storage,
-        bool $operatorChosen = false,
         bool $modelResolved = true,
     ): ?self {
         $stored = $storage->load();
@@ -58,7 +53,6 @@ final class AmazeeCredentials
         return new self(
             token: $stored['litellm_token'],
             baseUrl: $stored['litellm_api_url'],
-            operatorChosen: $operatorChosen,
             modelResolved: $modelResolved,
         );
     }
@@ -75,7 +69,6 @@ final class AmazeeCredentials
      */
     public static function fromArray(
         ?array $stored,
-        bool $operatorChosen = false,
         bool $modelResolved = true,
     ): ?self {
         if (!is_array($stored) || empty($stored['litellm_token']) || !is_string($stored['litellm_token'])) {
@@ -87,7 +80,6 @@ final class AmazeeCredentials
         return new self(
             token: $stored['litellm_token'],
             baseUrl: is_string($baseUrl) ? $baseUrl : '',
-            operatorChosen: $operatorChosen,
             modelResolved: $modelResolved,
         );
     }
