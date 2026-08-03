@@ -4,6 +4,34 @@ This document describes breaking changes and migration steps between versions of
 
 ## Unreleased
 
+### The Amazee.ai API key source is `amazee` again, not `amazee:operator` / `amazee:auto`
+
+1.1.0 introduced two Amazee source cases to separate a licensed connection from
+an auto-provisioned free trial. Nothing records which one produced a token —
+`AmazeeTrialProvisioner` and `AmazeeAccountUpgrader` both write the same three
+fields through `ConfigStorageInterface::store()` — so neither adapter could
+derive it, and each got stuck reporting a single case: Drupal always
+`amazee:operator`, WordPress always `amazee:auto`. They are collapsed back into
+one `ApiKeySource::Amazee` with the backing value `'amazee'`.
+
+**Routing is unchanged.** Precedence, Amazee eligibility, and which key is sent
+to which provider all behave exactly as before. Only the reported source string
+and its human-readable label change.
+
+**What to check**, if you consume the source rather than the enum:
+
+- Anything comparing against the literals `'amazee:operator'` or
+  `'amazee:auto'` — from `getApiKeySource()` (Drupal), `get_api_key_source()`
+  (WordPress), or the `ai_key_source` field of the `/health` payload — should
+  compare against `'amazee'`, or better, call `ResolvedApiKey::isAmazee()`.
+- The label and `ResolvedApiKey::describe()` no longer emit
+  "(auto-provisioned free trial)". A surface that matched on that wording needs
+  updating; a surface that renders the string needs nothing.
+
+Both classes are `@stability experimental`, so this lands inside the 1.1 line
+rather than waiting for a major. If you want the trial-versus-licensed
+distinction back, the credential store has to record it first.
+
 ### Search as you type is ON by default
 
 Typing in the search box now opens a suggestions dropdown under the input. The

@@ -39,13 +39,22 @@ managed gateway.
 | `settings` | A platform settings file |
 | `constant` | A PHP constant |
 | `database` | A value persisted in the site database (legacy) |
-| `amazee:operator` | Amazee.ai, selected by the operator |
-| `amazee:auto` | Amazee.ai, provisioned automatically as a free trial |
+| `amazee` | Stored Amazee.ai credentials |
 | `none` | No key anywhere |
 
-The two Amazee cases are separate because they mean different things to
-somebody reading a status line: one is a provider that was chosen, the other
-appeared on its own.
+Amazee is a single source, and no surface says how the connection was
+obtained. There were briefly two cases, `amazee:operator` and `amazee:auto`,
+splitting a licensed connection from an auto-provisioned free trial. Nothing
+records that: `AmazeeTrialProvisioner` and `AmazeeAccountUpgrader` both persist
+the same three fields through `ConfigStorageInterface::store()`, so the store
+cannot tell you which one ran. Each adapter substituted a local fact and got
+pinned to one case regardless of the truth — Drupal always reported
+`amazee:operator`, WordPress always `amazee:auto`, so WordPress announced every
+deliberately connected account as a free trial.
+
+Reporting a distinction that cannot be derived is worse than omitting it,
+because the surface states it with the same confidence as a fact it knows. If
+provenance is wanted later, the credential store has to record it first.
 
 ## Why the resolver returns the source
 
@@ -91,6 +100,6 @@ permanently and silently, whereas a key-less client throws
 `ApiKeyMissingException` and the endpoints degrade that to an unexpanded,
 unsummarized HTTP 200 — the same path as an unconfigured site.
 
-So for that state the resolver reports `amazee:auto` (or `amazee:operator`)
-as the source, sets `awaitingAmazeeModelResolution`, and returns an **empty
-key**. The state self-heals when provisioning next resolves a model.
+So for that state the resolver reports `amazee` as the source, sets
+`awaitingAmazeeModelResolution`, and returns an **empty key**. The state
+self-heals when provisioning next resolves a model.

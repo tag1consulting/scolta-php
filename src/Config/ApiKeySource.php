@@ -12,9 +12,17 @@ namespace Tag1\Scolta\Config;
  * disagreed about precedence; a shared enum means a surface can only report
  * a source that {@see ApiKeyResolver} actually produced.
  *
- * Amazee has two cases because they mean different things to an operator
- * reading a status line: `amazee:operator` is a provider somebody chose,
- * `amazee:auto` is a free trial that provisioned itself on first use.
+ * Amazee is one case. It briefly had two, `amazee:operator` and
+ * `amazee:auto`, meaning a provider somebody chose versus a free trial that
+ * provisioned itself. No adapter could tell those apart: both the trial
+ * provisioner and the account upgrader write the same three fields through
+ * {@see \Tag1\Scolta\AiProvider\Amazee\ConfigStorageInterface::store()}, so
+ * nothing records which one produced a token. Each adapter substituted a
+ * different local fact and ended up pinned to one case — Drupal always
+ * reported `amazee:operator`, WordPress always `amazee:auto`, and WordPress
+ * therefore called every deliberately connected account a free trial. A
+ * distinction that cannot be derived is worse than no distinction, because
+ * every surface reports it with total confidence.
  *
  * @since 1.1.0
  * @stability experimental
@@ -33,24 +41,21 @@ enum ApiKeySource: string
     /** A value persisted in the site database (legacy WordPress installs). */
     case Database = 'database';
 
-    /** Amazee.ai credentials for a provider the operator selected. */
-    case AmazeeOperator = 'amazee:operator';
-
-    /** Amazee.ai credentials from automatic free-trial provisioning. */
-    case AmazeeAuto = 'amazee:auto';
+    /** Stored Amazee.ai credentials. */
+    case Amazee = 'amazee';
 
     /** No key is configured anywhere. */
     case None = 'none';
 
     /**
-     * Whether this source is one of the Amazee.ai cases.
+     * Whether this source is Amazee.ai.
      *
      * @since 1.1.0
      * @stability experimental
      */
     public function isAmazee(): bool
     {
-        return $this === self::AmazeeOperator || $this === self::AmazeeAuto;
+        return $this === self::Amazee;
     }
 
     /**
@@ -86,8 +91,7 @@ enum ApiKeySource: string
             self::Settings => 'platform settings file',
             self::Constant => 'SCOLTA_API_KEY constant',
             self::Database => 'site database (legacy)',
-            self::AmazeeOperator => 'Amazee.ai',
-            self::AmazeeAuto => 'Amazee.ai (auto-provisioned free trial)',
+            self::Amazee => 'Amazee.ai',
             self::None => 'not configured',
         };
     }

@@ -111,9 +111,10 @@ final class ResolvedApiKey
     public function describe(): string
     {
         if ($this->isAmazee()) {
-            $text = $this->source === ApiKeySource::AmazeeAuto
-                ? 'Connected to Amazee.ai (auto-provisioned free trial).'
-                : 'Connected to Amazee.ai.';
+            // No claim about how the connection was obtained. Nothing records
+            // whether a token came from the trial provisioner or the account
+            // upgrader, so a surface that named one would be guessing.
+            $text = 'Connected to Amazee.ai.';
 
             if ($this->awaitingAmazeeModelResolution) {
                 $text .= ' Model resolution has not completed yet, so AI features stay degraded until it does.';

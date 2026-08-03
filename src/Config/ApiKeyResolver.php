@@ -84,7 +84,7 @@ final class ApiKeyResolver
                 // an unexpanded, unsummarized HTTP 200. The state self-heals
                 // when model resolution next succeeds.
                 key: $amazee->modelResolved ? $amazee->token : '',
-                source: $amazee->operatorChosen ? ApiKeySource::AmazeeOperator : ApiKeySource::AmazeeAuto,
+                source: ApiKeySource::Amazee,
                 provider: self::AMAZEE_GATEWAY_PROVIDER,
                 baseUrl: $amazee->baseUrl,
                 amazeeCredentialsStored: true,
