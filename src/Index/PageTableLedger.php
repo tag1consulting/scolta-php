@@ -368,6 +368,27 @@ final class PageTableLedger
     }
 
     /**
+     * Every id the current build has already committed.
+     *
+     * A generator rather than an array: the caller wants a high-water mark to
+     * restart a source query from, and materialising one string per page of
+     * the corpus to compute it would reintroduce exactly the per-corpus
+     * allocation the generation stamp removed.
+     *
+     * @return \Generator<int, string>
+     * @since 1.1.1
+     * @stability experimental
+     */
+    public function seenIdsThisBuild(): \Generator
+    {
+        foreach ($this->byId as $id => $row) {
+            if (($row['gen'] ?? 0) === $this->generation) {
+                yield (string) $id;
+            }
+        }
+    }
+
+    /**
      * The ordinal assigned to $id, or null when it has none.
      *
      * @since 1.1.1
