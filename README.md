@@ -94,7 +94,7 @@ All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Constr
 use Tag1\Scolta\Config\ScoltaConfig;
 
 $config = ScoltaConfig::fromArray([
-    // AI provider (optional — omit for base search only)
+    // AI provider — no default. Omitting it leaves AI off and search working.
     'ai_provider'         => 'anthropic',
     'ai_api_key'          => getenv('SCOLTA_API_KEY'),
     'ai_model'            => 'claude-sonnet-4-5-20250929',
@@ -119,6 +119,16 @@ $config = ScoltaConfig::fromArray([
 For the full list of config keys and their defaults, see [docs/CONFIG_REFERENCE.md](docs/CONFIG_REFERENCE.md).
 
 To render results with your own markup instead of Scolta's built-in card — a platform view mode, server-rendered fragments swapped in lazily, anything richer than title/excerpt/URL — see [docs/RENDER_SEAM.md](docs/RENDER_SEAM.md), which documents the render lifecycle events, `Scolta.setResultRenderer()`, and the non-destructive mount.
+
+### Selecting an AI provider is always manual
+
+Scolta ships with **no AI provider selected**. `ai_provider` is empty until somebody sets it, and while it is empty AI features are simply off: search works, no provider is assumed, and Anthropic in particular is not silently assumed. There is no default anywhere.
+
+An operator picks a provider in an adapter's admin UI; a developer sets `ai_provider` in code for the frameworks that have no admin UI. Both are explicit acts. This is a going-forward rule: a site that already persisted a provider keeps it, and nothing rewrites an existing value.
+
+**Amazee.ai is never enabled on its own.** No credential is provisioned and no outbound Amazee call is made on a request, cron, install or activation path for a site that has not opted in. `AutoProvisioner::ensureAiAvailable()` — whose name predates the policy — establishes nothing: it only re-resolves gateway model names against a key already on disk, which is reachable only for a site that already connected. A connection is established solely by an explicit call to `AmazeeTrialProvisioner::provision()` (the free demo, no email required) or `AmazeeAccountUpgrader` (the email → verification code → region flow that attaches an amazee.ai account). Amazee support is email-only, mirroring amazee.ai's own `ai_provider_amazeeio` module; there is no paste-your-API-key path.
+
+Which of those two established a connection is **recorded** at the time it happens, through `ProvenanceAwareConfigStorageInterface`, so `ApiKeySource` can report `amazee:demo` or `amazee:account` from a stored fact instead of a guess. Credentials with no recorded origin — anything connected before 1.2.0 — report the plain `amazee` source and claim nothing.
 
 The AI API key can come from an environment variable, a platform settings file or store, or stored Amazee.ai credentials. `Tag1\Scolta\Config\ApiKeyResolver` decides which one wins and returns the key together with its source, so an adapter's settings form, health payload and CLI cannot describe the key differently from the client that sends it. The order, the source vocabulary, and the rules adapters follow are in [docs/API_KEY_PRECEDENCE.md](docs/API_KEY_PRECEDENCE.md).
 

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tag1\Scolta\Tests\Config;
 
 use PHPUnit\Framework\TestCase;
+use Tag1\Scolta\AiProvider\Amazee\AmazeeConnectionSource;
+use Tag1\Scolta\AiProvider\Amazee\ProvenanceAwareConfigStorageInterface;
 use Tag1\Scolta\Config\AmazeeCredentials;
 use Tag1\Scolta\Config\ApiKeyResolver;
 use Tag1\Scolta\Config\ApiKeySource;
@@ -112,36 +114,100 @@ class ApiKeyResolverTest extends TestCase
     }
 
     /**
-     * The credential store cannot express provenance, so nothing may report it.
+     * Every Amazee source case rests on a fact the credential store records.
      *
-     * Asserted structurally rather than on the symptom: if a future change
-     * reintroduces a provenance-bearing source case without first giving the
-     * store somewhere to record it, this fails.
+     * The predecessor of this test asserted the opposite — that no case may
+     * claim a provenance — because the store had nowhere to keep one, and each
+     * adapter was substituting a local fact that merely correlated. That is
+     * still the property being protected; what changed is that the store now
+     * has somewhere to keep it, so the guard checks the support rather than
+     * banning the claim.
+     *
+     * Asserted structurally: adding an Amazee case with no corresponding
+     * {@see AmazeeConnectionSource} — a case nothing can ever record — fails
+     * here rather than shipping as a confident guess.
      */
-    public function testNoApiKeySourceCaseClaimsAmazeeProvenance(): void
+    public function testEveryAmazeeSourceCaseRestsOnARecordedFact(): void
     {
-        $storeSignature = (new \ReflectionMethod(
-            \Tag1\Scolta\AiProvider\Amazee\ConfigStorageInterface::class,
-            'store',
+        $recordable = (new \ReflectionMethod(
+            ProvenanceAwareConfigStorageInterface::class,
+            'storeConnectionSource',
         ))->getParameters();
-        $recorded = array_map(static fn(\ReflectionParameter $p): string => $p->getName(), $storeSignature);
-
         $this->assertSame(
-            ['litellmToken', 'litellmApiUrl', 'region'],
-            $recorded,
-            'ConfigStorageInterface::store() changed. If it now records how credentials were '
-            . 'obtained, a provenance-bearing ApiKeySource case is supportable; until then it is a guess.',
+            'source',
+            $recordable[0]->getName(),
+            'The credential store must have somewhere to record how a connection was made, '
+            . 'or no provenance-bearing ApiKeySource case is supportable.',
         );
+
+        $supported = ['amazee'];
+        foreach (AmazeeConnectionSource::cases() as $connection) {
+            $supported[] = ApiKeySource::forAmazeeConnection($connection)->value;
+        }
 
         foreach (ApiKeySource::cases() as $case) {
             if (!$case->isAmazee()) {
                 continue;
             }
-            $this->assertSame(
-                'amazee',
+            $this->assertContains(
                 $case->value,
-                'An Amazee source case is claiming a provenance the credential store never recorded.',
+                $supported,
+                'An Amazee source case is claiming a provenance nothing can record.',
             );
+        }
+    }
+
+    /**
+     * Unrecorded provenance reports as Amazee, never as one of the two actions.
+     *
+     * Credentials stored before 1.2.0, and any store that does not implement
+     * the provenance interface, have no recorded origin. Guessing one is the
+     * whole defect.
+     */
+    public function testUnrecordedProvenanceClaimsNoOrigin(): void
+    {
+        $resolved = ApiKeyResolver::resolve([], new AmazeeCredentials('t'));
+
+        $this->assertSame(ApiKeySource::Amazee, $resolved->source);
+        $this->assertFalse($resolved->source->isAmazeeDemo());
+        $this->assertStringNotContainsString('demo', $resolved->describe());
+        $this->assertStringNotContainsString('account', $resolved->describe());
+    }
+
+    /**
+     * A recorded connection source is reported, in both directions.
+     */
+    public function testRecordedProvenanceIsReported(): void
+    {
+        $demo = ApiKeyResolver::resolve(
+            [],
+            new AmazeeCredentials('t', connectionSource: AmazeeConnectionSource::Demo),
+        );
+        $this->assertSame(ApiKeySource::AmazeeDemo, $demo->source);
+        $this->assertTrue($demo->source->isAmazee());
+        $this->assertTrue($demo->source->isAmazeeDemo());
+        $this->assertStringContainsString('free demo', $demo->describe());
+
+        $account = ApiKeyResolver::resolve(
+            [],
+            new AmazeeCredentials('t', connectionSource: AmazeeConnectionSource::Account),
+        );
+        $this->assertSame(ApiKeySource::AmazeeAccount, $account->source);
+        $this->assertTrue($account->source->isAmazee());
+        $this->assertFalse($account->source->isAmazeeDemo());
+        $this->assertStringContainsString('your account', $account->describe());
+    }
+
+    /**
+     * No source case or label describes a connection as automatic.
+     */
+    public function testNoApiKeySourceLabelImpliesAutomaticProvisioning(): void
+    {
+        foreach (ApiKeySource::cases() as $case) {
+            foreach (['auto', 'automatic', 'free trial'] as $banned) {
+                $this->assertStringNotContainsStringIgnoringCase($banned, $case->value);
+                $this->assertStringNotContainsStringIgnoringCase($banned, $case->label());
+            }
         }
     }
 
@@ -211,7 +277,40 @@ class ApiKeyResolverTest extends TestCase
 
     public function testCleanExplicitKeyIsSuccess(): void
     {
-        $this->assertSame('ok', ApiKeyResolver::resolve(['env' => 'sk-env'])->severity());
+        $this->assertSame(
+            'ok',
+            ApiKeyResolver::resolve(['env' => 'sk-env'], configuredProvider: 'anthropic')->severity(),
+        );
+    }
+
+    /**
+     * A key without a selected provider is not a working configuration.
+     *
+     * Scolta ships no default provider, so an environment variable set before
+     * anybody chose one leaves AI off. Reporting that in success green would
+     * reinstate by the back door the assumption that an unselected provider
+     * means Anthropic.
+     */
+    public function testExplicitKeyWithNoProviderSelectedIsNotSuccess(): void
+    {
+        $resolved = ApiKeyResolver::resolve(['env' => 'sk-env']);
+
+        $this->assertSame('', $resolved->provider);
+        $this->assertFalse($resolved->providerSelected());
+        $this->assertFalse($resolved->aiEnabled());
+        $this->assertSame('warning', $resolved->severity());
+        $this->assertStringContainsString('No AI provider is selected', $resolved->describe());
+    }
+
+    /**
+     * The resolver never substitutes a provider for the empty value.
+     */
+    public function testResolverNeverDefaultsToAnthropic(): void
+    {
+        foreach ([ApiKeyResolver::resolve([]), ApiKeyResolver::resolve(['env' => 'sk-env'])] as $resolved) {
+            $this->assertSame('', $resolved->provider);
+            $this->assertStringNotContainsString('anthropic', $resolved->describe());
+        }
     }
 
     public function testUnconfiguredIsWarning(): void

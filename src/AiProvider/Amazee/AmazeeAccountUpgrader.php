@@ -5,13 +5,25 @@ declare(strict_types=1);
 namespace Tag1\Scolta\AiProvider\Amazee;
 
 /**
- * Orchestrates the account upgrade flow for Amazee.ai.
+ * Connects a site to an amazee.ai account, by email.
+ *
+ * This is the only way to reach a real amazee.ai account, and it is email-only
+ * by design: it mirrors amazee.ai's own `ai_provider_amazeeio` Drupal module,
+ * where an operator never generates or pastes an API key. Signing in returns
+ * the account's credentials and Scolta persists them. There is deliberately no
+ * bring-your-own-key form — an operator who already holds an account attaches
+ * it by signing in with that account's email, and the same flow creates the
+ * account when it does not exist yet.
  *
  * Three-step flow:
  *  1. requestVerificationCode() — send OTP to user's email.
  *  2. signIn()                  — exchange OTP for a session token.
  *  3. upgrade()                 — provision a private key in a region;
  *                                 stores credentials and returns UpgradeResult.
+ *
+ * It serves two operator journeys with the same steps: connecting an account
+ * from a clean install, and continuing after the demo credit runs out, which
+ * {@see KeyExpiryRecovery} flags with its upgrade-needed marker.
  *
  * @since 0.4.0
  * @stability experimental
@@ -64,7 +76,11 @@ final class AmazeeAccountUpgrader
     /**
      * Step 3: Provision a private AI key in the given region.
      *
-     * On success, new credentials replace any existing stored credentials.
+     * On success, new credentials replace any existing stored credentials —
+     * including a demo connection this account is replacing — and the
+     * connection source is recorded as
+     * {@see AmazeeConnectionSource::Account} when the store implements
+     * {@see ProvenanceAwareConfigStorageInterface}.
      *
      * @throws AmazeeApiException If the API call fails or credentials are missing.
      * @since 1.0.0
@@ -74,6 +90,10 @@ final class AmazeeAccountUpgrader
     {
         $result = $this->client->createPrivateKey($sessionToken, $regionId);
         $this->storage->store($result->litellmToken, $result->litellmApiUrl, $result->region);
+        if ($this->storage instanceof ProvenanceAwareConfigStorageInterface) {
+            $this->storage->storeConnectionSource(AmazeeConnectionSource::Account);
+        }
+
         return $result;
     }
 }

@@ -27,6 +27,7 @@ class AiServiceAdapterTest extends TestCase
     public function testCustomExpandPromptReturnedRaw(): void
     {
         $config = ScoltaConfig::fromArray([
+            'ai_provider' => 'anthropic',
             'site_name' => 'Acme Corp',
             'prompt_expand_query' => 'My custom expand prompt for {SITE_NAME}.',
         ]);
@@ -41,6 +42,7 @@ class AiServiceAdapterTest extends TestCase
     public function testCustomSummarizePromptReturnedRaw(): void
     {
         $config = ScoltaConfig::fromArray([
+            'ai_provider' => 'anthropic',
             'site_name' => 'Acme Corp',
             'prompt_summarize' => 'Custom summarize for {SITE_NAME}.',
         ]);
@@ -55,6 +57,7 @@ class AiServiceAdapterTest extends TestCase
     public function testCustomFollowUpPromptReturnedRaw(): void
     {
         $config = ScoltaConfig::fromArray([
+            'ai_provider' => 'anthropic',
             'site_name' => 'Acme Corp',
             'prompt_follow_up' => 'Custom follow-up for {SITE_NAME}.',
         ]);
@@ -73,6 +76,7 @@ class AiServiceAdapterTest extends TestCase
     public function testDefaultExpandPromptContainsSiteName(): void
     {
         $config = ScoltaConfig::fromArray([
+            'ai_provider' => 'anthropic',
             'site_name' => 'Acme Corp',
             'site_description' => 'technology blog',
         ]);
@@ -88,6 +92,7 @@ class AiServiceAdapterTest extends TestCase
     public function testDefaultSummarizePromptContainsSiteName(): void
     {
         $config = ScoltaConfig::fromArray([
+            'ai_provider' => 'anthropic',
             'site_name' => 'Example Site',
             'site_description' => 'news website',
         ]);
@@ -104,6 +109,7 @@ class AiServiceAdapterTest extends TestCase
     public function testDefaultFollowUpPromptContainsSiteName(): void
     {
         $config = ScoltaConfig::fromArray([
+            'ai_provider' => 'anthropic',
             'site_name' => 'Widget World',
         ]);
         $adapter = new AiServiceAdapter($config);
@@ -121,6 +127,7 @@ class AiServiceAdapterTest extends TestCase
     public function testEmptyExpandOverrideFallsBackToDefault(): void
     {
         $config = ScoltaConfig::fromArray([
+            'ai_provider' => 'anthropic',
             'site_name' => 'Test Site',
             'prompt_expand_query' => '',
         ]);
@@ -135,6 +142,7 @@ class AiServiceAdapterTest extends TestCase
     public function testEmptySummarizeOverrideFallsBackToDefault(): void
     {
         $config = ScoltaConfig::fromArray([
+            'ai_provider' => 'anthropic',
             'site_name' => 'Test Site',
             'prompt_summarize' => '',
         ]);
@@ -149,6 +157,7 @@ class AiServiceAdapterTest extends TestCase
     public function testEmptyFollowUpOverrideFallsBackToDefault(): void
     {
         $config = ScoltaConfig::fromArray([
+            'ai_provider' => 'anthropic',
             'site_name' => 'Test Site',
             'prompt_follow_up' => '',
         ]);
@@ -167,6 +176,7 @@ class AiServiceAdapterTest extends TestCase
     public function testResolvePromptSubstitutesPlaceholders(): void
     {
         $config = ScoltaConfig::fromArray([
+            'ai_provider' => 'anthropic',
             'site_name' => 'My Blog',
             'site_description' => 'a personal blog',
         ]);
@@ -187,6 +197,7 @@ class AiServiceAdapterTest extends TestCase
     public function testMessageForOperationUsesFrameworkPathWhenAvailable(): void
     {
         $config = ScoltaConfig::fromArray([
+            'ai_provider' => 'anthropic',
             'ai_expansion_model' => 'claude-haiku-4-5-20251001',
         ]);
         $adapter = new class ($config) extends AiServiceAdapter {
@@ -213,7 +224,7 @@ class AiServiceAdapterTest extends TestCase
 
             public function __construct()
             {
-                parent::__construct([]);
+                parent::__construct(['provider' => 'anthropic']);
             }
 
             public function message(string $systemPrompt, string $userMessage, int $maxTokens = 1024, ?string $model = null, ?float $temperature = null): string
@@ -244,7 +255,7 @@ class AiServiceAdapterTest extends TestCase
     {
         // Expansion is a deterministic semantic mapping — it must run at
         // temperature 0 so the same query yields the same terms every call.
-        $adapter = $this->makeRecordingAdapter(ScoltaConfig::fromArray([]));
+        $adapter = $this->makeRecordingAdapter(ScoltaConfig::fromArray(['ai_provider' => 'anthropic', ]));
 
         $result = $adapter->messageForOperation('expand_query', 'sys', 'user', 512);
 
@@ -256,7 +267,7 @@ class AiServiceAdapterTest extends TestCase
     {
         // Summarize (and follow-up) are creative surfaces — they keep the
         // provider default, i.e. no temperature is sent (null).
-        $adapter = $this->makeRecordingAdapter(ScoltaConfig::fromArray([]));
+        $adapter = $this->makeRecordingAdapter(ScoltaConfig::fromArray(['ai_provider' => 'anthropic', ]));
 
         $adapter->messageForOperation('summarize', 'sys', 'user', 512);
 
@@ -277,6 +288,7 @@ class AiServiceAdapterTest extends TestCase
     public function testAiExpansionModelMapsFromArray(): void
     {
         $config = ScoltaConfig::fromArray([
+            'ai_provider' => 'anthropic',
             'ai_expansion_model' => 'claude-haiku-4-5-20251001',
         ]);
 
@@ -286,6 +298,7 @@ class AiServiceAdapterTest extends TestCase
     public function testAiExpansionModelNotIncludedInAiClientConfig(): void
     {
         $config = ScoltaConfig::fromArray([
+            'ai_provider' => 'anthropic',
             'ai_model' => 'claude-sonnet-4-5-20250929',
             'ai_expansion_model' => 'claude-haiku-4-5-20251001',
         ]);
@@ -308,7 +321,7 @@ class AiServiceAdapterTest extends TestCase
      */
     private function makeThrowingAdapter(\RuntimeException $toThrow): AiServiceAdapter
     {
-        $config = ScoltaConfig::fromArray(['ai_expansion_model' => 'claude-haiku-4-5-20251001']);
+        $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_expansion_model' => 'claude-haiku-4-5-20251001']);
 
         $throwingClient = new class ($toThrow) extends AiClient {
             private \RuntimeException $toThrow;
@@ -316,7 +329,7 @@ class AiServiceAdapterTest extends TestCase
             public function __construct(\RuntimeException $toThrow)
             {
                 $this->toThrow = $toThrow;
-                parent::__construct([]);
+                parent::__construct(['provider' => 'anthropic']);
             }
 
             public function message(string $systemPrompt, string $userMessage, int $maxTokens = 1024, ?string $model = null, ?float $temperature = null): string
@@ -411,7 +424,7 @@ class AiServiceAdapterTest extends TestCase
      */
     public function testDefaultHookIsNoOpAndExceptionPropagates(): void
     {
-        $config = ScoltaConfig::fromArray([]);
+        $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', ]);
         $original = new \RuntimeException('some unrelated client failure');
 
         $throwingClient = new class ($original) extends AiClient {
@@ -420,7 +433,7 @@ class AiServiceAdapterTest extends TestCase
             public function __construct(\RuntimeException $toThrow)
             {
                 $this->toThrow = $toThrow;
-                parent::__construct([]);
+                parent::__construct(['provider' => 'anthropic']);
             }
 
             public function message(string $systemPrompt, string $userMessage, int $maxTokens = 1024, ?string $model = null, ?float $temperature = null): string
@@ -457,7 +470,7 @@ class AiServiceAdapterTest extends TestCase
      */
     public function testHookMayReplaceTheException(): void
     {
-        $config = ScoltaConfig::fromArray([]);
+        $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', ]);
         $original = new \RuntimeException('Budget has been exceeded!');
 
         $throwingClient = new class ($original) extends AiClient {
@@ -466,7 +479,7 @@ class AiServiceAdapterTest extends TestCase
             public function __construct(\RuntimeException $toThrow)
             {
                 $this->toThrow = $toThrow;
-                parent::__construct([]);
+                parent::__construct(['provider' => 'anthropic']);
             }
 
             public function message(string $systemPrompt, string $userMessage, int $maxTokens = 1024, ?string $model = null, ?float $temperature = null): string
@@ -520,7 +533,7 @@ class AiServiceAdapterTest extends TestCase
         ?InMemoryAmazeeStorage &$storage = null,
         ?\Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery &$recovery = null,
     ): AiServiceAdapter {
-        $config = ScoltaConfig::fromArray([]);
+        $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', ]);
 
         $throwingClient = new class ($toThrow) extends AiClient {
             private \RuntimeException $toThrow;
@@ -528,7 +541,7 @@ class AiServiceAdapterTest extends TestCase
             public function __construct(\RuntimeException $toThrow)
             {
                 $this->toThrow = $toThrow;
-                parent::__construct([]);
+                parent::__construct(['provider' => 'anthropic']);
             }
 
             public function message(string $systemPrompt, string $userMessage, int $maxTokens = 1024, ?string $model = null, ?float $temperature = null): string
