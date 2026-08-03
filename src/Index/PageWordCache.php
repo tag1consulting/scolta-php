@@ -18,17 +18,23 @@ use Tag1\Scolta\Storage\StorageDriverInterface;
  *
  * Architecture:
  *   - Manifest (token-cache-manifest.php): hash → chunk number, loaded into
- *     memory at construction (~5 MB for 44k pages).
+ *     memory at construction and capped at $maxManifestEntries.
  *   - Chunk files (token-cache/chunk-NNNN.php): each holds ~N entries of full
  *     token data. Loaded on demand, one at a time, then released.
  *   - Write buffer: new/updated entries in memory, flushed as a new chunk
  *     file when it reaches chunk size.
  *
- * Memory budget: manifest (~5 MB) + one loaded chunk (~2.5–5 MB) + write
- * buffer up to $maxWriteBufferBytes (default 4 MB) ≈ 15 MB total. Compare
- * previous architecture: entire cache in one PHP array → 400+ MB for large
- * corpora. The byte limit prevents OOM when pages have thousands of tokens
- * (e.g. long encyclopedia articles) that would overflow the count-only budget.
+ * Every one of those is bounded by the memory budget rather than by the
+ * corpus, which is the property the class needs and did not have: the manifest
+ * grew one entry per page with no ceiling, and a second table of every hash
+ * the build had touched grew alongside it. Past the manifest cap the cache
+ * declines new pages, so a corpus larger than the budget re-tokenizes its tail
+ * on each build — slower, never wrong.
+ *
+ * Memory: capped manifest + one loaded chunk (~2.5–5 MB) + write buffer up to
+ * $maxWriteBufferBytes (default 4 MB). The byte limit prevents OOM when pages
+ * have thousands of tokens (e.g. long encyclopedia articles) that would
+ * overflow the count-only budget.
  *
  * Cache chunk size matches the build pipeline's MemoryBudget::chunkSize(),
  * so it automatically adapts to constrained environments.
@@ -50,21 +56,32 @@ final class PageWordCache
     private readonly LoggerInterface $logger;
 
     /**
-     * Manifest: content hash → chunk number.
+     * Manifest: content hash → chunk number, with seen-ness in the sign.
      *
-     * Loaded entirely into memory at construction. This is the lookup index.
-     * At 44k entries with ~36-byte keys and 4-byte values, this is ~5 MB.
+     * A non-negative value is a chunk number for a hash this build has not
+     * touched. A negative value is `-(chunk + 1)` for one it has, which is how
+     * pruning knows what to keep.
+     *
+     * That encoding replaces a second array of every hash seen this build.
+     * The pair was the largest per-corpus allocation in the indexer after the
+     * index itself: two hash tables of the same 44k keys, neither bounded by
+     * the chunk size the memory budget is expressed in, so `--chunk-size=20`
+     * did nothing to either. Only one of them was ever load-bearing.
      *
      * @var array<string, int>
      */
     private array $manifest = [];
 
     /**
-     * Content hashes seen in this build (for pruning stale entries).
+     * Upper bound on manifest entries, from the memory budget.
      *
-     * @var array<string, true>
+     * Reached, the cache declines new pages rather than growing: those pages
+     * re-tokenize on the next build, which costs time and not correctness.
      */
-    private array $usedKeys = [];
+    private readonly int $maxManifestEntries;
+
+    /** The manifest-full notice is worth saying once per build, not per page. */
+    private bool $manifestFullWarned = false;
 
     /**
      * Currently loaded chunk: [chunkNumber => entries].
@@ -105,13 +122,34 @@ final class PageWordCache
         int $chunkSize = 50,
         ?LoggerInterface $logger = null,
         int $maxWriteBufferBytes = 4 * 1024 * 1024,
+        int $maxManifestEntries = 1_000_000,
     ) {
         $this->stateDir           = $stateDir;
         $this->storage            = $storage;
         $this->chunkSize          = max(1, $chunkSize);
         $this->logger             = $logger ?? new NullLogger();
         $this->maxWriteBufferBytes = max(0, $maxWriteBufferBytes);
+        $this->maxManifestEntries  = max(1, $maxManifestEntries);
         $this->loadManifest();
+    }
+
+    /**
+     * Decode a stored manifest value to its chunk number.
+     */
+    private static function chunkOf(int $stored): int
+    {
+        return $stored < 0 ? (-$stored) - 1 : $stored;
+    }
+
+    /**
+     * Record that this build still needs $hash, without a second hash table.
+     */
+    private function markSeen(string $hash): void
+    {
+        $stored = $this->manifest[$hash] ?? null;
+        if ($stored !== null && $stored >= 0) {
+            $this->manifest[$hash] = -($stored + 1);
+        }
     }
 
     /**
@@ -126,7 +164,7 @@ final class PageWordCache
      */
     public function get(string $hash): ?array
     {
-        $this->usedKeys[$hash] = true;
+        $this->markSeen($hash);
 
         // Check write buffer first (most recently added entries).
         if (isset($this->writeBuffer[$hash])) {
@@ -138,7 +176,7 @@ final class PageWordCache
             return null;
         }
 
-        $chunkNumber = $this->manifest[$hash];
+        $chunkNumber = self::chunkOf($this->manifest[$hash]);
 
         // Load the chunk if not already loaded.
         if ($this->loadedChunk === null || $this->loadedChunk['number'] !== $chunkNumber) {
@@ -174,7 +212,18 @@ final class PageWordCache
      */
     public function put(string $hash, array $tokenData): void
     {
-        $this->usedKeys[$hash] = true;
+        // The manifest is the bounded resource, so admission is decided here:
+        // a hash already tracked can always be rewritten, a new one only while
+        // there is room. Declining costs a re-tokenization next build.
+        if (!isset($this->manifest[$hash]) && !isset($this->writeBuffer[$hash])
+            && count($this->manifest) + count($this->writeBuffer) >= $this->maxManifestEntries
+        ) {
+            $this->warnManifestFull();
+
+            return;
+        }
+
+        $this->markSeen($hash);
         $this->writeBuffer[$hash] = $tokenData;
 
         if ($this->maxWriteBufferBytes > 0) {
@@ -211,10 +260,18 @@ final class PageWordCache
         // Release loaded chunk — we're done reading.
         $this->loadedChunk = null;
 
-        // Prune manifest: keep only entries whose hash was seen in this build.
-        if (!empty($this->usedKeys)) {
-            $this->manifest = array_intersect_key($this->manifest, $this->usedKeys);
+        // Prune: a hash this build never touched keeps its non-negative value
+        // and is dropped; the rest are decoded back to plain chunk numbers.
+        // Rebuilding into a new array rather than unsetting in place keeps the
+        // peak at one manifest, not one plus a full set of removed keys.
+        $kept = [];
+        foreach ($this->manifest as $hash => $stored) {
+            if ($stored < 0) {
+                $kept[$hash] = (-$stored) - 1;
+            }
         }
+        $this->manifest = $kept;
+        unset($kept);
 
         // Identify which chunk numbers are still referenced by the manifest.
         $liveChunks = array_flip(array_unique(array_values($this->manifest)));
@@ -370,8 +427,11 @@ final class PageWordCache
         $chunkNumber = $this->nextChunkNumber++;
         $this->writeChunkFile($chunkNumber, $this->writeBuffer);
 
+        // Written by this build, so stored already-seen: pruneAndSave() drops
+        // whatever is still unseen, and these entries are the newest there are.
+        $encoded = -($chunkNumber + 1);
         foreach ($this->writeBuffer as $hash => $entry) {
-            $this->manifest[$hash] = $chunkNumber;
+            $this->manifest[$hash] = $encoded;
         }
 
         $this->writeBuffer      = [];
@@ -409,7 +469,24 @@ final class PageWordCache
     {
         $this->manifest = array_filter(
             $this->manifest,
-            fn(int $num) => $num !== $chunkNumber,
+            static fn(int $stored): bool => self::chunkOf($stored) !== $chunkNumber,
         );
+    }
+
+    /**
+     * Say once that the cache stopped growing, and why it is not an error.
+     */
+    private function warnManifestFull(): void
+    {
+        if ($this->manifestFullWarned) {
+            return;
+        }
+
+        $this->manifestFullWarned = true;
+        $this->logger->notice(sprintf(
+            '[scolta] Token cache reached its %d-entry memory budget. Further pages are indexed '
+            . 'normally but will be re-tokenized on the next build. Raise --memory-budget to cache more.',
+            $this->maxManifestEntries,
+        ));
     }
 }
