@@ -7,14 +7,14 @@ namespace Tag1\Scolta\Tests\Index;
 use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\Export\ContentItem;
 use Tag1\Scolta\Index\BuildIntent;
+use Tag1\Scolta\Index\CborEncoder;
+use Tag1\Scolta\Index\ChunkWriter;
 use Tag1\Scolta\Index\IndexBuildOrchestrator;
 use Tag1\Scolta\Index\IndexMerger;
 use Tag1\Scolta\Index\MemoryBudget;
 use Tag1\Scolta\Index\PageTableLedger;
 use Tag1\Scolta\Index\Stemmer;
 use Tag1\Scolta\Index\StreamingFormatWriter;
-use Tag1\Scolta\Index\CborEncoder;
-use Tag1\Scolta\Index\ChunkWriter;
 use Tag1\Scolta\Storage\FilesystemDriver;
 use Tag1\Scolta\Tests\Support\CborDecoder;
 
