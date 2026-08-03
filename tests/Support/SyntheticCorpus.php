@@ -19,7 +19,7 @@ use Tag1\Scolta\Export\ContentItem;
  * generator seeded per item, so generate(5000, seed: 7) returns identical
  * ContentItems on every call, in every process, on every platform.
  *
- * @since 1.2.0
+ * @since 1.1.1
  * @stability experimental
  */
 final class SyntheticCorpus
@@ -41,13 +41,17 @@ final class SyntheticCorpus
     /**
      * Generate a deterministic corpus of $count items.
      *
+     * @param string $idPrefix Prefix for the item id. Pass '' for bare numeric
+     *                         ids ('1', '2', …), which is what a Drupal node id
+     *                         looks like and the case PHP's array-key
+     *                         normalization treats differently from every other.
      * @return ContentItem[] Indexed 0..$count-1, item N always identical for a given seed.
      */
-    public static function generate(int $count, int $seed = 1): array
+    public static function generate(int $count, int $seed = 1, string $idPrefix = 'item-'): array
     {
         $items = [];
         for ($i = 1; $i <= $count; $i++) {
-            $items[] = self::item($i, $seed);
+            $items[] = self::item($i, $seed, idPrefix: $idPrefix);
         }
 
         return $items;
@@ -61,8 +65,13 @@ final class SyntheticCorpus
      * to handle. $titleRevision changes only the title, which is the case the
      * token cache key currently misses.
      */
-    public static function item(int $i, int $seed = 1, int $revision = 0, int $titleRevision = 0): ContentItem
-    {
+    public static function item(
+        int $i,
+        int $seed = 1,
+        int $revision = 0,
+        int $titleRevision = 0,
+        string $idPrefix = 'item-',
+    ): ContentItem {
         $topic = self::TOPICS[($i - 1) % count(self::TOPICS)];
         $verb  = self::VERBS[($i - 1) % count(self::VERBS)];
 
@@ -84,7 +93,7 @@ final class SyntheticCorpus
         $url  = '/content/' . strtolower(str_replace(' ', '-', "{$verb}-{$topic}")) . '-' . $i;
 
         return new ContentItem(
-            id: "item-{$i}",
+            id: "{$idPrefix}{$i}",
             title: $title,
             bodyHtml: self::body($topic, $targetWords, $seed * 7919 + $i * 31 + $revision * 104_729),
             url: $url,
