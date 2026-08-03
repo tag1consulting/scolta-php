@@ -162,13 +162,38 @@ class IndexMerger
         // Always uses sequential access (one handle at a time) — no fan-in issue.
         $this->telemetry?->emit('merge_pages_start', ['chunks' => count($chunkPaths)]);
         $pagesWritten = 0;
+        /**
+         * Ordinal => id of the page that claimed it.
+         *
+         * InvertedIndexBuilder rejects a duplicate ordinal within one chunk,
+         * but the collision that actually happens spans chunks: a build that
+         * aborted and resumed without its ordinal assignments handed the same
+         * numbers out twice, and this loop would quietly overwrite one page
+         * with the other while every posting list kept pointing at the number.
+         *
+         * @var array<int, string>
+         */
+        $claimedBy = [];
         foreach ($chunkPaths as $path) {
             $reader = new ChunkReader($path);
             foreach ($reader->openPages() as $pageNum => $pageData) {
+                if (isset($claimedBy[$pageNum])) {
+                    throw new \RuntimeException(sprintf(
+                        'Duplicate page ordinal %d across chunks: "%s" and "%s" both claim it. '
+                        . 'Merging would keep one page and leave every posting list for the other '
+                        . 'pointing at the wrong document. Re-run with --restart to rebuild from scratch.',
+                        $pageNum,
+                        $claimedBy[$pageNum],
+                        (string) ($pageData['id'] ?? '?'),
+                    ));
+                }
+                $claimedBy[$pageNum] = (string) ($pageData['id'] ?? '?');
+
                 $writer->writePage($pageNum, $pageData);
                 $pagesWritten++;
             }
         }
+        unset($claimedBy);
         $this->telemetry?->emit('merge_pages_complete', ['items' => $pagesWritten]);
 
         // ── Phase 2: N-way merge of sorted term streams ───────────────────

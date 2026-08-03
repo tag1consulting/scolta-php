@@ -38,8 +38,39 @@ final class PageTableLedger
 {
     public const FILENAME = 'page-table-ledger.php';
 
+    /**
+     * Append-only record of allocations made since the last {@see self::save()}.
+     *
+     * The snapshot in FILENAME is only written when a build finishes. A build
+     * that aborts part-way still has chunk files on disk that reference the
+     * ordinals it handed out, and a resumed process that cannot see those
+     * ordinals allocates the same numbers again — the merge then keeps one
+     * page per ordinal and silently drops the rest, which is the corruption
+     * this journal exists to make impossible.
+     */
+    public const JOURNAL_FILENAME = 'page-table-ledger.journal';
+
     /** Next never-used ordinal. */
     private int $next = 0;
+
+    /**
+     * Monotonic build counter, bumped once per fresh build.
+     *
+     * A row's `gen` records the build that last saw its id. It replaces
+     * collecting every id of the corpus in an array to pass to
+     * {@see self::releaseAllExcept()}: that array is O(corpus) in memory, and
+     * across a resumed build it is worse than useless, because each process
+     * only ever sees its own segment and would release every page the previous
+     * segments committed.
+     */
+    private int $generation = 0;
+
+    /**
+     * Journal records not yet appended to disk.
+     *
+     * @var list<array{t: string, id: string, row?: array<string, mixed>, gen?: int}>
+     */
+    private array $pendingJournal = [];
 
     /**
      * Content-item id => assignment.
@@ -71,7 +102,10 @@ final class PageTableLedger
      * this array's keys directly; go through {@see self::assignedIds()}, which
      * is the one place the type is restored.
      *
-     * @var array<string, array{ordinal: int, url: string, filters: array<string, mixed>, sortable: array<string, mixed>, contentHash: string}>
+     * `gen` is optional because a snapshot written before it existed has rows
+     * without one; those read as generation 0, which is older than any build.
+     *
+     * @var array<string, array{ordinal: int, url: string, filters: array<string, mixed>, sortable: array<string, mixed>, contentHash: string, gen?: int}>
      */
     private array $byId = [];
 
@@ -122,15 +156,23 @@ final class PageTableLedger
     ): int {
         if (isset($this->byId[$id])) {
             $existing = $this->byId[$id];
-            if ($existing['url'] !== $url
+            $changed  = $existing['url'] !== $url
                 || $existing['filters'] !== $filters
                 || $existing['sortable'] !== $sortable
-                || $existing['contentHash'] !== $contentHash) {
+                || $existing['contentHash'] !== $contentHash;
+            $unseen = ($existing['gen'] ?? 0) !== $this->generation;
+
+            if ($changed || $unseen) {
                 $this->byId[$id]['url']         = $url;
                 $this->byId[$id]['filters']     = $filters;
                 $this->byId[$id]['sortable']    = $sortable;
                 $this->byId[$id]['contentHash'] = $contentHash;
+                $this->byId[$id]['gen']         = $this->generation;
                 $this->dirty                    = true;
+                // Journalled even when only `gen` moved: that stamp is what
+                // tells a later segment of the same build that this page is
+                // still in the corpus and must not be tombstoned.
+                $this->pendingJournal[] = ['t' => 'a', 'id' => $id, 'row' => $this->byId[$id]];
             }
 
             return $existing['ordinal'];
@@ -150,10 +192,111 @@ final class PageTableLedger
             'filters'     => $filters,
             'sortable'    => $sortable,
             'contentHash' => $contentHash,
+            'gen'         => $this->generation,
         ];
-        $this->dirty = true;
+        $this->dirty            = true;
+        $this->pendingJournal[] = ['t' => 'a', 'id' => $id, 'row' => $this->byId[$id]];
 
         return $ordinal;
+    }
+
+    /**
+     * Open a build against this ledger.
+     *
+     * A fresh build takes the next generation, so every row still carrying the
+     * previous one is a page the corpus no longer yielded and
+     * {@see self::releaseStaleRows()} can tombstone it. A resumed build keeps
+     * the generation its earlier segments stamped, which is the whole point:
+     * coverage is a property of the build, not of the process.
+     *
+     * @since 1.1.1
+     * @stability experimental
+     */
+    public function beginBuild(bool $fresh): void
+    {
+        if (!$fresh) {
+            return;
+        }
+
+        $this->generation++;
+        $this->dirty            = true;
+        $this->pendingJournal[] = ['t' => 'g', 'id' => '', 'gen' => $this->generation];
+    }
+
+    /**
+     * The build generation rows allocated right now are stamped with.
+     *
+     * @since 1.1.1
+     * @stability experimental
+     */
+    public function generation(): int
+    {
+        return $this->generation;
+    }
+
+    /**
+     * Release every row the current build did not see.
+     *
+     * The generation-stamped equivalent of {@see self::releaseAllExcept()},
+     * and the only one that is correct across a resumed build.
+     *
+     * @return list<int> Ordinals released.
+     * @since 1.1.1
+     * @stability experimental
+     */
+    public function releaseStaleRows(): array
+    {
+        $released = [];
+        foreach ($this->assignedIds() as $id) {
+            if (($this->byId[$id]['gen'] ?? 0) === $this->generation) {
+                continue;
+            }
+            $ordinal = $this->release($id);
+            if ($ordinal !== null) {
+                $released[] = $ordinal;
+            }
+        }
+
+        return $released;
+    }
+
+    /**
+     * Flush pending allocations to the journal.
+     *
+     * Must be called before the chunk file that references these ordinals is
+     * written, never after: an ordinal on disk without its chunk is re-used
+     * for the same id on resume and costs nothing, whereas a chunk on disk
+     * without its ordinal is the collision that corrupts the index.
+     *
+     * @since 1.1.1
+     * @stability experimental
+     */
+    public function checkpoint(): void
+    {
+        if ($this->pendingJournal === []) {
+            return;
+        }
+
+        $this->storage->makeDirectory($this->stateDir);
+
+        // base64 per line: a filter or sortable value may contain any byte,
+        // and a raw serialize() payload with a newline in it would make the
+        // journal unparseable exactly on the corpora that need it most.
+        $payload = '';
+        foreach ($this->pendingJournal as $record) {
+            $payload .= base64_encode(serialize($record)) . "\n";
+        }
+
+        $path = $this->stateDir . '/' . self::JOURNAL_FILENAME;
+        if (file_put_contents($path, $payload, FILE_APPEND | LOCK_EX) === false) {
+            throw new \RuntimeException(
+                "Failed to append to the page-table journal at {$path}. "
+                . 'Refusing to continue: the chunk about to be written would reference '
+                . 'ordinals no resumed process could see.',
+            );
+        }
+
+        $this->pendingJournal = [];
     }
 
     /**
@@ -206,6 +349,43 @@ final class PageTableLedger
         }
 
         return $released;
+    }
+
+    /**
+     * True when the current build already allocated and committed $id.
+     *
+     * A row only carries the current generation once its allocation reached
+     * the journal, and the journal is written immediately before the chunk
+     * that uses it — so this answers "an earlier segment of this build already
+     * indexed that page" and nothing weaker.
+     *
+     * @since 1.1.1
+     * @stability experimental
+     */
+    public function wasSeenThisBuild(string $id): bool
+    {
+        return isset($this->byId[$id]) && ($this->byId[$id]['gen'] ?? 0) === $this->generation;
+    }
+
+    /**
+     * Every id the current build has already committed.
+     *
+     * A generator rather than an array: the caller wants a high-water mark to
+     * restart a source query from, and materialising one string per page of
+     * the corpus to compute it would reintroduce exactly the per-corpus
+     * allocation the generation stamp removed.
+     *
+     * @return \Generator<int, string>
+     * @since 1.1.1
+     * @stability experimental
+     */
+    public function seenIdsThisBuild(): \Generator
+    {
+        foreach ($this->byId as $id => $row) {
+            if (($row['gen'] ?? 0) === $this->generation) {
+                yield (string) $id;
+            }
+        }
     }
 
     /**
@@ -396,8 +576,18 @@ final class PageTableLedger
             'byId'       => $this->byId,
             'free'       => $this->free,
             'tombstones' => $this->tombstones,
+            'generation' => $this->generation,
         ]));
         rename($tmp, $file);
+
+        // The snapshot now contains everything the journal was holding, and a
+        // stale journal replayed over a newer snapshot would resurrect rows
+        // this build released. Drop it only after the rename has landed.
+        $this->pendingJournal = [];
+        $journal              = $this->stateDir . '/' . self::JOURNAL_FILENAME;
+        if ($this->storage->exists($journal)) {
+            $this->storage->delete($journal);
+        }
 
         $this->dirty = false;
     }
@@ -419,7 +609,10 @@ final class PageTableLedger
         $this->byId       = [];
         $this->free       = [];
         $this->tombstones = [];
-        $this->dirty      = true;
+        // Pending records describe assignments that no longer exist; a
+        // checkpoint() after this would write them back out.
+        $this->pendingJournal = [];
+        $this->dirty          = true;
     }
 
     /**
@@ -443,6 +636,36 @@ final class PageTableLedger
     private function loadFromDisk(): void
     {
         $path = $this->stateDir . '/' . self::FILENAME;
+        if ($this->storage->exists($path)) {
+            try {
+                $raw  = $this->storage->get($path);
+                $data = @unserialize($raw, ['allowed_classes' => false]);
+            } catch (\Throwable) {
+                $data = null;
+            }
+
+            if (is_array($data)) {
+                $this->next       = (int) ($data['next'] ?? 0);
+                $this->byId       = is_array($data['byId'] ?? null) ? $data['byId'] : [];
+                $this->free       = is_array($data['free'] ?? null) ? array_values($data['free']) : [];
+                $this->tombstones = is_array($data['tombstones'] ?? null) ? $data['tombstones'] : [];
+                $this->generation = (int) ($data['generation'] ?? 0);
+            }
+        }
+
+        $this->replayJournal();
+    }
+
+    /**
+     * Replay allocations an interrupted build appended after the last snapshot.
+     *
+     * Each record is applied exactly as {@see self::allocate()} applied it, so
+     * a resumed process sees the same assignment the aborted one handed to the
+     * chunk files already on disk.
+     */
+    private function replayJournal(): void
+    {
+        $path = $this->stateDir . '/' . self::JOURNAL_FILENAME;
         if (!$this->storage->exists($path)) {
             return;
         }
@@ -453,14 +676,61 @@ final class PageTableLedger
             return;
         }
 
-        $data = @unserialize($raw, ['allowed_classes' => false]);
-        if (!is_array($data)) {
-            return;
+        foreach (explode("\n", $raw) as $line) {
+            if ($line === '') {
+                continue;
+            }
+
+            $decoded = base64_decode($line, true);
+            if ($decoded === false) {
+                continue;
+            }
+
+            $record = @unserialize($decoded, ['allowed_classes' => false]);
+            if (!is_array($record)) {
+                continue;
+            }
+
+            if (($record['t'] ?? '') === 'g') {
+                $this->generation = max($this->generation, (int) ($record['gen'] ?? 0));
+                continue;
+            }
+
+            if (($record['t'] ?? '') !== 'a' || !is_array($record['row'] ?? null)) {
+                continue;
+            }
+
+            $id  = (string) ($record['id'] ?? '');
+            $row = $record['row'];
+            if ($id === '' || !isset($row['ordinal'])) {
+                continue;
+            }
+
+            // Rebuilt field by field rather than assigned wholesale: this data
+            // came off disk from a process that died, and a malformed row must
+            // not be able to reshape the table every posting list indexes into.
+            $ordinal         = (int) $row['ordinal'];
+            $this->byId[$id] = [
+                'ordinal'     => $ordinal,
+                'url'         => (string) ($row['url'] ?? ''),
+                'filters'     => is_array($row['filters'] ?? null) ? $row['filters'] : [],
+                'sortable'    => is_array($row['sortable'] ?? null) ? $row['sortable'] : [],
+                'contentHash' => (string) ($row['contentHash'] ?? ''),
+                'gen'         => (int) ($row['gen'] ?? 0),
+            ];
+            $this->generation = max($this->generation, (int) ($row['gen'] ?? 0));
+
+            // Mirror allocate(): a reused ordinal leaves the free list and
+            // loses its tombstone, and a fresh one advances the high-water mark.
+            $this->free = array_values(array_filter($this->free, static fn(int $o): bool => $o !== $ordinal));
+            unset($this->tombstones[$ordinal]);
+            if ($ordinal >= $this->next) {
+                $this->next = $ordinal + 1;
+            }
         }
 
-        $this->next       = (int) ($data['next'] ?? 0);
-        $this->byId       = is_array($data['byId'] ?? null) ? $data['byId'] : [];
-        $this->free       = is_array($data['free'] ?? null) ? array_values($data['free']) : [];
-        $this->tombstones = is_array($data['tombstones'] ?? null) ? $data['tombstones'] : [];
+        // Replayed state differs from the snapshot on disk; a save() that
+        // short-circuited on !dirty here would lose every replayed row.
+        $this->dirty = true;
     }
 }

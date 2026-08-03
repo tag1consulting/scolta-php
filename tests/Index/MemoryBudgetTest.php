@@ -143,7 +143,10 @@ class MemoryBudgetTest extends TestCase
 
     public function testFromOptionsNamedProfileNoOverride(): void
     {
-        $b = MemoryBudget::fromOptions('balanced');
+        // Explicit "unlimited" rather than whatever the runner's php.ini says:
+        // fromOptions() caps a budget that would not fit the process, so a
+        // profile-mapping assertion has to name the process it maps in.
+        $b = MemoryBudget::fromOptions('balanced', null, processLimitBytes: 0);
         $this->assertSame('balanced', $b->profile());
         $this->assertSame(MemoryBudget::balanced()->chunkSize(), $b->chunkSize());
     }
@@ -157,7 +160,7 @@ class MemoryBudgetTest extends TestCase
 
     public function testFromOptionsByteStringWithChunkOverride(): void
     {
-        $b = MemoryBudget::fromOptions('256M', 100);
+        $b = MemoryBudget::fromOptions('256M', 100, processLimitBytes: 0);
         $this->assertSame(100, $b->chunkSize());
         // 256M routes to balanced threshold — verify memory budget applied
         $this->assertGreaterThan(96 * 1024 * 1024, $b->totalBudgetBytes());
@@ -165,14 +168,73 @@ class MemoryBudgetTest extends TestCase
 
     public function testFromOptionsNullChunkSizeUsesProfileDefault(): void
     {
-        $b = MemoryBudget::fromOptions('aggressive', null);
+        $b = MemoryBudget::fromOptions('aggressive', null, processLimitBytes: 0);
         $this->assertSame(MemoryBudget::aggressive()->chunkSize(), $b->chunkSize());
     }
 
     public function testFromOptionsZeroChunkSizeIsIgnored(): void
     {
         // 0 is not a valid chunk size; fromOptions must ignore it and keep the profile default.
-        $b = MemoryBudget::fromOptions('conservative', 0);
+        $b = MemoryBudget::fromOptions('conservative', 0, processLimitBytes: 0);
         $this->assertSame(MemoryBudget::conservative()->chunkSize(), $b->chunkSize());
+    }
+
+    // -------------------------------------------------------------------
+    // The budget is the operator's number, and it fits the process
+    // -------------------------------------------------------------------
+
+    public function testAByteBudgetKeepsTheRequestedSizeInsteadOfRoundingToAProfile(): void
+    {
+        // `--memory-budget=48M` used to land on conservative() and run with its
+        // 96 MB, so the number the operator chose had no effect at all.
+        $b = MemoryBudget::fromBytes(48 * 1024 * 1024);
+
+        $this->assertSame(48 * 1024 * 1024, $b->totalBudgetBytes());
+        $this->assertLessThan(
+            MemoryBudget::conservative()->chunkSize(),
+            $b->chunkSize(),
+            'A smaller budget must buy smaller chunks, not the conservative default',
+        );
+        $this->assertLessThan(
+            MemoryBudget::conservative()->tokenCacheChunkBytes(),
+            $b->tokenCacheChunkBytes(),
+        );
+    }
+
+    public function testABudgetLargerThanTheProcessLimitDegradesInsteadOfFataling(): void
+    {
+        // `--memory-budget=4G` in a 512 MB process selected the aggressive
+        // profile, whose 500-page chunks and 64 MB token-cache flush fatal in a
+        // single allocation before the RSS watchdog can abort between chunks.
+        $limit = 512 * 1024 * 1024;
+        $b     = MemoryBudget::fromOptions('4G', null, processLimitBytes: $limit);
+
+        $this->assertLessThan($limit, $b->totalBudgetBytes());
+        $this->assertLessThan(MemoryBudget::aggressive()->chunkSize(), $b->chunkSize());
+        $this->assertLessThan(MemoryBudget::aggressive()->tokenCacheChunkBytes(), $b->tokenCacheChunkBytes());
+    }
+
+    public function testABudgetThatFitsTheProcessIsLeftAlone(): void
+    {
+        $b = MemoryBudget::conservative()->withCeiling(512 * 1024 * 1024);
+
+        $this->assertSame(MemoryBudget::conservative()->chunkSize(), $b->chunkSize());
+        $this->assertSame(MemoryBudget::conservative()->totalBudgetBytes(), $b->totalBudgetBytes());
+    }
+
+    public function testAnUnlimitedProcessAppliesNoCeiling(): void
+    {
+        $b = MemoryBudget::aggressive()->withCeiling(0);
+
+        $this->assertSame(MemoryBudget::aggressive()->totalBudgetBytes(), $b->totalBudgetBytes());
+    }
+
+    public function testScalingNeverProducesADegenerateChunk(): void
+    {
+        $b = MemoryBudget::conservative()->scaledTo(1);
+
+        $this->assertGreaterThanOrEqual(10, $b->chunkSize());
+        $this->assertGreaterThanOrEqual(1, $b->mergeOpenFileHandles());
+        $this->assertGreaterThan(0, $b->tokenCacheChunkBytes());
     }
 }

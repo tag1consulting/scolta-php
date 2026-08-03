@@ -322,4 +322,114 @@ final class PageTableLedgerTest extends TestCase
         $this->assertSame(10, $l->liveCount());
         $this->assertSame(0.0, $l->tombstoneRatio());
     }
+
+    // -------------------------------------------------------------------
+    // Durability across a process that never reaches save()
+    // -------------------------------------------------------------------
+
+    /**
+     * The core of the corruption: a build that aborts still has chunk files
+     * on disk naming these ordinals, so a process that cannot read them back
+     * hands the same numbers to different pages.
+     */
+    public function testCheckpointedAllocationsSurviveAProcessThatNeverSaves(): void
+    {
+        $first = $this->ledger();
+        $first->beginBuild(fresh: true);
+        $first->allocate('a', '/a');
+        $first->allocate('b', '/b');
+        $first->checkpoint();
+        // No save(): this stands in for a process killed by the memory limit.
+        unset($first);
+
+        $second = $this->ledger();
+
+        $this->assertSame(0, $second->ordinalFor('a'));
+        $this->assertSame(1, $second->ordinalFor('b'));
+        $this->assertSame(2, $second->pageTableSize(), 'The next page must not reuse a live ordinal');
+        $this->assertSame(2, $second->allocate('c', '/c'));
+    }
+
+    public function testAllocationsNotYetCheckpointedAreNotResurrected(): void
+    {
+        // Their chunk was never committed either, so the pages will be handed
+        // to the build again and must be allocatable from scratch.
+        $first = $this->ledger();
+        $first->beginBuild(fresh: true);
+        $first->allocate('a', '/a');
+        $first->checkpoint();
+        $first->allocate('b', '/b');
+        unset($first);
+
+        $second = $this->ledger();
+
+        $this->assertSame(0, $second->ordinalFor('a'));
+        $this->assertNull($second->ordinalFor('b'));
+    }
+
+    public function testSavingClearsTheJournalSoStaleRowsAreNotReplayed(): void
+    {
+        $l = $this->ledger();
+        $l->beginBuild(fresh: true);
+        $l->allocate('a', '/a');
+        $l->allocate('gone', '/gone');
+        $l->checkpoint();
+        $l->release('gone');
+        $l->save();
+
+        $this->assertFileDoesNotExist($this->stateDir . '/' . PageTableLedger::JOURNAL_FILENAME);
+        $this->assertNull($this->ledger()->ordinalFor('gone'), 'A replayed journal resurrected a released row');
+    }
+
+    public function testAResumedBuildKeepsTheGenerationItsEarlierSegmentsStamped(): void
+    {
+        $first = $this->ledger();
+        $first->beginBuild(fresh: true);
+        $first->allocate('a', '/a');
+        $first->checkpoint();
+        $generation = $first->generation();
+        unset($first);
+
+        $second = $this->ledger();
+        $second->beginBuild(fresh: false);
+
+        $this->assertSame($generation, $second->generation());
+        $this->assertTrue($second->wasSeenThisBuild('a'), 'A page an earlier segment committed must not be re-indexed');
+    }
+
+    public function testAFreshBuildTreatsThePreviousBuildsRowsAsUnseen(): void
+    {
+        $first = $this->ledger();
+        $first->beginBuild(fresh: true);
+        $first->allocate('kept', '/kept');
+        $first->allocate('deleted', '/deleted');
+        $first->save();
+
+        $second = $this->ledger();
+        $second->beginBuild(fresh: true);
+        $this->assertFalse($second->wasSeenThisBuild('kept'));
+
+        $second->allocate('kept', '/kept');
+        $released = $second->releaseStaleRows();
+
+        $this->assertSame([1], $released, 'Only the id this build never yielded may be released');
+        $this->assertSame(0, $second->ordinalFor('kept'), 'A surviving page must keep its ordinal');
+    }
+
+    public function testACorruptJournalLineIsSkippedRatherThanFatal(): void
+    {
+        $l = $this->ledger();
+        $l->beginBuild(fresh: true);
+        $l->allocate('a', '/a');
+        $l->checkpoint();
+
+        file_put_contents(
+            $this->stateDir . '/' . PageTableLedger::JOURNAL_FILENAME,
+            "!!!not base64!!!\n",
+            FILE_APPEND,
+        );
+
+        $reloaded = $this->ledger();
+        $this->assertSame(0, $reloaded->ordinalFor('a'));
+    }
 }
