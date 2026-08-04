@@ -87,7 +87,8 @@ class BudgetAwareProviderDecoratorTest extends TestCase
     {
         $mock = new MockHandler([]);
         $httpClient = new Client(['handler' => HandlerStack::create($mock)]);
-        $aiClient = new AiClient(['api_key' => 'test'], $httpClient);
+        $aiClient = new AiClient([
+            'provider' => 'anthropic','api_key' => 'test'], $httpClient);
         $decorator = new BudgetAwareProviderDecorator($aiClient);
 
         $this->assertSame($aiClient, $decorator->getClient());

@@ -66,7 +66,7 @@ class AiClient
 
     /**
      * @param array $config Configuration array with keys:
-     *   - provider: 'anthropic' or 'openai' (default: 'anthropic')
+     *   - provider: 'anthropic' or 'openai' (required; there is no default)
      *   - api_key: API key (required)
      *   - model: Model identifier (default: 'claude-sonnet-4-5-20250929')
      *   - base_url: Override API base URL (optional)
@@ -76,7 +76,18 @@ class AiClient
      */
     public function __construct(array $config, ?ClientInterface $httpClient = null)
     {
-        $this->provider = $config['provider'] ?? 'anthropic';
+        // No default. An absent or empty provider is "nobody selected one", and
+        // the check below turns that into an error rather than into Anthropic:
+        // a client must never be built on an assumption about which vendor the
+        // site meant, and callers are expected to keep AI off instead of
+        // constructing one.
+        $this->provider = $config['provider'] ?? '';
+        if (trim($this->provider) === '') {
+            throw new \InvalidArgumentException(sprintf(
+                'No AI provider selected. Set one of: %s.',
+                implode(', ', self::SUPPORTED_PROVIDERS),
+            ));
+        }
         // Fail closed: an unrecognized provider must not silently fall through
         // to the Anthropic request path (wrong endpoint, wrong auth header).
         if (!in_array($this->provider, self::SUPPORTED_PROVIDERS, true)) {

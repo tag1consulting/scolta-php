@@ -7,6 +7,7 @@ namespace Tag1\Scolta\Service;
 use Tag1\Scolta\AiClient;
 use Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery;
 use Tag1\Scolta\Config\ScoltaConfig;
+use Tag1\Scolta\Exception\ApiKeyMissingException;
 use Tag1\Scolta\Prompt\DefaultPrompts;
 
 /**
@@ -217,9 +218,26 @@ class AiServiceAdapter
 
     /**
      * Get the built-in AiClient (lazily instantiated).
+     *
+     * Refuses to build one at all while no AI provider is selected. Scolta
+     * ships without a provider, and an unselected provider means AI is off —
+     * not that it is Anthropic. Constructing a client here would pick a vendor
+     * on the site's behalf, so instead this throws the same
+     * {@see ApiKeyMissingException} the callers already degrade on: the query
+     * goes out unexpanded and no summary is produced, which is what "AI off"
+     * looks like from the outside.
+     *
+     * @throws ApiKeyMissingException When no provider has been selected.
      */
     protected function getClient(): AiClient
     {
+        if (trim($this->config->aiProvider) === '') {
+            throw new ApiKeyMissingException(
+                'No AI provider is selected, so AI features are off. Select one in the Scolta '
+                . 'settings, or set the AI provider in configuration.',
+            );
+        }
+
         if ($this->client === null) {
             $this->client = $this->createClient();
         }

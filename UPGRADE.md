@@ -4,6 +4,52 @@ This document describes breaking changes and migration steps between versions of
 
 ## Unreleased
 
+### There is no default AI provider
+
+`ScoltaConfig::$aiProvider` now defaults to `''` instead of `'anthropic'`, and
+nothing coalesces an empty value back to a provider. An empty provider means AI
+features are off: `AiServiceAdapter` will not build an `AiClient`, `AiClient`
+rejects construction with "No AI provider selected", and `HealthChecker` reports
+`ai_provider: ''`, `ai_provider_selected: false` and `ai_usable: false`.
+
+**Existing installs are unaffected.** A provider already persisted in a site's
+configuration is read as-is; nothing rewrites, clears or re-defaults it. Only
+the shipped default and the empty-to-`anthropic` coalescing change.
+
+**What to check:**
+
+- Code constructing `AiClient` directly without a `provider` key now throws
+  `InvalidArgumentException`. Pass the provider explicitly.
+- `ApiKeyResolver::resolve()`'s `$configuredProvider` parameter now defaults to
+  `''`. Callers that relied on the old `'anthropic'` default must pass the
+  provider they mean.
+- `HealthChecker`'s payload gains `ai_provider_selected` (bool), and
+  `ai_provider` can now be `''`. A consumer that rendered `ai_provider`
+  unconditionally should handle the empty case.
+- `ResolvedApiKey` gains `providerSelected()` and `aiEnabled()`; `severity()`
+  now returns `'warning'` when a key is present but no provider is selected.
+
+### Amazee.ai connections record how they were established
+
+`ApiKeySource` gains `AmazeeDemo` (`'amazee:demo'`) and `AmazeeAccount`
+(`'amazee:account'`) alongside the existing `Amazee` (`'amazee'`). Which one is
+reported comes from a fact the credential store records at connect time, not
+from a derivation.
+
+To report the distinction, a storage backend implements the new
+`ProvenanceAwareConfigStorageInterface` (`storeConnectionSource()` /
+`loadConnectionSource()`), and must drop the recorded source in `clear()`.
+`ConfigStorageInterface` is unchanged, so **no existing implementation breaks**:
+a store that does not implement the sub-interface keeps working and reports the
+origin-free `Amazee` source, which is also what pre-existing credentials report.
+
+**What to check**, if you consume the source rather than the enum:
+
+- A comparison against the literal `'amazee'` no longer matches every Amazee
+  state. Use `ApiKeySource::isAmazee()`, or match all three values.
+- `ResolvedApiKey::describe()` now says "using the free demo" or "with your
+  account" when the origin was recorded.
+
 ### The Amazee.ai API key source is `amazee` again, not `amazee:operator` / `amazee:auto`
 
 1.1.0 introduced two Amazee source cases to separate a licensed connection from

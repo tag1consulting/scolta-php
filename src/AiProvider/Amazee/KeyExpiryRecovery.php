@@ -33,8 +33,9 @@ use Tag1\Scolta\Exception\ModelProviderMismatchException;
  *    succeed again;
  *  - an upgrade-needed marker, set when the stored credentials are no longer
  *    accepted, that persists until the admin re-authenticates. Adapter admin
- *    UIs read {@see isUpgradeNeeded()} to prompt the admin to continue by
- *    entering an email, which runs the verification flow
+ *    UIs read {@see isUpgradeNeeded()} to point the admin straight at the
+ *    "Enter your Amazee credentials" path, where entering an email runs the
+ *    verification flow
  *    ({@see AmazeeClient::requestVerificationCode()} +
  *    {@see AmazeeClient::signIn()}, used by {@see AmazeeAccountUpgrader}). On a
  *    successful upgrade the adapter calls {@see clearUpgradeNeeded()}.
@@ -182,7 +183,13 @@ final class KeyExpiryRecovery
     }
 
     /**
-     * Handle an AI call failure on the auto-provisioned Amazee path.
+     * Handle an AI call failure on the Amazee path.
+     *
+     * "The Amazee path" means a site whose operator connected Amazee.ai —
+     * either by starting the free demo or by signing in to an account. Nothing
+     * reaches this on a site that did not opt in, and nothing here mints a
+     * replacement connection: recovery is an operator action, prompted by the
+     * upgrade-needed marker this sets.
      *
      * For an auth-class failure (the stored credentials are no longer accepted)
      * this records the auth-failure marker so health reports AI as degraded,

@@ -344,7 +344,7 @@ class AuthFailureMarkerLifecycleTest extends TestCase
      */
     private function health(): array
     {
-        $config = ScoltaConfig::fromArray(['ai_api_key' => 'sk-configured']);
+        $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => 'sk-configured']);
 
         return (new HealthChecker($config, $this->tempDir, null, null, $this->cache))->check();
     }
@@ -356,7 +356,7 @@ class AuthFailureMarkerLifecycleTest extends TestCase
 
     private function makeAdapter(ScriptedAiClient $client): AiServiceAdapter
     {
-        $adapter = new class (ScoltaConfig::fromArray([]), $client) extends AiServiceAdapter {
+        $adapter = new class (ScoltaConfig::fromArray(['ai_provider' => 'anthropic', ]), $client) extends AiServiceAdapter {
             private AiClient $scripted;
 
             public function __construct(ScoltaConfig $config, AiClient $scripted)
@@ -386,7 +386,7 @@ class ScriptedAiClient extends AiClient
 
     public function __construct()
     {
-        parent::__construct([]);
+        parent::__construct(['provider' => 'anthropic']);
     }
 
     public function throwNext(\RuntimeException $e): void
