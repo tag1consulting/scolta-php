@@ -156,44 +156,7 @@ class InvertedIndexBuilder
         $pageNum = $pageOffset;
 
         foreach ($items as ['item' => $item, 'tokenData' => $tokenData]) {
-            $itemSortable = $item->sortable ?? [];
-            $itemDate = $item->date ?? '';
-            if ($itemDate !== '' && !isset($itemSortable['date'])) {
-                $itemSortable['date'] = $itemDate;
-            }
-            // Not every caller passes a full ContentItem — buildFromTokenData()
-            // documents that a slim proxy is allowed — so read defensively.
-            $itemMetadata = (array) ($item->metadata ?? []);
-            $pages[$pageNum] = [
-                'id'        => $item->id,
-                'url'       => $item->url,
-                'title'     => $tokenData['cleanTitle'],
-                'content'   => $tokenData['content'],
-                'wordCount' => $tokenData['wordCount'],
-                'date'      => $item->date,
-                'filters'   => array_merge(
-                    $item->siteName !== '' ? ['site' => $item->siteName] : [],
-                    $item->language !== '' ? ['language' => $item->language] : [],
-                    $item->filters,
-                ),
-                // Precedence, highest first: title/date, then sortable, then
-                // arbitrary per-item metadata. Sortable wins over metadata on a
-                // key collision because a sortable key also has to line up with
-                // the pf_meta sorts table. metadata is the cheap route to a
-                // per-item meta key (an entity id, say) — it costs one fragment
-                // field and nothing corpus-wide.
-                'meta'      => array_filter([
-                    'title' => $tokenData['cleanTitle'],
-                    'date'  => $item->date,
-                ] + $itemSortable + $itemMetadata, fn($v) => $v !== null && $v !== ''),
-                'sortable'  => $itemSortable,
-                'hash'      => hash('sha256', $tokenData['content']),
-            ];
-
-            $this->indexTokens($index, $tokenData['titleTokens'], $pageNum, self::TITLE_WEIGHT);
-            $this->indexTokens($index, $tokenData['bodyTokens'], $pageNum, self::BODY_WEIGHT);
-            $this->indexTokens($index, $tokenData['urlTokens'], $pageNum, self::BODY_WEIGHT);
-
+            $this->indexOne($index, $pages, $item, $tokenData, $pageNum);
             $pageNum++;
         }
 
@@ -226,48 +189,138 @@ class InvertedIndexBuilder
         $pageNum = $pageOffset;
 
         foreach ($tokenDataList as ['item' => $item, 'tokenData' => $tokenData]) {
-            $itemSortable = $item->sortable ?? [];
-            $itemDate = $item->date ?? '';
-            if ($itemDate !== '' && !isset($itemSortable['date'])) {
-                $itemSortable['date'] = $itemDate;
-            }
-            // Not every caller passes a full ContentItem — buildFromTokenData()
-            // documents that a slim proxy is allowed — so read defensively.
-            $itemMetadata = (array) ($item->metadata ?? []);
-            $pages[$pageNum] = [
-                'id'        => $item->id,
-                'url'       => $item->url,
-                'title'     => $tokenData['cleanTitle'],
-                'content'   => $tokenData['content'],
-                'wordCount' => $tokenData['wordCount'],
-                'date'      => $item->date,
-                'filters'   => array_merge(
-                    $item->siteName !== '' ? ['site' => $item->siteName] : [],
-                    $item->language !== '' ? ['language' => $item->language] : [],
-                    $item->filters,
-                ),
-                // Precedence, highest first: title/date, then sortable, then
-                // arbitrary per-item metadata. Sortable wins over metadata on a
-                // key collision because a sortable key also has to line up with
-                // the pf_meta sorts table. metadata is the cheap route to a
-                // per-item meta key (an entity id, say) — it costs one fragment
-                // field and nothing corpus-wide.
-                'meta'      => array_filter([
-                    'title' => $tokenData['cleanTitle'],
-                    'date'  => $item->date,
-                ] + $itemSortable + $itemMetadata, fn($v) => $v !== null && $v !== ''),
-                'sortable'  => $itemSortable,
-                'hash'      => hash('sha256', $tokenData['content']),
-            ];
-
-            $this->indexTokens($index, $tokenData['titleTokens'], $pageNum, self::TITLE_WEIGHT);
-            $this->indexTokens($index, $tokenData['bodyTokens'], $pageNum, self::BODY_WEIGHT);
-            $this->indexTokens($index, $tokenData['urlTokens'], $pageNum, self::BODY_WEIGHT);
-
+            $this->indexOne($index, $pages, $item, $tokenData, $pageNum);
             $pageNum++;
         }
 
         return ['index' => $index, 'pages' => $pages];
+    }
+
+    /**
+     * Build a partial index using an explicit ordinal per item.
+     *
+     * The sequential-offset form above derives each page number from its
+     * position in the gather order, which makes the ordinal a function of the
+     * whole corpus: insert one page near the front and every later page
+     * renumbers. When ordinals come from a durable ledger instead, they arrive
+     * per item and are not contiguous within a chunk, so they cannot be
+     * expressed as an offset.
+     *
+     * Ordinals must still be globally unique across the build.
+     * `IndexMerger::mergeEntries()` resolves a collision by last-write-wins,
+     * which is order-dependent (see MergeAlgebraTest), so two pages sharing an
+     * ordinal do not raise an error — they silently lose one page's postings.
+     * This method rejects a duplicate inside its own chunk; the ledger's
+     * one-ordinal-per-id invariant covers the rest.
+     *
+     * @param array<int, array{item: object, tokenData: array<string, mixed>, ordinal: int}> $tokenDataList
+     * @return array{index: array<int|string, mixed>, pages: array<int|string, mixed>}
+     * @throws \InvalidArgumentException When two items in the chunk share an ordinal.
+     * @since 1.1.1
+     * @stability experimental
+     */
+    public function buildFromTokenDataWithOrdinals(array $tokenDataList): array
+    {
+        $index = [];
+        $pages = [];
+
+        foreach ($tokenDataList as ['item' => $item, 'tokenData' => $tokenData, 'ordinal' => $ordinal]) {
+            if (isset($pages[$ordinal])) {
+                throw new \InvalidArgumentException(
+                    "Duplicate page ordinal {$ordinal} within one chunk: '{$pages[$ordinal]['id']}' and '{$item->id}'. "
+                    . 'Ordinals must be globally unique; the merge silently drops one side of a collision.',
+                );
+            }
+            $this->indexOne($index, $pages, $item, $tokenData, $ordinal);
+        }
+
+        return ['index' => $index, 'pages' => $pages];
+    }
+
+    /**
+     * Add one item's page record and token postings at $pageNum.
+     *
+     * Shared by both build entry points so the page record is described once.
+     */
+    /**
+     * The filter map a page actually carries: the auto-injected `site` and
+     * `language` dimensions plus the item's own.
+     *
+     * Public and static because the value has two consumers now — the page
+     * record built here, and the durable page table an incremental update
+     * rebuilds `pf_filter` and `scolta.facets` from. Two descriptions of the
+     * same merge would not raise an error, they would silently disagree about
+     * which pages carry which filter.
+     *
+     * @return array<string, mixed>
+     * @since 1.1.1
+     * @stability experimental
+     */
+    public static function effectiveFilters(object $item): array
+    {
+        return array_merge(
+            $item->siteName !== '' ? ['site' => $item->siteName] : [],
+            $item->language !== '' ? ['language' => $item->language] : [],
+            $item->filters,
+        );
+    }
+
+    /**
+     * The sortable map a page actually carries, with `date` folded in.
+     *
+     * Same reasoning as effectiveFilters(): the `pf_meta` sorts table and the
+     * durable page table have to agree on it.
+     *
+     * @return array<string, mixed>
+     * @since 1.1.1
+     * @stability experimental
+     */
+    public static function effectiveSortable(object $item): array
+    {
+        $sortable = $item->sortable ?? [];
+        $date     = $item->date ?? '';
+        if ($date !== '' && !isset($sortable['date'])) {
+            $sortable['date'] = $date;
+        }
+
+        return $sortable;
+    }
+
+    /**
+     * @param array<int|string, mixed> $index
+     * @param array<int|string, mixed> $pages
+     * @param array<string, mixed>     $tokenData
+     */
+    private function indexOne(array &$index, array &$pages, object $item, array $tokenData, int $pageNum): void
+    {
+        $itemSortable = self::effectiveSortable($item);
+        // Not every caller passes a full ContentItem — buildFromTokenData()
+        // documents that a slim proxy is allowed — so read defensively.
+        $itemMetadata = (array) ($item->metadata ?? []);
+        $pages[$pageNum] = [
+            'id'        => $item->id,
+            'url'       => $item->url,
+            'title'     => $tokenData['cleanTitle'],
+            'content'   => $tokenData['content'],
+            'wordCount' => $tokenData['wordCount'],
+            'date'      => $item->date,
+            'filters'   => self::effectiveFilters($item),
+            // Precedence, highest first: title/date, then sortable, then
+            // arbitrary per-item metadata. Sortable wins over metadata on a
+            // key collision because a sortable key also has to line up with
+            // the pf_meta sorts table. metadata is the cheap route to a
+            // per-item meta key (an entity id, say) — it costs one fragment
+            // field and nothing corpus-wide.
+            'meta'      => array_filter([
+                'title' => $tokenData['cleanTitle'],
+                'date'  => $item->date,
+            ] + $itemSortable + $itemMetadata, fn($v) => $v !== null && $v !== ''),
+            'sortable'  => $itemSortable,
+        ];
+
+        $this->indexTokens($index, $tokenData['titleTokens'], $pageNum, self::TITLE_WEIGHT);
+        $this->indexTokens($index, $tokenData['bodyTokens'], $pageNum, self::BODY_WEIGHT);
+        $this->indexTokens($index, $tokenData['urlTokens'], $pageNum, self::BODY_WEIGHT);
     }
 
     /**

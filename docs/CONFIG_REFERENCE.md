@@ -12,7 +12,7 @@ Passing `null` for any preset-overridable field means **"use the Site Type prese
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `aiProvider` | string | `'anthropic'` | AI provider identifier (`anthropic`, `openai`) |
+| `aiProvider` | string | `''` | AI provider identifier (`anthropic`, `openai`). No default: `''` means no provider has been selected and AI features are off. Selecting one is always explicit. |
 | `aiApiKey` | string | `''` | API key for the AI provider |
 | `aiModel` | string | `'claude-sonnet-4-5-20250929'` | Model identifier for summarize and follow-up |
 | `aiExpansionModel` | string | `''` | Optional model for query expansion (empty = use `aiModel`) |

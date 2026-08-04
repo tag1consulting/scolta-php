@@ -26,6 +26,9 @@ use Tag1\Scolta\Exception\MemoryThresholdExceededException;
  */
 final class MemoryTelemetry
 {
+    /** Bucket that collects time spent before the first emit() call. */
+    private const STARTUP_BUCKET = 'startup';
+
     private readonly int $limitBytes;
     private readonly float $buildStartTime;
     private readonly bool $canReadRss;
@@ -33,6 +36,33 @@ final class MemoryTelemetry
     private readonly \Closure $getCurrentMemory;
     /** @var \Closure(): int */
     private readonly \Closure $getPeakMemory;
+
+    /**
+     * Wall-clock accumulator, bucket name => {seconds, calls, items}.
+     *
+     * @var array<string, array{seconds: float, calls: int, items: int}>
+     */
+    private array $phaseTotals = [];
+
+    /**
+     * Sub-phase timers, name => {seconds, calls, items}.
+     *
+     * Spans between emit() calls cannot separate work that interleaves inside
+     * one span — on a real corpus 98% of the chunk loop lands between
+     * `chunk_committed(N)` and `chunk_start(N+1)`, which is gather, tokenize
+     * and GC together. These are accumulated by explicit hrtime() pairs at the
+     * call sites instead, and reported separately so they never double-count
+     * against the span totals.
+     *
+     * @var array<string, array{seconds: float, calls: int, items: int}>
+     */
+    private array $subTimers = [];
+
+    /** Time of the most recent emit(), or construction time before the first. */
+    private float $lastEmitTime;
+
+    /** Bucket the currently-open span is attributed to. */
+    private string $openBucket = self::STARTUP_BUCKET;
 
     /**
      * @param \Closure(): int|null $getCurrentMemory Injectable for testing; defaults to RSS or memory_get_usage(true).
@@ -46,6 +76,7 @@ final class MemoryTelemetry
     ) {
         $this->limitBytes     = self::effectiveMemoryLimit();
         $this->buildStartTime = microtime(true);
+        $this->lastEmitTime   = $this->buildStartTime;
 
         // Detect /proc availability once at construction — used in default closures.
         $canReadRss       = is_readable('/proc/self/status');
@@ -76,12 +107,18 @@ final class MemoryTelemetry
      */
     public function emit(string $phase, array $extra = []): void
     {
+        $now = microtime(true);
+        // Close the span opened by the previous emit() before anything else,
+        // so an abort at the 90% threshold still accounts for the time that
+        // led up to it. Spans are attributed to the phase that opened them.
+        $this->closeSpan($now, $phase, $extra);
+
         $current   = ($this->getCurrentMemory)();
         $peak      = ($this->getPeakMemory)();
         $pct       = $this->limitBytes > 0
             ? round($current / $this->limitBytes * 100, 1)
             : 0.0;
-        $elapsed   = round(microtime(true) - $this->buildStartTime, 2);
+        $elapsed   = round($now - $this->buildStartTime, 2);
 
         $context = array_merge([
             'phase'      => $phase,
@@ -116,6 +153,185 @@ final class MemoryTelemetry
                 $context,
             );
         }
+    }
+
+    /**
+     * Per-phase wall-clock totals for the build so far.
+     *
+     * `elapsed_s` on an individual event is time since construction, so
+     * attributing a span means subtracting adjacent lines — unworkable across
+     * the thousands of per-chunk lines a large build emits. This accumulates
+     * it instead: the interval between two emit() calls is charged to the
+     * phase that opened it, and phases are bucketed by name with any
+     * `(N)` suffix stripped, so `chunk_start(0)` … `chunk_start(2186)` roll
+     * up into one `chunk_start` row.
+     *
+     * The open span is included, measured to now, so the summary is complete
+     * whether or not a closing phase was emitted.
+     *
+     * @return array<string, array{seconds: float, calls: int, items: int, pct: float}>
+     *         Ordered by seconds descending.
+     * @since 1.1.1
+     * @stability experimental
+     */
+    public function phaseSummary(): array
+    {
+        $totals = $this->phaseTotals;
+
+        // Fold in the span that is still open so the rows sum to the build.
+        $openSeconds = microtime(true) - $this->lastEmitTime;
+        $bucket      = self::bucketName($this->openBucket);
+        $totals[$bucket] ??= ['seconds' => 0.0, 'calls' => 0, 'items' => 0];
+        $totals[$bucket]['seconds'] += $openSeconds;
+
+        $wall = array_sum(array_column($totals, 'seconds'));
+
+        foreach ($totals as $name => $row) {
+            $totals[$name]['seconds'] = round($row['seconds'], 3);
+            $totals[$name]['pct']     = $wall > 0.0 ? round($row['seconds'] / $wall * 100, 1) : 0.0;
+        }
+
+        uasort($totals, static fn(array $a, array $b): int => $b['seconds'] <=> $a['seconds']);
+
+        return $totals;
+    }
+
+    /**
+     * Accumulate one sub-phase measurement.
+     *
+     * The caller owns the hrtime() pair; this only adds it up. Kept free of
+     * any clock read of its own so wrapping a hot per-page call costs one
+     * array write.
+     *
+     * @param string $name    Sub-timer name, e.g. 'tokenize' or 'gc'.
+     * @param float  $seconds Elapsed seconds for this occurrence.
+     * @param int    $items   Items covered, for a rate in the summary.
+     * @since 1.1.1
+     * @stability experimental
+     */
+    public function recordSubTimer(string $name, float $seconds, int $items = 0): void
+    {
+        $this->subTimers[$name] ??= ['seconds' => 0.0, 'calls' => 0, 'items' => 0];
+        $this->subTimers[$name]['seconds'] += $seconds;
+        $this->subTimers[$name]['calls']++;
+        $this->subTimers[$name]['items'] += $items;
+    }
+
+    /**
+     * Accumulated sub-phase timers, ordered by seconds descending.
+     *
+     * These overlap the span totals from phaseSummary() by construction —
+     * they measure work happening inside a span, not alongside it — so the
+     * two sets must never be added together.
+     *
+     * @return array<string, array{seconds: float, calls: int, items: int}>
+     * @since 1.1.1
+     * @stability experimental
+     */
+    public function subTimers(): array
+    {
+        $timers = $this->subTimers;
+        foreach ($timers as $name => $row) {
+            $timers[$name]['seconds'] = round($row['seconds'], 3);
+        }
+        uasort($timers, static fn(array $a, array $b): int => $b['seconds'] <=> $a['seconds']);
+
+        return $timers;
+    }
+
+    /**
+     * Log the phase summary as a single line.
+     *
+     * Callers run this once at the end of a build. The human-readable message
+     * carries the ranked breakdown; the `phases` context key carries the same
+     * data structured, for log processors.
+     *
+     * @since 1.1.1
+     * @stability experimental
+     */
+    public function emitPhaseSummary(): void
+    {
+        $summary = $this->phaseSummary();
+
+        $parts = [];
+        foreach ($summary as $name => $row) {
+            $part = sprintf(
+                '%s %.1fs (%.1f%%, %d call%s',
+                $name,
+                $row['seconds'],
+                $row['pct'],
+                $row['calls'],
+                $row['calls'] === 1 ? '' : 's',
+            );
+            if ($row['items'] > 0) {
+                $rate  = $row['seconds'] > 0.0 ? $row['items'] / $row['seconds'] : 0.0;
+                $part .= sprintf(', %d items, %.1f/s', $row['items'], $rate);
+            }
+            $parts[] = $part . ')';
+        }
+
+        $subTimers = $this->subTimers();
+        $subParts  = [];
+        foreach ($subTimers as $name => $row) {
+            $rate = $row['items'] > 0 && $row['seconds'] > 0.0
+                ? sprintf(', %.2f ms/item', $row['seconds'] / $row['items'] * 1000)
+                : '';
+            $subParts[] = sprintf('%s %.1fs (%d calls%s)', $name, $row['seconds'], $row['calls'], $rate);
+        }
+
+        $this->logger->info(
+            '[scolta] Phase summary ({total_s}s total): {breakdown}',
+            [
+                'total_s'   => round(array_sum(array_column($summary, 'seconds')), 2),
+                'breakdown' => implode('; ', $parts),
+                'phases'    => $summary,
+            ],
+        );
+
+        if ($subParts !== []) {
+            $this->logger->info(
+                '[scolta] Sub-timers (inside the spans above, not additive with them): {breakdown}',
+                [
+                    'breakdown' => implode('; ', $subParts),
+                    'timers'    => $subTimers,
+                ],
+            );
+        }
+    }
+
+    /**
+     * Charge the interval since the last emit() to the phase that opened it,
+     * then open a new span for $nextPhase.
+     */
+    /** @param array<string, mixed> $extra */
+    private function closeSpan(float $now, string $nextPhase, array $extra): void
+    {
+        $bucket = self::bucketName($this->openBucket);
+        $this->phaseTotals[$bucket] ??= ['seconds' => 0.0, 'calls' => 0, 'items' => 0];
+        $this->phaseTotals[$bucket]['seconds'] += $now - $this->lastEmitTime;
+
+        // Calls and items belong to the phase being emitted, not the one whose
+        // span just closed: `chunk_committed(7)` reports the pages that chunk
+        // held, and the reader expects that count on the chunk_committed row.
+        $emitted = self::bucketName($nextPhase);
+        $this->phaseTotals[$emitted] ??= ['seconds' => 0.0, 'calls' => 0, 'items' => 0];
+        $this->phaseTotals[$emitted]['calls']++;
+        if (isset($extra['items']) && is_int($extra['items'])) {
+            $this->phaseTotals[$emitted]['items'] += $extra['items'];
+        }
+
+        $this->lastEmitTime = $now;
+        $this->openBucket   = $nextPhase;
+    }
+
+    /**
+     * Strip a trailing `(...)` discriminator so per-iteration phases roll up.
+     */
+    private static function bucketName(string $phase): string
+    {
+        $paren = strpos($phase, '(');
+
+        return $paren === false ? $phase : substr($phase, 0, $paren);
     }
 
     /**

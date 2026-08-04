@@ -21,9 +21,12 @@ final class ResolvedApiKey
     /**
      * @param string         $key      The effective key, or '' when none applies.
      * @param ApiKeySource   $source   Where that key came from.
-     * @param string         $provider The effective AI provider for this key.
-     *   Amazee resolves to the OpenAI-compatible LiteLLM gateway, so adapters
-     *   take the provider from here instead of setting it beside the key.
+     * @param string         $provider The effective AI provider for this key,
+     *   or '' when no provider has been selected. Amazee resolves to the
+     *   OpenAI-compatible LiteLLM gateway, so adapters take the provider from
+     *   here instead of setting it beside the key. '' is never rewritten to a
+     *   default: Scolta ships without a provider selected, and an empty value
+     *   means AI is off, not that it is Anthropic.
      * @param string         $baseUrl  Provider base URL, or '' for the default.
      * @param bool           $amazeeCredentialsStored Whether Amazee.ai
      *   credentials exist at all, whichever source won. This is what lets a
@@ -79,6 +82,33 @@ final class ResolvedApiKey
     }
 
     /**
+     * Whether an AI provider has been selected at all.
+     *
+     * Scolta ships no default provider, so an untouched install resolves with
+     * an empty provider and AI stays off. A key can be present while this is
+     * FALSE — an environment variable set before anybody picked a provider —
+     * and a surface has to say so rather than reporting the key as working.
+     *
+     * @since 1.2.0
+     * @stability experimental
+     */
+    public function providerSelected(): bool
+    {
+        return trim($this->provider) !== '';
+    }
+
+    /**
+     * Whether AI can actually run: a provider is selected and a key resolved.
+     *
+     * @since 1.2.0
+     * @stability experimental
+     */
+    public function aiEnabled(): bool
+    {
+        return $this->providerSelected() && $this->isConfigured();
+    }
+
+    /**
      * How prominently a surface should render this state.
      *
      * 'ok' or 'warning'. An overridden Amazee credential is deliberately not
@@ -90,7 +120,7 @@ final class ResolvedApiKey
      */
     public function severity(): string
     {
-        if (!$this->isConfigured() || $this->amazeeOverridden() || $this->awaitingAmazeeModelResolution) {
+        if (!$this->aiEnabled() || $this->amazeeOverridden() || $this->awaitingAmazeeModelResolution) {
             return 'warning';
         }
 
@@ -111,9 +141,14 @@ final class ResolvedApiKey
     public function describe(): string
     {
         if ($this->isAmazee()) {
-            $text = $this->source === ApiKeySource::AmazeeAuto
-                ? 'Connected to Amazee.ai (auto-provisioned free trial).'
-                : 'Connected to Amazee.ai.';
+            // Each variant states only what the credential store recorded when
+            // the connection was made. The unrecorded case names no origin at
+            // all rather than picking the likelier one.
+            $text = match ($this->source) {
+                ApiKeySource::AmazeeDemo => 'Connected to Amazee.ai using the free demo.',
+                ApiKeySource::AmazeeAccount => 'Connected to Amazee.ai with your account.',
+                default => 'Connected to Amazee.ai.',
+            };
 
             if ($this->awaitingAmazeeModelResolution) {
                 $text .= ' Model resolution has not completed yet, so AI features stay degraded until it does.';
@@ -123,7 +158,9 @@ final class ResolvedApiKey
         }
 
         if ($this->source === ApiKeySource::None) {
-            $text = 'No API key configured; AI features are disabled.';
+            $text = $this->providerSelected()
+                ? 'No API key configured; AI features are disabled.'
+                : 'No AI provider selected; AI features are off.';
             if ($this->amazeeCredentialsStored) {
                 $text .= ' Amazee.ai credentials are stored but not eligible for this provider.';
             }
@@ -132,6 +169,9 @@ final class ResolvedApiKey
         }
 
         $text = sprintf('API key configured via the %s.', $this->source->label());
+        if (!$this->providerSelected()) {
+            $text .= ' No AI provider is selected, so AI features stay off until one is chosen.';
+        }
         if ($this->amazeeOverridden()) {
             $text .= sprintf(' Amazee.ai credentials stored but overridden by the %s.', $this->source->label());
         }

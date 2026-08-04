@@ -46,7 +46,12 @@ final class ApiKeyResolver
      *   every candidate it knows about without pre-filtering.
      * @param AmazeeCredentials|null $amazee Stored Amazee credentials, if any.
      * @param string $configuredProvider The provider configured for explicit
-     *   keys. Defaults to 'anthropic', matching ScoltaConfig.
+     *   keys, matching ScoltaConfig. Defaults to '' — no provider selected —
+     *   because Scolta ships no default provider: until an operator or a
+     *   developer picks one, AI is off, and nothing here substitutes Anthropic
+     *   for the empty value. An explicit key with no provider selected still
+     *   resolves as that key's source, so the surface can say "key configured,
+     *   no provider selected" rather than hiding one of the two facts.
      * @param bool $amazeeEligible FALSE when the platform routes AI somewhere
      *   that must not receive Amazee credentials — Drupal's `drupal_ai`
      *   provider manages its own key, model and provider. Credentials are
@@ -58,10 +63,10 @@ final class ApiKeyResolver
     public static function resolve(
         array $explicitKeys,
         ?AmazeeCredentials $amazee = null,
-        string $configuredProvider = 'anthropic',
+        string $configuredProvider = '',
         bool $amazeeEligible = true,
     ): ResolvedApiKey {
-        $provider = $configuredProvider !== '' ? $configuredProvider : 'anthropic';
+        $provider = $configuredProvider;
 
         foreach ($explicitKeys as $source => $key) {
             if (trim($key) === '') {
@@ -84,7 +89,10 @@ final class ApiKeyResolver
                 // an unexpanded, unsummarized HTTP 200. The state self-heals
                 // when model resolution next succeeds.
                 key: $amazee->modelResolved ? $amazee->token : '',
-                source: $amazee->operatorChosen ? ApiKeySource::AmazeeOperator : ApiKeySource::AmazeeAuto,
+                // Derived from what the credential store recorded when the
+                // connection was established, never from a local fact that
+                // merely correlates with it.
+                source: ApiKeySource::forAmazeeConnection($amazee->connectionSource),
                 provider: self::AMAZEE_GATEWAY_PROVIDER,
                 baseUrl: $amazee->baseUrl,
                 amazeeCredentialsStored: true,

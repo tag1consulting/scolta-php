@@ -17,7 +17,9 @@ class ScoltaConfigTest extends TestCase
     {
         $config = new ScoltaConfig();
 
-        $this->assertEquals('anthropic', $config->aiProvider);
+        // No default provider. An untouched config has AI off, and in
+        // particular is not Anthropic.
+        $this->assertSame('', $config->aiProvider);
         $this->assertEquals('', $config->aiApiKey);
         $this->assertEquals('claude-sonnet-4-5-20250929', $config->aiModel);
         $this->assertEquals('', $config->aiBaseUrl);
@@ -203,9 +205,27 @@ class ScoltaConfigTest extends TestCase
     public function testFromArrayEmptyArray(): void
     {
         $config = ScoltaConfig::fromArray([]);
-        // All defaults should apply.
-        $this->assertEquals('anthropic', $config->aiProvider);
+        // All defaults should apply — and the AI provider's default is that
+        // there isn't one.
+        $this->assertSame('', $config->aiProvider);
         $this->assertEquals(365, $config->recencyHalfLifeDays);
+    }
+
+    /**
+     * A provider already saved by a site survives untouched.
+     *
+     * Removing the shipped default is a going-forward change: an install that
+     * chose a provider keeps it and keeps working. Nothing rewrites, clears or
+     * re-defaults a value that is already there.
+     */
+    public function testAnAlreadyChosenProviderIsPreserved(): void
+    {
+        foreach (['anthropic', 'openai', 'amazee'] as $chosen) {
+            $this->assertSame(
+                $chosen,
+                ScoltaConfig::fromArray(['ai_provider' => $chosen])->aiProvider,
+            );
+        }
     }
 
     public function testIndexerDefaultsToAuto(): void

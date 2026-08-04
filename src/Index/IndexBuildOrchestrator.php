@@ -35,8 +35,18 @@ final class IndexBuildOrchestrator
     private readonly InvertedIndexBuilder $builder;
     private readonly IndexMerger $merger;
     private readonly StorageDriverInterface $storage;
-    private readonly PageWordCache $cache;
+    /**
+     * Built lazily: the token cache's write-buffer size comes from the
+     * MemoryBudget, and the budget arrives with the BuildIntent, which the
+     * constructor never sees. Constructing it eagerly meant it always used
+     * MemoryBudget::default() — so on the shipped Drupal path
+     * `--memory-budget=aggressive` widened every buffer in the pipeline except
+     * this one. PhpIndexer always passed the budget correctly, which is why
+     * the two paths behaved differently under the same flag.
+     */
+    private ?PageWordCache $cache = null;
     private readonly TimestampManifest $tsManifest;
+    private readonly PageTableLedger $ledger;
     private readonly string $outputDir;
     /** Warning message emitted when output_dir was already suffixed with /pagefind. */
     private readonly ?string $outputDirNormalizationWarning;
@@ -71,12 +81,40 @@ final class IndexBuildOrchestrator
         $this->builder     = new InvertedIndexBuilder(new Tokenizer(), new Stemmer($language));
         $this->merger      = new IndexMerger();
         $this->storage     = $storage ?? new FilesystemDriver();
-        $this->cache       = new PageWordCache(
-            $stateDir,
-            $this->storage,
-            maxWriteBufferBytes: MemoryBudget::default()->tokenCacheChunkBytes(),
-        );
         $this->tsManifest  = new TimestampManifest($stateDir, $this->storage);
+        $this->ledger      = new PageTableLedger($stateDir, $this->storage);
+    }
+
+    /**
+     * The token cache, sized from $budget the first time it is asked for.
+     *
+     * @param MemoryBudget|null $budget Used only on the first call.
+     */
+    private function cache(?MemoryBudget $budget = null): PageWordCache
+    {
+        $effective = $budget ?? MemoryBudget::default();
+
+        return $this->cache ??= new PageWordCache(
+            $this->stateDir,
+            $this->storage,
+            chunkSize: $effective->chunkSize(),
+            maxWriteBufferBytes: $effective->tokenCacheChunkBytes(),
+            maxManifestEntries: $effective->tokenCacheManifestEntries(),
+        );
+    }
+
+    /**
+     * The durable ordinal assignment this build reads and writes.
+     *
+     * Exposed so an adapter can report the tombstone ratio, and so a
+     * compaction can reset it before running a full build.
+     *
+     * @since 1.1.1
+     * @stability experimental
+     */
+    public function pageTableLedger(): PageTableLedger
+    {
+        return $this->ledger;
     }
 
     /**
@@ -123,20 +161,39 @@ final class IndexBuildOrchestrator
         $startTime = microtime(true);
         $telemetry = new MemoryTelemetry($logger, $intent->memoryBudget());
 
+        $budget = $intent->memoryBudget();
+
+        // Order matters, and it is not obvious. A fresh build's prepare() calls
+        // BuildState::cleanup(), which unlinks every *file* in the state
+        // directory — including token-cache-manifest.php, while leaving the
+        // token-cache/ subdirectory of chunk files intact. The cache is usable
+        // afterwards only because its manifest was already read into memory.
+        // TimestampManifest and PageTableLedger survive the same wipe the same
+        // way, both loading in their constructors. Touch the cache here, before
+        // prepare(), or every fresh build silently starts with an empty one and
+        // re-tokenizes the entire corpus.
+        $this->cache($budget);
+
         try {
             $manifest = $this->coordinator->prepare($intent);
             $telemetry->emit('build_start', ['mode' => $intent->mode()]);
 
-            $budget    = $intent->memoryBudget();
+            // A fresh build takes a new generation; a resumed one inherits the
+            // generation its earlier segments stamped, so coverage is tracked
+            // across the whole build rather than per process.
+            $this->ledger->beginBuild($intent->isFresh());
+
             $chunkSize = $budget->chunkSize();
             $totalPages = $intent->totalPages() ?? (int) ($manifest['total_pages'] ?? 0);
 
             // On resume, pick up from where we left off.
             $startChunk    = 0;
             $currentOffset = 0;
-            if ($intent->mode() === 'resume') {
+            $isResume      = $intent->mode() === 'resume';
+            if ($isResume) {
                 $startChunk    = (int) ($manifest['chunks_written'] ?? 0);
                 $currentOffset = (int) ($manifest['pages_processed'] ?? 0);
+                $this->assertResumableLedger($startChunk, $currentOffset);
                 $logger->info("[scolta] Resuming from chunk {$startChunk}, page offset {$currentOffset}.");
             }
 
@@ -146,28 +203,75 @@ final class IndexBuildOrchestrator
             $chunk       = [];
             $chunkNum    = $startChunk;
             $pagesInRun  = 0;
+            /** @var list<array{id: string, reason: string}> Items given to the build that produced no page. */
+            $skipped     = [];
+            $resumeSkips = 0;
 
-            foreach ($pages as $page) {
+            // The generator that yields $pages does the CMS-side gathering, so
+            // the time it spends is only visible as the gap between one
+            // iteration ending and the next value arriving. Measure it
+            // explicitly: without this it hides inside the chunk-loop span
+            // along with tokenization and GC, which on a real corpus is 98% of
+            // the build and therefore the only number that matters.
+            $iter = (function () use ($pages, $telemetry) {
+                $it = is_array($pages) ? new \ArrayIterator($pages) : $pages;
+                $t0 = hrtime(true);
+                foreach ($it as $value) {
+                    $telemetry->recordSubTimer('gather_wait', (hrtime(true) - $t0) / 1e9, 1);
+                    yield $value;
+                    $t0 = hrtime(true);
+                }
+            })();
+
+            foreach ($iter as $page) {
+                // A resumed build is handed the whole corpus again, because no
+                // adapter can reliably translate "pages committed" into a
+                // position in its own source query — the offset that used to
+                // do this counted pages against a cursor that walks entities,
+                // so a corpus with translations skipped the wrong rows. The
+                // ledger already records precisely which ids this build
+                // committed, so ask it instead.
+                if ($isResume && $this->ledger->wasSeenThisBuild((string) $page->id)) {
+                    $resumeSkips++;
+                    continue;
+                }
+
                 if ($page instanceof CachedContentReference) {
-                    $tokenData = $this->cache->get($page->contentHash);
+                    $t0        = hrtime(true);
+                    $tokenData = $this->cache()->get($page->contentHash);
+                    $telemetry->recordSubTimer('token_cache_get', (hrtime(true) - $t0) / 1e9, 1);
                     if ($tokenData !== null) {
                         $this->tsManifest->markSeen($page->entityKey);
-                        $chunk[] = ['item' => $this->makeSlimProxy($page), 'tokenData' => $tokenData];
+                        $chunk[] = $this->makeChunkEntry($page, $tokenData, $page->contentHash);
+                    } else {
+                        // On cache miss: skip markSeen → manifest entry is pruned →
+                        // entity is treated as changed on the next build.
+                        $skipped[] = ['id' => (string) $page->id, 'reason' => 'token cache miss on a cached reference'];
                     }
-                    // On cache miss: skip markSeen → manifest entry is pruned →
-                    // entity is treated as changed on the next build.
                 } else {
                     $hash = PhpIndexer::contentHash($page);
-                    $tokenData = (!$force) ? $this->cache->get($hash) : null;
+                    if (!$force) {
+                        $t0        = hrtime(true);
+                        $tokenData = $this->cache()->get($hash);
+                        $telemetry->recordSubTimer('token_cache_get', (hrtime(true) - $t0) / 1e9, 1);
+                    } else {
+                        $tokenData = null;
+                    }
                     if ($tokenData === null) {
+                        $t0        = hrtime(true);
                         $tokenData = $this->builder->tokenizeItem($page);
+                        $telemetry->recordSubTimer('tokenize', (hrtime(true) - $t0) / 1e9, 1);
                         if ($tokenData !== null) {
-                            $this->cache->put($hash, $tokenData);
+                            $t0 = hrtime(true);
+                            $this->cache()->put($hash, $tokenData);
+                            $telemetry->recordSubTimer('token_cache_put', (hrtime(true) - $t0) / 1e9, 1);
                         }
                     }
 
                     if ($tokenData !== null) {
-                        $chunk[] = ['item' => $this->makeSlimProxy($page), 'tokenData' => $tokenData];
+                        $chunk[] = $this->makeChunkEntry($page, $tokenData, $hash);
+                    } else {
+                        $skipped[] = ['id' => (string) $page->id, 'reason' => 'no indexable text after HTML cleaning'];
                     }
                 }
 
@@ -181,7 +285,7 @@ final class IndexBuildOrchestrator
                     if ($this->isUnderMemoryPressure($telemetry)) {
                         $committedChunks = count($this->coordinator->chunkFiles());
                         $committedPages  = $this->coordinator->buildState()->getPagesProcessed();
-                        $this->cache->pruneAndSave();
+                        $this->cache()->pruneAndSave();
                         $this->tsManifest->pruneAndSave();
                         $this->coordinator->releaseLockOnly();
                         $logger->info(sprintf(
@@ -217,7 +321,7 @@ final class IndexBuildOrchestrator
             $limitBytes   = $telemetry->effectiveLimitBytes();
             $segmentBytes = $telemetry->getCurrentRssBytes();
             if ($limitBytes > 0 && $segmentBytes >= (int) ($limitBytes * self::MEMORY_PRESSURE_RATIO)) {
-                $this->cache->pruneAndSave();
+                $this->cache()->pruneAndSave();
                 $this->tsManifest->pruneAndSave();
                 $this->coordinator->releaseLockOnly();
                 $telemetry->emit('finalize_deferred', ['heap_pct' => round($segmentBytes / $limitBytes * 100, 1)]);
@@ -233,13 +337,33 @@ final class IndexBuildOrchestrator
                 );
             }
 
+            if ($resumeSkips > 0) {
+                $logger->info('[scolta] {count} pages were already committed by an earlier segment of this build.', [
+                    'count' => $resumeSkips,
+                ]);
+            }
+            $this->logSkippedItems($skipped, $logger);
+
             // Merge and write.
+            // Ids the ledger still holds but this build never yielded have been
+            // deleted at the source. Release them so their ordinals are
+            // reusable, and tombstone the rows so the page table stays dense.
+            $released = $this->ledger->releaseStaleRows();
+            if ($released !== []) {
+                $logger->info('[scolta] {count} pages removed since the last build; their ordinals are now tombstoned.', [
+                    'count' => count($released),
+                ]);
+            }
+
             $telemetry->emit('merge_start');
             $chunkFiles   = $this->coordinator->chunkFiles();
             $streamWriter = new StreamingFormatWriter(new CborEncoder(), budget: $budget);
+            $streamWriter->setTelemetry($telemetry);
+            $this->merger->setTelemetry($telemetry);
             $telemetry->emit('writer_start');
             $streamWriter->beginWrite($this->outputDir);
             $this->merger->mergeStreaming($chunkFiles, $streamWriter, $budget);
+            $streamWriter->fillTombstones($this->ledger->pageTableSize());
             $streamWriter->endWrite();
             $telemetry->emit('writer_complete');
 
@@ -254,8 +378,20 @@ final class IndexBuildOrchestrator
 
             $this->coordinator->release();
 
-            $this->cache->pruneAndSave();
+            $this->cache()->pruneAndSave();
             $this->tsManifest->pruneAndSave();
+            $this->ledger->save();
+
+            // gc_status() gained runs/collected in PHP 7.3; the array shape
+            // PHPStan knows does not list them, so read them defensively.
+            /** @var array<string, int|bool> $gc */
+            $gc = gc_status();
+            $telemetry->emit('build_complete', [
+                'items'        => $pagesForReport,
+                'gc_runs'      => (int) ($gc['runs'] ?? -1),
+                'gc_collected' => (int) ($gc['collected'] ?? -1),
+            ]);
+            $telemetry->emitPhaseSummary();
 
             return $this->makeStatusReport(
                 $telemetry,
@@ -316,6 +452,42 @@ final class IndexBuildOrchestrator
      * so it's freed as soon as the source generator advances instead of being
      * held for the full chunk duration.
      */
+    /**
+     * Build one chunk entry, assigning the item's ordinal from the ledger.
+     *
+     * On a ledger that has never been written, allocate() hands out 0, 1, 2 …
+     * in arrival order, which is exactly the running counter this replaced —
+     * so a first build produces byte-identical output while populating the
+     * ledger for later incremental updates. No mode flag distinguishes the two
+     * cases because there is only one case.
+     *
+     * Allocation happens here rather than at the top of the loop because items
+     * whose cleaned body is too short produce no page at all, and an ordinal
+     * burned on a page that is never written would leave a permanent tombstone.
+     *
+     * @return array{item: object, tokenData: array, ordinal: int}
+     */
+    /**
+     * @param array<string, mixed> $tokenData
+     * @return array{item: object, tokenData: array<string, mixed>, ordinal: int}
+     */
+    private function makeChunkEntry(object $page, array $tokenData, string $contentHash): array
+    {
+        $proxy = $this->makeSlimProxy($page);
+
+        return [
+            'item'      => $proxy,
+            'tokenData' => $tokenData,
+            'ordinal'   => $this->ledger->allocate(
+                $proxy->id,
+                $proxy->url,
+                InvertedIndexBuilder::effectiveFilters($proxy),
+                InvertedIndexBuilder::effectiveSortable($proxy),
+                $contentHash,
+            ),
+        ];
+    }
+
     private function makeSlimProxy(object $page): object
     {
         return (object) [
@@ -348,17 +520,39 @@ final class IndexBuildOrchestrator
         ProgressReporterInterface $progress,
     ): void {
         $telemetry->emit("chunk_start({$chunkNum})");
-        $partial = $this->builder->buildFromTokenData($chunk, $currentOffset);
+
+        $t0      = hrtime(true);
+        $partial = $this->builder->buildFromTokenDataWithOrdinals($chunk);
+        $telemetry->recordSubTimer('build_partial', (hrtime(true) - $t0) / 1e9, count($partial['pages']));
+
         $currentOffset += count($partial['pages']);
         $pagesInRun    += count($partial['pages']);
+
+        // Ordinals reach disk before the chunk that references them. The
+        // reverse order is the corruption: a chunk whose ordinals no resumed
+        // process can see gets those same numbers handed to different pages,
+        // and the merge keeps one page per ordinal.
+        $this->ledger->checkpoint();
+
+        $t0 = hrtime(true);
         $this->coordinator->commitChunk($chunkNum, $partial);
-        $telemetry->emit("chunk_committed({$chunkNum})", ['pages' => count($partial['pages'])]);
+        $telemetry->recordSubTimer('commit_chunk', (hrtime(true) - $t0) / 1e9, count($partial['pages']));
+
+        $telemetry->emit("chunk_committed({$chunkNum})", ['items' => count($partial['pages'])]);
         $progress->advance(1, "Chunk {$chunkNum} ({$pagesInRun} pages)");
         unset($partial);
+
+        // Measured, not assumed: PHP's cycle collector fires on its own at a
+        // 10,001-entry root buffer and acyclic data is freed at refcount zero
+        // without it, so these two calls may be buying nothing. gc_status()
+        // runs/collected are reported alongside the timing so the question is
+        // answerable from one build log.
+        $t0 = hrtime(true);
         gc_collect_cycles();
         if (function_exists('gc_mem_caches')) {
             gc_mem_caches();
         }
+        $telemetry->recordSubTimer('gc', (hrtime(true) - $t0) / 1e9, 1);
     }
 
     /**
@@ -428,10 +622,24 @@ final class IndexBuildOrchestrator
                 );
             }
 
+            // The same tail work build() does. Finalize used to skip it, so a
+            // deferred merge published an index with an unfilled page table and
+            // left the ledger unsaved — the next build then renumbered from
+            // whatever survived.
+            $released = $this->ledger->releaseStaleRows();
+            if ($released !== []) {
+                $logger->info('[scolta] {count} pages removed since the last build; their ordinals are now tombstoned.', [
+                    'count' => count($released),
+                ]);
+            }
+
             $telemetry->emit('merge_start');
             $streamWriter = new StreamingFormatWriter(new CborEncoder(), budget: $budget);
+            $streamWriter->setTelemetry($telemetry);
+            $this->merger->setTelemetry($telemetry);
             $streamWriter->beginWrite($this->outputDir);
             $this->merger->mergeStreaming($chunkFiles, $streamWriter, $budget);
+            $streamWriter->fillTombstones($this->ledger->pageTableSize());
             $streamWriter->endWrite();
             $telemetry->emit('writer_complete');
 
@@ -444,6 +652,13 @@ final class IndexBuildOrchestrator
             $this->verifyOutputHasFragments($pagesProcessed);
 
             $this->coordinator->release();
+
+            $this->cache()->pruneAndSave();
+            $this->tsManifest->pruneAndSave();
+            $this->ledger->save();
+
+            $telemetry->emit('build_complete', ['items' => $pagesProcessed]);
+            $telemetry->emitPhaseSummary();
 
             return $this->makeStatusReport(
                 $telemetry,
@@ -525,12 +740,15 @@ final class IndexBuildOrchestrator
     }
 
     /**
-     * Verify the output directory contains at least one fragment file.
+     * Verify the finished index accounts for every page the build indexed.
      *
-     * A successful build with pages to index MUST produce fragment files.
-     * Zero fragments with non-zero page count indicates a silent write failure.
+     * The count that matters is the ledger's live rows: one row per id this
+     * build kept, and one fragment per row. Comparing against it rather than
+     * against "more than zero" is what turns a dropped page into a failed
+     * build. An index that is short here has almost always lost pages to
+     * colliding ordinals, so the message says so.
      *
-     * @throws \RuntimeException If pages were indexed but the index is empty.
+     * @throws \RuntimeException If the index does not match the ledger.
      */
     private function verifyOutputHasFragments(int $pagesProcessed): void
     {
@@ -550,7 +768,92 @@ final class IndexBuildOrchestrator
             );
         }
 
+        // One fragment per ordinal in the page table: live pages plus the
+        // tombstones fillTombstones() pads it out with. A collision shows up
+        // here as a page table shorter than the fragments written, because two
+        // pages sharing an ordinal still produce two files (the filename
+        // hashes the url) but only ever one page-table row.
+        $pageTableSize = $this->ledger->pageTableSize();
+        if ($pageTableSize > 0 && $fragmentCount !== $pageTableSize) {
+            throw new \RuntimeException(sprintf(
+                'Index integrity check failed: the page table has %d ordinals but the index contains %d fragments. '
+                . 'Pages have shared an ordinal, so posting lists point at the wrong documents. '
+                . 'The index must not be served. Re-run with --restart to rebuild from scratch.',
+                $pageTableSize,
+                $fragmentCount,
+            ));
+        }
+
+        // Independent bookkeeping: the manifest counts pages as chunks commit,
+        // the ledger counts ids it kept. They are written by different code at
+        // different times, so a page indexed twice or lost between the two
+        // shows up as a disagreement rather than as a quietly short index.
+        $liveCount = $this->ledger->liveCount();
+        if ($liveCount > 0 && $pagesProcessed !== $liveCount) {
+            throw new \RuntimeException(sprintf(
+                'Index integrity check failed: the build committed %d pages but the page table holds %d live pages. '
+                . 'Documents have been indexed twice or dropped. '
+                . 'The index must not be served. Re-run with --restart to rebuild from scratch.',
+                $pagesProcessed,
+                $liveCount,
+            ));
+        }
+
         self::verifyIndexComplete($this->outputDir);
+    }
+
+    /**
+     * Fail unless the ledger can actually account for the committed chunks.
+     *
+     * Resuming onto a ledger that has lost its ordinals is the exact condition
+     * that used to produce a wrong index in silence: the chunks on disk hold
+     * ordinals 0..n, and a ledger that cannot see them hands the same numbers
+     * to different pages. State written by a pre-journal build looks like this,
+     * so it is refused rather than resumed.
+     *
+     * @throws \RuntimeException When the state directory cannot be resumed safely.
+     */
+    private function assertResumableLedger(int $chunksWritten, int $pagesProcessed): void
+    {
+        if ($chunksWritten === 0 || $pagesProcessed === 0) {
+            return;
+        }
+
+        if ($this->ledger->pageTableSize() === 0) {
+            throw new \RuntimeException(sprintf(
+                'Cannot resume: %d chunks holding %d pages are on disk, but the page-table ledger has no '
+                . 'ordinal assignments for them. Resuming would hand those ordinals to different pages and '
+                . 'produce an index that returns the wrong results. Re-run with --restart to rebuild from scratch.',
+                $chunksWritten,
+                $pagesProcessed,
+            ));
+        }
+    }
+
+    /**
+     * Itemise the documents that reached the build but produced no page.
+     *
+     * The integrity check subtracts these from the expected fragment count, so
+     * they are named rather than absorbed: an unexplained gap is a bug, and an
+     * explained one has to be readable in the build log to stay that way.
+     *
+     * @param list<array{id: string, reason: string}> $skipped
+     */
+    private function logSkippedItems(array $skipped, LoggerInterface $logger): void
+    {
+        if ($skipped === []) {
+            return;
+        }
+
+        $shown = array_slice($skipped, 0, 20);
+        $lines = array_map(static fn(array $s): string => "{$s['id']} ({$s['reason']})", $shown);
+        $more  = count($skipped) - count($shown);
+
+        $logger->warning('[scolta] {count} documents produced no indexable page and were skipped: {list}{more}', [
+            'count' => count($skipped),
+            'list'  => implode(', ', $lines),
+            'more'  => $more > 0 ? ", and {$more} more" : '',
+        ]);
     }
 
     /**

@@ -197,9 +197,27 @@ that throws is caught and logged rather than taking the render down.
 
 `container` is the dropdown element and is always identical to `event.target`.
 `suggestions` is the rendered model in DOM order; each entry has `type`
-(`recent` or `title`), `title`, `url`, `safeUrl` and `excerpt`. `title`, `url`
-and `excerpt` are **raw** — they are there to compare or to build a request, not
-to paste into markup.
+(`recent` or `title`), `title`, `url`, `safeUrl`, `excerpt` and `meta`. `title`,
+`url` and `excerpt` are **raw** — they are there to compare or to build a
+request, not to paste into markup.
+
+`meta` is the fragment's whole metadata map, carried through from the index: a
+thumbnail URL, an entity id, a content type, whatever the index holds. It is the
+same surface the result renderer sees as `data.meta`, and it is **raw** for the
+same reason the rest is. A recent search has no fragment behind it and carries
+`meta: {}`, so the field is always there and a listener never has to
+feature-test it.
+
+```js
+document.addEventListener('scolta:suggestions-rendered', (e) => {
+  for (const [i, s] of e.detail.suggestions.entries()) {
+    if (!s.meta.image) continue;
+    const row = e.detail.container.querySelector(`[data-scolta-sayt-index="${i}"]`);
+    // s.meta.image is raw index content: escape it before it reaches markup.
+    row?.prepend(buildThumb(s.meta.image));
+  }
+});
+```
 
 ```js
 document.addEventListener('scolta:suggestions-rendered', (e) => {
@@ -210,10 +228,36 @@ document.addEventListener('scolta:suggestions-rendered', (e) => {
 });
 ```
 
-There is deliberately **no suggestion-renderer registration API** in this
-release. The result renderer exists because platforms have rich, entity-specific
-result cards; a suggestion row is a title and an excerpt, and nobody has asked
-to own that markup yet. Use CSS.
+## The suggestion renderer
+
+Decorating rows after the fact through `scolta:suggestions-rendered` works, but
+the visitor sees Scolta's row first and yours a frame later. Registering a
+renderer means your markup is what gets painted:
+
+```js
+Scolta.setSuggestionRenderer(function (suggestion, ctx) {
+  if (suggestion.type === 'recent') return null;   // keep the built-in row
+  return `<img class="my-sayt__thumb" src="${escapeAttr(suggestion.meta.image)}" alt="">
+          <span class="my-sayt__title">${ctx.titleHtml}</span>`;
+});
+```
+
+You own the **inside** of the row. Scolta keeps the option element itself —
+`role="option"`, the stable id, `aria-selected`, `data-scolta-sayt-index`, and
+in `navigate` mode the anchor and its sanitized `href` — because that is the
+combobox and keyboard contract above, and a renderer that dropped one of those
+would break arrow-key navigation and screen-reader announcement silently.
+
+Return `null` (as the example does for recent searches) to fall back to the
+built-in row for that one suggestion; a renderer that throws falls back the same
+way with a console warning. There is a per-instance form,
+`inst.setSuggestionRenderer(fn)`, which wins over the global one, and `null`
+restores the built-in row.
+
+Full contract, including the `ctx` keys and the escaping rules:
+[`RENDER_SEAM.md`](RENDER_SEAM.md#the-suggestion-renderer). Like
+`setResultRenderer` it is a registration function and not a setting, so nothing
+here appears in `CONFIG_REFERENCE.md` or in a CMS settings form.
 
 ## Theming
 
@@ -259,7 +303,10 @@ updating and closing it cause zero layout shift.
 
 - `tests/js/sayt.test.js` — the suggest cycle, staleness at every await point,
   the keyboard and pointer contract, both suggestion actions, recent searches,
-  the expansion budget, and the off switch.
+  the expansion budget, the off switch, and `meta` reaching the suggestion model.
+- `tests/js/render-seam.test.js` — the suggestion renderer: one call per row,
+  fallback on null and on a throw, registration precedence, and the ARIA and
+  keyboard contract holding under renderer-produced rows.
 - `tests/js/security-render.test.js` — hostile fragment titles, excerpts,
   expansion terms and stored values.
 - `tests/js/result-count-baseline.test.js` — a tripwire on fragments loaded per

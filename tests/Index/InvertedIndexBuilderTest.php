@@ -233,15 +233,21 @@ class InvertedIndexBuilderTest extends TestCase
         $this->assertEmpty($result['pages']);
     }
 
-    public function testContentHash(): void
+    /**
+     * The page record used to carry a SHA-256 of the cleaned body under
+     * 'hash'. Nothing read it: no writer, no adapter, no merge step, and
+     * `git log -S` finds no commit that ever consumed it. It cost one full
+     * SHA-256 over every page's entire body on every build — searched history
+     * and the issue queue, found no reason for it, removed. If this breaks
+     * something the reason is now recoverable from this test and its message.
+     */
+    public function testPageRecordCarriesNoUnusedContentHash(): void
     {
         $result = $this->builder->build([
             $this->makeItem('doc-1', 'Test', 'Enough content here to pass the minimum length requirement for indexing.'),
         ]);
 
-        $page = array_values($result['pages'])[0];
-        $this->assertArrayHasKey('hash', $page);
-        $this->assertSame(64, strlen($page['hash'])); // SHA-256 hex
+        $this->assertArrayNotHasKey('hash', array_values($result['pages'])[0]);
     }
 
     public function testHtmlInTitleIsStripped(): void

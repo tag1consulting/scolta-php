@@ -243,7 +243,29 @@ class PhpIndexer
     }
 
     /**
-     * Compute a content hash for a single item (for smart rebuild cache).
+     * Key identifying one item's cached tokenization.
+     *
+     * Must cover every input the cached value depends on. PageWordCache stores
+     * `titleTokens`, `cleanTitle`, `bodyTokens`, `urlTokens`, `wordCount` and
+     * `content`, so:
+     *
+     *  - the **title** belongs in the key. It produces `cleanTitle` and
+     *    `titleTokens` outright, and `HtmlCleaner::clean()` strips a leading
+     *    title match from the body, so it reaches `content` too. Until 1.1.1 it
+     *    was absent, and a title-only edit silently reindexed the old title.
+     *  - the **language** belongs in the key. It selects the Snowball stemmer,
+     *    so the same bytes tokenized as English and as Spanish are different
+     *    cached values.
+     *  - the date, filters, sortable values and metadata do NOT belong: they
+     *    reach the fragment straight from the ContentItem and never touch the
+     *    cached tokens. Including them would miss the cache on every build for
+     *    no benefit.
+     *
+     * The `v2:` prefix is a format version. It changes every key, so the first
+     * build after upgrading repopulates the token cache from scratch — on a
+     * 109,308-page corpus that is a 965 MB cache rebuilt once. That is the
+     * price of the two correctness fixes above and there is no cheaper one:
+     * the old keys cannot be distinguished from correct ones.
      *
      * @since 1.0.0
      * @stability stable
@@ -252,7 +274,13 @@ class PhpIndexer
     {
         $algo = in_array('xxh128', hash_algos(), true) ? 'xxh128' : 'sha256';
 
-        return hash($algo, $item->url . "\0" . $item->bodyHtml);
+        return hash($algo, implode("\0", [
+            'v2:',
+            $item->language,
+            $item->title,
+            $item->url,
+            $item->bodyHtml,
+        ]));
     }
 
     private function atomicSwap(): void

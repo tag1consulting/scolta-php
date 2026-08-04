@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Tag1\Scolta\Config;
 
+use Tag1\Scolta\AiProvider\Amazee\AmazeeConnectionSource;
 use Tag1\Scolta\AiProvider\Amazee\ConfigStorageInterface;
+use Tag1\Scolta\AiProvider\Amazee\ProvenanceAwareConfigStorageInterface;
 
 /**
  * Stored Amazee.ai credentials, as input to {@see ApiKeyResolver}.
@@ -22,32 +24,37 @@ final class AmazeeCredentials
     /**
      * @param string $token          The LiteLLM bearer token.
      * @param string $baseUrl        The LiteLLM API base URL.
-     * @param bool   $operatorChosen TRUE when the operator selected Amazee as
-     *   the provider; FALSE when the credentials came from automatic
-     *   free-trial provisioning. Only affects how the source is reported.
      * @param bool   $modelResolved  Whether model resolution has succeeded.
      *   A half-provisioned install (credentials stored, `/model/info` never
      *   answered) must not send the shipped dated default to the gateway,
      *   which rejects it with HTTP 400. The resolver reports Amazee as the
      *   source but withholds the key, so a key-less client degrades to an
      *   unexpanded/no-summary response instead.
+     * @param AmazeeConnectionSource|null $connectionSource Which operator
+     *   action established this connection, when the store recorded it. NULL
+     *   means it was never recorded — a connection made before 1.2.0, or a
+     *   store that does not implement
+     *   {@see ProvenanceAwareConfigStorageInterface} — and must be reported as
+     *   unknown rather than assumed.
      */
     public function __construct(
         public readonly string $token,
         public readonly string $baseUrl = '',
-        public readonly bool $operatorChosen = false,
         public readonly bool $modelResolved = true,
+        public readonly ?AmazeeConnectionSource $connectionSource = null,
     ) {}
 
     /**
      * Build from a {@see ConfigStorageInterface}, or NULL when nothing is stored.
+     *
+     * The connection source is read from the store when it implements
+     * {@see ProvenanceAwareConfigStorageInterface}, and left NULL otherwise.
      *
      * @since 1.1.0
      * @stability experimental
      */
     public static function fromStorage(
         ConfigStorageInterface $storage,
-        bool $operatorChosen = false,
         bool $modelResolved = true,
     ): ?self {
         $stored = $storage->load();
@@ -58,8 +65,10 @@ final class AmazeeCredentials
         return new self(
             token: $stored['litellm_token'],
             baseUrl: $stored['litellm_api_url'],
-            operatorChosen: $operatorChosen,
             modelResolved: $modelResolved,
+            connectionSource: $storage instanceof ProvenanceAwareConfigStorageInterface
+                ? $storage->loadConnectionSource()
+                : null,
         );
     }
 
@@ -70,13 +79,16 @@ final class AmazeeCredentials
      * interface, so it needs the array form.
      *
      * @param array<string, mixed>|null $stored
+     * @param AmazeeConnectionSource|null $connectionSource The recorded
+     *   connection source, which a caller using this form has to read from its
+     *   own state and pass in. Omit it when nothing was recorded.
      * @since 1.1.0
      * @stability experimental
      */
     public static function fromArray(
         ?array $stored,
-        bool $operatorChosen = false,
         bool $modelResolved = true,
+        ?AmazeeConnectionSource $connectionSource = null,
     ): ?self {
         if (!is_array($stored) || empty($stored['litellm_token']) || !is_string($stored['litellm_token'])) {
             return null;
@@ -87,8 +99,8 @@ final class AmazeeCredentials
         return new self(
             token: $stored['litellm_token'],
             baseUrl: is_string($baseUrl) ? $baseUrl : '',
-            operatorChosen: $operatorChosen,
             modelResolved: $modelResolved,
+            connectionSource: $connectionSource,
         );
     }
 }

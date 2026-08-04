@@ -26,7 +26,8 @@ class AiClientTest extends TestCase
     {
         $mock = new MockHandler([]);
         $client = new AiClient(
-            ['api_key' => 'test'],
+            [
+                'provider' => 'anthropic','api_key' => 'test'],
             new Client(['handler' => HandlerStack::create($mock)]),
         );
         // If we could inspect the private field, we'd check. Instead we verify
@@ -52,7 +53,8 @@ class AiClientTest extends TestCase
 
     public function testThrowsWhenNoApiKey(): void
     {
-        $client = new AiClient(['api_key' => '']);
+        $client = new AiClient([
+            'provider' => 'anthropic','api_key' => '']);
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('API key not configured');
@@ -61,7 +63,8 @@ class AiClientTest extends TestCase
 
     public function testThrowsApiKeyMissingExceptionWhenNoApiKey(): void
     {
-        $client = new AiClient(['api_key' => '']);
+        $client = new AiClient([
+            'provider' => 'anthropic','api_key' => '']);
 
         $this->expectException(ApiKeyMissingException::class);
         $client->message('system', 'hello');
@@ -69,7 +72,9 @@ class AiClientTest extends TestCase
 
     public function testThrowsWhenApiKeyMissing(): void
     {
-        $client = new AiClient([]);
+        $client = new AiClient([
+            'provider' => 'anthropic',
+        ]);
 
         $this->expectException(\RuntimeException::class);
         $client->message('system', 'hello');
@@ -128,7 +133,8 @@ class AiClientTest extends TestCase
         $stack->push(Middleware::history($history));
 
         $client = new AiClient(
-            ['api_key' => 'key'],
+            [
+                'provider' => 'anthropic','api_key' => 'key'],
             new Client(['handler' => $stack]),
         );
 
@@ -158,7 +164,8 @@ class AiClientTest extends TestCase
         $stack->push(Middleware::history($history));
 
         $client = new AiClient(
-            ['api_key' => 'key', 'model' => 'default-model'],
+            [
+                'provider' => 'anthropic','api_key' => 'key', 'model' => 'default-model'],
             new Client(['handler' => $stack]),
         );
 
@@ -180,7 +187,8 @@ class AiClientTest extends TestCase
         $stack->push(Middleware::history($history));
 
         $client = new AiClient(
-            ['api_key' => 'key'],
+            [
+                'provider' => 'anthropic','api_key' => 'key'],
             new Client(['handler' => $stack]),
         );
 
@@ -384,7 +392,8 @@ class AiClientTest extends TestCase
         $stack->push(Middleware::history($history));
 
         $client = new AiClient(
-            ['api_key' => 'key'],
+            [
+                'provider' => 'anthropic','api_key' => 'key'],
             new Client(['handler' => $stack]),
         );
 
@@ -411,7 +420,8 @@ class AiClientTest extends TestCase
         $stack->push(Middleware::history($history));
 
         $client = new AiClient(
-            ['api_key' => 'key', 'base_url' => 'https://proxy.example.com/v1/messages'],
+            [
+                'provider' => 'anthropic','api_key' => 'key', 'base_url' => 'https://proxy.example.com/v1/messages'],
             new Client(['handler' => $stack]),
         );
 
@@ -431,7 +441,8 @@ class AiClientTest extends TestCase
         ]);
 
         $client = new AiClient(
-            ['api_key' => 'key'],
+            [
+                'provider' => 'anthropic','api_key' => 'key'],
             new Client(['handler' => HandlerStack::create($mock)]),
         );
 
@@ -447,7 +458,8 @@ class AiClientTest extends TestCase
         ]);
 
         $client = new AiClient(
-            ['api_key' => 'bad-key'],
+            [
+                'provider' => 'anthropic','api_key' => 'bad-key'],
             new Client(['handler' => HandlerStack::create($mock)]),
         );
 
@@ -462,7 +474,8 @@ class AiClientTest extends TestCase
         ]);
 
         $client = new AiClient(
-            ['api_key' => 'key'],
+            [
+                'provider' => 'anthropic','api_key' => 'key'],
             new Client(['handler' => HandlerStack::create($mock)]),
         );
 
@@ -477,7 +490,8 @@ class AiClientTest extends TestCase
         ]);
 
         $client = new AiClient(
-            ['api_key' => 'key'],
+            [
+                'provider' => 'anthropic','api_key' => 'key'],
             new Client(['handler' => HandlerStack::create($mock)]),
         );
 
@@ -496,7 +510,8 @@ class AiClientTest extends TestCase
         ]);
 
         $client = new AiClient(
-            ['api_key' => 'key'],
+            [
+                'provider' => 'anthropic','api_key' => 'key'],
             new Client(['handler' => HandlerStack::create($mock)]),
         );
 
@@ -515,7 +530,8 @@ class AiClientTest extends TestCase
         ]);
 
         $client = new AiClient(
-            ['api_key' => 'key'],
+            [
+                'provider' => 'anthropic','api_key' => 'key'],
             new Client(['handler' => HandlerStack::create($mock)]),
         );
 
@@ -542,7 +558,8 @@ class AiClientTest extends TestCase
         ]);
 
         $client = new AiClient(
-            ['api_key' => 'key', 'model' => 'claude-4-5-sonnet'],
+            [
+                'provider' => 'anthropic','api_key' => 'key', 'model' => 'claude-4-5-sonnet'],
             new Client(['handler' => HandlerStack::create($mock)]),
         );
 
@@ -568,7 +585,8 @@ class AiClientTest extends TestCase
         ]);
 
         $client = new AiClient(
-            ['api_key' => 'key', 'model' => 'claude-sonnet-4-5-20250929'],
+            [
+                'provider' => 'anthropic','api_key' => 'key', 'model' => 'claude-sonnet-4-5-20250929'],
             new Client(['handler' => HandlerStack::create($mock)]),
         );
 
@@ -611,7 +629,8 @@ class AiClientTest extends TestCase
         ]);
 
         $client = new AiClient(
-            ['api_key' => 'bad-key', 'model' => 'claude-4-5-sonnet'],
+            [
+                'provider' => 'anthropic','api_key' => 'bad-key', 'model' => 'claude-4-5-sonnet'],
             new Client(['handler' => HandlerStack::create($mock)]),
         );
 
@@ -629,7 +648,8 @@ class AiClientTest extends TestCase
         ]);
 
         $client = new AiClient(
-            ['api_key' => 'key', 'model' => 'claude-sonnet-4-5-20250929'],
+            [
+                'provider' => 'anthropic','api_key' => 'key', 'model' => 'claude-sonnet-4-5-20250929'],
             new Client(['handler' => HandlerStack::create($mock)]),
         );
 
@@ -648,7 +668,8 @@ class AiClientTest extends TestCase
         ]);
 
         $client = new AiClient(
-            ['api_key' => 'key'],
+            [
+                'provider' => 'anthropic','api_key' => 'key'],
             new Client(['handler' => HandlerStack::create($mock)]),
         );
 
@@ -673,7 +694,8 @@ class AiClientTest extends TestCase
         $stack->push($history);
 
         $client = new AiClient(
-            ['api_key' => 'test', 'timeout' => 60],
+            [
+                'provider' => 'anthropic','api_key' => 'test', 'timeout' => 60],
             new Client(['handler' => $stack]),
         );
 
@@ -697,7 +719,8 @@ class AiClientTest extends TestCase
         $stack->push($history);
 
         $client = new AiClient(
-            ['api_key' => 'test'],
+            [
+                'provider' => 'anthropic','api_key' => 'test'],
             new Client(['handler' => $stack]),
         );
 
@@ -719,7 +742,8 @@ class AiClientTest extends TestCase
         $stack->push($history);
 
         $client = new AiClient(
-            ['api_key' => 'test', 'api_version' => '2024-10-01'],
+            [
+                'provider' => 'anthropic','api_key' => 'test', 'api_version' => '2024-10-01'],
             new Client(['handler' => $stack]),
         );
 
@@ -742,7 +766,8 @@ class AiClientTest extends TestCase
         $stack->push($history);
 
         $client = new AiClient(
-            ['api_key' => 'test'],
+            [
+                'provider' => 'anthropic','api_key' => 'test'],
             new Client(['handler' => $stack]),
         );
 

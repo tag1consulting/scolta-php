@@ -108,7 +108,16 @@ final class HealthChecker
         $aiAuthFailingSince = $aiAuthFailing
             ? KeyExpiryRecovery::readFailureTimestamp($this->cache)
             : null;
+        // No provider selected means AI is off, whatever else is present. A key
+        // can exist without a provider — an environment variable set before
+        // anybody chose one — and reporting that as usable would restore by the
+        // back door the assumption that an unselected provider is Anthropic.
+        $providerSelected = $this->resolvedKey !== null
+            ? $this->resolvedKey->providerSelected()
+            : trim($this->config->aiProvider) !== '';
+
         $aiUsable = $aiConfigured
+            && $providerSelected
             && !$aiAuthFailing
             && !($this->resolvedKey !== null && $this->resolvedKey->awaitingAmazeeModelResolution);
 
@@ -131,7 +140,11 @@ final class HealthChecker
 
         return [
             'status' => $status,
-            'ai_provider' => $this->resolvedKey?->provider ?: ($this->config->aiProvider ?: 'anthropic'),
+            // '' means no provider has been selected, which is what a fresh
+            // install reports. It is never coalesced to 'anthropic': claiming a
+            // provider nobody chose is the failure this field exists to expose.
+            'ai_provider' => $this->resolvedKey?->provider ?: $this->config->aiProvider,
+            'ai_provider_selected' => $providerSelected,
             'ai_configured' => $aiConfigured,
             'ai_usable' => $aiUsable,
             'ai_auth_failing' => $aiAuthFailing,

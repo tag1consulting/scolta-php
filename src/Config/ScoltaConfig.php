@@ -20,7 +20,19 @@ use Tag1\Scolta\AiClient;
 class ScoltaConfig
 {
     // -- AI provider --
-    public string $aiProvider = 'anthropic';
+    /**
+     * The selected AI provider, or '' when none has been selected.
+     *
+     * There is no default. An install that nobody has configured has AI off:
+     * search works, no provider is assumed, and in particular Anthropic is not
+     * silently assumed. Selecting a provider is always a deliberate act — an
+     * operator choosing one in an admin UI, or a developer setting the value in
+     * code for the frameworks that have no admin UI.
+     *
+     * Existing installs are unaffected: a value already persisted in a site's
+     * config is read as-is, and nothing rewrites it.
+     */
+    public string $aiProvider = '';
     public string $aiApiKey = '';
     public string $aiModel = AiClient::DEFAULT_MODEL;
     public string $aiExpansionModel = '';

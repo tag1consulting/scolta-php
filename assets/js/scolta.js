@@ -370,6 +370,13 @@
   // "simplify" this into a config key.
   let globalResultRenderer = null;
 
+  // Platform-supplied suggestion renderer, registered through
+  // Scolta.setSuggestionRenderer(). Everything said above about
+  // globalResultRenderer applies here for the same reasons: module-scoped so
+  // registration works before any instance exists, overridable per instance,
+  // and deliberately a registration function rather than a config key.
+  let globalSuggestionRenderer = null;
+
   function createInstance(containerSelector, instanceConfig) {
 
   // --- Instance state (local to this closure) ---
@@ -380,6 +387,10 @@
   let conversationMessages = [];
   let followUpCount = 0;
   let abortController = null;
+  // Watches the resolved summary's text region so the clamp decision follows
+  // the width instead of being frozen at the width it resolved in. Exactly one
+  // at a time; see observeSummaryClamp().
+  let summaryClampObserver = null;
   let queryFacetCounts = {};   // { dimension: { value: count } } — per typed query, folded once when expansion lands
   let currentQuery = "";
   let allHighlightTerms = [];
@@ -451,6 +462,7 @@
   let rootEl = null;                    // mount point; lifecycle events bubble through it
   let scaffoldNodes = [];               // exactly the nodes init() inserted — destroy() removes these and nothing else
   let instanceResultRenderer = null;    // per-instance override of globalResultRenderer
+  let instanceSuggestionRenderer = null; // per-instance override of globalSuggestionRenderer
   // What is currently painted in #scolta-results, in DOM order:
   // [{ key, nodes: [Node, ...] }]. Drives the keyed reconcile in renderResults()
   // so a repaint that changes nothing moves no nodes.
@@ -1153,24 +1165,213 @@
     return picked;
   }
 
+  // ---- AI summary layout reservation ---------------------------------------
+  //
+  // The summarize call is deliberately deferred until query expansion settles,
+  // so the model ranks what the user sees. That means the result list is
+  // already painted when the summary lands above it, and every pixel the list
+  // moves is cumulative layout shift.
+  //
+  // It moved twice, not once. The slot went from display:none to a loading
+  // skeleton when expansion settled (measured +177px, 0.120), then from
+  // skeleton to resolved summary (+342px, 0.317) — 0.437 total against a
+  // "good" threshold of 0.1. The first of those is invisible in any harness
+  // that stubs expansion faster than 500ms, because the browser then credits
+  // it to the search click and excludes it; a real expansion is an LLM round
+  // trip and is not that fast.
+  //
+  // So the slot takes a fixed height in the same frame the results paint, and
+  // holds it through loading, resolution and error alike. A summary taller
+  // than the box is clipped behind a "Show more" control; expanding is
+  // user-initiated, which the metric excludes by definition, so the full text
+  // stays reachable for free. A deployment with the summary off reserves
+  // nothing and is byte-identical to before.
+  const SUMMARY_RESERVED_CLASS = 'scolta-ai-summary--reserved';
+  const SUMMARY_CLAMPED_CLASS = 'scolta-ai-summary--clamped';
+  const SUMMARY_TEXT_ID = 'scolta-ai-summary-text';
+
+  // Generous: the bars are clipped by the reserved height, so a theme that
+  // raises the line budget still gets a full skeleton, and one that lowers it
+  // pays nothing but a few unrendered divs.
+  const SUMMARY_SHIMMER_LINES = 14;
+  const SUMMARY_SHIMMER_WIDTHS = [95, 88, 72, 92, 84, 68, 90, 79];
+
+  function summaryLabelHtml(withDots) {
+    return `<div class="scolta-ai-summary-label">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2z"/></svg>
+        <span>AI Overview</span>${withDots ? '\n        <span class="scolta-ai-dots"><span>.</span><span>.</span><span>.</span></span>' : ''}
+      </div>`;
+  }
+
+  function summaryLoadingHtml() {
+    let bars = '';
+    for (let i = 0; i < SUMMARY_SHIMMER_LINES; i++) {
+      bars += `<div class="scolta-ai-shimmer" style="width:${SUMMARY_SHIMMER_WIDTHS[i % SUMMARY_SHIMMER_WIDTHS.length]}%"></div>`;
+    }
+    return `${summaryLabelHtml(true)}
+      <div class="scolta-ai-summary-text" id="${SUMMARY_TEXT_ID}">${bars}</div>`;
+  }
+
+  /**
+   * Paint the reserved, loading slot.
+   *
+   * Called from the frame that paints the result list — the box has to exist
+   * before anything can be pushed by it — and again by summarizeResults() so a
+   * direct call still works. Idempotent: a slot already reserved, already
+   * resolved, or already showing an error is left exactly as it is, which is
+   * what keeps a load-more or facet repaint from flashing the skeleton back
+   * over a summary the user is reading.
+   */
+  function reserveSummarySlot() {
+    const summaryEl = els && els.aiSummary;
+    if (!summaryEl) return;
+    if (!getInstanceConfig().AI_SUMMARIZE) return;
+    if (summaryEl.style.display !== 'none') return;
+    // Cleared, not set: the stylesheet makes .scolta-ai-summary a flex column,
+    // and an inline display would outrank it and break the reservation.
+    summaryEl.style.display = '';
+    summaryEl.className = `scolta-ai-summary loading ${SUMMARY_RESERVED_CLASS}`;
+    summaryEl.innerHTML = summaryLoadingHtml();
+  }
+
+  /**
+   * Collapse the slot: no reserved height, no skeleton, nothing.
+   *
+   * This is the state a deployment with the summary disabled is in for the
+   * whole life of the page, and the state the slot returns to when the model
+   * gives us nothing to show.
+   */
+  function releaseSummarySlot() {
+    const summaryEl = els && els.aiSummary;
+    if (!summaryEl) return;
+    // The element it was watching is about to be emptied.
+    disconnectSummaryClamp();
+    summaryEl.style.display = 'none';
+    summaryEl.className = '';
+    summaryEl.innerHTML = '';
+  }
+
+  /**
+   * Decide whether the resolved summary needs the "Show more" control.
+   *
+   * Measured, not estimated: the text is proportional, the box is themeable by
+   * a custom property, and any guess at "how many characters fit" gets both of
+   * those wrong. A summary that fits shows no control at all.
+   */
+  function updateSummaryClamp() {
+    const summaryEl = els && els.aiSummary;
+    if (!summaryEl) return;
+    const textEl = summaryEl.querySelector('.scolta-ai-summary-text');
+    const toggle = summaryEl.querySelector('[data-scolta-summary-toggle]');
+    if (!textEl || !toggle) return;
+    if (!summaryEl.classList.contains(SUMMARY_RESERVED_CLASS)) {
+      summaryEl.classList.remove(SUMMARY_CLAMPED_CLASS);
+      return;
+    }
+    // +1 absorbs sub-pixel rounding on fractional line heights.
+    const overflows = textEl.scrollHeight > textEl.clientHeight + 1;
+    if (overflows) {
+      summaryEl.classList.add(SUMMARY_CLAMPED_CLASS);
+    } else {
+      summaryEl.classList.remove(SUMMARY_CLAMPED_CLASS);
+    }
+    toggle.hidden = !overflows;
+  }
+
+  /**
+   * Keep the clamp decision honest as the text region's width changes.
+   *
+   * updateSummaryClamp() measures, so its answer is only true for the width it
+   * measured at. It ran once on resolve and again on a toggle click, which
+   * froze the decision at resolve-time width: rotate a phone to portrait, or
+   * shrink a responsive column, and a summary that fitted reflows to more
+   * lines and overflows the reserved height. The text is still clipped —
+   * .scolta-ai-summary-text is overflow:hidden while reserved — but without
+   * the clamped class there is no fade and the control stays hidden, so a
+   * sighted reader sees text cut off at the box edge with no way to open it.
+   * (The full text is in the DOM throughout, so find-in-page and assistive
+   * tech were never affected; the visible affordance was.) Widening has the
+   * mirror problem: a pointless control on a summary that now fits.
+   *
+   * Recomputing costs no layout shift. It toggles a mask class and the
+   * control's hidden flag, and the control lives inside the fixed-height,
+   * overflow-hidden panel, so nothing outside the box can move.
+   */
+  function observeSummaryClamp() {
+    // Feature-detected: older engines and JSDOM have no ResizeObserver, and
+    // the resolved path must not throw for want of it. Without one the
+    // behaviour is exactly what it was before this existed.
+    if (typeof ResizeObserver === 'undefined') return;
+    const summaryEl = els && els.aiSummary;
+    if (!summaryEl) return;
+    if (!getInstanceConfig().AI_SUMMARIZE) return;
+    const textEl = summaryEl.querySelector('.scolta-ai-summary-text');
+    if (!textEl) return;
+    disconnectSummaryClamp();
+    summaryClampObserver = new ResizeObserver(() => updateSummaryClamp());
+    summaryClampObserver.observe(textEl);
+  }
+
+  function disconnectSummaryClamp() {
+    if (!summaryClampObserver) return;
+    summaryClampObserver.disconnect();
+    summaryClampObserver = null;
+  }
+
+  /**
+   * Drop the reserved height so the whole summary (or a follow-up answer) is
+   * visible. Always the result of a click or a keypress, so the resulting
+   * shift carries hadRecentInput and costs nothing.
+   */
+  function expandSummarySlot() {
+    const summaryEl = els && els.aiSummary;
+    if (!summaryEl) return;
+    // The user has opened the summary. Stop watching rather than re-clamping
+    // against that choice: updateSummaryClamp() would no-op on an unreserved
+    // panel anyway, but an observer left running on an expanded summary is
+    // just work nobody asked for.
+    disconnectSummaryClamp();
+    summaryEl.classList.remove(SUMMARY_RESERVED_CLASS, SUMMARY_CLAMPED_CLASS);
+    const toggle = summaryEl.querySelector('[data-scolta-summary-toggle]');
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', 'true');
+      toggle.textContent = 'Show less';
+    }
+  }
+
+  function collapseSummarySlot() {
+    const summaryEl = els && els.aiSummary;
+    if (!summaryEl) return;
+    summaryEl.classList.add(SUMMARY_RESERVED_CLASS);
+    const toggle = summaryEl.querySelector('[data-scolta-summary-toggle]');
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.textContent = 'Show more';
+    }
+    updateSummaryClamp();
+    // Reserved again, so width changes matter again.
+    observeSummaryClamp();
+  }
+
+  function toggleSummaryExpanded() {
+    const summaryEl = els && els.aiSummary;
+    if (!summaryEl) return;
+    if (summaryEl.classList.contains(SUMMARY_RESERVED_CLASS)) {
+      expandSummarySlot();
+    } else {
+      collapseSummarySlot();
+    }
+  }
+
   async function summarizeResults(query, results, expandedTerms = [], sortHint = null, filterHint = null, userFilters = {}) {
     const CONFIG = getInstanceConfig();
     const endpoints = getInstanceEndpoints();
     if (!CONFIG.AI_SUMMARIZE || results.length === 0) return null;
     const summaryEl = els.aiSummary;
-    summaryEl.style.display = "block";
-    summaryEl.className = "scolta-ai-summary loading";
-    summaryEl.innerHTML = `
-      <div class="scolta-ai-summary-label">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2z"/></svg>
-        <span>AI Overview</span>
-        <span class="scolta-ai-dots"><span>.</span><span>.</span><span>.</span></span>
-      </div>
-      <div class="scolta-ai-summary-text">
-        <div class="scolta-ai-shimmer" style="width:95%"></div>
-        <div class="scolta-ai-shimmer" style="width:88%"></div>
-        <div class="scolta-ai-shimmer" style="width:72%"></div>
-      </div>`;
+    // Normally a no-op: the slot was already reserved in the frame the results
+    // painted. It still matters for a direct call, and for the case where the
+    // result list arrived empty and expansion later filled it.
+    reserveSummarySlot();
 
     const topN = selectSummaryCandidates(results, query, CONFIG);
     let context;
@@ -1263,7 +1464,9 @@
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       if (data.summary) {
-        summaryEl.className = "scolta-ai-summary";
+        // Stays reserved: the resolved summary replaces the skeleton inside
+        // the same box, so this swap moves nothing.
+        summaryEl.className = `scolta-ai-summary ${SUMMARY_RESERVED_CLASS}`;
         const formatted = formatSummary(data.summary);
 
         const userContext = `Search query: ${fullQuery}\n\nSearch result excerpts:\n${context}`;
@@ -1277,12 +1480,14 @@
           ? `<div class="scolta-ai-summary-disclaimer">${escapeHtml(disclaimer)}</div>`
           : '';
 
+        // The full text is always in the DOM, clipped by the box rather than
+        // truncated, so find-in-page and assistive tech reach all of it in
+        // either state.
         summaryEl.innerHTML = `
-          <div class="scolta-ai-summary-label">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2z"/></svg>
-            <span>AI Overview</span>
-          </div>
-          <div class="scolta-ai-summary-text">${formatted}</div>
+          ${summaryLabelHtml(false)}
+          <div class="scolta-ai-summary-text" id="${SUMMARY_TEXT_ID}">${formatted}</div>
+          <button type="button" class="scolta-ai-summary-toggle" data-scolta-summary-toggle
+                  aria-expanded="false" aria-controls="${SUMMARY_TEXT_ID}" hidden>Show more</button>
           <div id="scolta-followup-thread" class="scolta-ai-followup-thread" style="display:none;"></div>
           <div class="scolta-ai-followup-input" id="scolta-followup-input">
             <input type="text" id="scolta-followup-field" placeholder="Ask a follow-up question..."
@@ -1291,22 +1496,27 @@
             <span class="scolta-ai-followup-counter" id="scolta-followup-counter">${CONFIG.AI_MAX_FOLLOWUPS} remaining</span>
           </div>
           ${disclaimerHtml}`;
+        updateSummaryClamp();
+        // The decision above is only true for the width it measured at.
+        observeSummaryClamp();
       } else {
-        summaryEl.style.display = "none";
+        // Nothing to show. Collapse to exactly what a deployment with the
+        // summary disabled looks like rather than leaving an empty box.
+        releaseSummarySlot();
       }
     } catch (e) {
       if (e.name === 'AbortError') return;
       if (e instanceof TypeError) {
-        summaryEl.style.display = "none";
+        releaseSummarySlot();
         return;
       }
       console.warn("[scolta:summarize] failed:", e);
-      summaryEl.className = "scolta-ai-summary error";
-      summaryEl.innerHTML = `<div class="scolta-ai-summary-label">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2z"/></svg>
-          <span>AI Overview</span>
-        </div>
-        <div class="scolta-ai-summary-text">Summary unavailable. Results shown below.</div>`;
+      // Sized within the reserved height rather than collapsed: collapsing is
+      // an upward shift, and it counts against the metric exactly as the
+      // downward one did.
+      summaryEl.className = `scolta-ai-summary error ${SUMMARY_RESERVED_CLASS}`;
+      summaryEl.innerHTML = `${summaryLabelHtml(false)}
+        <div class="scolta-ai-summary-text" id="${SUMMARY_TEXT_ID}">Summary unavailable. Results shown below.</div>`;
     }
   }
 
@@ -1559,6 +1769,12 @@
     input.disabled = true;
     btn.disabled = true;
     input.value = '';
+
+    // The thread grows inside the summary panel, and the panel is clipped to
+    // its reserved height until something releases it — an answer appended
+    // under a clamp would be invisible. Asking a follow-up is a click or an
+    // Enter key, so releasing it here costs no layout shift.
+    expandSummarySlot();
 
     // Capture the search version at the time the follow-up was initiated.
     // If a new search starts while this follow-up is in-flight, the response
@@ -1961,7 +2177,12 @@
       type: 'recent',
       title: value,
       url: '',
+      // Nothing to navigate to: acting on a recent search runs the search in
+      // place. The field is present, and empty, so every suggestion has one
+      // shape and a consumer never has to feature-test safeUrl or meta.
+      safeUrl: '',
       excerpt: '',
+      meta: {},
     }));
   }
 
@@ -2114,6 +2335,14 @@
   // A scored result becomes a suggestion. `url` stays raw for the safety gate
   // and `safeUrl` is the same attribute-escaped, scheme-neutralized value the
   // result card puts in its href — one sanitizer, one behaviour.
+  //
+  // `meta` is the fragment's whole metadata map, carried through unchanged so a
+  // suggestion renderer or a scolta:suggestions-rendered listener can reach a
+  // thumbnail, an entity id or any other indexed display key. It is the same
+  // surface the result seam exposes as `data.meta`, and the values are RAW
+  // index content: nothing here escapes them, because escaping at the source
+  // would corrupt a value a consumer wants for a request URL or a comparison.
+  // A consumer that puts a meta value into markup escapes it itself.
   function toTitleSuggestion(scored) {
     const data = scored.data || {};
     const rawUrl = data.meta?.url || resolveUrl(data.url || '') || data.url || '';
@@ -2123,6 +2352,7 @@
       url: rawUrl,
       safeUrl: sanitizeUrlAttr(rawUrl),
       excerpt: data.excerpt || '',
+      meta: data.meta || {},
     };
   }
 
@@ -2169,6 +2399,59 @@
     });
   }
 
+  // The built-in inner content of one suggestion row — the kind glyph, the
+  // title, and the excerpt when there is one. Unchanged from before the
+  // suggestion-renderer seam existed: it is what a consumer that registers
+  // nothing sees, and what the renderer path falls back to.
+  function buildDefaultSuggestionInner(parts, isRecent) {
+    return `<span class="scolta-sayt-kind" aria-hidden="true">${isRecent ? '&#8635;' : '&#8250;'}</span>`
+      + `<span class="scolta-sayt-title">${parts.titleHtml}</span>`
+      + (parts.excerptHtml ? `<span class="scolta-sayt-excerpt">${parts.excerptHtml}</span>` : '');
+  }
+
+  // Build the INNER markup of one suggestion row: the registered platform
+  // renderer if there is one, the built-in row otherwise. Inner and not the
+  // whole row on purpose — the option element itself carries role="option", the
+  // stable id the input's aria-activedescendant points at, aria-selected, the
+  // data-scolta-sayt-index the keyboard and click handlers dispatch on, and in
+  // navigate mode the sanitized href. Those are the combobox contract, so
+  // renderSuggestions keeps them and a renderer cannot break them by omission.
+  //
+  // A renderer that returns anything other than a string — null, undefined, a
+  // mistake — falls back to the built-in row for THAT suggestion only, matching
+  // the result seam, so a platform able to decorate some suggestion types and
+  // not others does not have to decorate any of them.
+  function buildSuggestionInnerHtml(s, index, query, isRecent, renderer) {
+    const parts = {
+      index: index,
+      // The prefix being suggested on, RAW and not html-escaped: it is here so
+      // a renderer can build a request or compare terms, not to be pasted into
+      // markup. Every value below whose name ends in Html, plus safeUrl, is
+      // already escaped exactly as the built-in row escapes it — the same
+      // division the result renderer's ctx draws.
+      query: query,
+      titleHtml: escapeHtml(s.title),
+      excerptHtml: (!isRecent && s.excerpt) ? truncateExcerpt(s.excerpt, 120) : '',
+      // The same attribute-escaped, scheme-neutralized value the option's href
+      // carries in navigate mode. A recent search has no destination — acting
+      // on one runs the search in place rather than navigating — so it gets ''
+      // rather than a URL invented here that nothing else in the bundle emits.
+      safeUrl: s.safeUrl || '',
+    };
+
+    if (renderer) {
+      let out = null;
+      try {
+        out = renderer(s, parts);
+      } catch (e) {
+        console.warn('[scolta] suggestion renderer threw; falling back to the built-in row', e);
+        out = null;
+      }
+      if (typeof out === 'string') return out;
+    }
+    return buildDefaultSuggestionInner(parts, isRecent);
+  }
+
   function renderSuggestions(list, query) {
     if (!els.sayt) return;
 
@@ -2186,6 +2469,7 @@
     emitBeforeSuggestions(query);
 
     const navigates = getSaytConfig().suggestionAction === 'navigate';
+    const renderer = activeSuggestionRenderer();
     let html = '';
     for (let i = 0; i < list.length; i++) {
       const s = list[i];
@@ -2199,12 +2483,9 @@
       const asLink = !isRecent && navigates && isSafeLinkUrl(s.url);
       const tag = asLink ? 'a' : 'div';
       const href = asLink ? ` href="${s.safeUrl}"` : '';
-      const excerpt = (!isRecent && s.excerpt) ? truncateExcerpt(s.excerpt, 120) : '';
       html += `<${tag} class="${cls}" role="option" id="${suggestOptionId(i)}"`
         + ` aria-selected="false" data-scolta-sayt-index="${i}"${href}>`
-        + `<span class="scolta-sayt-kind" aria-hidden="true">${isRecent ? '&#8635;' : '&#8250;'}</span>`
-        + `<span class="scolta-sayt-title">${escapeHtml(s.title)}</span>`
-        + (excerpt ? `<span class="scolta-sayt-excerpt">${excerpt}</span>` : '')
+        + buildSuggestionInnerHtml(s, i, query, isRecent, renderer)
         + `</${tag}>`;
     }
     els.sayt.innerHTML = html;
@@ -3976,7 +4257,9 @@
       emitResultsRendered([], [], [], false);
       els.resultsHeader.innerHTML = "";
       els.noResults.style.display = "none";
-      els.aiSummary.style.display = "none";
+      // Full reset, not just display:none — the reserved class and the last
+      // summary's markup must not survive into the next cycle.
+      releaseSummarySlot();
       els.loadMore.style.display = "none";
       if (!preserveFilters) {
         els.expandedTerms.style.display = "none";
@@ -4186,7 +4469,31 @@
       const expandedLabel = expandedTerms
         ? expandedTerms.filter(t => t.toLowerCase() !== query.toLowerCase())
         : [];
-      summarizeResults(query, allScoredResults, expandedLabel, sortHint, filterHint, activeFilters);
+      // Deliberately not awaited — the summary is allowed to land after this
+      // chain settles — which is exactly why it needs its own catch. Nothing
+      // is chained onto the promise it returns, so a rejection from it does
+      // NOT reach the .catch below; it becomes an unhandled rejection and the
+      // reserved skeleton shimmers forever. summarizeResults() handles its own
+      // fetch failures, but the work before that fetch (candidate selection,
+      // context assembly) is outside them, and on a malformed result set a
+      // throw there used to strand the slot with no way back.
+      summarizeResults(query, allScoredResults, expandedLabel, sortHint, filterHint, activeFilters)
+        .catch(e => {
+          if (version !== searchVersion) return;
+          console.warn('[scolta:summarize] failed before the request:', e);
+          releaseSummarySlot();
+        });
+    }).catch(e => {
+      // The slot is reserved from the result paint, so anything that throws in
+      // the expansion phase — between that paint and the summarize call — now
+      // leaves a skeleton shimmering forever instead of failing silently.
+      // Collapse it and say why. This covers the awaited work above only; the
+      // un-awaited summarizeResults() call carries its own catch, for the
+      // reason given there. Only this cycle's slot: a newer search owns the
+      // panel once it starts.
+      if (version !== searchVersion) return;
+      console.warn('[scolta:search] expansion phase failed:', e);
+      releaseSummarySlot();
     });
   }
 
@@ -4201,7 +4508,7 @@
     els.searchClear.style.display = "none";
     els.layout.style.display = "none";
     els.expandedTerms.style.display = "none";
-    els.aiSummary.style.display = "none";
+    releaseSummarySlot();
     els.noResults.style.display = "none";
     els.sortIndicator.style.display = "none";
     els.sortIndicator.innerHTML = '';
@@ -4253,6 +4560,25 @@
 
   function activeResultRenderer() {
     return instanceResultRenderer || globalResultRenderer;
+  }
+
+  // --- Suggestion renderer registration ---
+  //
+  // Register a function that returns the inner markup for one suggestion row,
+  // replacing the built-in row. See the documented contract on
+  // Scolta.setSuggestionRenderer() below; this is the per-instance form and
+  // takes precedence over the global one for this instance only. Pass null to
+  // go back to the built-in row.
+  function setSuggestionRenderer(fn) {
+    if (fn !== null && fn !== undefined && typeof fn !== 'function') {
+      throw new TypeError('[scolta] setSuggestionRenderer expects a function or null');
+    }
+    instanceSuggestionRenderer = fn || null;
+    return instanceSuggestionRenderer;
+  }
+
+  function activeSuggestionRenderer() {
+    return instanceSuggestionRenderer || globalSuggestionRenderer;
   }
 
   // --- Render lifecycle events ---
@@ -4563,6 +4889,13 @@
     }
 
     noResults.style.display = "none";
+
+    // Reserve the summary slot in the same frame this paint happens in.
+    // Waiting until the summarize call would put the box in later, on its own,
+    // and push this list down — which is the shift. It is a sibling of
+    // #scolta-results and touches nothing in the results write path below.
+    reserveSummarySlot();
+
     const startIndex = displayedCount;
     const appended = startIndex > 0;
     const showing = Math.min(startIndex + CONFIG.RESULTS_PER_PAGE, filtered.length);
@@ -4916,6 +5249,11 @@
         applyOfferedLlmFilter(filterOfferEl.dataset.scoltaFilterOfferDim, filterOfferEl.dataset.scoltaFilterOfferVal);
         return;
       }
+      // Summary "Show more" / "Show less"
+      if (e.target.closest("[data-scolta-summary-toggle]")) {
+        toggleSummaryExpanded();
+        return;
+      }
       // Follow-up submit button
       if (e.target.closest("[data-scolta-followup-submit]")) {
         submitFollowUp();
@@ -5021,6 +5359,7 @@
     batchScoreResults,
     showMore,
     setResultRenderer,
+    setSuggestionRenderer,
     destroy: function() {
       if (abortController) abortController.abort();
       // Timers outlive the DOM they would write to; cancelSuggest() clears the
@@ -5109,6 +5448,72 @@
     globalResultRenderer = fn || null;
   };
 
+  /**
+   * Register the platform's suggestion renderer.
+   *
+   *   Scolta.setSuggestionRenderer(function (suggestion, ctx) { return html || null; });
+   *
+   * Called once per row of the search-as-you-type dropdown in place of the
+   * built-in row. `suggestion` is the same object the
+   * `scolta:suggestions-rendered` event carries:
+   *
+   *   type    — "title" for an index match, "recent" for a stored search
+   *   title   — the suggestion text, RAW
+   *   url     — the result's URL, RAW; "" on a recent search
+   *   safeUrl — attribute-escaped URL with non-http(s) schemes neutralized
+   *   excerpt — the fragment excerpt, RAW; "" on a recent search
+   *   meta    — the fragment's metadata map (thumbnail, entity id, anything the
+   *             index carries), RAW; {} on a recent search
+   *
+   * `ctx` carries:
+   *
+   *   index       — position of this suggestion in the dropdown
+   *   query       — the prefix being suggested on, RAW: it is here to build a
+   *                 request or compare terms, not to be pasted into markup
+   *   titleHtml   — the escaped title the built-in row would have shown
+   *   excerptHtml — the escaped, truncated excerpt, or "" on a recent search
+   *   safeUrl     — attribute-escaped URL with non-http(s) schemes neutralized,
+   *                 the same value the option's href carries in navigate mode;
+   *                 "" on a recent search, which has no destination
+   *
+   * The naming is the result renderer's: every ctx value whose name ends in
+   * Html, plus safeUrl, is pre-escaped, and everything else is raw. There is no
+   * highlightTerms here because the suggest path does not highlight — the terms
+   * on the instance belong to the committed search cycle, not to this one.
+   *
+   * Return an HTML string, or null to fall back to the built-in row for that
+   * one suggestion. A renderer that throws also falls back, with a console
+   * warning; one bad row never takes the dropdown down.
+   *
+   * What the returned string owns is the INSIDE of the option element. Scolta
+   * keeps the element itself — role="option", the stable id the input's
+   * aria-activedescendant points at, aria-selected, data-scolta-sayt-index, and
+   * in navigate mode the anchor and its sanitized href — because those are the
+   * ARIA combobox and keyboard contract, and a renderer that forgot one would
+   * break arrow-key navigation and screen-reader announcement silently.
+   *
+   * ESCAPING. The returned string is inserted as markup, so from that point the
+   * platform owns its own escaping. `ctx.titleHtml` and `ctx.excerptHtml` are
+   * already escaped exactly as the built-in row escapes them; `suggestion.title`,
+   * `suggestion.url`, `suggestion.excerpt`, every `suggestion.meta` value and
+   * `ctx.query` are raw index or visitor content, so escape them yourself.
+   *
+   * Pass null to restore the built-in row. Like setResultRenderer this is
+   * deliberately a registration function, not a config key: a function cannot
+   * travel through ScoltaConfig::toBrowserConfig() and the platform's settings
+   * JSON, and a browser config key PHP never emits would be dead weight the
+   * parity test has to be told to ignore.
+   *
+   * Applies to every instance that has not registered its own renderer via
+   * instance.setSuggestionRenderer(); safe to call before Scolta.init().
+   */
+  global.Scolta.setSuggestionRenderer = function(fn) {
+    if (fn !== null && fn !== undefined && typeof fn !== 'function') {
+      throw new TypeError('[scolta] Scolta.setSuggestionRenderer expects a function or null');
+    }
+    globalSuggestionRenderer = fn || null;
+  };
+
   // Backward-compatible init: creates a default instance from window.scolta.
   global.Scolta.init = function(containerSelector) {
     if (global.Scolta.defaultInstance) return; // already initialized
@@ -5117,9 +5522,10 @@
       global.scolta
     );
     // Expose instance methods on Scolta for backward compat. setResultRenderer
-    // is deliberately NOT among them: Scolta.setResultRenderer is the global
-    // registration, which must keep working when it is called before init() —
-    // the usual order, since a platform registers on script load.
+    // and setSuggestionRenderer are deliberately NOT among them: the Scolta.*
+    // forms are the global registrations, which must keep working when they are
+    // called before init() — the usual order, since a platform registers on
+    // script load.
     if (global.Scolta.defaultInstance) {
       var inst = global.Scolta.defaultInstance;
       global.Scolta.searchTerm = inst.searchTerm;

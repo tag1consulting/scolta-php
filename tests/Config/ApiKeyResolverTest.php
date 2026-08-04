@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tag1\Scolta\Tests\Config;
 
 use PHPUnit\Framework\TestCase;
+use Tag1\Scolta\AiProvider\Amazee\AmazeeConnectionSource;
+use Tag1\Scolta\AiProvider\Amazee\ProvenanceAwareConfigStorageInterface;
 use Tag1\Scolta\Config\AmazeeCredentials;
 use Tag1\Scolta\Config\ApiKeyResolver;
 use Tag1\Scolta\Config\ApiKeySource;
@@ -74,23 +76,139 @@ class ApiKeyResolverTest extends TestCase
         );
 
         $this->assertSame('litellm-token', $resolved->key);
-        $this->assertSame(ApiKeySource::AmazeeAuto, $resolved->source);
+        $this->assertSame(ApiKeySource::Amazee, $resolved->source);
         $this->assertSame('https://gateway.example', $resolved->baseUrl);
         $this->assertSame(ApiKeyResolver::AMAZEE_GATEWAY_PROVIDER, $resolved->provider);
         $this->assertFalse($resolved->amazeeOverridden());
     }
 
-    public function testOperatorChosenAmazeeIsDistinguishedFromAutoProvisioned(): void
+    /**
+     * Amazee is one source, and no surface guesses how it was obtained.
+     *
+     * The regression: the source briefly split into `amazee:operator` and
+     * `amazee:auto`, a trial-versus-licensed distinction nothing records.
+     * AmazeeTrialProvisioner and AmazeeAccountUpgrader both persist the same
+     * three fields through ConfigStorageInterface::store(), so each adapter
+     * substituted a local fact instead and got stuck on one case — WordPress
+     * on `amazee:auto`, which announced every operator-connected account as an
+     * auto-provisioned free trial.
+     */
+    public function testAmazeeIsOneSourceAndClaimsNothingAboutItsOrigin(): void
     {
-        $operator = ApiKeyResolver::resolve([], new AmazeeCredentials('t', '', operatorChosen: true));
-        $auto = ApiKeyResolver::resolve([], new AmazeeCredentials('t', '', operatorChosen: false));
+        $resolved = ApiKeyResolver::resolve([], new AmazeeCredentials('t'));
 
-        $this->assertSame(ApiKeySource::AmazeeOperator, $operator->source);
-        $this->assertSame(ApiKeySource::AmazeeAuto, $auto->source);
-        $this->assertTrue($operator->isAmazee());
-        $this->assertTrue($auto->isAmazee());
-        $this->assertStringNotContainsString('free trial', $operator->describe());
-        $this->assertStringContainsString('free trial', $auto->describe());
+        $this->assertSame(ApiKeySource::Amazee, $resolved->source);
+        $this->assertTrue($resolved->isAmazee());
+
+        // Every Amazee description, in every state, is free of a provenance
+        // claim: there is no stored fact that could support one.
+        $states = [
+            $resolved,
+            ApiKeyResolver::resolve([], new AmazeeCredentials('t', '', modelResolved: false)),
+        ];
+        foreach ($states as $state) {
+            $this->assertStringNotContainsString('free trial', $state->describe());
+            $this->assertStringNotContainsString('trial', $state->describe());
+            $this->assertStringNotContainsString('licensed', $state->describe());
+        }
+    }
+
+    /**
+     * Every Amazee source case rests on a fact the credential store records.
+     *
+     * The predecessor of this test asserted the opposite — that no case may
+     * claim a provenance — because the store had nowhere to keep one, and each
+     * adapter was substituting a local fact that merely correlated. That is
+     * still the property being protected; what changed is that the store now
+     * has somewhere to keep it, so the guard checks the support rather than
+     * banning the claim.
+     *
+     * Asserted structurally: adding an Amazee case with no corresponding
+     * {@see AmazeeConnectionSource} — a case nothing can ever record — fails
+     * here rather than shipping as a confident guess.
+     */
+    public function testEveryAmazeeSourceCaseRestsOnARecordedFact(): void
+    {
+        $recordable = (new \ReflectionMethod(
+            ProvenanceAwareConfigStorageInterface::class,
+            'storeConnectionSource',
+        ))->getParameters();
+        $this->assertSame(
+            'source',
+            $recordable[0]->getName(),
+            'The credential store must have somewhere to record how a connection was made, '
+            . 'or no provenance-bearing ApiKeySource case is supportable.',
+        );
+
+        $supported = ['amazee'];
+        foreach (AmazeeConnectionSource::cases() as $connection) {
+            $supported[] = ApiKeySource::forAmazeeConnection($connection)->value;
+        }
+
+        foreach (ApiKeySource::cases() as $case) {
+            if (!$case->isAmazee()) {
+                continue;
+            }
+            $this->assertContains(
+                $case->value,
+                $supported,
+                'An Amazee source case is claiming a provenance nothing can record.',
+            );
+        }
+    }
+
+    /**
+     * Unrecorded provenance reports as Amazee, never as one of the two actions.
+     *
+     * Credentials stored before 1.2.0, and any store that does not implement
+     * the provenance interface, have no recorded origin. Guessing one is the
+     * whole defect.
+     */
+    public function testUnrecordedProvenanceClaimsNoOrigin(): void
+    {
+        $resolved = ApiKeyResolver::resolve([], new AmazeeCredentials('t'));
+
+        $this->assertSame(ApiKeySource::Amazee, $resolved->source);
+        $this->assertFalse($resolved->source->isAmazeeDemo());
+        $this->assertStringNotContainsString('demo', $resolved->describe());
+        $this->assertStringNotContainsString('account', $resolved->describe());
+    }
+
+    /**
+     * A recorded connection source is reported, in both directions.
+     */
+    public function testRecordedProvenanceIsReported(): void
+    {
+        $demo = ApiKeyResolver::resolve(
+            [],
+            new AmazeeCredentials('t', connectionSource: AmazeeConnectionSource::Demo),
+        );
+        $this->assertSame(ApiKeySource::AmazeeDemo, $demo->source);
+        $this->assertTrue($demo->source->isAmazee());
+        $this->assertTrue($demo->source->isAmazeeDemo());
+        $this->assertStringContainsString('free demo', $demo->describe());
+
+        $account = ApiKeyResolver::resolve(
+            [],
+            new AmazeeCredentials('t', connectionSource: AmazeeConnectionSource::Account),
+        );
+        $this->assertSame(ApiKeySource::AmazeeAccount, $account->source);
+        $this->assertTrue($account->source->isAmazee());
+        $this->assertFalse($account->source->isAmazeeDemo());
+        $this->assertStringContainsString('your account', $account->describe());
+    }
+
+    /**
+     * No source case or label describes a connection as automatic.
+     */
+    public function testNoApiKeySourceLabelImpliesAutomaticProvisioning(): void
+    {
+        foreach (ApiKeySource::cases() as $case) {
+            foreach (['auto', 'automatic', 'free trial'] as $banned) {
+                $this->assertStringNotContainsStringIgnoringCase($banned, $case->value);
+                $this->assertStringNotContainsStringIgnoringCase($banned, $case->label());
+            }
+        }
     }
 
     public function testNoKeyAnywhereResolvesToNone(): void
@@ -128,7 +246,7 @@ class ApiKeyResolverTest extends TestCase
         );
 
         $this->assertSame('', $resolved->key, 'A dated default model reaching the gateway is an HTTP 400, not a degrade');
-        $this->assertSame(ApiKeySource::AmazeeAuto, $resolved->source);
+        $this->assertSame(ApiKeySource::Amazee, $resolved->source);
         $this->assertTrue($resolved->awaitingAmazeeModelResolution);
         $this->assertSame('warning', $resolved->severity());
     }
@@ -159,7 +277,40 @@ class ApiKeyResolverTest extends TestCase
 
     public function testCleanExplicitKeyIsSuccess(): void
     {
-        $this->assertSame('ok', ApiKeyResolver::resolve(['env' => 'sk-env'])->severity());
+        $this->assertSame(
+            'ok',
+            ApiKeyResolver::resolve(['env' => 'sk-env'], configuredProvider: 'anthropic')->severity(),
+        );
+    }
+
+    /**
+     * A key without a selected provider is not a working configuration.
+     *
+     * Scolta ships no default provider, so an environment variable set before
+     * anybody chose one leaves AI off. Reporting that in success green would
+     * reinstate by the back door the assumption that an unselected provider
+     * means Anthropic.
+     */
+    public function testExplicitKeyWithNoProviderSelectedIsNotSuccess(): void
+    {
+        $resolved = ApiKeyResolver::resolve(['env' => 'sk-env']);
+
+        $this->assertSame('', $resolved->provider);
+        $this->assertFalse($resolved->providerSelected());
+        $this->assertFalse($resolved->aiEnabled());
+        $this->assertSame('warning', $resolved->severity());
+        $this->assertStringContainsString('No AI provider is selected', $resolved->describe());
+    }
+
+    /**
+     * The resolver never substitutes a provider for the empty value.
+     */
+    public function testResolverNeverDefaultsToAnthropic(): void
+    {
+        foreach ([ApiKeyResolver::resolve([]), ApiKeyResolver::resolve(['env' => 'sk-env'])] as $resolved) {
+            $this->assertSame('', $resolved->provider);
+            $this->assertStringNotContainsString('anthropic', $resolved->describe());
+        }
     }
 
     public function testUnconfiguredIsWarning(): void
@@ -185,10 +336,10 @@ class ApiKeyResolverTest extends TestCase
             'env, amazee stored' => [['env' => 'sk-env'], true, 'env', true, true],
             'settings, no amazee' => [['env' => '', 'settings' => 'sk-set'], false, 'settings', true, false],
             'settings, amazee stored' => [['env' => '', 'settings' => 'sk-set'], true, 'settings', true, true],
-            'amazee, no amazee' => [[], false, 'none', false, false],
-            'amazee, amazee stored' => [[], true, 'amazee:auto', true, false],
-            'none, no amazee' => [['env' => '', 'settings' => ''], false, 'none', false, false],
-            'none, amazee stored' => [['env' => '', 'settings' => ''], true, 'amazee:auto', true, false],
+            'no candidates, no amazee' => [[], false, 'none', false, false],
+            'no candidates, amazee stored' => [[], true, 'amazee', true, false],
+            'empty candidates, no amazee' => [['env' => '', 'settings' => ''], false, 'none', false, false],
+            'empty candidates, amazee stored' => [['env' => '', 'settings' => ''], true, 'amazee', true, false],
         ];
     }
 
