@@ -51,7 +51,7 @@
             "awk '$2==\"js/scolta.js\"{print $1}' assets/ASSETS.sha256 > assets/js/scolta.js.sha256"
         ],
         "validate-release": "php scripts/validate-release.php",
-        "check-version-sync": "php scripts/check-version-sync.php"
+        "check-coherence": "node scripts/check-coherence.mjs ."
     },
     "extra": {
         "branch-alias": {
