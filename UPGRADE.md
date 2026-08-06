@@ -4,6 +4,69 @@ This document describes breaking changes and migration steps between versions of
 
 ## Unreleased
 
+## 1.2.0
+
+### `AmazeeCredentials` no longer takes `operatorChosen`
+
+`AmazeeCredentials` is `@stability experimental`, so this signature change lands
+inside the 1.2 line rather than waiting for a major. The `operatorChosen` flag
+is gone from all three entry points, replaced by an
+`AmazeeConnectionSource|null` recorded at connect time rather than a boolean
+supplied by the caller.
+
+Before (1.1.0):
+
+```php
+public function __construct(
+    public readonly string $token,
+    public readonly string $baseUrl = '',
+    public readonly bool $operatorChosen = false,
+    public readonly bool $modelResolved = true,
+) {}
+
+public static function fromStorage(ConfigStorageInterface $storage, bool $operatorChosen = false, bool $modelResolved = true): ?self
+public static function fromArray(?array $stored, bool $operatorChosen = false, bool $modelResolved = true): ?self
+```
+
+After (1.2.0):
+
+```php
+public function __construct(
+    public readonly string $token,
+    public readonly string $baseUrl = '',
+    public readonly bool $modelResolved = true,
+    public readonly ?AmazeeConnectionSource $connectionSource = null,
+) {}
+
+public static function fromStorage(ConfigStorageInterface $storage, bool $modelResolved = true): ?self
+public static function fromArray(?array $stored, bool $modelResolved = true, ?AmazeeConnectionSource $connectionSource = null): ?self
+```
+
+**Who is affected:** anything constructing `AmazeeCredentials` directly, or
+calling `fromStorage()` / `fromArray()`. The class is `final`, so there is no
+subclass to update.
+
+**What to do:**
+
+- A named argument `operatorChosen:` is now an unknown named parameter and
+  throws. Drop it. If you need the distinction back, pass
+  `connectionSource:` an `AmazeeConnectionSource` case instead, or let
+  `fromStorage()` read it from a store implementing
+  `ProvenanceAwareConfigStorageInterface`.
+- `fromStorage()` no longer accepts a connection-source argument at all. It
+  derives the value from the store, so a caller that was passing one drops it.
+- **Positional callers must recount.** `modelResolved` moved from third to
+  second on `fromStorage()` and `fromArray()`, and from fourth to third on the
+  constructor. A three-argument positional call such as
+  `new AmazeeCredentials($token, $url, true)` previously set `operatorChosen`
+  and now sets `modelResolved`, with no error at any layer. Audit positional
+  call sites rather than relying on a fatal to find them.
+- Passing a boolean into the new fourth constructor slot raises a `TypeError`,
+  since `connectionSource` is typed `?AmazeeConnectionSource`.
+
+Credentials stored before 1.2.0 have no recorded source and report
+`connectionSource: null`, which is reported as unknown rather than assumed.
+
 ### There is no default AI provider
 
 `ScoltaConfig::$aiProvider` now defaults to `''` instead of `'anthropic'`, and
@@ -74,9 +137,11 @@ and its human-readable label change.
   "(auto-provisioned free trial)". A surface that matched on that wording needs
   updating; a surface that renders the string needs nothing.
 
-Both classes are `@stability experimental`, so this lands inside the 1.1 line
+Both classes are `@stability experimental`, so this lands inside the 1.2 line
 rather than waiting for a major. If you want the trial-versus-licensed
 distinction back, the credential store has to record it first.
+
+## 1.1.0
 
 ### Search as you type is ON by default
 
