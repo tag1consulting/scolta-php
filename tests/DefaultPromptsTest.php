@@ -467,17 +467,17 @@ class DefaultPromptsTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
-    // Issue #36 — category-member and context decomposition rules
+    // Issue #36 — category-instance and context decomposition rules
     // -------------------------------------------------------------------------
 
-    public function testExpandQueryTemplateContainsCategoryMemberRule(): void
+    public function testExpandQueryTemplateContainsCategoryInstanceRule(): void
     {
         $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
 
         $this->assertStringContainsString(
-            'CATEGORY → MEMBERS',
+            'CATEGORY → INSTANCES',
             $template,
-            'expand_query must contain rule 13 (CATEGORY → MEMBERS)',
+            'expand_query must contain rule 13 (CATEGORY → INSTANCES)',
         );
         $this->assertStringContainsString(
             'Mercurial',
@@ -502,14 +502,14 @@ class DefaultPromptsTest extends TestCase
         );
     }
 
-    public function testExpandQueryTemplateForbidsFabricatingMembers(): void
+    public function testExpandQueryTemplateForbidsFabricatingInstances(): void
     {
         $template = DefaultPrompts::getTemplate(DefaultPrompts::EXPAND_QUERY);
 
         $this->assertStringContainsString(
-            'never invent members',
+            'never invent instances',
             $template,
-            'rule 13 must forbid fabricating members for unknown categories',
+            'rule 13 must forbid fabricating instances for unknown categories',
         );
     }
 
