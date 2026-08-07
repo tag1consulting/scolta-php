@@ -664,22 +664,151 @@ describe('the facet index path and the fallback path agree', () => {
         expect(panel(withArtifact.window)).toEqual(SCENARIO_EXPECTED);
     });
 
-    test('the delta costs the artifact path zero extra fragment loads', async () => {
+    test('the artifact still counts without filter chunks, and loads only the delta', async () => {
         const withArtifact = await scenarioEnv(true);
         await runSearch(withArtifact, 'alpha');
 
-        // facetCountsFor() reads nothing but r.id, so every document is loaded
-        // exactly once — by the result path — and the count pass loads none.
+        // The artifact is what does the counting: no filter chunk is fetched.
+        expect(withArtifact.filtersCalls).toBe(0);
+
+        // This used to assert zero extra loads. #265 made the count pass
+        // collapse the delta the way the list collapses it, and that collapse is
+        // defined on `url` and `meta.title` — the artifact stores neither, only a
+        // fragment hash to page ordinal. So the delta's fragments are now
+        // loaded. The property still worth pinning is that it is ONLY the delta,
+        // once each: the typed pass still counts natively and loads nothing, and
+        // these are the same fragments the result path just fetched, so they are
+        // Pagefind-cached by hash in a browser.
         const loads = {};
         for (const id of withArtifact.dataCalls) loads[id] = (loads[id] || 0) + 1;
-        expect(Object.values(loads).every(n => n === 1)).toBe(true);
-        expect(withArtifact.dataCalls).toHaveLength(5);
+        const loadedTwice = Object.keys(loads).filter(id => loads[id] > 1).sort();
+        expect(loadedTwice).toEqual(SCENARIO_EXPANDED.map(p => PAGE_IDS[p]).sort());
+        expect(Object.values(loads).every(n => n <= 2)).toBe(true);
 
-        // The fallback path has no artifact to count against, so it does load
-        // the delta's fragments — Pagefind-cached in a browser, and the
-        // difference is what the assertion above is protecting.
-        const fallback = await scenarioEnv(false);
-        await runSearch(fallback, 'alpha');
-        expect(fallback.dataCalls.length).toBeGreaterThan(5);
+        // The typed documents are still loaded exactly once, by the result path.
+        for (const p of SCENARIO_TYPED) expect(loads[PAGE_IDS[p]]).toBe(1);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// scolta-php#265: the panel counted a population the list had already collapsed,
+// and offered values the filtered search could not reproduce.
+//
+// mergeExpandedSearchResults() folds every expansion document through
+// mergeResults() (one row per normalized URL) and deduplicateByTitle()
+// (near-duplicate titles, Jaccard >= 0.6). The count path applied neither, so a
+// document the list folded away still added its values to the panel — one count
+// too high per collapsed pair, which is the off-by-one shape measured on
+// apollo-blog. Separately, a value whose only carrier never reached the list was
+// still offered, and clicking it landed on "No results found".
+// ---------------------------------------------------------------------------
+
+describe('#265: the panel counts only documents the list actually shows', () => {
+    test('an expansion document collapsed by title is not counted', async () => {
+        const env = await createEnv({
+            docs: {
+                'doc-a': { url: '/a', title: 'Alpha Bravo Charlie',
+                    filters: { topic: 'Fruit', level: 'Beginner', site: 'OneSite', language: 'en' } },
+                'doc-b': { url: '/b', title: 'Delta Echo Foxtrot',
+                    filters: { topic: 'Veg', level: 'Beginner', site: 'OneSite', language: 'en' } },
+                // Same title as doc-b, different URL: the URL collapse cannot
+                // catch it, deduplicateByTitle() can, and the list shows one row.
+                'doc-c': { url: '/c', title: 'Delta Echo Foxtrot',
+                    filters: { topic: 'Veg', level: 'Beginner', site: 'OneSite', language: 'en' } },
+            },
+            queries: { alpha: ['doc-a'], beta: ['doc-b', 'doc-c'] },
+            expansion: { terms: ['beta'] },
+        });
+        await runSearch(env, 'alpha');
+
+        // The list collapsed doc-c into doc-b.
+        expect(headerCount(env.window)).toBe(2);
+        expect(resultCards(env.window)).toBe(2);
+
+        const counts = panel(env.window);
+        // Veg read 2 before the fix, against one Veg row in the list.
+        expect(counts['topic:Veg']).toBe(1);
+        expect(counts['topic:Fruit']).toBe(1);
+        expect(counts['level:Beginner']).toBe(2);
+
+        // The invariant the divergence broke: a dimension's counts sum to the
+        // number of rows, because every row carries exactly one topic.
+        const topicSum = counts['topic:Fruit'] + counts['topic:Veg'];
+        expect(topicSum).toBe(headerCount(env.window));
+    });
+
+    test('the artifact path collapses the same document the fallback path does', async () => {
+        // Pages 4 and 6 are both Veg/Beginner in the fixture. Given one title
+        // they are one row in the list, so the artifact must count one page.
+        const env = await createEnv({
+            artifact: true,
+            docs: {
+                [PAGE_IDS[0]]: { url: '/p0', title: 'Alpha Bravo Charlie',
+                    filters: { topic: 'Fruit', level: 'Beginner', site: 'OneSite', language: 'en' } },
+                [PAGE_IDS[4]]: { url: '/p4', title: 'Delta Echo Foxtrot',
+                    filters: { topic: 'Veg', level: 'Beginner', site: 'OneSite', language: 'en' } },
+                [PAGE_IDS[6]]: { url: '/p6', title: 'Delta Echo Foxtrot',
+                    filters: { topic: 'Veg', level: 'Beginner', site: 'OneSite', language: 'en' } },
+            },
+            queries: { alpha: [PAGE_IDS[0]], beta: [PAGE_IDS[4], PAGE_IDS[6]] },
+            expansion: { terms: ['beta'] },
+        });
+        await runSearch(env, 'alpha');
+
+        expect(headerCount(env.window)).toBe(2);
+        const counts = panel(env.window);
+        expect(counts['topic:Veg']).toBe(1);
+        expect(counts['topic:Fruit']).toBe(1);
+    });
+
+    test('a value no result in the list carries is not offered', async () => {
+        // The typed pass counts natively and uncapped, so it sees all three
+        // documents; the list loads MAX_PAGEFIND_RESULTS of them. The Advanced
+        // document falls outside the cap, so the panel used to offer a value
+        // that clicked through to nothing.
+        const env = await createEnv({
+            scoring: { MAX_PAGEFIND_RESULTS: 2 },
+            docs: {
+                'doc-0': { url: '/0', title: 'Alpha Bravo Charlie',
+                    filters: { topic: 'Fruit', level: 'Beginner', site: 'OneSite', language: 'en' } },
+                'doc-1': { url: '/1', title: 'Delta Echo Foxtrot',
+                    filters: { topic: 'Veg', level: 'Beginner', site: 'OneSite', language: 'en' } },
+                'doc-9': { url: '/9', title: 'Golf Hotel India',
+                    filters: { topic: 'Veg', level: 'Advanced', site: 'OneSite', language: 'en' } },
+            },
+            queries: { alpha: ['doc-0', 'doc-1', 'doc-9'], beta: [] },
+            expansion: { terms: ['beta'] },
+        });
+        await runSearch(env, 'alpha');
+
+        expect(headerCount(env.window)).toBe(2);
+        const counts = panel(env.window);
+        expect(counts['level:Beginner']).toBe(2);
+        // Zeroed, so hideEmptyFacets drops it: absent, or present at 0. What it
+        // must never be is 1, a count with nothing behind it.
+        expect(counts['level:Advanced'] === undefined || counts['level:Advanced'] === 0).toBe(true);
+    });
+
+    test('the reachability gate never fires while a facet selection is active', async () => {
+        // Counts are deliberately selection-independent: a page loaded with
+        // ?f_level=Beginner must still offer Advanced, or the user can never
+        // switch value. The list holds only Beginner rows, so gating on presence
+        // in the list would hide Advanced outright. The gate must stand down.
+        const env = await createEnv({
+            docs: {
+                'doc-0': { url: '/0', title: 'Alpha Bravo Charlie',
+                    filters: { topic: 'Fruit', level: 'Beginner', site: 'OneSite', language: 'en' } },
+                'doc-9': { url: '/9', title: 'Golf Hotel India',
+                    filters: { topic: 'Veg', level: 'Advanced', site: 'OneSite', language: 'en' } },
+            },
+            queries: { alpha: ['doc-0', 'doc-9'], beta: [] },
+            expansion: { terms: ['beta'] },
+            initialFilters: { level: ['Beginner'] },
+        });
+        await runSearch(env, 'alpha');
+
+        const counts = panel(env.window);
+        expect(counts['level:Beginner']).toBe(1);
+        expect(counts['level:Advanced']).toBe(1);
     });
 });
