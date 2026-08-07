@@ -58,7 +58,11 @@ class StreamingFormatWriter
     /** CBOR-encoded word entries for the chunk being accumulated. */
     private array $currentChunkItems = [];
 
-    /** All words in the current chunk (for hash computation). */
+    /**
+     * All words in the current chunk, in written order (names the chunk file).
+     *
+     * @var list<string>
+     */
     private array $currentChunkWords = [];
 
     /** Estimated byte size of the current chunk. */
@@ -169,7 +173,7 @@ class StreamingFormatWriter
             ));
         }
 
-        $hash       = 'en_' . substr(hash('sha256', (string) $pageNum . $pageData['url']), 0, 10);
+        $hash       = IndexFileNaming::fragmentHash($pageNum, (string) $pageData['url'], $fragment);
         $compressed = gzencode(self::DELIMITER . $fragment, 9);
         $fragPath   = $this->buildDir . "/fragment/{$hash}.pf_fragment";
         if (file_put_contents($fragPath, $compressed) === false) {
@@ -325,7 +329,7 @@ class StreamingFormatWriter
 
         $innerArray = $this->cbor->encodeArray($this->currentChunkItems);
         $cborData   = $this->cbor->encodeArray([$innerArray]);
-        $hash       = 'en_' . substr(hash('sha256', implode(',', $this->currentChunkWords)), 0, 10);
+        $hash       = IndexFileNaming::chunkHash($this->currentChunkWords, $cborData);
         $compressed = gzencode(self::DELIMITER . $cborData, 9);
         $indexPath  = $this->buildDir . "/index/{$hash}.pf_index";
         if (file_put_contents($indexPath, $compressed) === false) {

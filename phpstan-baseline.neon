@@ -751,12 +751,6 @@ parameters:
 			path: src/Index/StreamingFormatWriter.php
 
 		-
-			message: '#^Property Tag1\\Scolta\\Index\\StreamingFormatWriter\:\:\$currentChunkWords type has no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Index/StreamingFormatWriter.php
-
-		-
 			message: '#^Property Tag1\\Scolta\\Index\\StreamingFormatWriter\:\:\$filterData type has no value type specified in iterable type array\.$#'
 			identifier: missingType.iterableValue
 			count: 1

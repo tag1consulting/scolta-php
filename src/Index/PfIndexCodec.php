@@ -115,15 +115,19 @@ final class PfIndexCodec
     }
 
     /**
-     * The filename a chunk holding these terms must have.
+     * The filename a chunk holding these terms and this body must have.
+     *
+     * The body is part of the name because the file is served from a static
+     * directory a cache sits in front of; see {@see IndexFileNaming}.
      *
      * @param array<string, mixed> $terms
+     * @param string               $body  The encoded chunk body, before compression.
      * @since 1.1.1
      * @stability experimental
      */
-    public static function chunkHash(array $terms): string
+    public static function chunkHash(array $terms, string $body): string
     {
-        return 'en_' . substr(hash('sha256', implode(',', self::wordList($terms))), 0, 10);
+        return IndexFileNaming::chunkHash(self::wordList($terms), $body);
     }
 
     /**

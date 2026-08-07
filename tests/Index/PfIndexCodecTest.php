@@ -107,12 +107,14 @@ final class PfIndexCodecTest extends TestCase
 
     public function testChunkHashMatchesTheFilenameTheWriterChose(): void
     {
+        $cbor = new CborEncoder();
+
         foreach ($this->buildIndex(300) as $path) {
             $decoded = PfIndexCodec::decodeChunk(self::chunkBody($path));
 
             $this->assertSame(
                 basename($path, '.pf_index'),
-                PfIndexCodec::chunkHash($decoded),
+                PfIndexCodec::chunkHash($decoded, PfIndexCodec::encodeChunk($cbor, $decoded)),
                 'Codec and writer disagree on chunk identity.',
             );
         }

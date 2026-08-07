@@ -260,7 +260,17 @@ final class IncrementalDifferentialTest extends TestCase
 
     // ── The property the whole design turns on ─────────────────────────────
 
-    public function testChangingOnlyPostingsRenamesNoIndexChunk(): void
+    /**
+     * A touched chunk is renamed, and the name it had is not left behind.
+     *
+     * The filename follows the chunk's contents rather than its word list
+     * alone, so a postings change does move the file — that is what keeps a
+     * cached copy of the previous bytes unreachable instead of merely stale.
+     * What the design still turns on is that the *range table* holds still:
+     * one chunk is rewritten, not the cover re-cut, and the result stays
+     * byte-identical to a full rebuild.
+     */
+    public function testChangingOnlyPostingsRenamesItsChunkAndLeavesNoOrphan(): void
     {
         // A corpus whose vocabulary is closed: every page draws from the same
         // small word pool, so editing a page changes which pages a term points
@@ -274,19 +284,35 @@ final class IncrementalDifferentialTest extends TestCase
         $namesBefore = array_map('basename', glob($this->incrementalOut . '/pagefind/index/*.pf_index') ?: []);
         sort($namesBefore);
 
+        $edited  = self::closedVocabularyPage(20, 1);
         $updater = $this->updater();
-        $updater->stageUpsert(self::closedVocabularyPage(20, 1));
+        $updater->stageUpsert($edited);
         $updater->commit();
 
         $namesAfter = array_map('basename', glob($this->incrementalOut . '/pagefind/index/*.pf_index') ?: []);
         sort($namesAfter);
 
-        $this->assertSame(
+        $this->assertCount(
+            count($namesBefore),
+            $namesAfter,
+            'A postings change must rename the chunk it touches, not add one alongside it.',
+        );
+        $this->assertNotSame(
             $namesBefore,
             $namesAfter,
-            'Changing which pages appear in a posting list must rename no chunk: the filename '
-            . 'hashes the word list, and the word list did not change.',
+            'A chunk whose postings moved kept its filename, so a cache holding the previous '
+            . 'bytes answers for the new contents.',
         );
+        $this->assertCount(
+            1,
+            array_diff($namesBefore, $namesAfter),
+            'Exactly the touched chunk should have been renamed.',
+        );
+
+        $changed     = $items;
+        $changed[19] = $edited;
+        $this->rebuildReference($changed);
+        $this->assertTreesMatch('A renamed chunk must still match what a full rebuild produces.');
     }
 
     /**

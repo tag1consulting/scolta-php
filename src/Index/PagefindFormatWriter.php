@@ -82,7 +82,7 @@ class PagefindFormatWriter
                 ));
             }
 
-            $hash = 'en_' . substr(hash('sha256', (string) $pageNum . $page['url']), 0, 10);
+            $hash = IndexFileNaming::fragmentHash($pageNum, (string) $page['url'], $fragment);
             $page['fragmentHash'] = $hash;
             $compressed = gzencode(self::DELIMITER . $fragment, 9);
             $fragPath = $buildDir . "/fragment/{$hash}.pf_fragment";
@@ -109,7 +109,7 @@ class PagefindFormatWriter
             // The WASM expects this wrapper when parsing pf_index chunks.
             $innerArray = $this->cbor->encodeArray($cborItems);
             $cborData = $this->cbor->encodeArray([$innerArray]);
-            $hash = 'en_' . substr(hash('sha256', implode(',', $chunkWords)), 0, 10);
+            $hash = IndexFileNaming::chunkHash($chunkWords, $cborData);
             $compressed = gzencode(self::DELIMITER . $cborData, 9);
             $indexPath = $buildDir . "/index/{$hash}.pf_index";
             if (file_put_contents($indexPath, $compressed) === false) {
@@ -514,7 +514,7 @@ class PagefindFormatWriter
     /**
      * Chunk words into groups for separate index files.
      *
-     * @return string[][] Array of word groups.
+     * @return list<list<string>> Array of word groups.
      */
     private function chunkWords(array $wordList, array $index): array
     {
