@@ -322,14 +322,25 @@ function captureFacetTuples(window) {
 
 function makeResult(filterObj, overrides) {
     const url = (overrides && overrides.url) || '/test';
+    const id = (overrides && overrides.id) || url;
+    // Distinct multi-word title per document. The default used to be a constant
+    // 'Test Page', which made deduplicateByTitle() collapse every fixture
+    // document into one row: the LIST showed one result while the count path
+    // (which did not collapse) reported two, and a test asserting the count of
+    // two was pinning exactly the divergence scolta-php#265 is about. The count
+    // path now collapses the same documents the list does, so a shared title
+    // would make these tests assert the collapsed number instead of the
+    // scalar/array and per-term-union behaviour they exist to cover.
+    const slug = String(id).replace(/\W+/g, '') || 'doc';
     return {
         // Pagefind result objects carry an `id` (the fragment hash); the OR-fallback
         // count path unions per-term results by it so a doc matching several terms
         // is counted once. Defaults to the url so single-result mocks stay distinct.
-        id: (overrides && overrides.id) || url,
+        id: id,
         data: () => Promise.resolve({
             meta: {
-                title: (overrides && overrides.title) || 'Test Page',
+                title: (overrides && overrides.title)
+                    || ('Alpha' + slug + ' Bravo' + slug + ' Charlie' + slug),
                 url,
                 site: filterObj.site || 'Site A',
             },
