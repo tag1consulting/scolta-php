@@ -174,13 +174,31 @@ jobs:
         run: |
           php -r '
             $j = json_decode(file_get_contents("composer.json"), true);
-            $j["repositories"] = [["type" => "vcs", "url" => "https://github.com/tag1consulting/scolta-php.git"]];
+            // no-api makes the VCS driver read refs over git instead of the
+            // api.github.com REST API. That API budget (1,000/hour/repo) is
+            // shared by every concurrent job and run, and when it runs dry
+            // the driver gets a 403 that composer reports as
+            // "Could not authenticate against github.com" (exit 100).
+            // Git access to a public repo does not touch that budget.
+            $j["repositories"] = [["type" => "vcs", "url" => "https://github.com/tag1consulting/scolta-php.git", "no-api" => true]];
             $j["require"]["tag1/scolta-php"] = "dev-main@dev";
             file_put_contents("composer.json", json_encode($j, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
           '
 
       - name: Install dependencies
-        run: composer update --no-interaction --prefer-dist --ignore-platform-req=php
+        # Retry: a dist download can still draw on the shared REST budget, so
+        # one throttled call should not fail the job.
+        run: |
+          for attempt in 1 2 3; do
+            if composer update --no-interaction --prefer-dist --ignore-platform-req=php; then
+              exit 0
+            fi
+            echo "composer update failed (attempt $attempt of 3)"
+            if [ "$attempt" != 3 ]; then
+              sleep $((attempt * 30))
+            fi
+          done
+          exit 1
 
       - name: Run WordPress adapter tests
         run: composer test
@@ -218,7 +236,10 @@ jobs:
                 $j["repositories"] ?? [],
                 fn($r) => !($r["type"] === "path" && str_contains($r["url"] ?? "", "scolta-php"))
             );
-            $repos[] = ["type" => "vcs", "url" => "https://github.com/tag1consulting/scolta-php.git"];
+            // no-api: read refs over git rather than the api.github.com REST
+            // API, whose shared 1,000/hour/repo budget throttles to a 403 that
+            // composer reports as "Could not authenticate against github.com".
+            $repos[] = ["type" => "vcs", "url" => "https://github.com/tag1consulting/scolta-php.git", "no-api" => true];
             $j["repositories"] = array_values($repos);
             $j["require"]["tag1/scolta-php"] = "dev-main@dev";
             // Allow Drupal core plugins required when installing Drupal as a dependency.
@@ -232,7 +253,19 @@ jobs:
           '
 
       - name: Install dependencies
-        run: composer update --no-interaction --prefer-dist --ignore-platform-req=php
+        # Retry: a dist download can still draw on the shared REST budget, so
+        # one throttled call should not fail the job.
+        run: |
+          for attempt in 1 2 3; do
+            if composer update --no-interaction --prefer-dist --ignore-platform-req=php; then
+              exit 0
+            fi
+            echo "composer update failed (attempt $attempt of 3)"
+            if [ "$attempt" != 3 ]; then
+              sleep $((attempt * 30))
+            fi
+          done
+          exit 1
 
       - name: Verify scolta-php installed correctly
         # The full adapter test suite is owned by scolta-drupal's own CI.
@@ -270,13 +303,28 @@ jobs:
         run: |
           php -r '
             $j = json_decode(file_get_contents("composer.json"), true);
-            $j["repositories"] = [["type" => "vcs", "url" => "https://github.com/tag1consulting/scolta-php.git"]];
+            // no-api: read refs over git rather than the api.github.com REST
+            // API, whose shared 1,000/hour/repo budget throttles to a 403 that
+            // composer reports as "Could not authenticate against github.com".
+            $j["repositories"] = [["type" => "vcs", "url" => "https://github.com/tag1consulting/scolta-php.git", "no-api" => true]];
             $j["require"]["tag1/scolta-php"] = "dev-main@dev";
             file_put_contents("composer.json", json_encode($j, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
           '
 
       - name: Install dependencies
-        run: composer update --no-interaction --prefer-dist --ignore-platform-req=php
+        # Retry: a dist download can still draw on the shared REST budget, so
+        # one throttled call should not fail the job.
+        run: |
+          for attempt in 1 2 3; do
+            if composer update --no-interaction --prefer-dist --ignore-platform-req=php; then
+              exit 0
+            fi
+            echo "composer update failed (attempt $attempt of 3)"
+            if [ "$attempt" != 3 ]; then
+              sleep $((attempt * 30))
+            fi
+          done
+          exit 1
 
       - name: Run Laravel adapter tests
         run: composer test
