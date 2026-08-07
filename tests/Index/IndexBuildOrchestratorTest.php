@@ -68,6 +68,31 @@ class IndexBuildOrchestratorTest extends TestCase
         $this->assertFileExists($this->outputDir . '/pagefind/pagefind-entry.json');
     }
 
+    public function testBuildPublishesOverStagingDirsLeftByAnInterruptedSwap(): void
+    {
+        // What an interrupted swap leaves on disk. Both are rename() targets
+        // and rename() onto a non-empty directory fails with ENOTEMPTY, so
+        // before the fix the first of these wedged every subsequent build:
+        // the swap threw, and the failure reproduced the state that caused it.
+        mkdir($this->outputDir . '/.scolta-new', 0755, true);
+        mkdir($this->outputDir . '/.scolta-old', 0755, true);
+        file_put_contents($this->outputDir . '/.scolta-new/corpse.txt', 'stale');
+        file_put_contents($this->outputDir . '/.scolta-old/corpse.txt', 'stale');
+
+        $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
+        $report       = $orchestrator->build(
+            BuildIntent::fresh(3, MemoryBudget::conservative()),
+            $this->makeItems(3),
+        );
+
+        $this->assertTrue($report->success, $report->error ?? 'No error');
+        $this->assertFileExists($this->outputDir . '/pagefind/pagefind-entry.json');
+        $this->assertFileDoesNotExist($this->outputDir . '/pagefind/corpse.txt');
+        $this->assertDirectoryDoesNotExist($this->outputDir . '/.scolta-new');
+        $this->assertDirectoryDoesNotExist($this->outputDir . '/.scolta-old');
+        $this->assertDirectoryDoesNotExist($this->outputDir . '/.scolta-building');
+    }
+
     public function testBuildCreatesFragmentFiles(): void
     {
         $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
