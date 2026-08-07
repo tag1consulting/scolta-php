@@ -171,7 +171,7 @@ final class MemoryTelemetry
      *
      * @return array<string, array{seconds: float, calls: int, items: int, pct: float}>
      *         Ordered by seconds descending.
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function phaseSummary(): array
@@ -206,7 +206,7 @@ final class MemoryTelemetry
      * @param string $name    Sub-timer name, e.g. 'tokenize' or 'gc'.
      * @param float  $seconds Elapsed seconds for this occurrence.
      * @param int    $items   Items covered, for a rate in the summary.
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function recordSubTimer(string $name, float $seconds, int $items = 0): void
@@ -225,7 +225,7 @@ final class MemoryTelemetry
      * two sets must never be added together.
      *
      * @return array<string, array{seconds: float, calls: int, items: int}>
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function subTimers(): array
@@ -246,7 +246,7 @@ final class MemoryTelemetry
      * carries the ranked breakdown; the `phases` context key carries the same
      * data structured, for log processors.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function emitPhaseSummary(): void

@@ -19,7 +19,7 @@ use Tag1\Scolta\Export\ContentItem;
  * generator seeded per item, so generate(5000, seed: 7) returns identical
  * ContentItems on every call, in every process, on every platform.
  *
- * @since 1.1.1
+ * @since 1.2.0
  * @stability experimental
  */
 final class SyntheticCorpus

@@ -21,7 +21,7 @@ namespace Tag1\Scolta\Index;
  * corpus (2,071 word entries): decode followed by re-encode reproduced the
  * original bytes for every one.
  *
- * @since 1.1.1
+ * @since 1.2.0
  * @stability experimental
  */
 final class CborDecoder
@@ -35,7 +35,7 @@ final class CborDecoder
      *
      * @throws \RuntimeException When the bytes are truncated, use an
      *                           unsupported type, or carry trailing data.
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public static function decode(string $data): mixed
@@ -58,7 +58,7 @@ final class CborDecoder
      * Read a Pagefind artifact: gunzip, strip the delimiter, decode.
      *
      * @throws \RuntimeException When the file cannot be read or decompressed.
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public static function decodeArtifact(string $path, string $delimiter = 'pagefind_dcd'): mixed

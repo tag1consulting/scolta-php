@@ -9,7 +9,7 @@ namespace Tag1\Scolta\AiProvider\Amazee;
  *
  * This is recorded at the moment a connection is established, not derived
  * afterwards. The distinction was previously guessed from whatever local fact
- * an adapter had to hand, which is why 1.1.1 removed it outright
+ * an adapter had to hand, which is why 1.2.0 removed it outright
  * ([#273](https://github.com/tag1consulting/scolta-php/pull/273)): both
  * {@see AmazeeTrialProvisioner::provision()} and
  * {@see AmazeeAccountUpgrader::upgrade()} persist the same three fields

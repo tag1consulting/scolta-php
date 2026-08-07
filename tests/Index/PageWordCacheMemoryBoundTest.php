@@ -18,7 +18,7 @@ use Tag1\Scolta\Storage\FilesystemDriver;
  * were never released between chunks, so `--chunk-size=20` on a large corpus
  * changed how much was read at a time and nothing about what was retained.
  *
- * @since 1.1.1
+ * @since 1.2.0
  * @stability experimental
  */
 class PageWordCacheMemoryBoundTest extends TestCase

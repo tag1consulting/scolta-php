@@ -26,7 +26,7 @@ namespace Tag1\Scolta\Index;
  * Verified against 25 chunks of a real 109,308-page index (2,071 word entries):
  * decode followed by re-encode reproduced the original bytes for all 25.
  *
- * @since 1.1.1
+ * @since 1.2.0
  * @stability experimental
  */
 final class PfIndexCodec
@@ -43,7 +43,7 @@ final class PfIndexCodec
      *
      * @param string $cborBody The chunk bytes with the gzip and delimiter already stripped.
      * @return array<string, array<int|string, mixed>> term => pageEntries, in file order.
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public static function decodeChunk(string $cborBody): array
@@ -69,7 +69,7 @@ final class PfIndexCodec
      * Read and decode a chunk file.
      *
      * @return array<string, array<int|string, mixed>>
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public static function decodeChunkFile(string $path): array
@@ -100,7 +100,7 @@ final class PfIndexCodec
      *
      * @param array<string, mixed> $terms
      * @return list<string>
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public static function wordList(array $terms): array
@@ -122,7 +122,7 @@ final class PfIndexCodec
      *
      * @param array<string, mixed> $terms
      * @param string               $body  The encoded chunk body, before compression.
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public static function chunkHash(array $terms, string $body): string
@@ -138,7 +138,7 @@ final class PfIndexCodec
      * rather than keeping its own copy, so the two directions cannot drift.
      *
      * @param array<string, array<int|string, mixed>> $terms term => pageEntries, in the order that names the file.
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public static function encodeChunk(CborEncoder $cbor, array $terms): string
@@ -159,7 +159,7 @@ final class PfIndexCodec
      * decode() can restore a single bucket and still round-trip exactly.
      *
      * @param array<int|string, mixed> $pageEntries
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public static function encodeWordEntry(CborEncoder $cbor, string $word, array $pageEntries): string
