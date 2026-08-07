@@ -33,11 +33,15 @@ use Tag1\Scolta\Storage\StorageDriverInterface;
  *
  *  - The page ordinal comes from {@see PageTableLedger}, so it survives edits,
  *    inserts and deletes instead of being a running counter over gather order.
- *  - The `pf_index` chunk filename hashes only its word list, and the chunk
- *    ranges in `pf_meta[2]` are treated as frozen. Changing which pages appear
- *    in a posting list therefore renames no file at all; only a vocabulary
- *    change touches chunk identity, and then only the one chunk that owns the
- *    new term.
+ *  - The chunk ranges in `pf_meta[2]` are treated as frozen, so which chunk
+ *    owns a term is a function of the vocabulary rather than of the corpus.
+ *
+ * Chunk and fragment *filenames* are not pinned, and deliberately so: both
+ * follow their contents (see {@see IndexFileNaming}), because a published
+ * index is fetched over HTTP and a name that outlives its bytes is a name a
+ * cache will serve stale. A touched chunk is therefore rewritten under a new
+ * name and the old file unlinked — the rename path below — and a rewritten
+ * fragment likewise. Only the ranges stay put.
  *
  * ## What it refuses
  *
@@ -190,8 +194,9 @@ final class IncrementalIndexUpdater
             }
             $this->collectRemovals($id, $ordinal, $removals);
 
-            $this->deleteFragment($ordinal, (string) $this->ledger->urlFor($id));
+            $superseded         = $pageMeta[$ordinal]['fragmentHash'] ?? null;
             $pageMeta[$ordinal] = $this->writeTombstoneFragment($ordinal);
+            $this->deleteSupersededFragment($superseded, $pageMeta[$ordinal]['fragmentHash']);
             $this->ledger->release($id);
             $touchedFragments++;
         }
@@ -208,8 +213,12 @@ final class IncrementalIndexUpdater
                 // full build would do with it.
                 if ($existingOrdinal !== null) {
                     $this->collectRemovals($item->id, $existingOrdinal, $removals);
-                    $this->deleteFragment($existingOrdinal, (string) $this->ledger->urlFor($item->id));
+                    $superseded                 = $pageMeta[$existingOrdinal]['fragmentHash'] ?? null;
                     $pageMeta[$existingOrdinal] = $this->writeTombstoneFragment($existingOrdinal);
+                    $this->deleteSupersededFragment(
+                        $superseded,
+                        $pageMeta[$existingOrdinal]['fragmentHash'],
+                    );
                     $this->ledger->release($item->id);
                     $touchedFragments++;
                 }
@@ -218,7 +227,6 @@ final class IncrementalIndexUpdater
 
             $this->cache->put($newHash, $tokenData);
 
-            $previousUrl = $this->ledger->urlFor($item->id);
             if ($existingOrdinal !== null) {
                 $this->collectRemovals($item->id, $existingOrdinal, $removals);
             }
@@ -231,26 +239,19 @@ final class IncrementalIndexUpdater
                 $newHash,
             );
 
-            // A url change at a stable ordinal renames the fragment, because
-            // the filename hashes ordinal AND url. Without removing the old
-            // file the index keeps an orphan nothing references.
-            if ($previousUrl !== null && $previousUrl !== $item->url) {
-                $this->deleteFragment($ordinal, $previousUrl);
-            }
-
-            // Taking an ordinal off the free list means it was holding a
-            // tombstone, whose fragment is named for the empty url. That file
-            // is now unreferenced, and unlike the full build there is no
-            // directory swap to sweep it away.
-            if ($existingOrdinal === null && $item->url !== '') {
-                $this->deleteFragment($ordinal, '');
-            }
-
             $partial = $this->builder->buildFromTokenDataWithOrdinals([
                 ['item' => $item, 'tokenData' => $tokenData, 'ordinal' => $ordinal],
             ]);
 
+            // Whatever this ordinal named before is unreferenced the moment the
+            // new fragment lands, and unlike the full build there is no
+            // directory swap to sweep it away. That covers an edit, a url
+            // change, and an ordinal taken off the free list still holding its
+            // tombstone — all three are the same thing now that the filename
+            // follows the contents.
+            $superseded         = $pageMeta[$ordinal]['fragmentHash'] ?? null;
             $pageMeta[$ordinal] = $this->writeFragment($ordinal, $partial['pages'][$ordinal]);
+            $this->deleteSupersededFragment($superseded, $pageMeta[$ordinal]['fragmentHash']);
             $touchedFragments++;
 
             foreach ($partial['index'] as $term => $entries) {
@@ -411,9 +412,9 @@ final class IncrementalIndexUpdater
             // each chunk's words in order.
             uksort($chunk, self::compareTerms(...));
 
-            $newHash = PfIndexCodec::chunkHash($chunk);
             $words   = PfIndexCodec::wordList($chunk);
             $body    = PfIndexCodec::encodeChunk($this->cbor, $chunk);
+            $newHash = PfIndexCodec::chunkHash($chunk, $body);
 
             $newPath = $this->indexDir() . "/index/{$newHash}.pf_index";
             if (file_put_contents($newPath, gzencode(self::DELIMITER . $body, 9)) === false) {
@@ -614,7 +615,7 @@ final class IncrementalIndexUpdater
             ));
         }
 
-        $hash = 'en_' . substr(hash('sha256', (string) $ordinal . $pageData['url']), 0, 10);
+        $hash = IndexFileNaming::fragmentHash($ordinal, (string) $pageData['url'], $fragment);
         $path = $this->indexDir() . "/fragment/{$hash}.pf_fragment";
         if (file_put_contents($path, gzencode(self::DELIMITER . $fragment, 9)) === false) {
             throw new \RuntimeException("Failed to write fragment: {$path}");
@@ -639,10 +640,22 @@ final class IncrementalIndexUpdater
         ]);
     }
 
-    private function deleteFragment(int $ordinal, string $url): void
+    /**
+     * Remove the fragment an ordinal named before its rewrite.
+     *
+     * Takes the recorded hash rather than recomputing one: a fragment filename
+     * now follows its contents, so the only handle on the previous file is the
+     * name `pf_meta` was carrying for it. A rewrite that happens to reproduce
+     * the same bytes keeps the same name, and the guard stops that case from
+     * deleting the file just written.
+     */
+    private function deleteSupersededFragment(?string $previousHash, string $currentHash): void
     {
-        $hash = 'en_' . substr(hash('sha256', (string) $ordinal . $url), 0, 10);
-        $path = $this->indexDir() . "/fragment/{$hash}.pf_fragment";
+        if ($previousHash === null || $previousHash === $currentHash) {
+            return;
+        }
+
+        $path = $this->indexDir() . "/fragment/{$previousHash}.pf_fragment";
         if (is_file($path)) {
             unlink($path);
         }
