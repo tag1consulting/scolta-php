@@ -163,6 +163,28 @@ class PhpIndexerTest extends TestCase
         $this->removeDir($stateDir2);
     }
 
+    public function testAtomicSwapPublishesOverStagingDirsLeftByAnInterruptedSwap(): void
+    {
+        // What an interrupted swap leaves on disk. rename() onto either of
+        // these fails with ENOTEMPTY, and this indexer discards move()'s
+        // return value, so before the fix .scolta-new was published as the
+        // live index and the real build stayed behind in .scolta-building.
+        mkdir($this->outputDir . '/.scolta-new', 0755, true);
+        mkdir($this->outputDir . '/.scolta-old', 0755, true);
+        file_put_contents($this->outputDir . '/.scolta-new/corpse.txt', 'stale');
+        file_put_contents($this->outputDir . '/.scolta-old/corpse.txt', 'stale');
+
+        $indexer = new PhpIndexer($this->stateDir, $this->outputDir);
+        $indexer->processChunk($this->makeItems(2), 0);
+        $indexer->finalize();
+
+        $this->assertFileExists($this->outputDir . '/pagefind/pagefind-entry.json');
+        $this->assertFileDoesNotExist($this->outputDir . '/pagefind/corpse.txt');
+        $this->assertDirectoryDoesNotExist($this->outputDir . '/.scolta-new');
+        $this->assertDirectoryDoesNotExist($this->outputDir . '/.scolta-old');
+        $this->assertDirectoryDoesNotExist($this->outputDir . '/.scolta-building');
+    }
+
     public function testFingerprintChangesWhenIndexerTypeWouldChange(): void
     {
         // The PHP indexer fingerprint must differ from a hypothetical binary

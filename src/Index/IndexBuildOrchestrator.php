@@ -697,6 +697,15 @@ final class IndexBuildOrchestrator
             throw new \RuntimeException('Build directory does not exist: ' . $buildDir);
         }
 
+        // Both staging paths are rename() targets, and rename() onto an
+        // existing non-empty directory fails with ENOTEMPTY. A swap that died
+        // partway leaves one of them populated, so clearing them is what keeps
+        // that failure from wedging every later build. Neither can hold
+        // anything but a corpse from a previous run: the index being published
+        // is in $buildDir and the live one is at $finalDir.
+        $this->clearStagingDir($oldDir);
+        $this->clearStagingDir($newDir);
+
         if (!$this->storage->move($buildDir, $newDir)) {
             throw new \RuntimeException("Failed to stage build directory: {$buildDir} → {$newDir}");
         }
@@ -713,6 +722,24 @@ final class IndexBuildOrchestrator
 
         if ($this->storage->exists($oldDir)) {
             $this->storage->deleteDirectory($oldDir);
+        }
+    }
+
+    /**
+     * Remove a staging directory left behind by an interrupted swap.
+     *
+     * Failing loudly rather than pressing on: a staging path that cannot be
+     * cleared is a rename() target that is about to fail anyway, and the
+     * message names the directory an operator has to remove by hand.
+     */
+    private function clearStagingDir(string $dir): void
+    {
+        if (!$this->storage->exists($dir)) {
+            return;
+        }
+
+        if (!$this->storage->deleteDirectory($dir)) {
+            throw new \RuntimeException("Failed to clear stale staging directory: {$dir}");
         }
     }
 
