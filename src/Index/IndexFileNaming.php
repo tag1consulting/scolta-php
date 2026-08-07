@@ -29,7 +29,7 @@ namespace Tag1\Scolta\Index;
  * fragment is byte-identical, and collapsing them onto one name would make
  * one ordinal's cleanup delete another ordinal's file.
  *
- * @since 1.1.1
+ * @since 1.2.0
  * @stability experimental
  */
 final class IndexFileNaming
@@ -41,7 +41,7 @@ final class IndexFileNaming
      * @param string $url      The page url, part of the pre-existing identity.
      * @param string $fragment The encoded fragment JSON, before compression.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public static function fragmentHash(int $ordinal, string $url, string $fragment): string
@@ -55,7 +55,7 @@ final class IndexFileNaming
      * @param list<string> $words The chunk's word list, in the order it was written.
      * @param string       $body  The encoded chunk body, before compression.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public static function chunkHash(array $words, string $body): string
