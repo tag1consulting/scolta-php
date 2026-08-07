@@ -108,8 +108,9 @@ describe('faceting: source structure', () => {
         // Only seeding queries: the typed and agreement-only terms introduce no
         // documents of their own, and the list is passed through rather than rebuilt.
         expect(scoltaSource).toContain('countTerms = queries.filter(q => !q.isTyped && !q.agreementOnly).map(q => q.term);');
-        // Gated on !preserveFilters, so a facet toggle/sort/load-more never recomputes.
-        expect(scoltaSource).toContain('if (!preserveFilters && countTerms.length > 0) {');
+        // Gated on !preserveFilters, so a facet toggle/sort/load-more never
+        // recomputes — and on facetMode, since 'disabled' has no panel to feed.
+        expect(scoltaSource).toContain("if (!preserveFilters && countTerms.length > 0 && !facetsDisabled()) {");
         expect(scoltaSource).toContain('Discarding stale post-expansion facet counts');
     });
 
@@ -169,8 +170,9 @@ describe('faceting: source structure', () => {
 
     test('doSearch accepts initialFilters parameter', () => {
         expect(scoltaSource).toContain('async function doSearch(preserveFilters, initialFilters)');
-        // activeFilters is now set via effectiveFilters to allow auto-language injection
-        expect(scoltaSource).toContain('activeFilters = effectiveFilters;');
+        // activeFilters is set via effectiveFilters to allow auto-language
+        // injection, and emptied outright under facetMode 'disabled'.
+        expect(scoltaSource).toContain("activeFilters = facetsDisabled() ? {} : effectiveFilters;");
     });
 
     test('doSearch computes query-fixed counts only on a fresh typed query', () => {

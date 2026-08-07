@@ -69,9 +69,24 @@ function resultsForPages(pages) {
     }));
 }
 
-/** A Pagefind mock that records what it was asked to do. */
+/**
+ * A Pagefind mock that records what it was asked to do.
+ *
+ * `calls.fragmentLoads` counts result.data() calls. Pagefind computes a search's
+ * `filters` map eagerly inside search() and hands it back as a plain property,
+ * so reading it costs nothing and cannot be used to detect count work. Fragment
+ * loads can: they are the one genuinely additional cost the count pass carries
+ * beyond the searches it shares through the per-cycle memo.
+ *
+ * `opts.resultsForQuery(query)` overrides the matched set per query, which is
+ * what lets a test build the AND-empty / terms-match shape that sends the count
+ * pass down its union branch.
+ */
 function createMockPagefind(matchedPages, opts = {}) {
-    const calls = { filters: 0, searchOpts: [], queries: [] };
+    const calls = { filters: 0, searchOpts: [], queries: [], fragmentLoads: 0 };
+    const countingResults = pages => resultsForPages(pages).map(r => Object.assign({}, r, {
+        data: () => { calls.fragmentLoads++; return r.data(); },
+    }));
     const mock = {
         init: () => Promise.resolve(),
         preload: () => Promise.resolve(),
@@ -86,9 +101,11 @@ function createMockPagefind(matchedPages, opts = {}) {
             // With no filter chunk loaded Pagefind returns an EMPTY filters map,
             // which is why an all-zero count map has to be synthesized rather
             // than read back from the search.
-            const applied = opts.pagefindFilters ? opts.pagefindFilters(searchOpts) : matchedPages;
+            let applied;
+            if (opts.resultsForQuery) applied = opts.resultsForQuery(query);
+            else applied = opts.pagefindFilters ? opts.pagefindFilters(searchOpts) : matchedPages;
             return Promise.resolve({
-                results: resultsForPages(applied),
+                results: countingResults(applied),
                 filters: opts.pagefindCounts || {},
                 unfilteredResultCount: applied.length,
             });
@@ -103,6 +120,7 @@ async function boot(mockPagefind, {
     artifactBytes = FIXTURE_GZ,
     entryHash = 'en_fixture01',
     withDecompressionStream = true,
+    configExtra = {},
 } = {}) {
     const dom = new JSDOM(
         '<!DOCTYPE html><html lang="en"><body><div id="scolta-search"></div></body></html>',
@@ -168,6 +186,7 @@ async function boot(mockPagefind, {
         },
         filterFieldDescriptions: { topic: 'What the page covers. Values: Fruit, Veg.' },
     };
+    Object.assign(window.scolta, configExtra);
 
     window.eval(patchedSource);
     await new Promise(r => setTimeout(r, 0));
@@ -416,5 +435,239 @@ describe('the AI subject-to-filter mapper reads the artifact taxonomy', () => {
         const values = renderedFacets(env.window)
             .filter(f => f.dim === 'topic').map(f => f.val).sort();
         expect(values).toEqual(['Fruit', 'Veg']);
+    });
+});
+
+/**
+ * facetMode: when — or whether — the facet artifact is loaded.
+ *
+ * The artifact is worth its download only to a site that shows something built
+ * from it. A site rendering its own fixed facets without counts displays nothing
+ * from it, yet paid 1.5 MB on every search-page load, and most sessions never
+ * filter at all. 'deferred' moves that cost to the first facet selection;
+ * 'disabled' removes it, the panel and the per-query count pass together.
+ *
+ * The subtlety these tests exist to pin, and it applies to both non-default
+ * modes: NOT loading the artifact must not become "filter without it".
+ * pagefindSearch() hands filters to Pagefind whenever facetIndex is null, and
+ * naming a dimension there fetches that dimension's .pf_filter chunk and taxes
+ * every later search for the life of the page. So 'deferred' has to COMPLETE its
+ * load before that branch is reached, and 'disabled' has to never reach it at
+ * all. The assertions below therefore check both halves every time: what was
+ * fetched, and that no search ever carried a filters option while
+ * pagefind.filters() was never called.
+ */
+function artifactFetches(env) {
+    return env.requested.filter(u => /scolta\.facets/.test(u)).length;
+}
+
+function assertNeverAskedPagefindForFilters(calls) {
+    expect(calls.searchOpts.length).toBeGreaterThan(0);
+    for (const opts of calls.searchOpts) {
+        expect(opts === undefined || opts.filters === undefined).toBe(true);
+    }
+    expect(calls.filters).toBe(0);
+}
+
+describe("facetMode 'eager' is the default and the unchanged behaviour", () => {
+    test('unset: the artifact loads at init and the panel paints, as it always has', async () => {
+        const { mock } = createMockPagefind([0, 1, 2, 3]);
+        const env = await boot(mock);
+        await initAndSearch(env);
+
+        expect(artifactFetches(env)).toBe(1);
+        expect(renderedFacets(env.window).length).toBeGreaterThan(0);
+    });
+
+    test("stated explicitly: identical to leaving it unset", async () => {
+        const { mock } = createMockPagefind([0, 1, 2, 3]);
+        const env = await boot(mock, { configExtra: { facetMode: 'eager' } });
+        await initAndSearch(env);
+
+        expect(artifactFetches(env)).toBe(1);
+        expect(renderedFacets(env.window).length).toBeGreaterThan(0);
+    });
+
+    test('an unrecognized value falls back to eager, never to a cheaper mode', async () => {
+        // A typo — 'defered', 'off', 'true' — must not silently cost a site its
+        // facets. The fully-featured default is the only safe fallback.
+        const { mock } = createMockPagefind([0, 1, 2, 3]);
+        const env = await boot(mock, { configExtra: { facetMode: 'defered' } });
+        await initAndSearch(env);
+
+        expect(artifactFetches(env)).toBe(1);
+        expect(renderedFacets(env.window).length).toBeGreaterThan(0);
+    });
+});
+
+describe("facetMode 'deferred' defers the artifact to the first facet selection", () => {
+    test('page load and an unfiltered search fetch no artifact at all', async () => {
+        const { mock, calls } = createMockPagefind([0, 1, 2, 3]);
+        const env = await boot(mock, { configExtra: { facetMode: 'deferred' } });
+        await initAndSearch(env);
+
+        // The win: nothing was downloaded to build counts nobody asked for.
+        expect(artifactFetches(env)).toBe(0);
+        // And it did not silently fall through to the far more expensive path
+        // the artifact was introduced to replace.
+        expect(calls.filters).toBe(0);
+    });
+
+    test('the first filtered search loads the artifact and takes the artifact path', async () => {
+        const { mock, calls } = createMockPagefind(Array.from({ length: 200 }, (_, i) => i));
+        const env = await boot(mock, { configExtra: { facetMode: 'deferred' } });
+        await initAndSearch(env);
+        expect(artifactFetches(env)).toBe(0);
+
+        await env.window.Scolta.toggleFilter('topic', 'Fruit');
+        await new Promise(r => setTimeout(r, 80));
+
+        expect(artifactFetches(env)).toBe(1);
+        // This is the assertion that separates the intended design from the
+        // naive one: had the load not completed above the searchOpts branch,
+        // 'topic' would appear in a filters option here and pull a chunk.
+        assertNeverAskedPagefindForFilters(calls);
+    });
+
+    test('deferred filtering returns the same results eager filtering does', async () => {
+        const { mock, calls } = createMockPagefind(Array.from({ length: 6 }, (_, i) => i));
+        const env = await boot(mock, { configExtra: { facetMode: 'deferred' } });
+        await initAndSearch(env);
+        const cards = () => env.window.document.querySelectorAll('.scolta-result-card').length;
+
+        expect(cards()).toBe(6);
+        await env.window.Scolta.toggleFilter('topic', 'Fruit');       // pages 0,1,2
+        await new Promise(r => setTimeout(r, 80));
+        expect(cards()).toBe(3);
+        await env.window.Scolta.toggleFilter('level', 'Beginner');    // AND even -> 0,2
+        await new Promise(r => setTimeout(r, 80));
+        expect(cards()).toBe(2);
+        await env.window.Scolta.toggleFilter('level', 'Advanced');    // OR within level -> 0,1,2
+        await new Promise(r => setTimeout(r, 80));
+        expect(cards()).toBe(3);
+
+        assertNeverAskedPagefindForFilters(calls);
+    });
+
+    test('repeated facet activity downloads the artifact exactly once', async () => {
+        const { mock } = createMockPagefind(Array.from({ length: 200 }, (_, i) => i));
+        const env = await boot(mock, { configExtra: { facetMode: 'deferred' } });
+        await initAndSearch(env);
+
+        await env.window.Scolta.toggleFilter('topic', 'Fruit');
+        await new Promise(r => setTimeout(r, 80));
+        await env.window.Scolta.toggleFilter('level', 'Beginner');
+        await new Promise(r => setTimeout(r, 80));
+        await env.window.Scolta.toggleFilter('topic', 'Fruit');   // clearing it again
+        await new Promise(r => setTimeout(r, 80));
+
+        expect(artifactFetches(env)).toBe(1);
+    });
+
+    test('an index with no artifact still filters, falling back only once asked', async () => {
+        // The 1.1.0-and-earlier corpus. The fallback is unchanged, just deferred:
+        // nothing is fetched until a facet is used, and only then does it warn
+        // and reach for pagefind.filters().
+        const { mock, calls } = createMockPagefind(
+            Array.from({ length: 6 }, (_, i) => i),
+            { taxonomy: { topic: { Fruit: 3, Veg: 3 } } },
+        );
+        const env = await boot(mock, {
+            serveArtifact: false,
+            configExtra: { facetMode: 'deferred' },
+        });
+        await initAndSearch(env);
+
+        expect(calls.filters).toBe(0);
+
+        await env.window.Scolta.toggleFilter('topic', 'Fruit');
+        await new Promise(r => setTimeout(r, 80));
+
+        expect(calls.filters).toBe(1);
+        expect(env.warnings.find(w => /No Scolta facet index/.test(w))).toBeDefined();
+    });
+});
+
+describe("facetMode 'disabled' removes faceting entirely", () => {
+    test('nothing is fetched, no panel is rendered, and search still works', async () => {
+        const { mock, calls } = createMockPagefind(Array.from({ length: 6 }, (_, i) => i));
+        const env = await boot(mock, { configExtra: { facetMode: 'disabled' } });
+        await initAndSearch(env);
+
+        expect(artifactFetches(env)).toBe(0);
+        expect(calls.filters).toBe(0);
+        expect(renderedFacets(env.window).length).toBe(0);
+        expect(env.window.document.querySelector('#scolta-filters').innerHTML).toBe('');
+        // The mode removes facets, not search: the result list is untouched.
+        expect(env.window.document.querySelectorAll('.scolta-result-card').length).toBe(6);
+    });
+
+    test('the layout is told it has no filters, so no empty rail is reserved', async () => {
+        const { mock } = createMockPagefind([0, 1, 2, 3]);
+        const env = await boot(mock, { configExtra: { facetMode: 'disabled' } });
+        await initAndSearch(env);
+
+        const layout = env.window.document.querySelector('.scolta-layout');
+        expect(layout.classList.contains('has-filters')).toBe(false);
+    });
+
+    test('the per-query count pass is skipped, not merely unrendered', async () => {
+        // Measured on the count pass's expensive branch. When the AND search
+        // matches nothing but the individual terms do, counts must follow the OR
+        // union the result list shows, and computeUnionFacetCounts() loads a
+        // fragment per fresh document to collapse the delta by URL and title.
+        // Those loads are the pass's one cost the per-cycle search memo does not
+        // already absorb, so they are what "skipped" has to mean.
+        //
+        // The searches themselves are deliberately NOT asserted on: the count
+        // pass reuses the result path's searches through the memo, so it adds no
+        // pagefind.search() call to count in the first place.
+        const resultsForQuery = q => (/\s/.test(q) ? [] : [0, 1, 2, 3, 4, 5]);
+
+        const { mock: eagerMock, calls: eagerCalls } = createMockPagefind([], { resultsForQuery });
+        const eager = await boot(eagerMock);
+        await initAndSearch(eager, 'alpha bravo');
+        // Guard the fixture: if the union branch never ran there is no cost to
+        // skip, and the comparison below would pass for the wrong reason.
+        expect(eagerCalls.fragmentLoads).toBeGreaterThan(0);
+
+        const { mock, calls } = createMockPagefind([], { resultsForQuery });
+        const env = await boot(mock, { configExtra: { facetMode: 'disabled' } });
+        await initAndSearch(env, 'alpha bravo');
+
+        expect(calls.fragmentLoads).toBeLessThan(eagerCalls.fragmentLoads);
+        assertNeverAskedPagefindForFilters(calls);
+    });
+
+    test('a host calling toggleFilter() anyway changes nothing', async () => {
+        // toggleFilter() is public API and stays reachable under every mode.
+        // Accepting the selection would filter nothing (no artifact) while still
+        // writing an f_ param and claiming the filter in the results header.
+        const { mock, calls } = createMockPagefind(Array.from({ length: 6 }, (_, i) => i));
+        const env = await boot(mock, { configExtra: { facetMode: 'disabled' } });
+        await initAndSearch(env);
+
+        await env.window.Scolta.toggleFilter('topic', 'Fruit');
+        await new Promise(r => setTimeout(r, 80));
+
+        expect(env.window.document.querySelectorAll('.scolta-result-card').length).toBe(6);
+        expect(artifactFetches(env)).toBe(0);
+        expect(env.window.location.search).not.toMatch(/f_topic/);
+        assertNeverAskedPagefindForFilters(calls);
+    });
+
+    test('a URL f_ param does not resurrect filtering', async () => {
+        // Landing on a shared link built before the site disabled facets. The
+        // selection must be dropped, not applied through the .pf_filter fallback.
+        const { mock, calls } = createMockPagefind(Array.from({ length: 6 }, (_, i) => i));
+        const env = await boot(mock, { configExtra: { facetMode: 'disabled' } });
+        await initAndSearch(env);
+
+        await env.window.Scolta.doSearch(false, { topic: new Set(['Fruit']) });
+        await new Promise(r => setTimeout(r, 80));
+
+        expect(env.window.document.querySelectorAll('.scolta-result-card').length).toBe(6);
+        expect(artifactFetches(env)).toBe(0);
+        assertNeverAskedPagefindForFilters(calls);
     });
 });

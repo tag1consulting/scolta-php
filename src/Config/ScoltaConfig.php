@@ -309,6 +309,40 @@ class ScoltaConfig
      */
     public bool $hideEmptyFacets = true;
 
+    /**
+     * When the browser loads the facet index, or whether it loads it at all.
+     *
+     * - 'eager' (default) — load it during init, which is what Scolta has always
+     *   done: the filter panel is populated before the first search paints and
+     *   every facet click is answerable immediately.
+     * - 'deferred' — skip the init load and take it on the first search that
+     *   carries a facet selection. For a site that renders its own facets and
+     *   does not want the artifact (which can reach a megabyte or more on a large
+     *   corpus) on the initial page load. Scolta's own filter panel stays empty
+     *   until that first selection, since it is built from the artifact.
+     * - 'disabled' — never load it. No filter panel is rendered, no facet
+     *   filtering runs, and the per-query facet count pass is skipped.
+     *
+     * Deferring is NOT "filter without the index": the browser completes the load
+     * before applying a selection, so a deferred first click still takes the
+     * artifact path rather than falling back to Pagefind's own filter chunks,
+     * which would cost every subsequent search on the page. An unrecognized value
+     * clamps to 'eager'. Emitted top-level into window.scolta and read by
+     * scolta.js facetMode().
+     *
+     * @var string
+     * @since 1.2.1
+     * @stability experimental
+     */
+    public string $facetMode = 'eager';
+
+    /**
+     * Accepted values for $facetMode.
+     *
+     * @var string[]
+     */
+    public const FACET_MODES = ['eager', 'deferred', 'disabled'];
+
     // -- Search as you type (SAYT) --
     //
     // Ten top-level browser settings, NOT scoring keys: they govern the
@@ -723,6 +757,7 @@ class ScoltaConfig
             'pagefindPath' => $this->pagefindIndexPath . '/pagefind.js',
             'filterFieldDescriptions' => $this->filterFieldDescriptions,
             'hideEmptyFacets' => $this->hideEmptyFacets,
+            'facetMode' => $this->normalizedFacetMode(),
             // SAYT — top-level, not scoring keys. scolta.js reads each as
             // instanceConfig.<camelCase> with a fallback byte-equal to the
             // default here, and BrowserConfigParityTest diffs the two sets.
@@ -754,6 +789,25 @@ class ScoltaConfig
         return in_array($this->saytSuggestionAction, self::SAYT_SUGGESTION_ACTIONS, true)
             ? $this->saytSuggestionAction
             : 'navigate';
+    }
+
+    /**
+     * The facet-loading mode, clamped to a value the browser understands.
+     *
+     * Validated here as well as in the browser so a typo in a site's settings
+     * never reaches the page payload. The browser clamps too, because a direct
+     * createInstance() caller bypasses this class entirely. Both clamp toward
+     * 'eager': a misspelled mode must fall back to the fully-featured default,
+     * never silently cost a site its facets.
+     *
+     * @since 1.2.1
+     * @stability experimental
+     */
+    public function normalizedFacetMode(): string
+    {
+        return in_array($this->facetMode, self::FACET_MODES, true)
+            ? $this->facetMode
+            : 'eager';
     }
 
     /**
