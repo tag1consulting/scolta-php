@@ -110,8 +110,20 @@ jobs:
   # Fires only on pull_request events.  Skips drafts and PRs labeled
   # 'skip-ai-review'.  The slash-commands job below is skipped on this event.
   review:
+    # The fork condition is what keeps this job off pull requests it cannot
+    # possibly complete. GitHub withholds repository secrets from a
+    # pull_request run whose head is a fork, so `api-key` resolves empty and the
+    # action exits 1 with "ANTHROPIC_API_KEY is required". Without this guard
+    # every external contribution reports a red check for having no key rather
+    # than for anything in its diff, which is indistinguishable at a glance from
+    # a real failure and blocks the PR behind a check that can never pass.
+    # Skipped is the honest state: the review did not run, and no result is
+    # being claimed. Enabling reviews on fork PRs is a separate decision that
+    # means moving to pull_request_target, which needs the security hardening
+    # described in the header block above and must not be done casually.
     if: >-
       github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
       !github.event.pull_request.draft &&
       !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')
     runs-on: ubuntu-latest
