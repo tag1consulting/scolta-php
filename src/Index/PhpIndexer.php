@@ -251,7 +251,7 @@ class PhpIndexer
      *
      *  - the **title** belongs in the key. It produces `cleanTitle` and
      *    `titleTokens` outright, and `HtmlCleaner::clean()` strips a leading
-     *    title match from the body, so it reaches `content` too. Until 1.1.1 it
+     *    title match from the body, so it reaches `content` too. Until 1.2.0 it
      *    was absent, and a title-only edit silently reindexed the old title.
      *  - the **language** belongs in the key. It selects the Snowball stemmer,
      *    so the same bytes tokenized as English and as Spanish are different

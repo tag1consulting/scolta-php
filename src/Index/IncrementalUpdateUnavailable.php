@@ -12,7 +12,7 @@ namespace Tag1\Scolta\Index;
  * cannot be mistaken for "there was nothing to do", and so the reason reaches
  * the operator instead of being swallowed.
  *
- * @since 1.1.1
+ * @since 1.2.0
  * @stability experimental
  */
 final class IncrementalUpdateUnavailable extends \RuntimeException {}

@@ -34,7 +34,7 @@ use Tag1\Scolta\Tests\Support\CborDecoder;
  * url, so colliding ordinals still produce distinct files and that assertion
  * passed throughout. These assert the numbering and the posting lists.
  *
- * @since 1.1.1
+ * @since 1.2.0
  * @stability experimental
  */
 class BuildIntegrityTest extends TestCase

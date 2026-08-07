@@ -50,7 +50,7 @@ use Tag1\Scolta\Storage\StorageDriverInterface;
  *  - a changed page whose previous token data is no longer in the token cache,
  *    so its stale postings cannot be located and removed
  *
- * @since 1.1.1
+ * @since 1.2.0
  * @stability experimental
  */
 final class IncrementalIndexUpdater
@@ -98,7 +98,7 @@ final class IncrementalIndexUpdater
      * Queue a page as added or changed. Which one it is follows from whether
      * the ledger already knows the id.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function stageUpsert(ContentItem $item): void
@@ -109,7 +109,7 @@ final class IncrementalIndexUpdater
     /**
      * Queue a page for removal by content-item id.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function stageDelete(string $id): void
@@ -120,7 +120,7 @@ final class IncrementalIndexUpdater
     /**
      * True when an incremental update is possible at all right now.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function isAvailable(): bool
@@ -136,7 +136,7 @@ final class IncrementalIndexUpdater
      * compacts automatically, because an unattended compaction is a full
      * rebuild and that is the hour-long surprise this class exists to remove.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function tombstoneRatio(): float
@@ -148,7 +148,7 @@ final class IncrementalIndexUpdater
      * Apply every staged change and publish the result.
      *
      * @throws IncrementalUpdateUnavailable When the update cannot be done exactly.
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function commit(): IncrementalUpdateResult

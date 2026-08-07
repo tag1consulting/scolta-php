@@ -147,7 +147,7 @@ final class MemoryBudget
     /**
      * Return a copy sized to $totalBytes, keeping this profile's proportions.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function scaledTo(int $totalBytes): self
@@ -186,7 +186,7 @@ final class MemoryBudget
      * every default.
      *
      * @param int $processLimitBytes The effective limit, or 0 when unlimited.
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function withCeiling(int $processLimitBytes): self
@@ -274,7 +274,7 @@ final class MemoryBudget
     /**
      * The process memory limit in bytes, or 0 when there is none.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public static function detectProcessLimitBytes(): int
@@ -398,7 +398,7 @@ final class MemoryBudget
      * plus PHP's hash-table slot), so the conservative profile still tracks
      * ~260k pages before it starts declining new ones.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function tokenCacheManifestEntries(): int

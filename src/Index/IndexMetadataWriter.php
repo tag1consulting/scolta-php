@@ -20,7 +20,7 @@ namespace Tag1\Scolta\Index;
  * The full build still reaches them through endWrite(); this is one
  * implementation with two callers, not a copy.
  *
- * @since 1.1.1
+ * @since 1.2.0
  * @stability experimental
  */
 final class IndexMetadataWriter
@@ -41,7 +41,7 @@ final class IndexMetadataWriter
      * @param list<array{from: string, to: string, hash: string}>     $indexChunkMeta Sorted, non-overlapping term ranges.
      * @param list<string>                                            $metaFields     Meta field names.
      * @return string The pf_meta hash, which stamps the facet index and the entry file.
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function write(

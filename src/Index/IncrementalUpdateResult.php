@@ -7,7 +7,7 @@ namespace Tag1\Scolta\Index;
 /**
  * Outcome of one IncrementalIndexUpdater::commit().
  *
- * @since 1.1.1
+ * @since 1.2.0
  * @stability experimental
  */
 final class IncrementalUpdateResult
