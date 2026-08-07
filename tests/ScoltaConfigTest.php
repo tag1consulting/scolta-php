@@ -1031,6 +1031,74 @@ class ScoltaConfigTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+    // facetMode — when the facet index loads, or whether it loads at all
+    // ------------------------------------------------------------------
+
+    public function testFacetModeDefaultsToEager(): void
+    {
+        // The default must be the fully-featured mode: every site that has not
+        // heard of this setting keeps the behaviour it already had.
+        $config = new ScoltaConfig();
+        $this->assertSame('eager', $config->facetMode);
+        $this->assertSame('eager', $config->normalizedFacetMode());
+    }
+
+    public function testFromArrayMapsEveryFacetMode(): void
+    {
+        foreach (ScoltaConfig::FACET_MODES as $mode) {
+            $config = ScoltaConfig::fromArray(['facet_mode' => $mode]);
+            $this->assertSame($mode, $config->facetMode);
+            $this->assertSame($mode, $config->normalizedFacetMode());
+        }
+    }
+
+    public function testFacetModeConstListsExactlyTheSupportedModes(): void
+    {
+        // scolta.js accepts these three and nothing else; the const is what the
+        // adapters build their settings dropdowns from.
+        $this->assertSame(['eager', 'deferred', 'disabled'], ScoltaConfig::FACET_MODES);
+    }
+
+    public function testUnrecognizedFacetModeClampsToEager(): void
+    {
+        // A typo must never silently cost a site its facets, so the clamp goes
+        // toward the default rather than toward the cheapest mode. The raw
+        // property keeps what was set; only the normalized read is clamped.
+        foreach (['defered', 'off', 'DISABLED', '', 'true'] as $bogus) {
+            $config = ScoltaConfig::fromArray(['facet_mode' => $bogus]);
+            $this->assertSame(
+                'eager',
+                $config->normalizedFacetMode(),
+                "facet_mode '{$bogus}' should clamp to eager",
+            );
+        }
+    }
+
+    public function testFacetModeAbsentPreservesDefault(): void
+    {
+        $config = ScoltaConfig::fromArray([]);
+        $this->assertSame('eager', $config->facetMode);
+    }
+
+    public function testToBrowserConfigEmitsNormalizedFacetModeTopLevel(): void
+    {
+        // Top-level in window.scolta, NOT nested under scoring, so scolta.js
+        // reads it via instanceConfig.facetMode.
+        $browser = (new ScoltaConfig())->toBrowserConfig();
+        $this->assertArrayHasKey('facetMode', $browser);
+        $this->assertSame('eager', $browser['facetMode']);
+        $this->assertArrayNotHasKey('facetMode', $browser['scoring']);
+
+        $deferred = ScoltaConfig::fromArray(['facet_mode' => 'deferred'])->toBrowserConfig();
+        $this->assertSame('deferred', $deferred['facetMode']);
+
+        // The payload carries the clamped value, so a typo in a site's settings
+        // never reaches the page at all.
+        $bogus = ScoltaConfig::fromArray(['facet_mode' => 'defered'])->toBrowserConfig();
+        $this->assertSame('eager', $bogus['facetMode']);
+    }
+
+    // ------------------------------------------------------------------
     // Search as you type (SAYT) — ten top-level browser settings
     // ------------------------------------------------------------------
 
