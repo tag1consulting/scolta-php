@@ -31,7 +31,7 @@ use Tag1\Scolta\Storage\StorageDriverInterface;
  * artifact at once, so it is an operation an operator asks for, never a
  * side effect of a delete.
  *
- * @since 1.1.1
+ * @since 1.2.0
  * @stability experimental
  */
 final class PageTableLedger
@@ -144,7 +144,7 @@ final class PageTableLedger
      *
      * @param array<string, mixed> $filters  Merged filter map, from InvertedIndexBuilder::effectiveFilters().
      * @param array<string, mixed> $sortable Merged sortable map, from InvertedIndexBuilder::effectiveSortable().
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function allocate(
@@ -209,7 +209,7 @@ final class PageTableLedger
      * the generation its earlier segments stamped, which is the whole point:
      * coverage is a property of the build, not of the process.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function beginBuild(bool $fresh): void
@@ -226,7 +226,7 @@ final class PageTableLedger
     /**
      * The build generation rows allocated right now are stamped with.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function generation(): int
@@ -241,7 +241,7 @@ final class PageTableLedger
      * and the only one that is correct across a resumed build.
      *
      * @return list<int> Ordinals released.
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function releaseStaleRows(): array
@@ -268,7 +268,7 @@ final class PageTableLedger
      * for the same id on resume and costs nothing, whereas a chunk on disk
      * without its ordinal is the collision that corrupts the index.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function checkpoint(): void
@@ -303,7 +303,7 @@ final class PageTableLedger
      * Release $id's ordinal to the free list and mark it as a tombstone.
      *
      * @return int|null The released ordinal, or null when $id was not assigned.
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function release(string $id): ?int
@@ -331,7 +331,7 @@ final class PageTableLedger
      *
      * @param array<string, true>|list<string> $seenIds Ids present in this build.
      * @return list<int> Ordinals released.
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function releaseAllExcept(array $seenIds): array
@@ -359,7 +359,7 @@ final class PageTableLedger
      * that uses it — so this answers "an earlier segment of this build already
      * indexed that page" and nothing weaker.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function wasSeenThisBuild(string $id): bool
@@ -376,7 +376,7 @@ final class PageTableLedger
      * allocation the generation stamp removed.
      *
      * @return \Generator<int, string>
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function seenIdsThisBuild(): \Generator
@@ -391,7 +391,7 @@ final class PageTableLedger
     /**
      * The ordinal assigned to $id, or null when it has none.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function ordinalFor(string $id): ?int
@@ -405,7 +405,7 @@ final class PageTableLedger
      * Callers compare this with the incoming url to decide whether the
      * fragment file needs renaming.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function urlFor(string $id): ?string
@@ -417,7 +417,7 @@ final class PageTableLedger
      * Filter values recorded against $id, or an empty array.
      *
      * @return array<string, mixed>
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function filtersFor(string $id): array
@@ -429,7 +429,7 @@ final class PageTableLedger
      * Sortable values recorded against $id, or an empty array.
      *
      * @return array<string, mixed>
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function sortableFor(string $id): array
@@ -446,7 +446,7 @@ final class PageTableLedger
      * needed. Returns '' when unknown, which the updater treats as "cannot do
      * this incrementally" rather than guessing.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function contentHashFor(string $id): string
@@ -459,7 +459,7 @@ final class PageTableLedger
      *
      * @return array<int, array{id: string, url: string, filters: array<string, mixed>, sortable: array<string, mixed>, contentHash: string}>
      *         Keyed by ordinal, ascending. Tombstoned ordinals are absent.
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function rowsByOrdinal(): array
@@ -487,7 +487,7 @@ final class PageTableLedger
      * index writer needs: the table stays dense across deletes so nothing
      * downstream grows a hole case.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function pageTableSize(): int
@@ -503,7 +503,7 @@ final class PageTableLedger
      * PHP's key normalization is a no-op here rather than a lossy conversion.
      *
      * @return list<int>
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function tombstones(): array
@@ -519,7 +519,7 @@ final class PageTableLedger
      * rebuild, which is exactly the hour-long surprise incremental updates
      * exist to remove.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function tombstoneRatio(): float
@@ -534,7 +534,7 @@ final class PageTableLedger
     /**
      * Number of live (non-tombstone) pages.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function liveCount(): int
@@ -548,7 +548,7 @@ final class PageTableLedger
      * A build with an empty ledger numbers from zero in gather order, which is
      * byte-for-byte what the pipeline did before this class existed.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function isEmpty(): bool
@@ -559,7 +559,7 @@ final class PageTableLedger
     /**
      * Persist atomically, if anything changed.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function save(): void
@@ -600,7 +600,7 @@ final class PageTableLedger
      * and it invalidates every fragment filename in the index, so the caller
      * must follow it with a full build before serving the result.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function reset(): void

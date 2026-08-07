@@ -92,7 +92,7 @@ class StreamingFormatWriter
      * are four separate whole-corpus writes with no boundary between them
      * otherwise.
      *
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function setTelemetry(?MemoryTelemetry $telemetry): void
@@ -225,7 +225,7 @@ class StreamingFormatWriter
      *
      * @param int $pageTableSize Total ordinals in the table, live plus tombstoned.
      * @return int Number of tombstones written.
-     * @since 1.1.1
+     * @since 1.2.0
      * @stability experimental
      */
     public function fillTombstones(int $pageTableSize): int

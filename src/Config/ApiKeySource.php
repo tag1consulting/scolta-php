@@ -16,7 +16,7 @@ use Tag1\Scolta\AiProvider\Amazee\AmazeeConnectionSource;
  *
  * Amazee has three cases, and the history behind that is the point. 1.1.0
  * split it into `amazee:operator` and `amazee:auto` — a provider somebody
- * chose versus a free trial that provisioned itself — and 1.1.1 collapsed
+ * chose versus a free trial that provisioned itself — and 1.2.0 collapsed
  * both back to a single `amazee`, because nothing in the credential store
  * recorded which one produced a token and each adapter was substituting a
  * different local fact. A distinction that cannot be derived is worse than no
