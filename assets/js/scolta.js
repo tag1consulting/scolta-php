@@ -205,21 +205,40 @@
     'whatever', 'whichever', 'whoever', 'yes', 'ok', 'okay',
   ]);
 
+  // The stopword set actually in force: the built-ins plus the site's own.
+  // Honor CUSTOM_STOP_WORDS in JS just as the WASM scorer does — previously
+  // query tokenization used only the built-in STOPWORDS, so it disagreed with
+  // WASM scoring (issue #156 follow-up).
+  function effectiveStopwords() {
+    const customStops = (getConfig().CUSTOM_STOP_WORDS || []).map(w => String(w).toLowerCase());
+    return customStops.length ? new Set([...STOPWORDS, ...customStops]) : STOPWORDS;
+  }
+
+  // Whether a word may be wrapped in <mark>.
+  //
+  // `length > 2` was the cheap stopword proxy and it admits every function word
+  // of three letters or more — "and", "the", "for", "but", "with", "that". A
+  // query whose expansion produced "reading and writing" therefore highlighted
+  // "and" in every excerpt on the page. The stopword set is the real gate; the
+  // length guard stays because a one- or two-letter word matches too much text
+  // to be worth marking even when it is not a stopword.
+  //
+  // The word is normalized the way extractSearchTerms() normalizes it, so a
+  // trailing comma cannot smuggle a stopword past the set.
+  function isHighlightableWord(word, stops) {
+    const bare = String(word).toLowerCase().replace(/[^\w]/g, '');
+    return bare.length > 2 && !stops.has(bare);
+  }
+
   // Extract meaningful search terms from a query (filter stopwords).
   // "who is Loreen Babcock" → ["loreen", "babcock"]
   // If everything is filtered, fall back to words longer than 2 chars.
   function extractSearchTerms(query) {
-    // Honor CUSTOM_STOP_WORDS in JS just as the WASM scorer does — previously
-    // this used only the built-in STOPWORDS, so JS query tokenization disagreed
-    // with WASM scoring (issue #156 follow-up).
-    const customStops = (getConfig().CUSTOM_STOP_WORDS || []).map(w => String(w).toLowerCase());
-    const effectiveStopwords = customStops.length
-      ? new Set([...STOPWORDS, ...customStops])
-      : STOPWORDS;
+    const stops = effectiveStopwords();
     const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 0);
     const meaningful = words
       .map(w => w.replace(/[^\w]/g, ''))
-      .filter(w => !effectiveStopwords.has(w) && w.length > 1);
+      .filter(w => !stops.has(w) && w.length > 1);
     if (meaningful.length === 0) {
       return words.filter(w => w.length > 2);
     }
@@ -3980,9 +3999,13 @@
       return;
     }
 
+    // An expansion term is a phrase, and decomposing it into words is what
+    // puts a conjunction on the highlight list: "reading and writing" carries
+    // an "and" that the primary path already filtered out of the query.
+    const expansionStops = effectiveStopwords();
     for (const term of validTerms) {
       for (const word of term.toLowerCase().split(/\s+/)) {
-        if (word.length > 2 && !allHighlightTerms.includes(word)) {
+        if (isHighlightableWord(word, expansionStops) && !allHighlightTerms.includes(word)) {
           allHighlightTerms.push(word);
         }
       }
@@ -4486,9 +4509,14 @@
       const scorerQuery = isForcedPhrase ? trimmedQuery : searchQuery;
       debugLog('[scolta:search] Filtered query:', JSON.stringify(sanitizeQueryForLogging(searchQuery)), '(original:', JSON.stringify(sanitizeQueryForLogging(query)), ')');
 
-      allHighlightTerms = meaningfulTerms.length > 0
-        ? meaningfulTerms.filter(t => t.length > 2)
-        : query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+      // Both branches go through the same gate. The fallback is the one that
+      // used to leak: it applied only a length guard to the raw query, so a
+      // query of nothing but stopwords marked every one of them.
+      const highlightStops = effectiveStopwords();
+      allHighlightTerms = (meaningfulTerms.length > 0
+        ? meaningfulTerms
+        : query.toLowerCase().split(/\s+/)
+      ).filter(t => isHighlightableWord(t, highlightStops));
 
       // Phase 1: Primary search — render results IMMEDIATELY
       expandPromise = preserveFilters
