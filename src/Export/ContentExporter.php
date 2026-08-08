@@ -7,6 +7,8 @@ namespace Tag1\Scolta\Export;
 use Tag1\Scolta\Html\HtmlCleaner;
 use Tag1\Scolta\Html\PagefindHtmlBuilder;
 use Tag1\Scolta\Index\CachedContentReference;
+use Tag1\Scolta\Index\PhpIndexer;
+use Tag1\Scolta\Index\TimestampManifest;
 
 /**
  * Exports content items as minimal HTML files for Pagefind indexing.
@@ -190,24 +192,50 @@ class ContentExporter
      * pass through without inspection — they carry no bodyHtml and are handled
      * downstream by IndexBuildOrchestrator.
      *
-     * @param iterable<ContentItem|CachedContentReference> $items Items to filter (array or generator).
+     * Pass the build's TimestampManifest to have every dropped item's content
+     * hash recorded as known-empty. The gatherer has already written those
+     * entities into the manifest by the time they get here — it filters on
+     * changed timestamps, not on body length — so without the record they come
+     * back on the next build as cached references whose token lookup can only
+     * miss, and each miss re-gathers an entity that will be dropped again. This
+     * is the only place the drop decision is made against a body in memory,
+     * which is why the record belongs here and not at the gatherer.
+     *
+     * @param iterable<ContentItem|CachedContentReference> $items    Items to filter (array or generator).
+     * @param TimestampManifest|null                       $manifest Build manifest to record dropped hashes in.
      * @return \Generator<ContentItem|CachedContentReference>      Items that pass the minimum length check, plus all cached references.
      *
      * @since 0.3.2
      * @stability experimental
      */
-    public function filterItems(iterable $items): \Generator
+    public function filterItems(iterable $items, ?TimestampManifest $manifest = null): \Generator
     {
         foreach ($items as $item) {
             if ($item instanceof CachedContentReference) {
                 yield $item;
                 continue;
             }
-            $cleaned = HtmlCleaner::clean($item->bodyHtml);
-            if (mb_strlen($cleaned) >= $this->minContentLength) {
+            if ($this->hasIndexableText($item)) {
                 yield $item;
+                continue;
             }
+            $manifest?->markEmpty(PhpIndexer::contentHash($item));
         }
+    }
+
+    /**
+     * Whether an item's body survives cleaning with enough text to index.
+     *
+     * The single definition of "too short to index" for the streaming path.
+     * filterItems() drops what this rejects and records it as known-empty, so
+     * the two can never disagree about which items exist downstream.
+     *
+     * @since 1.2.1
+     * @stability experimental
+     */
+    public function hasIndexableText(ContentItem $item): bool
+    {
+        return mb_strlen(HtmlCleaner::clean($item->bodyHtml)) >= $this->minContentLength;
     }
 
     /**

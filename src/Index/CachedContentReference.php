@@ -15,9 +15,13 @@ namespace Tag1\Scolta\Index;
  * slim proxy reads off a ContentItem. A field absent here is silently lost on the
  * cached path; SlimProxyFieldParityTest exists to catch that.
  *
- * On token cache miss the orchestrator skips markSeen(), causing pruneAndSave()
- * to remove the manifest entry. The next build treats the entity as changed,
- * re-loads it, re-tokenizes, and re-populates both cache and manifest.
+ * On token cache miss the orchestrator asks TimestampManifest::isKnownEmpty()
+ * what the miss means. For a hash the exporter has recorded as producing no
+ * indexable page it is the expected outcome: the entry is marked seen and kept,
+ * because re-gathering an entity that will be dropped again buys nothing. For
+ * any other hash it is an eviction: markSeen() is skipped, pruneAndSave()
+ * removes the entry, and the next build treats the entity as changed, re-loads
+ * it, re-tokenizes, and re-populates both cache and manifest.
  *
  * @since 0.3.12
  */

@@ -28,11 +28,30 @@ use Tag1\Scolta\Storage\StorageDriverInterface;
  *  3. After build, pruneAndSave() removes entries for deleted entities and
  *     persists the updated manifest atomically.
  *
+ * Known-empty content hashes are tracked alongside the entries, in their own
+ * file. An entity whose body is too short to index is still recorded by the
+ * gatherer's put(), because the gatherer never sees the exporter's minimum
+ * length gate — so on the next build it returns as a CachedContentReference
+ * whose token cache lookup can only miss, and a miss used to mean "prune the
+ * entry and re-gather". For an entity that never had tokens that re-gather
+ * repeats forever. ContentExporter::filterItems() records the hash it drops
+ * here, and the orchestrator consults isKnownEmpty() before treating a miss as
+ * an eviction, so the entry survives and the entity is gathered once, not once
+ * per build.
+ *
+ * The record is keyed by content hash, so editing an entity invalidates it
+ * without any explicit clearing: new body, new hash, no match. Lowering the
+ * exporter's minimum content length does NOT invalidate it — hashes recorded
+ * under the old threshold stay known-empty until a --force build rewrites the
+ * manifest.
+ *
  * @since 0.3.12
  */
 final class TimestampManifest
 {
     private const FILENAME = 'timestamp-manifest.php';
+
+    private const EMPTY_FILENAME = 'timestamp-manifest-empty.php';
 
     /** @var array<string, array{ts: int, items: list<array<string, mixed>>}> */
     private array $data = [];
@@ -40,13 +59,26 @@ final class TimestampManifest
     /** @var array<string, true> */
     private array $seen = [];
 
+    /**
+     * Content hashes known to produce no indexable page.
+     *
+     * @var array<string, true>
+     */
+    private array $empty = [];
+
+    /** @var array<string, true> */
+    private array $emptySeen = [];
+
     private bool $dirty = false;
+
+    private bool $emptyDirty = false;
 
     public function __construct(
         private readonly string $stateDir,
         private readonly StorageDriverInterface $storage,
     ) {
         $this->loadFromDisk();
+        $this->loadEmptyFromDisk();
     }
 
     /**
@@ -94,6 +126,60 @@ final class TimestampManifest
     }
 
     /**
+     * Record that a content hash produces no indexable page.
+     *
+     * Called by ContentExporter::filterItems() as it drops an item, which is
+     * the one place the decision is made against a body that is actually in
+     * memory. Recording it anywhere else risks a second, drifting definition
+     * of "empty" — and a hash wrongly recorded here is a page that silently
+     * stops being indexed.
+     *
+     * @since 1.2.1
+     * @stability experimental
+     */
+    public function markEmpty(string $contentHash): void
+    {
+        $this->emptySeen[$contentHash] = true;
+
+        if (isset($this->empty[$contentHash])) {
+            return;
+        }
+
+        $this->empty[$contentHash] = true;
+        $this->emptyDirty          = true;
+    }
+
+    /**
+     * Whether a content hash is known to produce no indexable page.
+     *
+     * Also marks the hash as still in use, so it survives pruneAndSave().
+     *
+     * @since 1.2.1
+     * @stability experimental
+     */
+    public function isKnownEmpty(string $contentHash): bool
+    {
+        if (!isset($this->empty[$contentHash])) {
+            return false;
+        }
+
+        $this->emptySeen[$contentHash] = true;
+
+        return true;
+    }
+
+    /**
+     * How many content hashes are recorded as producing no indexable page.
+     *
+     * @since 1.2.1
+     * @stability experimental
+     */
+    public function knownEmptyCount(): int
+    {
+        return count($this->empty);
+    }
+
+    /**
      * Remove entries for entities no longer present, then save atomically.
      *
      * Should be called in the same places as PageWordCache::pruneAndSave().
@@ -110,9 +196,29 @@ final class TimestampManifest
             }
         }
 
-        if ($this->dirty) {
+        foreach (array_keys($this->empty) as $hash) {
+            if (!isset($this->emptySeen[$hash])) {
+                unset($this->empty[$hash]);
+                $this->emptyDirty = true;
+            }
+        }
+
+        // A fresh build's prepare() calls BuildState::cleanup(), which unlinks
+        // every file in the state directory — this manifest included. Both
+        // copies live in memory by then, so the build runs correctly and the
+        // loss is invisible until the NEXT build finds no manifest and
+        // re-gathers the whole corpus. Saving only when something changed is
+        // therefore not enough: a build in which every entity is unchanged has
+        // nothing to mark dirty, and is exactly the build that can least afford
+        // to lose the manifest. Write whenever the file is missing.
+        if ($this->dirty || ($this->data !== [] && !$this->storage->exists($this->path(self::FILENAME)))) {
             $this->saveToDisk();
             $this->dirty = false;
+        }
+
+        if ($this->emptyDirty || ($this->empty !== [] && !$this->storage->exists($this->path(self::EMPTY_FILENAME)))) {
+            $this->saveEmptyToDisk();
+            $this->emptyDirty = false;
         }
     }
 
@@ -134,9 +240,14 @@ final class TimestampManifest
         return count($this->data);
     }
 
+    private function path(string $filename): string
+    {
+        return $this->stateDir . '/' . $filename;
+    }
+
     private function loadFromDisk(): void
     {
-        $path = $this->stateDir . '/' . self::FILENAME;
+        $path = $this->path(self::FILENAME);
         if (!$this->storage->exists($path)) {
             return;
         }
@@ -153,12 +264,53 @@ final class TimestampManifest
         }
     }
 
+    /**
+     * Load the known-empty hashes.
+     *
+     * Kept in its own file rather than folded into the entry manifest so that a
+     * manifest written by an older version stays readable as-is: the set simply
+     * starts out absent, and the first build that drops an item writes it.
+     */
+    private function loadEmptyFromDisk(): void
+    {
+        $path = $this->path(self::EMPTY_FILENAME);
+        if (!$this->storage->exists($path)) {
+            return;
+        }
+
+        try {
+            $raw = $this->storage->get($path);
+        } catch (\Throwable) {
+            return;
+        }
+
+        $hashes = @unserialize($raw, ['allowed_classes' => false]);
+        if (!is_array($hashes)) {
+            return;
+        }
+
+        foreach ($hashes as $hash) {
+            if (is_string($hash)) {
+                $this->empty[$hash] = true;
+            }
+        }
+    }
+
     private function saveToDisk(): void
     {
         $this->storage->makeDirectory($this->stateDir);
-        $file = $this->stateDir . '/' . self::FILENAME;
+        $file = $this->path(self::FILENAME);
         $tmp  = $file . '.tmp.' . getmypid();
         $this->storage->put($tmp, serialize($this->data));
+        rename($tmp, $file);
+    }
+
+    private function saveEmptyToDisk(): void
+    {
+        $this->storage->makeDirectory($this->stateDir);
+        $file = $this->path(self::EMPTY_FILENAME);
+        $tmp  = $file . '.tmp.' . getmypid();
+        $this->storage->put($tmp, serialize(array_keys($this->empty)));
         rename($tmp, $file);
     }
 }

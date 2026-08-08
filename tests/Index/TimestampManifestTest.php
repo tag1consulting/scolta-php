@@ -211,6 +211,148 @@ class TimestampManifestTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // Surviving the state-directory wipe
+    // -------------------------------------------------------------------------
+
+    /**
+     * A fresh build unlinks every file in the state directory partway through,
+     * after the manifest is already in memory. If pruneAndSave() then declines
+     * to write because nothing changed, the manifest is gone and the next build
+     * re-gathers the entire corpus — the more unchanged the corpus, the more
+     * certain the loss.
+     */
+    public function test_rewrites_the_manifest_when_the_file_was_deleted_mid_build(): void
+    {
+        $m = $this->make();
+        $m->put('42', 1_000_000, [['hash' => 'abc', 'id' => '42', 'url' => '/node/42', 'date' => '2026-01-01', 'siteName' => 'Test', 'language' => 'en', 'filters' => []]]);
+        $m->pruneAndSave();
+
+        // Second build: entry unchanged, so nothing marks the manifest dirty.
+        $second = $this->make();
+        unlink($this->stateDir . '/timestamp-manifest.php');
+        $second->markSeen('42');
+        $second->pruneAndSave();
+
+        $this->assertNotNull($this->make()->get('42'));
+    }
+
+    public function test_rewrites_the_empty_set_when_the_file_was_deleted_mid_build(): void
+    {
+        $m = $this->make();
+        $m->markEmpty('abc');
+        $m->pruneAndSave();
+
+        $second = $this->make();
+        unlink($this->stateDir . '/timestamp-manifest-empty.php');
+        $this->assertTrue($second->isKnownEmpty('abc'));
+        $second->pruneAndSave();
+
+        $this->assertTrue($this->make()->isKnownEmpty('abc'));
+    }
+
+    /**
+     * The reverse: an empty manifest writes nothing, so a first build that
+     * gathers nothing does not leave a file behind.
+     */
+    public function test_does_not_write_a_manifest_with_nothing_in_it(): void
+    {
+        $this->make()->pruneAndSave();
+
+        $this->assertFileDoesNotExist($this->stateDir . '/timestamp-manifest.php');
+        $this->assertFileDoesNotExist($this->stateDir . '/timestamp-manifest-empty.php');
+    }
+
+    // -------------------------------------------------------------------------
+    // Known-empty content hashes
+    // -------------------------------------------------------------------------
+
+    public function test_unrecorded_hash_is_not_known_empty(): void
+    {
+        $m = $this->make();
+        $this->assertFalse($m->isKnownEmpty('abc'));
+        $this->assertSame(0, $m->knownEmptyCount());
+    }
+
+    public function test_known_empty_hash_survives_save_and_reload(): void
+    {
+        $m = $this->make();
+        $m->markEmpty('abc');
+        $m->pruneAndSave();
+
+        $reloaded = $this->make();
+        $this->assertTrue($reloaded->isKnownEmpty('abc'));
+        $this->assertSame(1, $reloaded->knownEmptyCount());
+    }
+
+    /**
+     * The entry manifest and the empty set are separate files, so a build that
+     * records nothing but empties still persists them.
+     */
+    public function test_known_empty_hash_persists_without_any_entries(): void
+    {
+        $m = $this->make();
+        $m->markEmpty('abc');
+        $m->pruneAndSave();
+
+        $this->assertTrue($this->make()->isKnownEmpty('abc'));
+    }
+
+    public function test_known_empty_hash_is_pruned_when_the_build_does_not_touch_it(): void
+    {
+        $m = $this->make();
+        $m->markEmpty('abc');
+        $m->markEmpty('def');
+        $m->pruneAndSave();
+
+        // Next build sees only 'abc' — 'def' belongs to content that has since
+        // been edited or deleted, so its hash can never come back.
+        $second = $this->make();
+        $this->assertTrue($second->isKnownEmpty('abc'));
+        $second->pruneAndSave();
+
+        $third = $this->make();
+        $this->assertTrue($third->isKnownEmpty('abc'));
+        $this->assertFalse($third->isKnownEmpty('def'));
+        $this->assertSame(1, $third->knownEmptyCount());
+    }
+
+    public function test_reading_a_known_empty_hash_keeps_it_across_a_prune(): void
+    {
+        $m = $this->make();
+        $m->markEmpty('abc');
+        $m->pruneAndSave();
+
+        $second = $this->make();
+        $this->assertTrue($second->isKnownEmpty('abc'));
+        $second->pruneAndSave();
+
+        $this->assertTrue($this->make()->isKnownEmpty('abc'));
+    }
+
+    /**
+     * A manifest written before the empty set existed must still load.
+     */
+    public function test_loads_when_empty_set_file_is_absent(): void
+    {
+        $m = $this->make();
+        $m->put('42', 1_000_000, [['hash' => 'abc', 'id' => '42', 'url' => '/node/42', 'date' => '2026-01-01', 'siteName' => 'Test', 'language' => 'en', 'filters' => []]]);
+        $m->pruneAndSave();
+
+        $this->assertFileDoesNotExist($this->stateDir . '/timestamp-manifest-empty.php');
+
+        $reloaded = $this->make();
+        $this->assertNotNull($reloaded->get('42'));
+        $this->assertFalse($reloaded->isKnownEmpty('abc'));
+    }
+
+    public function test_loads_empty_set_as_empty_when_corrupted(): void
+    {
+        file_put_contents($this->stateDir . '/timestamp-manifest-empty.php', 'not valid php serialize data');
+
+        $this->assertFalse($this->make()->isKnownEmpty('abc'));
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
