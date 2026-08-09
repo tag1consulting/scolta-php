@@ -206,6 +206,8 @@ final class IndexBuildOrchestrator
             /** @var list<array{id: string, reason: string}> Items given to the build that produced no page. */
             $skipped     = [];
             $resumeSkips = 0;
+            /** @var int Cached references whose entity is already known to produce no page. */
+            $expectedEmpty = 0;
 
             // The generator that yields $pages does the CMS-side gathering, so
             // the time it spends is only visible as the gap between one
@@ -243,6 +245,15 @@ final class IndexBuildOrchestrator
                     if ($tokenData !== null) {
                         $this->tsManifest->markSeen($page->entityKey);
                         $chunk[] = $this->makeChunkEntry($page, $tokenData, $page->contentHash);
+                    } elseif ($this->tsManifest->isKnownEmpty($page->contentHash)) {
+                        // A body the exporter has already dropped for being too
+                        // short. It never had token data and never will, so the
+                        // miss is the expected outcome rather than an eviction:
+                        // keep the manifest entry (markSeen) and let the next
+                        // build skip the entity instead of re-gathering it to
+                        // drop it again. Not a warning — nothing is lost.
+                        $this->tsManifest->markSeen($page->entityKey);
+                        $expectedEmpty++;
                     } else {
                         // On cache miss: skip markSeen → manifest entry is pruned →
                         // entity is treated as changed on the next build.
@@ -341,6 +352,12 @@ final class IndexBuildOrchestrator
                 $logger->info('[scolta] {count} pages were already committed by an earlier segment of this build.', [
                     'count' => $resumeSkips,
                 ]);
+            }
+            if ($expectedEmpty > 0) {
+                $logger->info(
+                    '[scolta] {count} unchanged documents produce no indexable page; they were kept in the manifest and not re-gathered.',
+                    ['count' => $expectedEmpty],
+                );
             }
             $this->logSkippedItems($skipped, $logger);
 
