@@ -9,6 +9,7 @@ scripts/.pagefind-bin/
 /.e2e-output-sayt/
 /.e2e-output-facet-mode/
 /.e2e-output-summary-cls/
+/.e2e-attachment-output/
 /test-results/
 .php-cs-fixer.cache
 /.claude/

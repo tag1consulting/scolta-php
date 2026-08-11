@@ -178,18 +178,24 @@ final class PfIndexCodec
             $entry     = $pageEntries[$pageNum];
             $pageItems = [$cbor->encodeUint($deltaPages[$idx])];
 
-            /** @var list<int> $allBodyPositions */
-            $allBodyPositions = [];
-            foreach ($entry['positions'] as $positions) {
+            // One marker per weight bucket, each group delta-encoded from its
+            // own first position. Buckets are emitted heaviest-first so a page
+            // carrying only body positions produces the exact bytes it did
+            // before attachment text existed.
+            $buckets = [];
+            foreach ($entry['positions'] as $weight => $positions) {
+                $positions = array_map(intval(...), $positions);
                 sort($positions);
-                $allBodyPositions = array_merge($allBodyPositions, array_map(intval(...), $positions));
+                if ($positions !== []) {
+                    $buckets[(int) $weight] = $positions;
+                }
             }
-            sort($allBodyPositions);
+            krsort($buckets, SORT_NUMERIC);
 
             $posItems = [];
-            if (!empty($allBodyPositions)) {
-                $posItems[] = $cbor->encodeNegInt(-self::BODY_WEIGHT);
-                foreach (DeltaEncoder::deltaEncode($allBodyPositions) as $dp) {
+            foreach ($buckets as $weight => $positions) {
+                $posItems[] = $cbor->encodeNegInt(-$weight);
+                foreach (DeltaEncoder::deltaEncode($positions) as $dp) {
                     $posItems[] = $dp >= 0 ? $cbor->encodeUint($dp) : $cbor->encodeNegInt($dp);
                 }
             }
@@ -251,14 +257,12 @@ final class PfIndexCodec
             [$delta, $locs, $metaLocs] = $pageEntry;
             $pageNum += (int) $delta;
 
-            // Both position lists start with a field marker (-25 body, -1
-            // title) that is not a position. Its absence means an empty list.
-            $bodyPositions = self::decodePositions($locs);
-            $metaPositions = self::decodePositions($metaLocs);
-
+            // Both position lists start with a field marker (-25 body,
+            // -13 attachment, -1 title) that is not a position. Its absence
+            // means an empty list.
             $entries[$pageNum] = [
-                'positions'      => $bodyPositions === [] ? [] : [self::BODY_WEIGHT => $bodyPositions],
-                'meta_positions' => $metaPositions,
+                'positions'      => self::decodePositionBuckets($locs),
+                'meta_positions' => self::decodePositions($metaLocs),
             ];
         }
 
@@ -279,6 +283,41 @@ final class PfIndexCodec
         }
 
         return $entries;
+    }
+
+    /**
+     * Split a position list into its weight buckets.
+     *
+     * Positions inside a bucket are sorted before encoding, so every delta in
+     * one is non-negative and any negative value is unambiguously the next
+     * bucket's marker. Pagefind's own decoder relies on the same property.
+     * Each bucket delta-encodes from its own first position, so the
+     * accumulator resets at every marker.
+     *
+     * @param list<mixed> $locs
+     * @return array<int, list<int>> Weight => absolute positions.
+     */
+    private static function decodePositionBuckets(array $locs): array
+    {
+        $buckets = [];
+        $weight  = self::BODY_WEIGHT;
+        $acc     = 0;
+        $atStart = true;
+
+        foreach ($locs as $value) {
+            $value = (int) $value;
+            if ($value < 0) {
+                $weight  = -$value;
+                $acc     = 0;
+                $atStart = true;
+                continue;
+            }
+            $acc               = $atStart ? $value : $acc + $value;
+            $atStart           = false;
+            $buckets[$weight][] = $acc;
+        }
+
+        return $buckets;
     }
 
     /**

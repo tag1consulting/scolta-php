@@ -450,6 +450,7 @@ final class PageWordCache
     {
         $tokenCount = count($tokenData['titleTokens'] ?? [])
                     + count($tokenData['bodyTokens'] ?? [])
+                    + count($tokenData['attachmentTokens'] ?? [])
                     + count($tokenData['urlTokens'] ?? []);
 
         return $tokenCount * 80 + strlen($tokenData['content'] ?? '');

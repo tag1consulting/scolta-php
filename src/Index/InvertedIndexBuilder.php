@@ -22,6 +22,17 @@ class InvertedIndexBuilder
     private const BODY_WEIGHT = 25;
 
     /**
+     * Weight for attachment text matches.
+     *
+     * These constants are Pagefind position markers, not scores: the encoder
+     * writes -N and pagefind.js reads back `weight: l.w / 24`. BODY_WEIGHT 25
+     * is therefore the 1.0 baseline, and 13 is 0.5 — an attachment match counts
+     * half of the same word in the body, because attachment text is bulk
+     * extracted prose with no authoring intent behind it.
+     */
+    private const ATTACHMENT_WEIGHT = 13;
+
+    /**
      * Maximum positions stored per term per weight bucket per page.
      *
      * Common stop words ("the", "and", "of") appear hundreds of times per
@@ -78,8 +89,8 @@ class InvertedIndexBuilder
      * character offsets. Positions are reindexed after tokenization so
      * they are comparable across pages and phrase_proximity_multiplier fires.
      *
-     * @return array{titleTokens: Token[], bodyTokens: Token[], urlTokens: Token[],
-     *               wordCount: int, cleanTitle: string, content: string}|null
+     * @return array{titleTokens: Token[], bodyTokens: Token[], attachmentTokens: Token[],
+     *               urlTokens: Token[], wordCount: int, cleanTitle: string, content: string}|null
      *
      * @since 1.0.0
      * @stability stable
@@ -102,18 +113,33 @@ class InvertedIndexBuilder
         $bodyResult    = $this->reindexToWordPositions($rawBodyTokens, $titleResult['nextIndex']);
         $bodyTokens    = $bodyResult['tokens'];
 
+        // Attachment text is positioned immediately after the body and before
+        // the URL, because both facts are load-bearing. Pagefind builds an
+        // excerpt by splitting the fragment content on whitespace and indexing
+        // into it by match position, so attachment positions only resolve to
+        // real words while they stay contiguous with the content appended
+        // below. URL tokens are deliberately pushed past wordCount (see the
+        // comment there) and are unreachable by that same excerpt builder —
+        // tokenizing attachments after them would inherit that unreachability.
+        $cleanAttachment  = HtmlCleaner::clean($item->attachmentText);
+        $rawAttachTokens  = $this->tokenizer->tokenize($cleanAttachment);
+        $attachResult     = $this->reindexToWordPositions($rawAttachTokens, $bodyResult['nextIndex']);
+        $attachmentTokens = $attachResult['tokens'];
+
         // Tokenize URL path segments for search discovery.
         $urlPath     = parse_url($item->url, PHP_URL_PATH) ?? '';
         $urlPath     = preg_replace('/\.\w+$/', '', $urlPath);
         $urlSegments = array_filter(explode('/', $urlPath), fn($s) => strlen($s) > 0);
         $urlText     = implode(' ', $urlSegments);
         $rawUrlTokens = $this->tokenizer->tokenize($urlText);
-        $urlResult   = $this->reindexToWordPositions($rawUrlTokens, $bodyResult['nextIndex']);
+        $urlResult   = $this->reindexToWordPositions($rawUrlTokens, $attachResult['nextIndex']);
         $urlTokens   = $urlResult['tokens'];
 
         // Pagefind word_count = content.split(' ').length — URL path
-        // tokens are NOT counted even though they are indexed.
-        $wordCount = count($titleTokens) + count($bodyTokens);
+        // tokens are NOT counted even though they are indexed. Attachment
+        // tokens ARE counted, because their text is part of content below and
+        // Pagefind's length normalization divides by this number.
+        $wordCount = count($titleTokens) + count($bodyTokens) + count($attachmentTokens);
 
         // Fragment content mirrors what PagefindHtmlBuilder puts in <body>:
         // "<h1>title</h1><p>body...</p>". Pagefind extracts that as
@@ -121,14 +147,18 @@ class InvertedIndexBuilder
         // scolta-core's content_match_score sees title words in the excerpt,
         // giving title-matching pages the same content boost as body matches.
         $content = $cleanTitle !== '' ? $cleanTitle . '. ' . $cleanText : $cleanText;
+        if ($cleanAttachment !== '') {
+            $content .= ' ' . $cleanAttachment;
+        }
 
         return [
-            'titleTokens' => $titleTokens,
-            'bodyTokens'  => $bodyTokens,
-            'urlTokens'   => $urlTokens,
-            'wordCount'   => $wordCount,
-            'cleanTitle'  => $cleanTitle,
-            'content'     => $content,
+            'titleTokens'      => $titleTokens,
+            'bodyTokens'       => $bodyTokens,
+            'attachmentTokens' => $attachmentTokens,
+            'urlTokens'        => $urlTokens,
+            'wordCount'        => $wordCount,
+            'cleanTitle'       => $cleanTitle,
+            'content'          => $content,
         ];
     }
 
@@ -320,6 +350,11 @@ class InvertedIndexBuilder
 
         $this->indexTokens($index, $tokenData['titleTokens'], $pageNum, self::TITLE_WEIGHT);
         $this->indexTokens($index, $tokenData['bodyTokens'], $pageNum, self::BODY_WEIGHT);
+        // Absent only on token data cached by a build that predates attachment
+        // text. PhpIndexer::contentHash() carries a version prefix that this
+        // feature bumped, so every such entry misses its lookup and is
+        // re-tokenized rather than read back short a field.
+        $this->indexTokens($index, $tokenData['attachmentTokens'] ?? [], $pageNum, self::ATTACHMENT_WEIGHT);
         $this->indexTokens($index, $tokenData['urlTokens'], $pageNum, self::BODY_WEIGHT);
     }
 

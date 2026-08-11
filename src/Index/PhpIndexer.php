@@ -275,11 +275,15 @@ class PhpIndexer
         $algo = in_array('xxh128', hash_algos(), true) ? 'xxh128' : 'sha256';
 
         return hash($algo, implode("\0", [
-            'v2:',
+            // v3 adds attachmentText. The bump is the invalidation: every
+            // cached token array predates the attachmentTokens field, and a
+            // stale hit would index a page short that whole bucket.
+            'v3:',
             $item->language,
             $item->title,
             $item->url,
             $item->bodyHtml,
+            $item->attachmentText,
         ]));
     }
 
