@@ -576,7 +576,7 @@ final class IncrementalIndexUpdater
         }
 
         $terms = [];
-        foreach (['titleTokens', 'bodyTokens', 'urlTokens'] as $bucket) {
+        foreach (['titleTokens', 'bodyTokens', 'attachmentTokens', 'urlTokens'] as $bucket) {
             foreach ($old[$bucket] ?? [] as $token) {
                 $terms[$this->stemmer->stem($token->stem)] = true;
             }

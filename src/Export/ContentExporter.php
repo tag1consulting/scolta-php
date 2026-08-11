@@ -235,7 +235,15 @@ class ContentExporter
      */
     public function hasIndexableText(ContentItem $item): bool
     {
-        return mb_strlen(HtmlCleaner::clean($item->bodyHtml)) >= $this->minContentLength;
+        // Attachment text counts toward the threshold: a page whose real
+        // content is its attachment — a stub linking a worksheet, say — is
+        // indexable on the strength of that text alone.
+        $length = mb_strlen(HtmlCleaner::clean($item->bodyHtml));
+        if ($item->attachmentText !== '') {
+            $length += mb_strlen(HtmlCleaner::clean($item->attachmentText));
+        }
+
+        return $length >= $this->minContentLength;
     }
 
     /**

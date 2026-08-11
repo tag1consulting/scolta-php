@@ -230,21 +230,25 @@ class PagefindFormatWriter
                 $this->cbor->encodeUint($deltaPages[$idx]),
             ];
 
-            // Encode locs: Pagefind always emits a weight marker, even for
-            // the default body weight. Body weight in Pagefind is 24 (marker -25).
-            $allBodyPositions = [];
+            // Encode locs: Pagefind always emits a weight marker, even for the
+            // default body weight, which is 24 (marker -25). One marker per
+            // bucket, heaviest first, each group delta-encoded from its own
+            // first position — flattening them here would silently promote a
+            // lighter bucket such as attachment text to full body weight.
+            $buckets = [];
             foreach ($entry['positions'] as $weight => $positions) {
+                $positions = array_map(intval(...), $positions);
                 sort($positions);
-                $allBodyPositions = array_merge($allBodyPositions, $positions);
+                if ($positions !== []) {
+                    $buckets[(int) $weight] = $positions;
+                }
             }
-            sort($allBodyPositions);
+            krsort($buckets, SORT_NUMERIC);
 
             $posItems = [];
-            if (!empty($allBodyPositions)) {
-                // Weight marker for body content: -(24 + 1) = -25
-                $posItems[] = $this->cbor->encodeNegInt(-25);
-                $deltaPos = DeltaEncoder::deltaEncode($allBodyPositions);
-                foreach ($deltaPos as $dp) {
+            foreach ($buckets as $weight => $positions) {
+                $posItems[] = $this->cbor->encodeNegInt(-$weight);
+                foreach (DeltaEncoder::deltaEncode($positions) as $dp) {
                     $posItems[] = $dp >= 0
                         ? $this->cbor->encodeUint($dp)
                         : $this->cbor->encodeNegInt($dp);

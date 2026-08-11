@@ -15,16 +15,18 @@ namespace Tag1\Scolta\Index;
  *
  * The round trip is exact, not approximate. Two details make it so:
  *
- *  - `encodeWordEntry()` flattens every weight bucket into one sorted body
- *    position list before encoding, so the per-weight split is already gone
- *    from the file. Decoding into a single bucket (25, the body weight) and
- *    re-encoding therefore reproduces the original bytes even though the
- *    intermediate shape differs from what `InvertedIndexBuilder` produced.
+ *  - `encodeWordEntry()` emits one marker per weight bucket, heaviest first,
+ *    and `decodePositionBuckets()` splits them back apart on those markers, so
+ *    the per-weight structure survives the file rather than being flattened
+ *    into it. Buckets are sorted before encoding, which is what makes a
+ *    negative value unambiguously a marker rather than a delta.
  *  - Page numbers and positions are delta-encoded on the way out and are
- *    restored by running sums here.
+ *    restored by running sums here, restarting at each marker.
  *
  * Verified against 25 chunks of a real 109,308-page index (2,071 word entries):
- * decode followed by re-encode reproduced the original bytes for all 25.
+ * decode followed by re-encode reproduced the original bytes for all 25. Those
+ * chunks predate multi-bucket entries and so exercise only the single-bucket
+ * case; `AttachmentTextTest` covers the round trip with two buckets on a term.
  *
  * @since 1.2.0
  * @stability experimental

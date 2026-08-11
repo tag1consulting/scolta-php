@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tag1\Scolta\Tests\Index;
 
 use PHPUnit\Framework\TestCase;
+use Tag1\Scolta\Export\ContentExporter;
 use Tag1\Scolta\Export\ContentItem;
 use Tag1\Scolta\Index\CborEncoder;
 use Tag1\Scolta\Index\InvertedIndexBuilder;
@@ -183,6 +184,58 @@ class AttachmentTextTest extends TestCase
         $this->assertNotSame(
             PhpIndexer::contentHash($base),
             PhpIndexer::contentHash($base->cloneWith(['attachmentText' => 'Chloroplasts absorb photons.'])),
+        );
+    }
+
+    /**
+     * A page whose body is empty but whose attachment carries real text is the
+     * case this field exists to serve, and both length gates used to drop it.
+     */
+    public function testAttachmentOnlyPageIsIndexable(): void
+    {
+        $item = new ContentItem(
+            'stub-1',
+            'Worksheet',
+            '',
+            '/lesson/worksheet',
+            '2026-08-11',
+            attachmentText: 'A zygomorphic corolla has one plane of symmetry, unlike a radial one.',
+        );
+
+        $this->assertNotNull($this->builder->tokenizeItem($item), 'Tokenizer dropped an attachment-only page.');
+        $this->assertTrue(
+            (new ContentExporter(sys_get_temp_dir()))->hasIndexableText($item),
+            'Exporter dropped an attachment-only page.',
+        );
+    }
+
+    /**
+     * A corpus with no attachment text must keep the keys it already had, or
+     * adding this field costs every such site a full token-cache rebuild for
+     * no change in output.
+     */
+    public function testContentHashIsUnchangedWhenNoAttachmentTextIsPresent(): void
+    {
+        $item = $this->item('<p>Leaves capture sunlight.</p>', '');
+
+        $this->assertSame(
+            hash('xxh128', implode("\0", ['v2:', $item->language, $item->title, $item->url, $item->bodyHtml])),
+            PhpIndexer::contentHash($item),
+        );
+    }
+
+    /**
+     * The build-needed check hashes item content. If it ignored attachment
+     * text, the first build after a site starts populating the field would
+     * report "up to date" and never run.
+     */
+    public function testFingerprintRespondsToAttachmentText(): void
+    {
+        $base = $this->item('<p>Leaves capture sunlight.</p>', '');
+
+        $this->assertNotSame(
+            PhpIndexer::computeFingerprint([$base]),
+            PhpIndexer::computeFingerprint([$base->cloneWith(['attachmentText' => 'Chloroplasts absorb photons.'])]),
         );
     }
 

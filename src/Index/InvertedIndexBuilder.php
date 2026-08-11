@@ -97,8 +97,15 @@ class InvertedIndexBuilder
      */
     public function tokenizeItem(ContentItem $item): ?array
     {
-        $cleanText = HtmlCleaner::clean($item->bodyHtml, $item->title);
-        if (strlen($cleanText) < 10) {
+        $cleanText       = HtmlCleaner::clean($item->bodyHtml, $item->title);
+        $cleanAttachment = $item->attachmentText !== ''
+            ? HtmlCleaner::clean($item->attachmentText)
+            : '';
+
+        // Either source can carry the page. A stub whose real content is its
+        // attachment has almost no body and would otherwise be dropped here,
+        // which is the case this field exists to serve.
+        if (strlen($cleanText) + strlen($cleanAttachment) < 10) {
             return null;
         }
 
@@ -121,10 +128,9 @@ class InvertedIndexBuilder
         // below. URL tokens are deliberately pushed past wordCount (see the
         // comment there) and are unreachable by that same excerpt builder —
         // tokenizing attachments after them would inherit that unreachability.
-        $cleanAttachment  = HtmlCleaner::clean($item->attachmentText);
-        $rawAttachTokens  = $this->tokenizer->tokenize($cleanAttachment);
-        $attachResult     = $this->reindexToWordPositions($rawAttachTokens, $bodyResult['nextIndex']);
-        $attachmentTokens = $attachResult['tokens'];
+        $rawAttachmentTokens = $this->tokenizer->tokenize($cleanAttachment);
+        $attachmentResult    = $this->reindexToWordPositions($rawAttachmentTokens, $bodyResult['nextIndex']);
+        $attachmentTokens    = $attachmentResult['tokens'];
 
         // Tokenize URL path segments for search discovery.
         $urlPath     = parse_url($item->url, PHP_URL_PATH) ?? '';
@@ -132,7 +138,7 @@ class InvertedIndexBuilder
         $urlSegments = array_filter(explode('/', $urlPath), fn($s) => strlen($s) > 0);
         $urlText     = implode(' ', $urlSegments);
         $rawUrlTokens = $this->tokenizer->tokenize($urlText);
-        $urlResult   = $this->reindexToWordPositions($rawUrlTokens, $attachResult['nextIndex']);
+        $urlResult   = $this->reindexToWordPositions($rawUrlTokens, $attachmentResult['nextIndex']);
         $urlTokens   = $urlResult['tokens'];
 
         // Pagefind word_count = content.split(' ').length — URL path
@@ -350,10 +356,10 @@ class InvertedIndexBuilder
 
         $this->indexTokens($index, $tokenData['titleTokens'], $pageNum, self::TITLE_WEIGHT);
         $this->indexTokens($index, $tokenData['bodyTokens'], $pageNum, self::BODY_WEIGHT);
-        // Absent only on token data cached by a build that predates attachment
-        // text. PhpIndexer::contentHash() carries a version prefix that this
-        // feature bumped, so every such entry misses its lookup and is
-        // re-tokenized rather than read back short a field.
+        // Absent on token data cached before this field existed. Such an entry
+        // is only ever reached by a page with no attachment text — see the key
+        // construction in PhpIndexer::contentHash() — so an empty bucket is the
+        // correct reading of it, not a dropped field.
         $this->indexTokens($index, $tokenData['attachmentTokens'] ?? [], $pageNum, self::ATTACHMENT_WEIGHT);
         $this->indexTokens($index, $tokenData['urlTokens'], $pageNum, self::BODY_WEIGHT);
     }
