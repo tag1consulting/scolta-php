@@ -188,6 +188,30 @@ class AttachmentTextTest extends TestCase
     }
 
     /**
+     * The on-disk bucket layout has two writers — PfIndexCodec and
+     * PagefindFormatWriter — and no test compares their output, so they used to
+     * be able to drift into emitting different bytes for the same index. They
+     * now share this helper; this pins the contract it defines.
+     */
+    public function testPositionBucketsEncodeHeaviestFirstWithPerBucketDeltas(): void
+    {
+        $cbor  = new CborEncoder();
+        $items = PfIndexCodec::encodePositionBuckets($cbor, [13 => [40, 44], 25 => [2, 5]]);
+
+        // Body (25) precedes attachment (13); each bucket's first position is
+        // absolute and the rest are deltas from it.
+        $this->assertSame(
+            [
+                $cbor->encodeNegInt(-25), $cbor->encodeUint(2), $cbor->encodeUint(3),
+                $cbor->encodeNegInt(-13), $cbor->encodeUint(40), $cbor->encodeUint(4),
+            ],
+            $items,
+        );
+
+        $this->assertSame([], PfIndexCodec::encodePositionBuckets($cbor, [25 => []]), 'Empty buckets emit nothing.');
+    }
+
+    /**
      * A page whose body is empty but whose attachment carries real text is the
      * case this field exists to serve, and both length gates used to drop it.
      */

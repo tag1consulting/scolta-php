@@ -237,6 +237,35 @@ final class IncrementalDifferentialTest extends TestCase
         $this->assertTreesMatch('The append step must match a rebuild of that state.');
     }
 
+    /**
+     * Incremental removal had only ever been exercised for terms in the body.
+     * A term living solely in attachment text is the case that breaks if the
+     * removal sweep works from a hardcoded bucket list rather than from
+     * TextChannel: its postings survive the update and the page goes on
+     * matching a word it no longer contains. Tree equality catches that more
+     * thoroughly than inspecting one posting would.
+     */
+    public function testDroppingAttachmentTextLeavesNoOrphanedPosting(): void
+    {
+        $items = SyntheticCorpus::generate(80, seed: 5);
+        // A term that appears nowhere else in the corpus, so any surviving
+        // posting for it can only have come from this page's attachment.
+        $items[40] = $items[40]->cloneWith(['attachmentText' => 'Zygomorphic corolla symmetry.']);
+        $this->seedBoth($items);
+
+        $edited     = $items;
+        $edited[40] = $edited[40]->cloneWith(['attachmentText' => '']);
+
+        $updater = $this->updater();
+        $updater->stageUpsert($edited[40]);
+        $result = $updater->commit();
+
+        $this->assertSame(1, $result->pagesUpdated);
+
+        $this->rebuildReference($edited);
+        $this->assertTreesMatch('Dropping attachment text must leave no posting a full rebuild would not have.');
+    }
+
     public function testUrlChangeRenamesTheFragmentAndLeavesNoOrphan(): void
     {
         $items = SyntheticCorpus::generate(60, seed: 5);

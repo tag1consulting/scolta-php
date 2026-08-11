@@ -390,7 +390,7 @@ final class PageWordCache
         // Old entries store tokens as plain arrays; reading them with ->stem would fatal.
         // Return null to force re-tokenization — the new entry will use Token objects.
         foreach ($data as $entry) {
-            $firstTokens = $entry['titleTokens'] ?? $entry['bodyTokens'] ?? [];
+            $firstTokens = $entry[TextChannel::Title->value] ?? $entry[TextChannel::Body->value] ?? [];
             if (!empty($firstTokens) && is_array(reset($firstTokens))) {
                 return null;
             }
@@ -448,10 +448,10 @@ final class PageWordCache
      */
     private function estimateBytes(array $tokenData): int
     {
-        $tokenCount = count($tokenData['titleTokens'] ?? [])
-                    + count($tokenData['bodyTokens'] ?? [])
-                    + count($tokenData['attachmentTokens'] ?? [])
-                    + count($tokenData['urlTokens'] ?? []);
+        $tokenCount = 0;
+        foreach (TextChannel::cases() as $channel) {
+            $tokenCount += count($tokenData[$channel->value] ?? []);
+        }
 
         return $tokenCount * 80 + strlen($tokenData['content'] ?? '');
     }
