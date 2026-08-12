@@ -42,6 +42,10 @@ namespace Tag1\Scolta\Index;
  * Everything else — indexing, word count, content assembly, incremental
  * removal, cache accounting — reads this enum and follows automatically.
  *
+ * Every method below answers per case rather than by negating one of them, so
+ * a new case is a set of decisions the author has to make rather than a set
+ * silently inherited from whichever channel the negation named.
+ *
  * @since 1.2.1
  * @stability experimental
  */
@@ -85,6 +89,24 @@ enum TextChannel: string
     }
 
     /**
+     * The bucket a position list opens in when it carries no marker.
+     *
+     * Pagefind lets exactly one bucket stay implicit, and it is the body's. A
+     * decoder has to start somewhere, so this is non-nullable where
+     * `positionMarker()` is not: `Body` carries a weight bucket by
+     * construction, and a `Body` that stopped doing so would be a different
+     * format rather than a null to handle.
+     *
+     * @since 1.2.1
+     * @stability experimental
+     */
+    public static function implicitBucketMarker(): int
+    {
+        return self::Body->positionMarker()
+            ?? throw new \LogicException('Body must carry a weight bucket: it is the implicit one.');
+    }
+
+    /**
      * The relevance this channel's matches carry, as pagefind.js computes it.
      *
      * Null for a meta channel, which is scored by a different path.
@@ -106,12 +128,19 @@ enum TextChannel: string
      * whose text is in `content` must count or the page reads as denser than
      * it is. `Url` text is not in `content`, so it does not count.
      *
+     * Spelled out per case rather than as `$this !== self::Url`, so that adding
+     * a channel is a decision made here rather than one inherited from whatever
+     * the negation happened to mean.
+     *
      * @since 1.2.1
      * @stability experimental
      */
     public function countsTowardWordCount(): bool
     {
-        return $this !== self::Url;
+        return match ($this) {
+            self::Title, self::Body, self::Attachment => true,
+            self::Url                                 => false,
+        };
     }
 
     /**
@@ -120,37 +149,17 @@ enum TextChannel: string
      * Content is what the excerpt is sliced out of, so this and position order
      * have to agree: a channel in `content` must be numbered before `Url`.
      *
+     * Per case for the same reason as `countsTowardWordCount()`.
+     *
      * @since 1.2.1
      * @stability experimental
      */
     public function contributesToContent(): bool
     {
-        return $this !== self::Url;
+        return match ($this) {
+            self::Title, self::Body, self::Attachment => true,
+            self::Url                                 => false,
+        };
     }
 
-    /**
-     * The channels that carry a weight bucket, heaviest marker first.
-     *
-     * Encoders write buckets in this order. Returned as magnitudes rather than
-     * cases because `Body` and `Url` share one, and a bucket is a magnitude.
-     *
-     * @return list<int>
-     *
-     * @since 1.2.1
-     * @stability experimental
-     */
-    public static function bucketMarkersHeaviestFirst(): array
-    {
-        $markers = [];
-        foreach (self::cases() as $channel) {
-            $marker = $channel->positionMarker();
-            if ($marker !== null) {
-                $markers[$marker] = true;
-            }
-        }
-        $markers = array_keys($markers);
-        rsort($markers, SORT_NUMERIC);
-
-        return $markers;
-    }
 }

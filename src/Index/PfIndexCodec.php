@@ -33,9 +33,6 @@ namespace Tag1\Scolta\Index;
  */
 final class PfIndexCodec
 {
-    /** Body-weight marker written by encodeWordEntry(). */
-    private const BODY_WEIGHT = 25;
-
     /**
      * Decode a chunk's CBOR body into an ordered term map.
      *
@@ -327,7 +324,7 @@ final class PfIndexCodec
     private static function decodePositionBuckets(array $locs): array
     {
         $buckets = [];
-        $weight  = self::BODY_WEIGHT;
+        $weight  = TextChannel::implicitBucketMarker();
         $acc     = 0;
         $atStart = true;
 
