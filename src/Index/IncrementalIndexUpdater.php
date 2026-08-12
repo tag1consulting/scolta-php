@@ -576,8 +576,11 @@ final class IncrementalIndexUpdater
         }
 
         $terms = [];
-        foreach (['titleTokens', 'bodyTokens', 'urlTokens'] as $bucket) {
-            foreach ($old[$bucket] ?? [] as $token) {
+        // Read from TextChannel rather than a list repeated here: a channel
+        // missing from this sweep leaves its postings orphaned on every page
+        // update, and does so silently.
+        foreach (TextChannel::cases() as $channel) {
+            foreach ($old[$channel->value] ?? [] as $token) {
                 $terms[$this->stemmer->stem($token->stem)] = true;
             }
         }

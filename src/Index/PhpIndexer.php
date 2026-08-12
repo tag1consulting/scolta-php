@@ -236,7 +236,10 @@ class PhpIndexer
      */
     public static function computeFingerprint(array $items): string
     {
-        $data = array_map(fn($item) => $item->id . ':' . hash('sha256', $item->bodyHtml), $items);
+        $data = array_map(
+            fn($item) => $item->id . ':' . hash('sha256', $item->bodyHtml . "\0" . $item->attachmentText),
+            $items,
+        );
         sort($data);
 
         return hash('sha256', 'php-indexer-v1:' . json_encode($data));
@@ -246,8 +249,8 @@ class PhpIndexer
      * Key identifying one item's cached tokenization.
      *
      * Must cover every input the cached value depends on. PageWordCache stores
-     * `titleTokens`, `cleanTitle`, `bodyTokens`, `urlTokens`, `wordCount` and
-     * `content`, so:
+     * `titleTokens`, `cleanTitle`, `bodyTokens`, `attachmentTokens`,
+     * `urlTokens`, `wordCount` and `content`, so:
      *
      *  - the **title** belongs in the key. It produces `cleanTitle` and
      *    `titleTokens` outright, and `HtmlCleaner::clean()` strips a leading
@@ -256,6 +259,9 @@ class PhpIndexer
      *  - the **language** belongs in the key. It selects the Snowball stemmer,
      *    so the same bytes tokenized as English and as Spanish are different
      *    cached values.
+     *  - the **attachment text** belongs in the key, but is appended only when
+     *    it is non-empty. See the construction below for why that is not the
+     *    same as folding it in unconditionally.
      *  - the date, filters, sortable values and metadata do NOT belong: they
      *    reach the fragment straight from the ContentItem and never touch the
      *    cached tokens. Including them would miss the cache on every build for
@@ -274,13 +280,27 @@ class PhpIndexer
     {
         $algo = in_array('xxh128', hash_algos(), true) ? 'xxh128' : 'sha256';
 
-        return hash($algo, implode("\0", [
+        $parts = [
             'v2:',
             $item->language,
             $item->title,
             $item->url,
             $item->bodyHtml,
-        ]));
+        ];
+
+        // Appended only when there is something to append, rather than folded
+        // in unconditionally behind a version bump. Both invalidate a page that
+        // gained attachment text; only this one leaves a corpus that has none
+        // with the keys — and therefore the token cache — it already had. On
+        // the reference 109,308-page corpus the difference is a 965 MB cache
+        // rebuilt for no change in output. An entry cached before this field
+        // existed stays correct for such a page precisely because the page has
+        // no attachment tokens to be missing.
+        if ($item->attachmentText !== '') {
+            $parts[] = $item->attachmentText;
+        }
+
+        return hash($algo, implode("\0", $parts));
     }
 
     private function atomicSwap(): void

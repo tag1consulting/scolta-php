@@ -15,12 +15,6 @@ use Tag1\Scolta\Html\HtmlCleaner;
  */
 class InvertedIndexBuilder
 {
-    /** Weight for title matches. */
-    private const TITLE_WEIGHT = 50;
-
-    /** Weight for body content matches (default). */
-    private const BODY_WEIGHT = 25;
-
     /**
      * Maximum positions stored per term per weight bucket per page.
      *
@@ -63,12 +57,13 @@ class InvertedIndexBuilder
     /**
      * Extract tokenization data for a single content item.
      *
-     * Returns the token arrays and derived text fields needed to build index
-     * entries. Returns null when the cleaned body is too short to index.
-     * The returned array is safe to serialize into a persistent cache.
-     * Token objects serialize efficiently and are allowed in PageWordCache.
+     * Returns one token array per TextChannel, keyed by the channel's value,
+     * plus the derived text fields needed to build index entries. Returns null
+     * when there is too little text to index. The returned array is safe to
+     * serialize into a persistent cache. Token objects serialize efficiently
+     * and are allowed in PageWordCache.
      *
-     * Tokenize title and body separately for weight differentiation.
+     * Each channel is tokenized separately for weight differentiation.
      * Strip HTML tags and decode entities — CMS adapters may pass
      * titles like "<b>Bold Title</b>" or "Title &amp; Subtitle".
      * Remove <script>/<style> blocks first so their inner text (e.g.
@@ -78,57 +73,82 @@ class InvertedIndexBuilder
      * character offsets. Positions are reindexed after tokenization so
      * they are comparable across pages and phrase_proximity_multiplier fires.
      *
-     * @return array{titleTokens: Token[], bodyTokens: Token[], urlTokens: Token[],
-     *               wordCount: int, cleanTitle: string, content: string}|null
+     * @return array{titleTokens: Token[], bodyTokens: Token[], attachmentTokens: Token[],
+     *               urlTokens: Token[], wordCount: int, cleanTitle: string, content: string}|null
      *
      * @since 1.0.0
      * @stability stable
      */
     public function tokenizeItem(ContentItem $item): ?array
     {
-        $cleanText = HtmlCleaner::clean($item->bodyHtml, $item->title);
-        if (strlen($cleanText) < 10) {
+        $cleanText       = HtmlCleaner::clean($item->bodyHtml, $item->title);
+        $cleanAttachment = $item->attachmentText !== ''
+            ? HtmlCleaner::clean($item->attachmentText)
+            : '';
+
+        // Either source can carry the page. A stub whose real content is its
+        // attachment has almost no body and would otherwise be dropped here,
+        // which is the case this field exists to serve.
+        if (strlen($cleanText) + strlen($cleanAttachment) < 10) {
             return null;
         }
 
         $titleRaw   = preg_replace('/<(script|style)[^>]*>.*?<\/\1>/si', '', $item->title) ?? $item->title;
         $cleanTitle = html_entity_decode(strip_tags($titleRaw), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
-        $rawTitleTokens = $this->tokenizer->tokenize($cleanTitle);
-        $titleResult    = $this->reindexToWordPositions($rawTitleTokens, 0);
-        $titleTokens    = $titleResult['tokens'];
-
-        $rawBodyTokens = $this->tokenizer->tokenize($cleanText);
-        $bodyResult    = $this->reindexToWordPositions($rawBodyTokens, $titleResult['nextIndex']);
-        $bodyTokens    = $bodyResult['tokens'];
-
-        // Tokenize URL path segments for search discovery.
         $urlPath     = parse_url($item->url, PHP_URL_PATH) ?? '';
         $urlPath     = preg_replace('/\.\w+$/', '', $urlPath);
         $urlSegments = array_filter(explode('/', $urlPath), fn($s) => strlen($s) > 0);
-        $urlText     = implode(' ', $urlSegments);
-        $rawUrlTokens = $this->tokenizer->tokenize($urlText);
-        $urlResult   = $this->reindexToWordPositions($rawUrlTokens, $bodyResult['nextIndex']);
-        $urlTokens   = $urlResult['tokens'];
 
-        // Pagefind word_count = content.split(' ').length — URL path
-        // tokens are NOT counted even though they are indexed.
-        $wordCount = count($titleTokens) + count($bodyTokens);
+        // The one per-channel step: each is derived from a different place and
+        // cleaned differently. Everything after this is driven by TextChannel.
+        $texts = [
+            TextChannel::Title->value      => $cleanTitle,
+            TextChannel::Body->value       => $cleanText,
+            TextChannel::Attachment->value => $cleanAttachment,
+            TextChannel::Url->value        => implode(' ', $urlSegments),
+        ];
+
+        // Positions are numbered in TextChannel declaration order, which is
+        // what keeps excerptable channels contiguous with `content` below and
+        // Url past word_count. See the enum for why that ordering is
+        // load-bearing rather than incidental.
+        $tokens    = [];
+        $wordCount = 0;
+        $nextIndex = 0;
+        foreach (TextChannel::cases() as $channel) {
+            $result = $this->reindexToWordPositions(
+                $this->tokenizer->tokenize($texts[$channel->value]),
+                $nextIndex,
+            );
+            $tokens[$channel->value] = $result['tokens'];
+            $nextIndex               = $result['nextIndex'];
+
+            if ($channel->countsTowardWordCount()) {
+                $wordCount += count($result['tokens']);
+            }
+        }
 
         // Fragment content mirrors what PagefindHtmlBuilder puts in <body>:
         // "<h1>title</h1><p>body...</p>". Pagefind extracts that as
         // "Title. Body..." in the content field. We must do the same so
         // scolta-core's content_match_score sees title words in the excerpt,
         // giving title-matching pages the same content boost as body matches.
-        $content = $cleanTitle !== '' ? $cleanTitle . '. ' . $cleanText : $cleanText;
+        // The title keeps the sentence-ending period that mirroring implies;
+        // every other channel is joined with a single space.
+        $parts = [];
+        foreach (TextChannel::cases() as $channel) {
+            $text = $texts[$channel->value];
+            if (!$channel->contributesToContent() || $text === '') {
+                continue;
+            }
+            $parts[] = $channel === TextChannel::Title ? $text . '.' : $text;
+        }
 
-        return [
-            'titleTokens' => $titleTokens,
-            'bodyTokens'  => $bodyTokens,
-            'urlTokens'   => $urlTokens,
-            'wordCount'   => $wordCount,
-            'cleanTitle'  => $cleanTitle,
-            'content'     => $content,
+        return $tokens + [
+            'wordCount'  => $wordCount,
+            'cleanTitle' => $cleanTitle,
+            'content'    => implode(' ', $parts),
         ];
     }
 
@@ -318,9 +338,14 @@ class InvertedIndexBuilder
             'sortable'  => $itemSortable,
         ];
 
-        $this->indexTokens($index, $tokenData['titleTokens'], $pageNum, self::TITLE_WEIGHT);
-        $this->indexTokens($index, $tokenData['bodyTokens'], $pageNum, self::BODY_WEIGHT);
-        $this->indexTokens($index, $tokenData['urlTokens'], $pageNum, self::BODY_WEIGHT);
+        // A bucket is absent only on token data cached before its channel
+        // existed. Such an entry is only ever reached by a page that has no
+        // text for that channel — see the key construction in
+        // PhpIndexer::contentHash() — so an empty bucket is the correct
+        // reading of it, not a dropped field.
+        foreach (TextChannel::cases() as $channel) {
+            $this->indexTokens($index, $tokenData[$channel->value] ?? [], $pageNum, $channel);
+        }
     }
 
     /**
@@ -351,8 +376,9 @@ class InvertedIndexBuilder
      *
      * @param Token[] $tokens
      */
-    private function indexTokens(array &$index, array $tokens, int $pageNum, int $weight): void
+    private function indexTokens(array &$index, array $tokens, int $pageNum, TextChannel $channel): void
     {
+        $marker = $channel->positionMarker();
         foreach ($tokens as $token) {
             $stemmed = $this->stemmer->stem($token->stem);
             $position = $token->position;
@@ -368,20 +394,20 @@ class InvertedIndexBuilder
                 ];
             }
 
-            // Title tokens go to meta_positions only (encoded in meta_locs).
-            // Pagefind binary indexer puts title words in meta_positions only —
-            // body tokens start at a higher word index, so title words will
-            // appear in body positions if and only if they also occur in the
-            // body text. Do not duplicate title positions into body positions.
-            // Body/URL tokens go only to positions (encoded in locs).
-            if ($weight === self::TITLE_WEIGHT) {
+            // A meta channel (null marker) goes to meta_positions only, encoded
+            // in meta_locs. Pagefind's binary indexer puts title words in
+            // meta_positions only — body tokens start at a higher word index,
+            // so title words appear in body positions if and only if they also
+            // occur in the body text. Do not duplicate them across both.
+            // Every weighted channel goes to positions, encoded in locs.
+            if ($marker === null) {
                 $index[$stemmed][$pageNum]['meta_positions'][] = $position;
             } else {
-                if (!isset($index[$stemmed][$pageNum]['positions'][$weight])) {
-                    $index[$stemmed][$pageNum]['positions'][$weight] = [];
+                if (!isset($index[$stemmed][$pageNum]['positions'][$marker])) {
+                    $index[$stemmed][$pageNum]['positions'][$marker] = [];
                 }
-                if (count($index[$stemmed][$pageNum]['positions'][$weight]) < self::MAX_POSITIONS_PER_WEIGHT) {
-                    $index[$stemmed][$pageNum]['positions'][$weight][] = $position;
+                if (count($index[$stemmed][$pageNum]['positions'][$marker]) < self::MAX_POSITIONS_PER_WEIGHT) {
+                    $index[$stemmed][$pageNum]['positions'][$marker][] = $position;
                 }
             }
 

@@ -230,27 +230,11 @@ class PagefindFormatWriter
                 $this->cbor->encodeUint($deltaPages[$idx]),
             ];
 
-            // Encode locs: Pagefind always emits a weight marker, even for
-            // the default body weight. Body weight in Pagefind is 24 (marker -25).
-            $allBodyPositions = [];
-            foreach ($entry['positions'] as $weight => $positions) {
-                sort($positions);
-                $allBodyPositions = array_merge($allBodyPositions, $positions);
-            }
-            sort($allBodyPositions);
-
-            $posItems = [];
-            if (!empty($allBodyPositions)) {
-                // Weight marker for body content: -(24 + 1) = -25
-                $posItems[] = $this->cbor->encodeNegInt(-25);
-                $deltaPos = DeltaEncoder::deltaEncode($allBodyPositions);
-                foreach ($deltaPos as $dp) {
-                    $posItems[] = $dp >= 0
-                        ? $this->cbor->encodeUint($dp)
-                        : $this->cbor->encodeNegInt($dp);
-                }
-            }
-            $pageItems[] = $this->cbor->encodeArray($posItems);
+            // Encode locs. Shared with PfIndexCodec so the two writers cannot
+            // drift into emitting different bytes for the same index.
+            $pageItems[] = $this->cbor->encodeArray(
+                PfIndexCodec::encodePositionBuckets($this->cbor, $entry['positions']),
+            );
 
             // Encode meta_locs: title positions use field index markers.
             // Pagefind format: -(field_index + 1) as marker, then delta positions.

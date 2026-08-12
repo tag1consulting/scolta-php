@@ -15,25 +15,24 @@ namespace Tag1\Scolta\Index;
  *
  * The round trip is exact, not approximate. Two details make it so:
  *
- *  - `encodeWordEntry()` flattens every weight bucket into one sorted body
- *    position list before encoding, so the per-weight split is already gone
- *    from the file. Decoding into a single bucket (25, the body weight) and
- *    re-encoding therefore reproduces the original bytes even though the
- *    intermediate shape differs from what `InvertedIndexBuilder` produced.
+ *  - `encodeWordEntry()` emits one marker per weight bucket, heaviest first,
+ *    and `decodePositionBuckets()` splits them back apart on those markers, so
+ *    the per-weight structure survives the file rather than being flattened
+ *    into it. Buckets are sorted before encoding, which is what makes a
+ *    negative value unambiguously a marker rather than a delta.
  *  - Page numbers and positions are delta-encoded on the way out and are
- *    restored by running sums here.
+ *    restored by running sums here, restarting at each marker.
  *
  * Verified against 25 chunks of a real 109,308-page index (2,071 word entries):
- * decode followed by re-encode reproduced the original bytes for all 25.
+ * decode followed by re-encode reproduced the original bytes for all 25. Those
+ * chunks predate multi-bucket entries and so exercise only the single-bucket
+ * case; `AttachmentTextTest` covers the round trip with two buckets on a term.
  *
  * @since 1.2.0
  * @stability experimental
  */
 final class PfIndexCodec
 {
-    /** Body-weight marker written by encodeWordEntry(). */
-    private const BODY_WEIGHT = 25;
-
     /**
      * Decode a chunk's CBOR body into an ordered term map.
      *
@@ -152,11 +151,56 @@ final class PfIndexCodec
     }
 
     /**
+     * Encode weight buckets as one CBOR item list: a marker, then that
+     * bucket's positions delta-encoded from its own first position.
+     *
+     * The single definition of the on-disk bucket layout. `PfIndexCodec` and
+     * `PagefindFormatWriter` both write it, and nothing compares their output
+     * — the round-trip test exercises the codec, the E2E test exercises the
+     * writer — so two copies could drift into emitting different bytes for the
+     * same index without either test noticing.
+     *
+     * Buckets are emitted heaviest-first, and each is sorted before encoding
+     * so every delta within it is non-negative. That is what lets a decoder
+     * treat a negative value as unambiguously the next marker, and it is why a
+     * page carrying only body positions produces the exact bytes it did before
+     * more than one bucket was possible.
+     *
+     * @param array<int|string, list<int>> $positionsByWeight Marker magnitude => positions.
+     * @return list<string> CBOR-encoded items, ready to wrap in an array.
+     * @since 1.2.1
+     * @stability experimental
+     */
+    public static function encodePositionBuckets(CborEncoder $cbor, array $positionsByWeight): array
+    {
+        $buckets = [];
+        foreach ($positionsByWeight as $marker => $positions) {
+            $positions = array_map(intval(...), $positions);
+            sort($positions);
+            if ($positions !== []) {
+                $buckets[(int) $marker] = $positions;
+            }
+        }
+        krsort($buckets, SORT_NUMERIC);
+
+        $items = [];
+        foreach ($buckets as $marker => $positions) {
+            $items[] = $cbor->encodeNegInt(-$marker);
+            foreach (DeltaEncoder::deltaEncode($positions) as $dp) {
+                $items[] = $dp >= 0 ? $cbor->encodeUint($dp) : $cbor->encodeNegInt($dp);
+            }
+        }
+
+        return $items;
+    }
+
+    /**
      * Encode a single word entry as CBOR.
      *
-     * Body position buckets are flattened into one sorted list and both
-     * position lists are delta-encoded behind their field marker, which is why
-     * decode() can restore a single bucket and still round-trip exactly.
+     * Weight buckets are emitted one marker each by encodePositionBuckets(),
+     * heaviest first, and the meta list is delta-encoded behind its own field
+     * marker. decodePositionBuckets() splits them back apart on those markers,
+     * which is what makes the round trip exact rather than approximate.
      *
      * @param array<int|string, mixed> $pageEntries
      * @since 1.2.0
@@ -178,21 +222,7 @@ final class PfIndexCodec
             $entry     = $pageEntries[$pageNum];
             $pageItems = [$cbor->encodeUint($deltaPages[$idx])];
 
-            /** @var list<int> $allBodyPositions */
-            $allBodyPositions = [];
-            foreach ($entry['positions'] as $positions) {
-                sort($positions);
-                $allBodyPositions = array_merge($allBodyPositions, array_map(intval(...), $positions));
-            }
-            sort($allBodyPositions);
-
-            $posItems = [];
-            if (!empty($allBodyPositions)) {
-                $posItems[] = $cbor->encodeNegInt(-self::BODY_WEIGHT);
-                foreach (DeltaEncoder::deltaEncode($allBodyPositions) as $dp) {
-                    $posItems[] = $dp >= 0 ? $cbor->encodeUint($dp) : $cbor->encodeNegInt($dp);
-                }
-            }
+            $posItems = self::encodePositionBuckets($cbor, $entry['positions']);
             $pageItems[] = $cbor->encodeArray($posItems);
 
             $metaPositions = $entry['meta_positions'] ?? [];
@@ -251,14 +281,12 @@ final class PfIndexCodec
             [$delta, $locs, $metaLocs] = $pageEntry;
             $pageNum += (int) $delta;
 
-            // Both position lists start with a field marker (-25 body, -1
-            // title) that is not a position. Its absence means an empty list.
-            $bodyPositions = self::decodePositions($locs);
-            $metaPositions = self::decodePositions($metaLocs);
-
+            // Both position lists start with a field marker (-25 body,
+            // -13 attachment, -1 title) that is not a position. Its absence
+            // means an empty list.
             $entries[$pageNum] = [
-                'positions'      => $bodyPositions === [] ? [] : [self::BODY_WEIGHT => $bodyPositions],
-                'meta_positions' => $metaPositions,
+                'positions'      => self::decodePositionBuckets($locs),
+                'meta_positions' => self::decodePositions($metaLocs),
             ];
         }
 
@@ -279,6 +307,41 @@ final class PfIndexCodec
         }
 
         return $entries;
+    }
+
+    /**
+     * Split a position list into its weight buckets.
+     *
+     * Positions inside a bucket are sorted before encoding, so every delta in
+     * one is non-negative and any negative value is unambiguously the next
+     * bucket's marker. Pagefind's own decoder relies on the same property.
+     * Each bucket delta-encodes from its own first position, so the
+     * accumulator resets at every marker.
+     *
+     * @param list<mixed> $locs
+     * @return array<int, list<int>> Weight => absolute positions.
+     */
+    private static function decodePositionBuckets(array $locs): array
+    {
+        $buckets = [];
+        $weight  = TextChannel::implicitBucketMarker();
+        $acc     = 0;
+        $atStart = true;
+
+        foreach ($locs as $value) {
+            $value = (int) $value;
+            if ($value < 0) {
+                $weight  = -$value;
+                $acc     = 0;
+                $atStart = true;
+                continue;
+            }
+            $acc               = $atStart ? $value : $acc + $value;
+            $atStart           = false;
+            $buckets[$weight][] = $acc;
+        }
+
+        return $buckets;
     }
 
     /**

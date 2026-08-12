@@ -45,6 +45,21 @@ class ContentItem
         /** Key-value pairs emitted as both data-pagefind-meta and data-pagefind-sort.
          *  e.g. ['price' => '29.99', 'rating' => '4.5']. */
         public readonly array $sortable = [],
+        /** Plain text extracted from attachments (PDFs, office documents).
+         *
+         *  Indexed in its own weight bucket below body weight, so an attachment
+         *  match scores lower than the same word in the body. The text is also
+         *  appended to the fragment content, which is what lets Pagefind build
+         *  an excerpt from it when the match lands here — see
+         *  InvertedIndexBuilder::tokenizeItem().
+         *
+         *  Pass plain text, not HTML or Markdown: HtmlCleaner strips tags, so
+         *  markup survives only as literal syntax in excerpts. Cap it upstream —
+         *  every byte lands in the fragment the browser downloads for a result.
+         *
+         *  @since 1.2.1
+         *  @stability experimental */
+        public readonly string $attachmentText = '',
     ) {
         // Strip scheme and host so the baked-in URL works on any domain.
         // An index built on DDEV (https://myapp.ddev.site/path) must serve
@@ -88,6 +103,7 @@ class ContentItem
             filters: $overrides['filters'] ?? $this->filters,
             metadata: $overrides['metadata'] ?? $this->metadata,
             sortable: $overrides['sortable'] ?? $this->sortable,
+            attachmentText: $overrides['attachmentText'] ?? $this->attachmentText,
         );
     }
 }
