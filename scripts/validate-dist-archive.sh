@@ -70,6 +70,7 @@ EXCLUDED_PATHS=(
   "package-lock.json"
   "playwright.config.js"
   "CLAUDE.md"
+  "MAINTAINING.md"
   ".editorconfig"
   "docs/BENCHMARKS-LATEST.md"
   "docs/LANGUAGE_PARITY.md"
