@@ -8,8 +8,17 @@ name: Release Validation
 # What this validates:
 #   1. PHP indexer → pagefind.js search compatibility (Playwright E2E)
 #   2. AI endpoint handler integration (mock HTTP, no real API key needed)
-#   3. Adapter install: each platform adapter installs scolta-php from VCS
-#      and its full test suite stays green
+#   3. Adapter install: each platform adapter installs the scolta-php this run
+#      is about and its full test suite stays green
+#
+#      These jobs used to pin tag1/scolta-php to dev-main, which meant that on
+#      a pull request they resolved main and never once looked at the branch
+#      they were checking. A guard that reads a different commit than the one
+#      under review cannot fail on the change that breaks it, only afterwards:
+#      #289 passed four pull-request runs and turned main red on merge, and the
+#      adapter test it broke had been asserting that exact contract all along.
+#      They now resolve the checkout beside them, which on a pull request is the
+#      merge ref.
 #   4. Release script validation (version format, changelog presence)
 
 on:
@@ -163,6 +172,14 @@ jobs:
           repository: tag1consulting/scolta-wp
           path: scolta-wp
 
+      # The scolta-php under test. On a pull request this is the merge ref, so
+      # the adapter runs against what merging would produce; on a push to main
+      # it is main. Either way it is the code this run is about.
+      - name: Checkout scolta-php (the code under test)
+        uses: actions/checkout@v4
+        with:
+          path: scolta-php
+
       - name: Setup PHP 8.3
         uses: shivammathur/setup-php@v2
         with:
@@ -170,18 +187,18 @@ jobs:
           extensions: intl
           coverage: none
 
-      - name: Replace path repo with GitHub VCS repo
+      - name: Point the adapter at the scolta-php checked out beside it
         run: |
           php -r '
             $j = json_decode(file_get_contents("composer.json"), true);
-            // no-api makes the VCS driver read refs over git instead of the
-            // api.github.com REST API. That API budget (1,000/hour/repo) is
-            // shared by every concurrent job and run, and when it runs dry
-            // the driver gets a 403 that composer reports as
-            // "Could not authenticate against github.com" (exit 100).
-            // Git access to a public repo does not touch that budget.
-            $j["repositories"] = [["type" => "vcs", "url" => "https://github.com/tag1consulting/scolta-php.git", "no-api" => true]];
-            $j["require"]["tag1/scolta-php"] = "dev-main@dev";
+            $j["repositories"] = [["type" => "path", "url" => "../scolta-php", "options" => ["symlink" => false]]];
+            // "@dev" rather than a branch name: a path repository takes its
+            // version from the package composer.json, so "dev-main" names a
+            // branch that resolution never sees. Each adapter floor guard
+            // admits "@dev" explicitly, and this file is rewritten in the
+            // runner and never committed, so the lock guards that reject a
+            // path dist on a branch are not in play.
+            $j["require"]["tag1/scolta-php"] = "@dev";
             file_put_contents("composer.json", json_encode($j, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
           '
 
@@ -219,6 +236,14 @@ jobs:
           repository: tag1consulting/scolta-drupal
           path: scolta-drupal
 
+      # The scolta-php under test. On a pull request this is the merge ref, so
+      # the adapter runs against what merging would produce; on a push to main
+      # it is main. Either way it is the code this run is about.
+      - name: Checkout scolta-php (the code under test)
+        uses: actions/checkout@v4
+        with:
+          path: scolta-php
+
       - name: Setup PHP 8.3
         uses: shivammathur/setup-php@v2
         with:
@@ -226,22 +251,25 @@ jobs:
           extensions: intl
           coverage: none
 
-      - name: Replace path repo with GitHub VCS repo
+      - name: Point the adapter at the scolta-php checked out beside it
         run: |
           php -r '
             $j = json_decode(file_get_contents("composer.json"), true);
-            // Replace the local path repo for scolta-php with the GitHub VCS repo.
+            // Repoint the scolta-php path repo at the checkout beside this one.
             // Keep all other repositories (e.g. packages.drupal.org/8 for Drupal packages).
             $repos = array_filter(
                 $j["repositories"] ?? [],
                 fn($r) => !($r["type"] === "path" && str_contains($r["url"] ?? "", "scolta-php"))
             );
-            // no-api: read refs over git rather than the api.github.com REST
-            // API, whose shared 1,000/hour/repo budget throttles to a 403 that
-            // composer reports as "Could not authenticate against github.com".
-            $repos[] = ["type" => "vcs", "url" => "https://github.com/tag1consulting/scolta-php.git", "no-api" => true];
+            $repos[] = ["type" => "path", "url" => "../scolta-php", "options" => ["symlink" => false]];
             $j["repositories"] = array_values($repos);
-            $j["require"]["tag1/scolta-php"] = "dev-main@dev";
+            // "@dev" rather than a branch name: a path repository takes its
+            // version from the package composer.json, so "dev-main" names a
+            // branch that resolution never sees. The floor guard admits "@dev"
+            // explicitly, and this file is rewritten in the runner and never
+            // committed, so the lock guard that rejects a path dist on a branch
+            // is not in play.
+            $j["require"]["tag1/scolta-php"] = "@dev";
             // Allow Drupal core plugins required when installing Drupal as a dependency.
             // This job runs an unpinned "composer update", so a plugin newly
             // required by drupal/core blocks the install until it is listed
@@ -292,6 +320,14 @@ jobs:
           repository: tag1consulting/scolta-laravel
           path: scolta-laravel
 
+      # The scolta-php under test. On a pull request this is the merge ref, so
+      # the adapter runs against what merging would produce; on a push to main
+      # it is main. Either way it is the code this run is about.
+      - name: Checkout scolta-php (the code under test)
+        uses: actions/checkout@v4
+        with:
+          path: scolta-php
+
       - name: Setup PHP 8.4
         uses: shivammathur/setup-php@v2
         with:
@@ -299,15 +335,18 @@ jobs:
           extensions: intl
           coverage: none
 
-      - name: Replace path repo with GitHub VCS repo
+      - name: Point the adapter at the scolta-php checked out beside it
         run: |
           php -r '
             $j = json_decode(file_get_contents("composer.json"), true);
-            // no-api: read refs over git rather than the api.github.com REST
-            // API, whose shared 1,000/hour/repo budget throttles to a 403 that
-            // composer reports as "Could not authenticate against github.com".
-            $j["repositories"] = [["type" => "vcs", "url" => "https://github.com/tag1consulting/scolta-php.git", "no-api" => true]];
-            $j["require"]["tag1/scolta-php"] = "dev-main@dev";
+            $j["repositories"] = [["type" => "path", "url" => "../scolta-php", "options" => ["symlink" => false]]];
+            // "@dev" rather than a branch name: a path repository takes its
+            // version from the package composer.json, so "dev-main" names a
+            // branch that resolution never sees. The floor guard in
+            // tests/ScoltaPhpFloorTest.php admits "@dev" explicitly, and this
+            // file is rewritten in the runner and never committed, so the lock
+            // guard that rejects a path dist on a branch is not in play.
+            $j["require"]["tag1/scolta-php"] = "@dev";
             file_put_contents("composer.json", json_encode($j, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
           '
 
