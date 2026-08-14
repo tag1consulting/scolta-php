@@ -230,6 +230,29 @@ class PhpIndexer
     /**
      * Compute a deterministic fingerprint for a set of content items.
      *
+     * Attachment text is appended only when there is something to append, the
+     * same rule and for the same reason as contentHash() below. Folding it in
+     * unconditionally buys nothing the conditional form does not already give:
+     * a page that gains attachment text still moves from hash(body) to
+     * hash(body, attachment), so the first build after a site starts
+     * populating the field still runs, which is the property this hash has to
+     * have. What it costs is paid by every corpus that has no attachment text
+     * at all. Two things break for those:
+     *
+     *  - **Every existing index rebuilds once, for no change in output.** This
+     *    hash is what `shouldBuild()` compares against `.scolta-state`, so a
+     *    changed formula reports the whole corpus as changed on the first
+     *    build after the upgrade. That is a full reindex, not a cache refill;
+     *    the fleet's largest demo is 12,541 fragments.
+     *  - **The streaming mirror in scolta-laravel stops agreeing.** Its queued
+     *    rebuild path cannot hold every item in memory, so it hashes items one
+     *    at a time and combines them, and asserts byte-identity with this
+     *    method in its own test suite. A site on the mirrored formula would
+     *    read every dispatch as changed and rebuild the corpus on every run.
+     *    That adapter's floor still admits a scolta-php whose ContentItem has
+     *    no attachmentText at all, so it cannot simply follow an unconditional
+     *    change here.
+     *
      * @param \Tag1\Scolta\Export\ContentItem[] $items
      * @since 1.0.0
      * @stability stable
@@ -237,7 +260,12 @@ class PhpIndexer
     public static function computeFingerprint(array $items): string
     {
         $data = array_map(
-            fn($item) => $item->id . ':' . hash('sha256', $item->bodyHtml . "\0" . $item->attachmentText),
+            fn($item) => $item->id . ':' . hash(
+                'sha256',
+                $item->attachmentText === ''
+                    ? $item->bodyHtml
+                    : $item->bodyHtml . "\0" . $item->attachmentText,
+            ),
             $items,
         );
         sort($data);
