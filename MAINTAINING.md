@@ -26,6 +26,13 @@ and scolta-wp, which must not), and `extra.branch-alias.dev-main` beside it name
 `Validate Composer dist archive`, and `Version coherence`. The asset manifest is checked by
 `tests/AssetManifestTest.php` inside phpunit, not by a job of its own.
 
+**The second workflow is the one that catches cross-repo breakage.** `Release Validation` runs on every
+pull request here and installs each PHP adapter against the scolta-php this run is about, then runs that
+adapter's own suite. It is the only place adapter `main` meets library `main` before a merge, so a change
+here that breaks scolta-drupal, scolta-laravel or scolta-wp goes red on the branch that made it. Read a
+red `Adapter install` job as a real finding about your change, not as someone else's repo being broken.
+It also carries the E2E, concordance, smoke and benchmark jobs.
+
 **On release day.** This tags first in the PHP group. If you're opening a cycle, move
 `extra.branch-alias` in the same commit as the bump. Tag, then wait for Packagist: stop at 15 minutes if
 it hasn't updated, before any adapter tags.
