@@ -264,6 +264,51 @@ class AttachmentTextTest extends TestCase
     }
 
     /**
+     * Replacing an attachment has to move the fingerprint too.
+     *
+     * The test above only proves the empty-to-populated transition. A site
+     * whose PDF was re-uploaded with different text stays populated on both
+     * sides of the change, and that is the case a conditional append could
+     * plausibly have missed.
+     */
+    public function testFingerprintRespondsToAttachmentTextChanging(): void
+    {
+        $base = $this->item('<p>Leaves capture sunlight.</p>', 'Chloroplasts absorb photons.');
+
+        $this->assertNotSame(
+            PhpIndexer::computeFingerprint([$base]),
+            PhpIndexer::computeFingerprint([$base->cloneWith(['attachmentText' => 'Stomata regulate gas exchange.'])]),
+        );
+    }
+
+    /**
+     * A corpus with no attachment text must keep the fingerprint it already
+     * had, for the same reason contentHash() keeps its keys, and for a second
+     * reason that is stronger.
+     *
+     * shouldBuild() compares this value against `.scolta-state`, so a changed
+     * formula reports every page as changed on the first build after an
+     * upgrade: a full reindex of a corpus nothing edited. It is also the value
+     * scolta-laravel's queued rebuild path reproduces item by item and asserts
+     * byte-identity against, and that adapter's floor still admits a
+     * scolta-php whose ContentItem has no attachmentText to read.
+     *
+     * The expected value is spelled out rather than taken from the method, so
+     * this fails if the formula moves instead of moving with it.
+     */
+    public function testFingerprintIsUnchangedWhenNoAttachmentTextIsPresent(): void
+    {
+        $item = $this->item('<p>Leaves capture sunlight.</p>', '');
+
+        $this->assertSame(
+            hash('sha256', 'php-indexer-v1:' . json_encode([
+                $item->id . ':' . hash('sha256', $item->bodyHtml),
+            ])),
+            PhpIndexer::computeFingerprint([$item]),
+        );
+    }
+
+    /**
      * cloneWith() is the documented way to enrich an item; a field it forgets
      * is dropped silently at the call site that looks most correct.
      */
