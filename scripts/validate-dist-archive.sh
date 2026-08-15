@@ -6,7 +6,7 @@
 # package, Composer downloads GitHub's generated zipball/tarball, which is
 # produced by `git archive` and HONORS `.gitattributes export-ignore`. So the
 # `export-ignore` list is the live filter that keeps dev cruft (tests, CI
-# config, tooling) out of what every Composer consumer downloads — and an
+# config, tooling) out of what every Composer consumer downloads, and an
 # over-broad line silently DROPS a runtime file and ships a broken package.
 #
 # Nothing else in CI validates that list against the archive it actually
@@ -38,7 +38,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-# Scratch files live under one mktemp -d dir — never fixed names in the CWD
+# Scratch files live under one mktemp -d dir, never fixed names in the CWD
 # (see the scolta-wp zip-contents.txt mistake). A single random dir holds both
 # the archive and the extract tree; `mktemp -d` is portable (the alternative,
 # `mktemp foo.XXXXXX.tar`, has a suffix after the X's that BSD/macOS mktemp
@@ -49,7 +49,7 @@ EXTRACT_DIR="$SCRATCH_DIR/extract"
 mkdir -p "$EXTRACT_DIR"
 
 # ---------------------------------------------------------------------------
-# Configuration — keep in sync with .gitattributes and the runtime tree.
+# Configuration: keep in sync with .gitattributes and the runtime tree.
 # ---------------------------------------------------------------------------
 
 # Paths that MUST NOT appear in the archive. Mirror of the `export-ignore`
@@ -76,7 +76,7 @@ EXCLUDED_PATHS=(
   "docs/LANGUAGE_PARITY.md"
 )
 
-# Committed runtime assets that MUST be present in the archive — a broken or
+# Committed runtime assets that MUST be present in the archive. A broken or
 # over-broad export-ignore line that drops one of these ships a dead package.
 REQUIRED_PATHS=(
   "composer.json"

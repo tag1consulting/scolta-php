@@ -1,4 +1,4 @@
-# MAINTAINING — scolta-php
+# Maintaining scolta-php
 
 The reference PHP library: a Pagefind index builder plus an AI proxy. It also owns the canonical browser
 bundle. Publishes to Packagist.
@@ -26,7 +26,7 @@ and scolta-wp, which must not), and `extra.branch-alias.dev-main` beside it name
 `Validate Composer dist archive`, and `Version coherence`. The asset manifest is checked by
 `tests/AssetManifestTest.php` inside phpunit, not by a job of its own.
 
-**The second workflow is the one that catches cross-repo breakage.** `Release Validation` runs on every
+**Release Validation.** This second workflow catches cross-repo breakage. It runs on every
 pull request here and installs each PHP adapter against the scolta-php this run is about, then runs that
 adapter's own suite. It is the only place adapter `main` meets library `main` before a merge, so a change
 here that breaks scolta-drupal, scolta-laravel or scolta-wp goes red on the branch that made it. Read a
@@ -49,5 +49,12 @@ it hasn't updated, before any adapter tags.
 - `src/prompts.rs` in scolta-core is the source of the prompt text; the templates here are a mirror of
   it, and scolta-node and scolta-python fail CI when their mirrors drift. A prompt change lands in
   scolta-core first.
+- The Snowball stemmers under `src/Index/Snowball/` are generated and vendored, not a dependency, so
+  index-time stems match Pagefind's query-time stems byte for byte. The parity target is the
+  `pagefind_stem` crate at the version Pagefind's query WASM compiles in, recorded with the snowball
+  commit it was generated from in [src/Index/Snowball/PROVENANCE.md](src/Index/Snowball/PROVENANCE.md).
+  Regenerate with `scripts/generate-stemmers.sh` and re-baseline the manifest; never hand-edit a stemmer.
+  scolta-core has no stemmer, so this pin is the ports' to keep, and it moves in scolta-php, scolta-node
+  and scolta-python together.
 - Sweep `@since` annotations in `src/` when you rename the dev line. No check compares them to the
   version file.
