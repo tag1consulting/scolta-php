@@ -17,6 +17,7 @@
 - [ ] I have added tests that prove my fix/feature works
 - [ ] All existing tests pass (`./vendor/bin/phpunit`)
 - [ ] I have updated CHANGELOG.md with a summary of my changes
+- [ ] If this changes how the package is versioned, built, or published, it changes MAINTAINING.md in the same pull request
 - [ ] New public methods have `@since` and `@stability` PHPDoc annotations
 - [ ] No stable method signatures were changed
 - [ ] CONFIG_REFERENCE.md is updated if configuration properties changed
