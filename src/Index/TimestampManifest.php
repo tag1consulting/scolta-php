@@ -134,7 +134,7 @@ final class TimestampManifest
      * of "empty" — and a hash wrongly recorded here is a page that silently
      * stops being indexed.
      *
-     * @since 1.2.1
+     * @since 1.3.0
      * @stability experimental
      */
     public function markEmpty(string $contentHash): void
@@ -154,7 +154,7 @@ final class TimestampManifest
      *
      * Also marks the hash as still in use, so it survives pruneAndSave().
      *
-     * @since 1.2.1
+     * @since 1.3.0
      * @stability experimental
      */
     public function isKnownEmpty(string $contentHash): bool
@@ -171,7 +171,7 @@ final class TimestampManifest
     /**
      * How many content hashes are recorded as producing no indexable page.
      *
-     * @since 1.2.1
+     * @since 1.3.0
      * @stability experimental
      */
     public function knownEmptyCount(): int

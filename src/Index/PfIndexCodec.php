@@ -168,7 +168,7 @@ final class PfIndexCodec
      *
      * @param array<int|string, list<int>> $positionsByWeight Marker magnitude => positions.
      * @return list<string> CBOR-encoded items, ready to wrap in an array.
-     * @since 1.2.1
+     * @since 1.3.0
      * @stability experimental
      */
     public static function encodePositionBuckets(CborEncoder $cbor, array $positionsByWeight): array
