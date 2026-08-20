@@ -230,7 +230,7 @@ class ContentExporter
      * filterItems() drops what this rejects and records it as known-empty, so
      * the two can never disagree about which items exist downstream.
      *
-     * @since 1.2.1
+     * @since 1.3.0
      * @stability experimental
      */
     public function hasIndexableText(ContentItem $item): bool

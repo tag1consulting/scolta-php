@@ -57,7 +57,7 @@ class ContentItem
          *  markup survives only as literal syntax in excerpts. Cap it upstream —
          *  every byte lands in the fragment the browser downloads for a result.
          *
-         *  @since 1.2.1
+         *  @since 1.3.0
          *  @stability experimental */
         public readonly string $attachmentText = '',
     ) {

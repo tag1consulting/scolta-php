@@ -331,7 +331,7 @@ class ScoltaConfig
      * scolta.js facetMode().
      *
      * @var string
-     * @since 1.2.1
+     * @since 1.3.0
      * @stability experimental
      */
     public string $facetMode = 'eager';
@@ -800,7 +800,7 @@ class ScoltaConfig
      * 'eager': a misspelled mode must fall back to the fully-featured default,
      * never silently cost a site its facets.
      *
-     * @since 1.2.1
+     * @since 1.3.0
      * @stability experimental
      */
     public function normalizedFacetMode(): string

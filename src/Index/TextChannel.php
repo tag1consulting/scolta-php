@@ -46,7 +46,7 @@ namespace Tag1\Scolta\Index;
  * a new case is a set of decisions the author has to make rather than a set
  * silently inherited from whichever channel the negation named.
  *
- * @since 1.2.1
+ * @since 1.3.0
  * @stability experimental
  */
 enum TextChannel: string
@@ -75,7 +75,7 @@ enum TextChannel: string
      * body relevance, and sharing the number merges them into one bucket,
      * which is the behaviour that predates this enum.
      *
-     * @since 1.2.1
+     * @since 1.3.0
      * @stability experimental
      */
     public function positionMarker(): ?int
@@ -97,7 +97,7 @@ enum TextChannel: string
      * construction, and a `Body` that stopped doing so would be a different
      * format rather than a null to handle.
      *
-     * @since 1.2.1
+     * @since 1.3.0
      * @stability experimental
      */
     public static function implicitBucketMarker(): int
@@ -111,7 +111,7 @@ enum TextChannel: string
      *
      * Null for a meta channel, which is scored by a different path.
      *
-     * @since 1.2.1
+     * @since 1.3.0
      * @stability experimental
      */
     public function relevanceWeight(): ?float
@@ -132,7 +132,7 @@ enum TextChannel: string
      * a channel is a decision made here rather than one inherited from whatever
      * the negation happened to mean.
      *
-     * @since 1.2.1
+     * @since 1.3.0
      * @stability experimental
      */
     public function countsTowardWordCount(): bool
@@ -151,7 +151,7 @@ enum TextChannel: string
      *
      * Per case for the same reason as `countsTowardWordCount()`.
      *
-     * @since 1.2.1
+     * @since 1.3.0
      * @stability experimental
      */
     public function contributesToContent(): bool
