@@ -4,6 +4,8 @@ All notable changes to scolta-php will be documented in this file.
 
 This project uses [Semantic Versioning](https://semver.org/). Each Scolta package versions independently; compatibility is expressed by the constraint an adapter declares for this package rather than by matching version numbers.
 
+## [Unreleased]
+
 ## [1.3.0] - 2026-08-19
 
 ### Changed
@@ -798,6 +800,7 @@ Coordinated release with scolta-core, scolta-wp, scolta-drupal, scolta-laravel. 
 - Shared frontend assets (`scolta.js`, `scolta.css`) used by all platform adapters
 - Pre-built `scolta_core.wasm` binary shipped in the package
 
+[Unreleased]: https://github.com/tag1consulting/scolta-php/compare/v1.3.0...HEAD
 [1.3.0]: https://github.com/tag1consulting/scolta-php/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/tag1consulting/scolta-php/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/tag1consulting/scolta-php/compare/v1.0.5...v1.1.0
