@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Each Scolta packag
 
 ## [Unreleased]
 
+### Changed
+- **`extra.branch-alias.dev-main` is pinned at `1.x-dev` for the life of the major (`composer.json`, `.github/workflows/ci.yml`, `scripts/check-coherence.mjs`).** The alias existed so a `dev-main` checkout can satisfy caret dev constraints (`^1.3@dev`) and transitive `^1.x` requirements, but naming the exact minor line meant it had to move every time a cycle opened, and twice it did not ([#275](https://github.com/tag1consulting/scolta-php/pull/275) being the incident the `coherence` job was built for). `1.x-dev` satisfies every `^1.y@dev` constraint in the major and never needs touching again until 2.0; only an exact-minor pin such as `1.3.x-dev` stops resolving, and nothing in the org pins that way (the adapters' CI uses `dev-main@dev`, the demos pin stable). With the alias no longer restating the development line, `composer.json` `version` is the only version stamp this package carries, so the `coherence` CI job and the vendored `scripts/check-coherence.mjs` have nothing left to compare here and are removed — reversing 1.3.0's "the `coherence` check stays", which was written when the alias still moved. The check's TypeScript source lives on in scolta-fleet, where the adapters (which carry `.info.yml` / plugin-header stamps) still need it; scolta-fleet should drop this repo from its `vendor:coherence` targets, and note its `versionLine()` regex does not parse `1.x-dev`.
+
 ## [1.3.0] - 2026-08-19
 
 ### Changed

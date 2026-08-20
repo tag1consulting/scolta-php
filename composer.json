@@ -50,12 +50,11 @@
             "@update-asset-manifest",
             "awk '$2==\"js/scolta.js\"{print $1}' assets/ASSETS.sha256 > assets/js/scolta.js.sha256"
         ],
-        "validate-release": "php scripts/validate-release.php",
-        "check-coherence": "node scripts/check-coherence.mjs ."
+        "validate-release": "php scripts/validate-release.php"
     },
     "extra": {
         "branch-alias": {
-            "dev-main": "1.3.x-dev"
+            "dev-main": "1.x-dev"
         }
     },
     "archive": {
