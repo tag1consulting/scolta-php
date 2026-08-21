@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Each Scolta packag
 
 ## [Unreleased]
 
+### Fixed
+- **A URL carrying facet state now runs on load (`assets/js/scolta.js`).** A browse deliberately writes no `q` parameter — its shareable link is the `f_*` parameters alone — but the load bootstrap only called `doSearch()` on a non-empty `q`, so following that link, or any facet URL a platform builds (a "Search all resources" button linking to `/search?f_subject=Arts`), landed on an idle search page with the filter primed and nothing executed. The gate is now "a non-empty `q` OR at least one `f_*` parameter", and the popstate handler takes the same rule, so navigating back to a facet-only history entry re-runs the filtered browse instead of clearing. What 1.3.0 decided deliberately stays decided: a bare `/search` — and a `?q=` with an empty value and no facet state — still runs nothing on load, because an `f_*` parameter is explicit intent and an empty page is not, so the full-corpus browse-on-every-load that gate exists to prevent stays off. The duplicated `f_*` parsing in the bootstrap and the popstate handler is extracted into one `filtersFromUrlParams()`, language clamp included. The landing browse goes through the same path every browse takes: filtered against the `scolta.facets` artifact, no filters object handed to Pagefind, no `.pf_filter` chunk fetched. Covered by nine cases in `tests/js/browse-on-facet-url.test.js` against the real committed artifact fixture: the filtered landing, the null term, the two cost assertions, the two still-inert loads, the combined `q`-plus-`f_` landing, and both popstate directions. Five of the nine fail before this change; the four that pass pin the invariants that must stay true.
+
 ## [1.3.0] - 2026-08-19
 
 ### Changed
