@@ -144,4 +144,73 @@ describe('phrase-proximity integration (WASM boundary)', () => {
         expect(scored[0].url).toBe('https://example.com/1');
     });
 
+    // -------------------------------------------------------------------------
+    // Forced-phrase exclusion — a quoted query EXCLUDES results whose terms
+    // appear only scattered apart, rather than merely down-ranking them.
+    //
+    // Mirrors Rust: score_results_forced_phrase_excludes_scattered_terms
+    //
+    // The real-world case: the query "Boston massacre" matched a Tulsa Race
+    // Massacre guide because its author is Carole BOSTON Weatherford — both
+    // words present, never adjacent.
+    // -------------------------------------------------------------------------
+    test('quoted query drops a result whose terms are scattered apart', () => {
+        const scattered = makeResult(
+            'https://example.com/tulsa',
+            'Unspeakable: The Tulsa Race Massacre',
+            'written by Carole Weatherford',
+            1.0,
+            [3, 40],
+        );
+        const adjacent = makeResult(
+            'https://example.com/boston',
+            'Revolutionary Era Sources',
+            'primary sources on the event',
+            1.0,
+            [7, 8],
+        );
+
+        const scored = scoreViaWasm('"boston massacre"', [scattered, adjacent]);
+
+        expect(scored.length).toBe(1);
+        expect(scored[0].url).toBe('https://example.com/boston');
+    });
+
+    test('unquoted query keeps the scattered result (exclusion is quote-gated)', () => {
+        const scattered = makeResult(
+            'https://example.com/tulsa',
+            'Unspeakable: The Tulsa Race Massacre',
+            'written by Carole Weatherford',
+            1.0,
+            [3, 40],
+        );
+
+        const scored = scoreViaWasm('boston massacre', [scattered]);
+
+        expect(scored.length).toBe(1);
+    });
+
+    test('quoted query keeps a literal title match and a no-locations result', () => {
+        // Literal phrase in the title survives even with scattered locations;
+        // a result carrying no location evidence fails open.
+        const titleMatch = makeResult(
+            'https://example.com/boston',
+            'The Boston Massacre',
+            'colonial era content',
+            1.0,
+            [3, 40],
+        );
+        const noLocations = makeResult(
+            'https://example.com/unknown',
+            'Primary Sources',
+            'colonial era content',
+            1.0,
+            null,
+        );
+
+        const scored = scoreViaWasm('"boston massacre"', [titleMatch, noLocations]);
+
+        expect(scored.length).toBe(2);
+    });
+
 });
