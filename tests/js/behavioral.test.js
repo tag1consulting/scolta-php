@@ -206,6 +206,23 @@ describe('scolta.js behavioral tests', () => {
         expect(fetchCall[0]).toBe('/e');
     });
 
+    test('quoted forced-phrase query never calls the expand endpoint', async () => {
+        // The user asked for the exact phrase; expansion terms would seed
+        // documents that matched something other than that phrase, so the
+        // expand call is skipped entirely (like the OR fallback already is).
+        const { window } = createWindow();
+        const input = window.document.querySelector('#scolta-query');
+        const btn = window.document.querySelector('#scolta-search-btn');
+
+        input.value = '"docker containers"';
+        btn.click();
+
+        await new Promise(r => setTimeout(r, 100));
+
+        const expandCalls = window.fetch.mock.calls.filter(c => c[0] === '/e');
+        expect(expandCalls).toHaveLength(0);
+    });
+
     test('Enter key in search input triggers search', async () => {
         const { window } = createWindow();
         const input = window.document.querySelector('#scolta-query');
