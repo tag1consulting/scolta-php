@@ -459,6 +459,47 @@ class IndexBuildOrchestratorTest extends TestCase
     }
 
     // -------------------------------------------------------------------
+    // Per-chunk GC is throttled to every Nth chunk
+    // -------------------------------------------------------------------
+
+    public function testGcRunsOnlyOnEveryEighthChunk(): void
+    {
+        $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
+
+        // 10 chunks of one page each: GC fires on chunks 0 and 8 only.
+        $report = $orchestrator->build(
+            BuildIntent::fresh(10, MemoryBudget::conservative()->withChunkSize(1)),
+            $this->makeItems(10),
+            $logger = $this->makeSubTimerCapturingLogger(),
+        );
+
+        $this->assertTrue($report->success);
+        $this->assertArrayHasKey('gc', $logger->timers, 'The gc sub-timer must record the collections that ran');
+        $this->assertSame(2, $logger->timers['gc']['calls'], 'GC must run on chunks 0 and 8 only, not per chunk');
+    }
+
+    /**
+     * A logger that keeps the structured sub-timer breakdown emitPhaseSummary()
+     * attaches to its "Sub-timers" info line.
+     *
+     * @return \Psr\Log\AbstractLogger&object{timers: array<string, array{seconds: float, calls: int, items: int}>}
+     */
+    private function makeSubTimerCapturingLogger(): \Psr\Log\AbstractLogger
+    {
+        return new class extends \Psr\Log\AbstractLogger {
+            /** @var array<string, array{seconds: float, calls: int, items: int}> */
+            public array $timers = [];
+
+            public function log($level, string|\Stringable $message, array $context = []): void
+            {
+                if (isset($context['timers']) && is_array($context['timers'])) {
+                    $this->timers = $context['timers'];
+                }
+            }
+        };
+    }
+
+    // -------------------------------------------------------------------
     // Voluntary memory-aware restart
     // -------------------------------------------------------------------
 

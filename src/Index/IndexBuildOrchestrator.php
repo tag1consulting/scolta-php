@@ -31,6 +31,17 @@ final class IndexBuildOrchestrator
      */
     private const MEMORY_PRESSURE_RATIO = 0.75;
 
+    /**
+     * Run gc_collect_cycles() + gc_mem_caches() on every Nth chunk instead
+     * of every chunk. Chunk data is acyclic and freed at refcount zero, so
+     * per-chunk collection reclaims nothing (measured — see flushChunk());
+     * what the calls do earn is a periodic allocator-cache trim so the
+     * voluntary-yield check at MEMORY_PRESSURE_RATIO reads an RSS that is
+     * at most this many chunks stale. 8 cuts the measured cost ~8× while
+     * keeping the reading fresh within a few thousand pages.
+     */
+    private const GC_CHUNK_INTERVAL = 8;
+
     private readonly BuildCoordinator $coordinator;
     private readonly InvertedIndexBuilder $builder;
     private readonly IndexMerger $merger;
@@ -525,8 +536,8 @@ final class IndexBuildOrchestrator
 
     /**
      * Build, commit, and release one chunk of token data, advancing the page
-     * offset and run counter. GC runs after the partial is freed so
-     * chunk-sized allocations don't accumulate across the loop.
+     * offset and run counter. GC runs after the partial is freed, on every
+     * GC_CHUNK_INTERVAL-th chunk.
      */
     private function flushChunk(
         array $chunk,
@@ -559,17 +570,24 @@ final class IndexBuildOrchestrator
         $progress->advance(1, "Chunk {$chunkNum} ({$pagesInRun} pages)");
         unset($partial);
 
-        // Measured, not assumed: PHP's cycle collector fires on its own at a
-        // 10,001-entry root buffer and acyclic data is freed at refcount zero
-        // without it, so these two calls may be buying nothing. gc_status()
-        // runs/collected are reported alongside the timing so the question is
-        // answerable from one build log.
-        $t0 = hrtime(true);
-        gc_collect_cycles();
-        if (function_exists('gc_mem_caches')) {
-            gc_mem_caches();
+        // Measured: unconditional collection here cost 24 ms per chunk (a
+        // 1.0s 'gc' sub-timer on a 30.4s 20k-page build) while gc_status()
+        // reported collected=0 across the whole run — chunk data is acyclic
+        // and freed at refcount zero, and PHP's own collector still fires at
+        // its root-buffer threshold for anything cyclic. Collecting every
+        // GC_CHUNK_INTERVAL-th chunk keeps the gc_mem_caches() trim that the
+        // voluntary-yield RSS reading benefits from while shedding most of
+        // the cost. The 'gc' sub-timer counts only collections that ran, and
+        // gc_status() runs/collected in build_complete telemetry keep the
+        // decision auditable per build.
+        if ($chunkNum % self::GC_CHUNK_INTERVAL === 0) {
+            $t0 = hrtime(true);
+            gc_collect_cycles();
+            if (function_exists('gc_mem_caches')) {
+                gc_mem_caches();
+            }
+            $telemetry->recordSubTimer('gc', (hrtime(true) - $t0) / 1e9, 1);
         }
-        $telemetry->recordSubTimer('gc', (hrtime(true) - $t0) / 1e9, 1);
     }
 
     /**
