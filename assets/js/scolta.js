@@ -1590,6 +1590,20 @@
           ? `<div class="scolta-ai-summary-disclaimer">${escapeHtml(disclaimer)}</div>`
           : '';
 
+        // With follow-ups turned off, the endpoint refuses every one of them
+        // and submitFollowUp() returns early, so an input here would be a
+        // dead field labelled "0 remaining". Emit neither it nor the thread
+        // it would append to.
+        const followUpHtml = CONFIG.AI_MAX_FOLLOWUPS > 0
+          ? `<div id="scolta-followup-thread" class="scolta-ai-followup-thread" style="display:none;"></div>
+          <div class="scolta-ai-followup-input" id="scolta-followup-input">
+            <input type="text" id="scolta-followup-field" placeholder="Ask a follow-up question..."
+                   data-scolta-followup-input>
+            <button id="scolta-followup-btn" data-scolta-followup-submit>Ask</button>
+            <span class="scolta-ai-followup-counter" id="scolta-followup-counter">${CONFIG.AI_MAX_FOLLOWUPS} remaining</span>
+          </div>`
+          : '';
+
         // The full text is always in the DOM, clipped by the box rather than
         // truncated, so find-in-page and assistive tech reach all of it in
         // either state.
@@ -1598,13 +1612,7 @@
           <div class="scolta-ai-summary-text" id="${SUMMARY_TEXT_ID}">${formatted}</div>
           <button type="button" class="scolta-ai-summary-toggle" data-scolta-summary-toggle
                   aria-expanded="false" aria-controls="${SUMMARY_TEXT_ID}" hidden>Show more</button>
-          <div id="scolta-followup-thread" class="scolta-ai-followup-thread" style="display:none;"></div>
-          <div class="scolta-ai-followup-input" id="scolta-followup-input">
-            <input type="text" id="scolta-followup-field" placeholder="Ask a follow-up question..."
-                   data-scolta-followup-input>
-            <button id="scolta-followup-btn" data-scolta-followup-submit>Ask</button>
-            <span class="scolta-ai-followup-counter" id="scolta-followup-counter">${CONFIG.AI_MAX_FOLLOWUPS} remaining</span>
-          </div>
+          ${followUpHtml}
           ${disclaimerHtml}`;
         updateSummaryClamp();
         // The decision above is only true for the width it measured at.

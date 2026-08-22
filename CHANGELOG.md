@@ -6,6 +6,9 @@ This project uses [Semantic Versioning](https://semver.org/). Each Scolta packag
 
 ## [Unreleased]
 
+### Fixed
+- **A deployment with follow-ups turned off no longer renders a dead follow-up field (`assets/js/scolta.js`).** `max_follow_ups` accepts 0, and every layer below the template already honours it: `AiEndpointHandler::handleFollowUp()` answers a 429 for any conversation once `followUpsSoFar >= $this->maxFollowUps`, which at 0 is the first one, and `submitFollowUp()` returns before it ever sends. The resolved-summary template emitted the thread and the input unconditionally, so a site that turned the feature off still got a text box labelled "0 remaining" whose Ask button did nothing at all: `submitFollowUp()` returns on the limit check before it appends a turn, so a typed question produced no answer, no error and no visible response of any kind. Both divs are now gated on `AI_MAX_FOLLOWUPS > 0`, so they are absent from the DOM rather than present and non-functional; nothing else in the panel moves, and a positive limit renders exactly what it did before. `templates/search.html` needed no change — it configures the limit and carries no follow-up markup of its own — and the checksums in `assets/ASSETS.sha256` and `assets/js/scolta.js.sha256` are regenerated for the bundle change. Covered by three cases in `tests/js/followup-disabled.test.js` driving the real bundle in JSDOM: the limit at 0 (no thread, no input, no counter, and no "remaining" text anywhere in the panel, with the summary itself still rendered), an explicit positive limit, and the unset default.
+
 ## [1.3.0] - 2026-08-19
 
 ### Changed
