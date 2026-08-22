@@ -4441,10 +4441,11 @@
     // relevance signal, an expansion, terms to highlight — not about rendering
     // something else. There is no separate empty state.
     //
-    // A page that loads with no ?q= never reaches here: the bootstrap only
-    // calls doSearch() when the parameter is present, so this is entered by an
-    // explicit submit, a facet toggle or a sort, never by arriving at a search
-    // page.
+    // A page that loads with neither ?q= nor an f_ parameter never reaches
+    // here: the bootstrap only calls doSearch() when one of them is present,
+    // so this is entered by an explicit submit, a facet toggle, a sort, or a
+    // landing on a URL that names a query or facet state — never by arriving
+    // at a bare search page.
     const isBrowse = query === '';
 
     // The user committed. Any pending or in-flight suggest work is now noise:
@@ -5612,27 +5613,40 @@
       }
     });
 
-    // Handle browser back/forward navigation between searches.
+    // The filter state a URL carries: one f_<dimension> parameter per
+    // dimension, comma-separated values — the same shape doSearch()'s URL
+    // sync writes. Shared by the popstate handler and the load bootstrap.
+    // Under AUTO_LANGUAGE_FILTER a URL naming only other languages is
+    // clamped to the page's own, the same override every search applies.
+    function filtersFromUrlParams(urlParams) {
+      var filters = {};
+      for (const [key, val] of urlParams.entries()) {
+        if (key.startsWith('f_') && val) {
+          var filterDim = key.slice(2);
+          var filterVals = val.split(',').filter(Boolean);
+          if (filterVals.length > 0) filters[filterDim] = new Set(filterVals);
+        }
+      }
+      if (getInstanceConfig().AUTO_LANGUAGE_FILTER && defaultLangCode && filters.language) {
+        if (!filters.language.has(defaultLangCode)) {
+          filters.language = new Set([defaultLangCode]);
+        }
+      }
+      return filters;
+    }
+
+    // Handle browser back/forward navigation between searches. A state with
+    // a query or facet state re-runs it — a browse writes no q param, so its
+    // history entries carry f_ parameters alone; a state with neither is the
+    // pre-search page, which clears.
     window.addEventListener("popstate", () => {
       try {
         var urlParams = new URLSearchParams(window.location.search);
         var urlQuery = urlParams.get('q');
-        if (urlQuery) {
-          els.queryInput.value = urlQuery;
-          els.searchClear.style.display = "block";
-          var restoredFilters = {};
-          for (const [key, val] of urlParams.entries()) {
-            if (key.startsWith('f_') && val) {
-              var filterDim = key.slice(2);
-              var filterVals = val.split(',').filter(Boolean);
-              if (filterVals.length > 0) restoredFilters[filterDim] = new Set(filterVals);
-            }
-          }
-          if (getInstanceConfig().AUTO_LANGUAGE_FILTER && defaultLangCode && restoredFilters.language) {
-            if (!restoredFilters.language.has(defaultLangCode)) {
-              restoredFilters.language = new Set([defaultLangCode]);
-            }
-          }
+        var restoredFilters = filtersFromUrlParams(urlParams);
+        if (urlQuery || Object.keys(restoredFilters).length > 0) {
+          els.queryInput.value = urlQuery || '';
+          els.searchClear.style.display = urlQuery ? "block" : "none";
           doSearch(false, Object.keys(restoredFilters).length > 0 ? restoredFilters : null);
         } else {
           clearSearch();
@@ -5646,25 +5660,20 @@
     Promise.all([initPagefind(), initScoltaWasm()]).then(() => {
       debugLog("[scolta] Ready — Pagefind + WASM loaded");
 
-      // If URL contains ?q=<query>, auto-execute the search and restore filter state.
+      // If the URL carries a query (?q=<query>) or facet state (f_*
+      // parameters), auto-execute it. A facet-only URL is what a browse's own
+      // URL sync writes — the link a filtered browse shares — and an f_ param
+      // is explicit intent, so landing on one runs the filtered browse.
+      // A bare /search still does nothing: browsing the full corpus on every
+      // search-page load stays off.
       try {
         var urlParams = new URLSearchParams(window.location.search);
         var urlQuery = urlParams.get('q');
-        if (urlQuery) {
-          els.queryInput.value = urlQuery;
-          els.searchClear.style.display = "block";
-          var initialFilters = {};
-          for (const [key, val] of urlParams.entries()) {
-            if (key.startsWith('f_') && val) {
-              var filterDim = key.slice(2);
-              var filterVals = val.split(',').filter(Boolean);
-              if (filterVals.length > 0) initialFilters[filterDim] = new Set(filterVals);
-            }
-          }
-          if (getInstanceConfig().AUTO_LANGUAGE_FILTER && defaultLangCode && initialFilters.language) {
-            if (!initialFilters.language.has(defaultLangCode)) {
-              initialFilters.language = new Set([defaultLangCode]);
-            }
+        var initialFilters = filtersFromUrlParams(urlParams);
+        if (urlQuery || Object.keys(initialFilters).length > 0) {
+          if (urlQuery) {
+            els.queryInput.value = urlQuery;
+            els.searchClear.style.display = "block";
           }
           doSearch(false, Object.keys(initialFilters).length > 0 ? initialFilters : null);
         }
