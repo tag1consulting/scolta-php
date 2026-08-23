@@ -31,6 +31,23 @@ final class IndexBuildOrchestrator
      */
     private const MEMORY_PRESSURE_RATIO = 0.75;
 
+    /**
+     * Fraction of the items in a run that may miss the token cache on a
+     * cached reference before the build refuses to publish.
+     *
+     * A cached reference carries no body: the whole point is that the
+     * gatherer did not load one, because the token cache already holds the
+     * page. A miss therefore cannot be recovered in this run — the page is
+     * dropped, its ledger row is released as stale, and the merge writes a
+     * tombstone in its place. One or two are ordinary (an evicted entry past
+     * the manifest cap). A thousand mean the cache is gone, and the index the
+     * build is about to swap in is empty.
+     *
+     * Ten percent is well above the eviction rate a manifest cap produces and
+     * well below anything a lost cache looks like.
+     */
+    private const MAX_CACHED_REFERENCE_MISS_RATIO = 0.10;
+
     private readonly BuildCoordinator $coordinator;
     private readonly InvertedIndexBuilder $builder;
     private readonly IndexMerger $merger;
@@ -208,6 +225,10 @@ final class IndexBuildOrchestrator
             $resumeSkips = 0;
             /** @var int Cached references whose entity is already known to produce no page. */
             $expectedEmpty = 0;
+            /** @var int Items the run actually considered, resume skips excluded. */
+            $itemsSeen = 0;
+            /** @var int Cached references whose token data was gone. */
+            $cachedRefMisses = 0;
 
             // The generator that yields $pages does the CMS-side gathering, so
             // the time it spends is only visible as the gap between one
@@ -238,6 +259,8 @@ final class IndexBuildOrchestrator
                     continue;
                 }
 
+                $itemsSeen++;
+
                 if ($page instanceof CachedContentReference) {
                     $t0        = hrtime(true);
                     $tokenData = $this->cache()->get($page->contentHash);
@@ -257,6 +280,7 @@ final class IndexBuildOrchestrator
                     } else {
                         // On cache miss: skip markSeen → manifest entry is pruned →
                         // entity is treated as changed on the next build.
+                        $cachedRefMisses++;
                         $skipped[] = ['id' => (string) $page->id, 'reason' => 'token cache miss on a cached reference'];
                     }
                 } else {
@@ -361,6 +385,51 @@ final class IndexBuildOrchestrator
             }
             $this->logSkippedItems($skipped, $logger);
 
+            // Refuse to publish an index the token cache emptied.
+            //
+            // A cached reference that misses is a page this run cannot index:
+            // it was handed no body to fall back to. The pipeline downstream
+            // treats that as "the entity is gone" — releaseStaleRows() frees
+            // its ordinal, the merge fills the hole with a tombstone — and the
+            // swap publishes the result. That is correct for a page deleted at
+            // the source and catastrophic for a page whose cache entry was
+            // evicted, and nothing downstream can tell the two apart, because
+            // both look like an id the build never committed.
+            //
+            // So it is decided here, on the only evidence that separates them:
+            // how many. A wiped cache misses on nearly every reference, and a
+            // build in that state must not reach the merge at all.
+            $missBudget = (int) ($itemsSeen * self::MAX_CACHED_REFERENCE_MISS_RATIO);
+            if ($cachedRefMisses > 0 && ($pagesInRun === 0 || $cachedRefMisses > $missBudget)) {
+                // Nothing has been swapped, so the currently published index is
+                // still the last good one. Save the token cache WITHOUT pruning:
+                // prepare() unlinked the manifest file at the top of this build
+                // and only the in-memory copy is left, so pruning here — or
+                // simply returning — is how a recoverable cache becomes an
+                // unrecoverable one.
+                $this->cache()->saveWithoutPruning();
+                $this->coordinator->releaseLockOnly();
+                $error = sprintf(
+                    'token cache lost; re-run with `--force`: %d of %d unchanged pages had no token data, '
+                    . 'so this build would have published %d empty fragments in place of them. '
+                    . 'The existing index has been left in place.',
+                    $cachedRefMisses,
+                    $itemsSeen,
+                    $cachedRefMisses,
+                );
+                $logger->error('[scolta] ' . $error);
+
+                return $this->makeStatusReport(
+                    $telemetry,
+                    $budget,
+                    $startTime,
+                    pagesProcessed: $pagesInRun,
+                    chunksWritten: $chunkNum,
+                    success: false,
+                    error: $error,
+                );
+            }
+
             // Merge and write.
             // Ids the ledger still holds but this build never yielded have been
             // deleted at the source. Release them so their ordinals are
@@ -371,6 +440,8 @@ final class IndexBuildOrchestrator
                     'count' => count($released),
                 ]);
             }
+
+            $this->assertLedgerHasLivePages();
 
             $telemetry->emit('merge_start');
             $chunkFiles   = $this->coordinator->chunkFiles();
@@ -650,6 +721,8 @@ final class IndexBuildOrchestrator
                 ]);
             }
 
+            $this->assertLedgerHasLivePages();
+
             $telemetry->emit('merge_start');
             $streamWriter = new StreamingFormatWriter(new CborEncoder(), budget: $budget);
             $streamWriter->setTelemetry($telemetry);
@@ -784,6 +857,40 @@ final class IndexBuildOrchestrator
     }
 
     /**
+     * Refuse a page table in which nothing is alive.
+     *
+     * A page whose content this build could not read looks exactly like a page
+     * that was deleted at the source: neither is committed, so releaseStaleRows()
+     * frees the ordinal and the merge pads the hole with a tombstone. One at a
+     * time that is correct. All of them at once is a corpus that vanished
+     * between two builds, and the difference between "the site was emptied" and
+     * "the build could not read the site" is not one this code can make — so it
+     * makes neither, and refuses to publish an index in which every document is
+     * a tombstone.
+     *
+     * Called before the merge, where refusing still leaves the previous index
+     * in place, and again from the integrity check afterwards for the paths
+     * that reach it another way.
+     *
+     * @throws \RuntimeException When the page table holds ordinals and no live page.
+     */
+    private function assertLedgerHasLivePages(): void
+    {
+        $pageTableSize = $this->ledger->pageTableSize();
+        if ($pageTableSize === 0 || $this->ledger->liveCount() > 0) {
+            return;
+        }
+
+        throw new \RuntimeException(sprintf(
+            'Index integrity check failed: the page table has %d ordinals and none of them is live, '
+            . 'so the index would contain nothing but tombstones. Either every page was deleted at '
+            . 'the source, or the build could not read the content it was handed. '
+            . 'The index must not be served. Re-run with --force to rebuild from the source content.',
+            $pageTableSize,
+        ));
+    }
+
+    /**
      * Verify the finished index accounts for every page the build indexed.
      *
      * The count that matters is the ledger's live rows: one row per id this
@@ -796,6 +903,11 @@ final class IndexBuildOrchestrator
      */
     private function verifyOutputHasFragments(int $pagesProcessed): void
     {
+        // Before the zero-page exit, not after it: zero is the symptom here,
+        // not the exemption. Held back until after the exit, a build that lost
+        // every page reports success and serves an index of pure tombstones.
+        $this->assertLedgerHasLivePages();
+
         if ($pagesProcessed === 0) {
             return;
         }

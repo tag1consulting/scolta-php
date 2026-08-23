@@ -294,6 +294,51 @@ final class PageWordCache
         $this->saveManifest();
     }
 
+    /**
+     * Save the manifest without dropping anything this process never looked up.
+     *
+     * {@see self::pruneAndSave()} is correct exactly once: at the end of a run
+     * that looked up every live page, where a hash nobody asked for belongs to
+     * a page that is gone. An incremental update looks up one or two, so the
+     * same call reads "every other page has been deleted" and empties the
+     * cache — 2,000 entries down to 2 after a single edit. The next edit to any
+     * other page then cannot find its previous token data and refuses, and the
+     * full build it falls back to is cold.
+     *
+     * So the write buffer is flushed, the seen markers are decoded back to
+     * plain chunk numbers (the on-disk manifest holds no signs, and
+     * loadManifest() derives the next chunk number from the maximum value),
+     * and every entry is kept. Nothing is deleted, which means a partial run
+     * leaves the hash of an edited page behind: one stale entry per edit,
+     * bounded by the manifest cap and swept by the next full build. That is
+     * the trade — a little garbage rather than a wiped cache.
+     *
+     * @since 1.3.1
+     * @stability experimental
+     */
+    public function saveWithoutPruning(): void
+    {
+        if (!empty($this->writeBuffer)) {
+            $this->flushWriteBuffer();
+        }
+
+        // Release loaded chunk — we're done reading.
+        $this->loadedChunk = null;
+
+        // Walk the keys rather than the array: a foreach over the property
+        // holds a reference to it, so the first write separates the whole hash
+        // table and peaks at two manifests. The key list costs a pointer per
+        // entry instead.
+        foreach (array_keys($this->manifest) as $hash) {
+            $stored = $this->manifest[$hash];
+            if ($stored < 0) {
+                $this->manifest[$hash] = (-$stored) - 1;
+            }
+        }
+
+        $this->saveManifest();
+    }
+
     private function loadManifest(): void
     {
         $manifestFile = $this->stateDir . '/' . self::MANIFEST_FILENAME;

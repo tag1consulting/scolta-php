@@ -294,7 +294,15 @@ final class IncrementalIndexUpdater
         $this->removeSupersededMeta($metaPath);
 
         $this->ledger->save();
-        $this->cache->pruneAndSave();
+
+        // Saved, not pruned. Pruning drops every hash this process did not look
+        // up, which at the end of a full build means the pages that are gone
+        // and here would mean all of them but the one just edited: an update
+        // touching two pages out of 109,308 would leave a two-entry cache, the
+        // next update to any other page could not find its previous token data
+        // and would refuse, and the full build that refusal falls back to would
+        // start cold. The cache belongs to the corpus, not to this update.
+        $this->cache->saveWithoutPruning();
 
         $result = new IncrementalUpdateResult(
             pagesUpdated: count($this->upserts),

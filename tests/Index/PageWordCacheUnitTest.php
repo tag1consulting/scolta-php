@@ -260,6 +260,80 @@ class PageWordCacheUnitTest extends TestCase
     }
 
     // =========================================================================
+    // saveWithoutPruning() keeps what the process never looked at
+    // =========================================================================
+
+    public function testSaveWithoutPruningKeepsUntouchedEntries(): void
+    {
+        $cache = $this->makeCache();
+        $cache->put('hash-a', $this->tokenData('a'));
+        $cache->put('hash-b', $this->tokenData('b'));
+        $cache->pruneAndSave();
+
+        // A process that looks up one hash and saves: the other must survive,
+        // which is the whole difference from pruneAndSave().
+        $cache2 = $this->makeCache();
+        $cache2->get('hash-a');
+        $cache2->saveWithoutPruning();
+
+        $manifest = $this->readManifest();
+        $this->assertArrayHasKey('hash-a', $manifest, 'The looked-up entry must survive.');
+        $this->assertArrayHasKey('hash-b', $manifest, 'An entry this process never asked for must survive.');
+    }
+
+    public function testSaveWithoutPruningStoresPlainChunkNumbers(): void
+    {
+        // The seen marker is a negative chunk number and is in-memory
+        // bookkeeping only. Saved as-is it would make loadManifest() read
+        // max() over negatives and hand the next flush a chunk number that
+        // already exists, so the sign has to come off before the write.
+        $cache = $this->makeCache(chunkSize: 1);
+        $cache->put('hash-a', $this->tokenData('a'));
+        $cache->put('hash-b', $this->tokenData('b'));
+        $cache->saveWithoutPruning();
+
+        $manifest = $this->readManifest();
+        $this->assertSame([0, 1], array_values($manifest), 'Manifest values must be plain chunk numbers.');
+
+        // Reopening must therefore allocate chunk 2 rather than overwrite one.
+        $cache2 = $this->makeCache(chunkSize: 1);
+        $cache2->put('hash-c', $this->tokenData('c'));
+        $cache2->saveWithoutPruning();
+
+        $this->assertFileExists($this->chunkFile(2), 'The next flush must take an unused chunk number.');
+        $this->assertNotNull($cache2->get('hash-a'), 'An earlier chunk must not have been overwritten.');
+        $this->assertNotNull($cache2->get('hash-b'), 'An earlier chunk must not have been overwritten.');
+    }
+
+    public function testSaveWithoutPruningFlushesTheWriteBuffer(): void
+    {
+        $cache = $this->makeCache(chunkSize: 100);
+        $cache->put('hash-a', $this->tokenData('a'));
+        $cache->saveWithoutPruning();
+
+        $reopened = $this->makeCache(chunkSize: 100);
+        $this->assertNotNull(
+            $reopened->get('hash-a'),
+            'An entry still in the write buffer must be flushed, not lost.',
+        );
+    }
+
+    public function testSaveWithoutPruningLeavesChunkFilesAlone(): void
+    {
+        $cache = $this->makeCache(chunkSize: 1);
+        $cache->put('hash-a', $this->tokenData('a'));
+        $cache->put('hash-b', $this->tokenData('b'));
+        $cache->pruneAndSave();
+
+        $cache2 = $this->makeCache(chunkSize: 1);
+        $cache2->get('hash-a');
+        $cache2->saveWithoutPruning();
+
+        $this->assertFileExists($this->chunkFile(0));
+        $this->assertFileExists($this->chunkFile(1), 'No chunk may be deleted when nothing is pruned.');
+    }
+
+    // =========================================================================
     // pruneAndSave() deletes orphaned chunks
     // =========================================================================
 
