@@ -115,6 +115,114 @@ final class IndexMetadataWriter
     }
 
     /**
+     * Write `pf_meta` and restamp `scolta.facets` without rebuilding either
+     * corpus-wide table.
+     *
+     * `write()` rebuilds the filter chunks, the sorts table and the whole facet
+     * index every time, because all three are functions of the entire page
+     * table. For a body-only edit none of that is true: no page's filter values
+     * moved, no page's sortable values moved, and no page joined or left. The
+     * only thing that changed is one page's fragment hash, and the page table is
+     * the one place that appears.
+     *
+     * So the filter hashes are taken from the previous `pf_meta[3]` — which
+     * leaves the `.pf_filter` files on disk untouched, rather than rewriting
+     * them to the same bytes under the same names — the sorts table is
+     * re-encoded from the previous `pf_meta[4]`'s ordering, and the facet index
+     * is restamped from its own bytes. The caller decides when this is legal;
+     * see `IncrementalIndexUpdater::commit()`.
+     *
+     * @param array<int, array{fragmentHash: string, wordCount: int}> $pageMeta        Ordinal => page row.
+     * @param list<mixed>                                             $previousFilters Decoded `pf_meta[3]`.
+     * @param list<mixed>                                             $previousSorts   Decoded `pf_meta[4]`.
+     * @param list<array{from: string, to: string, hash: string}>     $indexChunkMeta
+     * @param list<string>                                            $metaFields
+     * @return string The new pf_meta hash.
+     * @throws \RuntimeException When the previous facet index cannot be reused.
+     * @since 1.3.1
+     * @stability experimental
+     */
+    public function writeReusingCorpusTables(
+        string $buildDir,
+        array $pageMeta,
+        array $previousFilters,
+        array $previousSorts,
+        array $indexChunkMeta,
+        array $metaFields,
+        string $version,
+    ): string {
+        ksort($pageMeta, SORT_NUMERIC);
+
+        $filterItems = [];
+        foreach ($previousFilters as $row) {
+            if (!is_array($row) || count($row) !== 2) {
+                throw new \RuntimeException('Malformed pf_meta filter row: expected [name, hash].');
+            }
+            $filterItems[] = $this->cbor->encodeArray([
+                $this->cbor->encodeString((string) $row[0]),
+                $this->cbor->encodeString((string) $row[1]),
+            ]);
+        }
+
+        $sortItems = [];
+        foreach ($previousSorts as $row) {
+            if (!is_array($row) || count($row) !== 2 || !is_array($row[1])) {
+                throw new \RuntimeException('Malformed pf_meta sorts row: expected [field, ordinals].');
+            }
+            $sortItems[] = $this->cbor->encodeArray([
+                $this->cbor->encodeString((string) $row[0]),
+                $this->cbor->encodeArray(array_map(
+                    fn($ordinal): string => $this->cbor->encodeUint((int) $ordinal),
+                    $row[1],
+                )),
+            ]);
+        }
+
+        $metaCbor = $this->assembleMetadata(
+            $pageMeta,
+            $indexChunkMeta,
+            $filterItems,
+            $this->cbor->encodeArray($sortItems),
+            $metaFields,
+            $version,
+        );
+        $metaHash = 'en_' . substr(hash('sha256', $metaCbor), 0, 10);
+
+        $pageHashes = array_map(static fn(array $meta): string => $meta['fragmentHash'], $pageMeta);
+        if (!(new FacetIndexWriter($this->compressionLevel))->rewriteWithNewPageTable($buildDir, $pageHashes, $metaHash)) {
+            throw new \RuntimeException(
+                'The existing facet index cannot be restamped for this update. '
+                . 'The caller must fall back to a full corpus-table rebuild.',
+            );
+        }
+
+        self::putFile(
+            $buildDir . "/pagefind.{$metaHash}.pf_meta",
+            gzencode(self::DELIMITER . $metaCbor, $this->compressionLevel),
+        );
+
+        $entry = [
+            'version'            => $version,
+            'languages'          => [
+                'en' => [
+                    'hash'       => $metaHash,
+                    'wasm'       => 'en',
+                    'page_count' => count($pageMeta),
+                ],
+            ],
+            'include_characters' => [],
+        ];
+        self::putFile(
+            $buildDir . '/pagefind-entry.json',
+            (string) json_encode($entry, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
+        );
+
+        $this->copyAssets($buildDir);
+
+        return $metaHash;
+    }
+
+    /**
      * Put filter data into the one order every writer can reproduce.
      *
      * Within a value, page ordinals ascending. Within a dimension, values
@@ -221,6 +329,44 @@ final class IndexMetadataWriter
         array $metaFields,
         string $version,
     ): string {
+        $filterItems = [];
+        foreach ($filterHashes as $filterName => $hash) {
+            $filterItems[] = $this->cbor->encodeArray([
+                $this->cbor->encodeString((string) $filterName),
+                $this->cbor->encodeString($hash),
+            ]);
+        }
+
+        return $this->assembleMetadata(
+            $pageMeta,
+            $indexChunkMeta,
+            $filterItems,
+            $this->buildSortsArray($sortFields),
+            $metaFields,
+            $version,
+        );
+    }
+
+    /**
+     * Assemble the six pf_meta positions from parts both writers can supply.
+     *
+     * The one place the pf_meta layout is written down, so the full path and the
+     * restamping path cannot drift into producing differently-shaped metadata.
+     *
+     * @param array<int, array{fragmentHash: string, wordCount: int}> $pageMeta
+     * @param list<array{from: string, to: string, hash: string}>     $indexChunkMeta
+     * @param list<string>                                            $filterItems Encoded [name, hash] pairs.
+     * @param string                                                  $sortsCbor   The encoded sorts array.
+     * @param list<string>                                            $metaFields
+     */
+    private function assembleMetadata(
+        array $pageMeta,
+        array $indexChunkMeta,
+        array $filterItems,
+        string $sortsCbor,
+        array $metaFields,
+        string $version,
+    ): string {
         $pageItems = [];
         foreach ($pageMeta as $meta) {
             $pageItems[] = $this->cbor->encodeArray([
@@ -238,14 +384,6 @@ final class IndexMetadataWriter
             ]);
         }
 
-        $filterItems = [];
-        foreach ($filterHashes as $filterName => $hash) {
-            $filterItems[] = $this->cbor->encodeArray([
-                $this->cbor->encodeString((string) $filterName),
-                $this->cbor->encodeString($hash),
-            ]);
-        }
-
         $metaFieldItems = [];
         foreach ($metaFields as $field) {
             $metaFieldItems[] = $this->cbor->encodeString($field);
@@ -256,7 +394,7 @@ final class IndexMetadataWriter
             $this->cbor->encodeArray($pageItems),
             $this->cbor->encodeArray($chunkItems),
             $this->cbor->encodeArray($filterItems),
-            $this->buildSortsArray($sortFields),
+            $sortsCbor,
             $this->cbor->encodeArray($metaFieldItems),
         ]);
     }

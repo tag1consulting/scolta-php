@@ -196,12 +196,23 @@ final class IncrementalIndexUpdater
 
         $touchedFragments = 0;
 
+        // Whether anything happened that the whole-corpus tables depend on.
+        // They are a function of the entire page table, so any page joining or
+        // leaving it, and any change to a page's filter or sortable values,
+        // means they have to be rebuilt. A body-only edit means none of that:
+        // no posting in scolta.facets moves, no .pf_filter chunk changes, and
+        // the sorts table keeps its order. Decided while staging, because it
+        // depends on the ledger's *previous* values and allocate() overwrites
+        // them.
+        $corpusTablesChanged = false;
+
         foreach ($this->deletes as $id) {
             $ordinal = $this->ledger->ordinalFor($id);
             if ($ordinal === null) {
                 continue;
             }
             $this->collectRemovals($id, $ordinal, $removals);
+            $corpusTablesChanged = true;
 
             $superseded         = $pageMeta[$ordinal]['fragmentHash'] ?? null;
             $pageMeta[$ordinal] = $this->writeTombstoneFragment($ordinal);
@@ -216,11 +227,21 @@ final class IncrementalIndexUpdater
 
             $existingOrdinal = $this->ledger->ordinalFor($item->id);
 
+            // Read before allocate(), which overwrites both.
+            if ($existingOrdinal === null
+                || InvertedIndexBuilder::effectiveFilters($item) !== $this->ledger->filtersFor($item->id)
+                || InvertedIndexBuilder::effectiveSortable($item) !== $this->ledger->sortableFor($item->id)
+            ) {
+                $corpusTablesChanged = true;
+            }
+
             if ($tokenData === null) {
                 // Body too short to index. An existing page becomes a
                 // tombstone; a new one is simply not added, matching what a
                 // full build would do with it.
                 if ($existingOrdinal !== null) {
+                    // A page that becomes a tombstone leaves the live table.
+                    $corpusTablesChanged = true;
                     $this->collectRemovals($item->id, $existingOrdinal, $removals);
                     $superseded                 = $pageMeta[$existingOrdinal]['fragmentHash'] ?? null;
                     $pageMeta[$existingOrdinal] = $this->writeTombstoneFragment($existingOrdinal);
@@ -281,19 +302,62 @@ final class IncrementalIndexUpdater
 
         $chunkStats = $this->applyTermDeltas($removals, $additions, $variantAdds, $indexChunkMeta);
 
-        // The whole-corpus artifacts are rebuilt in full: they are small, and a
-        // partial rewrite of any of them has no meaning.
-        [$filterData, $sortFields] = $this->rebuildCorpusTables($pageMeta);
+        $metadataWriter = new IndexMetadataWriter($this->cbor, $this->budget->compressionLevel());
+        $corpusTableRoute = 'rebuilt';
 
-        (new IndexMetadataWriter($this->cbor, $this->budget->compressionLevel()))->write(
-            $this->indexDir(),
-            $pageMeta,
-            $filterData,
-            $sortFields,
-            $indexChunkMeta,
-            $metaFields,
-            $version,
-        );
+        if ($corpusTablesChanged) {
+            // Rebuilt in full: they are small relative to the index, and a
+            // partial rewrite of any of them has no meaning once pages have
+            // joined or left the table.
+            [$filterData, $sortFields] = $this->rebuildCorpusTables($pageMeta);
+
+            $metadataWriter->write(
+                $this->indexDir(),
+                $pageMeta,
+                $filterData,
+                $sortFields,
+                $indexChunkMeta,
+                $metaFields,
+                $version,
+            );
+        } else {
+            // Nothing a corpus-wide table describes has moved, so the filter
+            // chunks are left on disk untouched, the sorts table keeps the order
+            // it had, and the facet index is restamped from its own bytes rather
+            // than having every posting list re-encoded. A refusal from the
+            // restamp falls back to the full path rather than publishing
+            // anything doubtful.
+            try {
+                $corpusTableRoute = 'reused';
+                $metadataWriter->writeReusingCorpusTables(
+                    $this->indexDir(),
+                    $pageMeta,
+                    // array_values(): a CBOR array decodes in order, and the
+                    // order is the whole content of both tables.
+                    is_array($meta[3] ?? null) ? array_values($meta[3]) : [],
+                    is_array($meta[4] ?? null) ? array_values($meta[4]) : [],
+                    $indexChunkMeta,
+                    $metaFields,
+                    $version,
+                );
+            } catch (\RuntimeException $e) {
+                $corpusTableRoute = 'rebuilt';
+                $this->logger->info(
+                    '[scolta] Reusing the corpus tables was refused ({reason}); rebuilding them.',
+                    ['reason' => $e->getMessage()],
+                );
+                [$filterData, $sortFields] = $this->rebuildCorpusTables($pageMeta);
+                $metadataWriter->write(
+                    $this->indexDir(),
+                    $pageMeta,
+                    $filterData,
+                    $sortFields,
+                    $indexChunkMeta,
+                    $metaFields,
+                    $version,
+                );
+            }
+        }
 
         // Publish order matters. New chunks were written under new names before
         // this point and the old pf_meta still pointed at the old ones, so a
@@ -323,11 +387,13 @@ final class IncrementalIndexUpdater
         );
 
         $this->logger->info(
-            '[scolta] Incremental update: {updated} updated, {deleted} deleted, {chunks} index chunks rewritten in {secs}s (tombstones {pct}%).',
+            '[scolta] Incremental update: {updated} updated, {deleted} deleted, {chunks} index chunks rewritten, '
+            . 'corpus tables {tables}, in {secs}s (tombstones {pct}%).',
             [
                 'updated' => $result->pagesUpdated,
                 'deleted' => $result->pagesDeleted,
                 'chunks'  => $result->chunksRewritten,
+                'tables'  => $corpusTableRoute,
                 'secs'    => $result->durationSeconds,
                 'pct'     => round($result->tombstoneRatio * 100, 1),
             ],
