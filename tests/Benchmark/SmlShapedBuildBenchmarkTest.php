@@ -44,10 +44,29 @@ use Tag1\Scolta\Tests\Benchmark\Support\SmlShapedCorpus;
 final class SmlShapedBuildBenchmarkTest extends TestCase
 {
     /**
-     * Corpus size. Two orders below the real 109,308 and still large enough
-     * for the merge and the whole-corpus artifacts to dominate.
+     * Default corpus size. Two orders below the real 109,308 and still large
+     * enough for the merge and the whole-corpus artifacts to dominate.
      */
-    private const PAGES = 5_000;
+    private const DEFAULT_PAGES = 5_000;
+
+    /**
+     * Corpus size for this run, from SCOLTA_BENCH_PAGES.
+     *
+     * The default is what CI runs. The optimisation work on this pipeline is
+     * measured at 20,000 and re-checked at the real 109,308, and neither of
+     * those belongs in a shared-runner default, so the size is an environment
+     * variable rather than a constant somebody edits and forgets to put back.
+     */
+    private static function pages(): int
+    {
+        $raw = getenv('SCOLTA_BENCH_PAGES');
+        if ($raw === false || trim($raw) === '') {
+            return self::DEFAULT_PAGES;
+        }
+        $pages = (int) trim($raw);
+
+        return $pages > 0 ? $pages : self::DEFAULT_PAGES;
+    }
 
     private string $stateDir;
     private string $outputDir;
@@ -99,7 +118,8 @@ final class SmlShapedBuildBenchmarkTest extends TestCase
 
     public function testColdThenWarmThenIncrementalOnAnSmlShapedCorpus(): void
     {
-        $corpus = new SmlShapedCorpus(self::PAGES);
+        $pages  = self::pages();
+        $corpus = new SmlShapedCorpus($pages);
         $logger = new PhaseSummaryLogger();
 
         $items = [];
@@ -112,7 +132,7 @@ final class SmlShapedBuildBenchmarkTest extends TestCase
         $cold = $this->build($items, $logger);
         $coldSeconds = microtime(true) - $t0;
         $this->assertTrue($cold->success, 'Cold build failed: ' . ($cold->error ?? ''));
-        $this->assertSame(self::PAGES, $cold->pagesProcessed);
+        $this->assertSame($pages, $cold->pagesProcessed);
 
         self::copyDir($this->outputDir . '/pagefind', $this->coldSnapshot . '/pagefind');
 
@@ -127,7 +147,7 @@ final class SmlShapedBuildBenchmarkTest extends TestCase
         $warm = $this->build($references, $logger);
         $warmSeconds = microtime(true) - $t0;
         $this->assertTrue($warm->success, 'Warm build failed: ' . ($warm->error ?? ''));
-        $this->assertSame(self::PAGES, $warm->pagesProcessed, 'A warm build must index every page it was handed.');
+        $this->assertSame($pages, $warm->pagesProcessed, 'A warm build must index every page it was handed.');
 
         $this->assertSame(
             [],
@@ -140,7 +160,7 @@ final class SmlShapedBuildBenchmarkTest extends TestCase
 
         // ── Incremental: one page edited, everything else untouched. ───────
         $updater = new IncrementalIndexUpdater($this->stateDir, $this->outputDir);
-        $updater->stageUpsert($corpus->item(2_500, edit: 1));
+        $updater->stageUpsert($corpus->item(intdiv($pages, 2), edit: 1));
         $t0     = microtime(true);
         $update = $updater->commit();
         $updateSeconds = microtime(true) - $t0;
@@ -152,7 +172,7 @@ final class SmlShapedBuildBenchmarkTest extends TestCase
             "\n%s: %d pages\n  cold        %6.2fs\n  warm        %6.2fs (%.1fx)\n"
             . "  incremental %6.3fs (%d chunks rewritten)\n",
             self::class,
-            self::PAGES,
+            $pages,
             $coldSeconds,
             $warmSeconds,
             $warmSeconds > 0.0 ? $coldSeconds / $warmSeconds : 0.0,
