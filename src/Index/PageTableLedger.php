@@ -50,6 +50,21 @@ final class PageTableLedger
      */
     public const JOURNAL_FILENAME = 'page-table-ledger.journal';
 
+    /**
+     * Max time to wait for the journal lock before giving up.
+     *
+     * Unlike the manifest's per-writer temp files, this journal is a fixed
+     * shared path that genuinely needs mutual exclusion, so a blocking
+     * flock() is not an option: on NFS-backed storage a process killed
+     * ungracefully can leave the server believing the lock is still held,
+     * and a blocking wait against that stale state hangs forever, even
+     * across SIGKILL. Poll with a bounded timeout instead.
+     */
+    private const JOURNAL_LOCK_TIMEOUT_SECONDS = 60;
+
+    /** Interval between lock-acquisition attempts while waiting. */
+    private const JOURNAL_LOCK_POLL_MICROSECONDS = 250_000;
+
     /** Next never-used ordinal. */
     private int $next = 0;
 
@@ -132,6 +147,7 @@ final class PageTableLedger
     public function __construct(
         private readonly string $stateDir,
         private readonly StorageDriverInterface $storage,
+        private readonly int $journalLockTimeoutSeconds = self::JOURNAL_LOCK_TIMEOUT_SECONDS,
     ) {
         $this->loadFromDisk();
     }
@@ -288,7 +304,41 @@ final class PageTableLedger
         }
 
         $path = $this->stateDir . '/' . self::JOURNAL_FILENAME;
-        if (file_put_contents($path, $payload, FILE_APPEND | LOCK_EX) === false) {
+
+        $fp = fopen($path, 'a');
+        if ($fp === false) {
+            throw new \RuntimeException(
+                "Failed to open the page-table journal at {$path}. "
+                . 'Refusing to continue: the chunk about to be written would reference '
+                . 'ordinals no resumed process could see.',
+            );
+        }
+
+        $locked   = false;
+        $deadline = microtime(true) + $this->journalLockTimeoutSeconds;
+        do {
+            if (flock($fp, LOCK_EX | LOCK_NB)) {
+                $locked = true;
+                break;
+            }
+            usleep(self::JOURNAL_LOCK_POLL_MICROSECONDS);
+        } while (microtime(true) < $deadline);
+
+        if (!$locked) {
+            fclose($fp);
+            throw new \RuntimeException(
+                'Failed to acquire the page-table journal lock after ' . $this->journalLockTimeoutSeconds . 's; '
+                . 'a previous process may have died holding a stale NFS lock. If no other build is genuinely '
+                . "running, the environment's storage/lock state may need administrator attention.",
+            );
+        }
+
+        $written = fwrite($fp, $payload);
+        fflush($fp);
+        flock($fp, LOCK_UN);
+        fclose($fp);
+
+        if ($written === false) {
             throw new \RuntimeException(
                 "Failed to append to the page-table journal at {$path}. "
                 . 'Refusing to continue: the chunk about to be written would reference '

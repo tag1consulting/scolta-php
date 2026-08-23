@@ -93,6 +93,43 @@ class BuildStateAtomicWriteTest extends TestCase
         $this->assertIsArray($data);
     }
 
+    public function testManifestWriteUsesAUniquePerProcessTempFilenameNotAFixedPath(): void
+    {
+        $state = new BuildState($this->tmpDir);
+        $state->initiateBuild(['total_pages' => 1]);
+
+        $this->assertFileDoesNotExist($this->tmpDir . '/manifest.json.tmp');
+
+        $tempLeftovers = glob($this->tmpDir . '/manifest.json.tmp*') ?: [];
+        $this->assertSame([], $tempLeftovers, 'A successful commit must leave no temp file behind, unique-named or not');
+    }
+
+    public function testReadFallsBackToTheMostRecentOfSeveralOrphanedTempFiles(): void
+    {
+        $older = $this->tmpDir . '/manifest.json.tmp.111.aaa';
+        $newer = $this->tmpDir . '/manifest.json.tmp.222.bbb';
+
+        file_put_contents($older, json_encode([
+            'status' => 'building',
+            'total_pages' => 1,
+            'pages_processed' => 1,
+        ]));
+        touch($older, time() - 10);
+
+        file_put_contents($newer, json_encode([
+            'status' => 'building',
+            'total_pages' => 99,
+            'pages_processed' => 77,
+        ]));
+        touch($newer, time());
+
+        $state = new BuildState($this->tmpDir);
+        $manifest = $state->shouldResume();
+
+        $this->assertNotNull($manifest);
+        $this->assertSame(99, $manifest['total_pages'], 'Must prefer the most recently modified orphaned temp file');
+    }
+
     public function testStaleLockIsReleasedOnNextAcquisition(): void
     {
         $lockFile = $this->tmpDir . '/lock';
