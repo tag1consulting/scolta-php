@@ -80,6 +80,21 @@ final class BuildChunkReuse
     private bool $enabled = false;
 
     /**
+     * The hash these keys are built with.
+     *
+     * Guarded the way {@see PhpIndexer::contentHash()} guards it: xxh128 has
+     * been in core since PHP 8.1, but a host with a cut-down hash extension
+     * would make an unguarded hash() call a fatal rather than a slow build. A
+     * host that resolves this differently from the build that wrote the keys
+     * simply fails every comparison, which costs a rebuild and never a wrong
+     * chunk — and the algorithm is folded into the header anyway.
+     */
+    private static function algo(): string
+    {
+        return in_array('xxh128', hash_algos(), true) ? 'xxh128' : 'sha256';
+    }
+
+    /**
      * The previous build's identities, per range.
      *
      * @var array<int, array<int, string>> Range => ordinal => identity.
@@ -151,9 +166,10 @@ final class BuildChunkReuse
         // directory an operator may well hand to somebody debugging a build.
         $secret = HmacSecret::normalize($hmacSecret);
 
-        return hash('xxh128', implode("\0", [
+        return hash(self::algo(), implode("\0", [
             'scolta-chunk-reuse',
             (string) self::STATE_VERSION,
+            self::algo(),
             (string) $rangeSize,
             $language,
             $secret === null ? 'no-hmac' : hash('sha256', $secret),
@@ -177,7 +193,7 @@ final class BuildChunkReuse
      */
     public static function pageIdentity(int $ordinal, string $contentHash, object $page): string
     {
-        return hash('xxh128', implode("\0", [
+        return hash(self::algo(), implode("\0", [
             (string) $ordinal,
             $contentHash,
             $page->id,
@@ -214,7 +230,7 @@ final class BuildChunkReuse
             $parts[] = $ordinal . ':' . $identity;
         }
 
-        return hash('xxh128', implode(',', $parts));
+        return hash(self::algo(), implode(',', $parts));
     }
 
     /**
