@@ -599,6 +599,80 @@ final class IncrementalDifferentialTest extends TestCase
 
     // ── Refusals ───────────────────────────────────────────────────────────
 
+    public function testAFullBuildAfterJournalledUpdatesReproducesTheSameIndex(): void
+    {
+        // An incremental commit appends to the ledger journal instead of
+        // snapshotting the whole table. The next full build therefore starts
+        // from snapshot-plus-journal rather than from a snapshot, and it has to
+        // reproduce exactly the numbering the updates left — including a
+        // released ordinal still on the free list, which only the journal
+        // records now.
+        $items = SyntheticCorpus::generate(60, seed: 21);
+        $this->seedBoth($items);
+
+        $editA = $items[15]->cloneWith(['bodyHtml' => $items[31]->bodyHtml]);
+        $gone  = $items[40];
+
+        $updater = $this->updater();
+        $updater->stageUpsert($editA);
+        $updater->commit();
+
+        $updater = $this->updater();
+        $updater->stageDelete($gone->id);
+        $updater->commit();
+
+        // The journal is what the next load will read; if the update had
+        // snapshotted, this assertion would be vacuous.
+        $this->assertFileExists(
+            $this->incrementalState . '/' . PageTableLedger::JOURNAL_FILENAME,
+            'The incremental commits snapshotted the ledger instead of journalling it.',
+        );
+
+        $survivors = array_values(array_filter(
+            $items,
+            static fn(ContentItem $i): bool => $i->id !== $gone->id,
+        ));
+        $survivors[15] = $editA;
+
+        // A full build over the journalled state directory.
+        $this->fullBuild($this->incrementalState, $this->incrementalOut, $survivors);
+
+        // The reference saw the same two changes in the same order.
+        $this->rebuildReference($survivors);
+        $this->assertTreesMatch(
+            'A full build on top of journalled incremental commits must reproduce the reference index.',
+        );
+    }
+
+    public function testAnAppendAfterAJournalledDeleteStillReusesTheFreedOrdinal(): void
+    {
+        $items = SyntheticCorpus::generate(40, seed: 23);
+        $this->seedBoth($items);
+
+        $gone = $items[10];
+        $updater = $this->updater();
+        $updater->stageDelete($gone->id);
+        $updater->commit();
+
+        $freed = new PageTableLedger($this->incrementalState, new FilesystemDriver());
+        $this->assertContains(
+            10,
+            $freed->tombstones(),
+            'The journalled delete did not leave a tombstone a reloaded ledger can see.',
+        );
+
+        // A brand-new page must take the freed ordinal, not a fresh one, or the
+        // page table grows a permanent hole across every future build.
+        $added   = SyntheticCorpus::item(41, seed: 23);
+        $updater = $this->updater();
+        $updater->stageUpsert($added);
+        $updater->commit();
+
+        $after = new PageTableLedger($this->incrementalState, new FilesystemDriver());
+        $this->assertSame(10, $after->ordinalFor($added->id));
+        $this->assertSame(40, $after->pageTableSize());
+    }
+
     public function testRefusesWhenThereIsNoIndexToUpdate(): void
     {
         $this->expectException(IncrementalUpdateUnavailable::class);

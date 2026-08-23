@@ -432,4 +432,120 @@ final class PageTableLedgerTest extends TestCase
         $reloaded = $this->ledger();
         $this->assertSame(0, $reloaded->ordinalFor('a'));
     }
+
+    // ── Journalled commits ─────────────────────────────────────────────────
+
+    public function testJournalledEditsAndDeletesReloadToTheSameTableAsASnapshot(): void
+    {
+        // The property commitIncremental() rests on: the journal is a complete
+        // description of what happened since the snapshot, releases included.
+        // Before release() was journalled, replaying an allocation-only journal
+        // over an older snapshot brought deleted rows back.
+        $journalled = $this->ledger();
+        $journalled->allocate('a', '/a', ['x' => '1'], [], 'ha');
+        $journalled->allocate('b', '/b', ['x' => '2'], [], 'hb');
+        $journalled->allocate('c', '/c', ['x' => '3'], [], 'hc');
+        $journalled->save();
+
+        // From here on, only journal appends.
+        $journalled->allocate('d', '/d', ['x' => '4'], [], 'hd');
+        $journalled->release('b');
+        $journalled->allocate('e', '/e', ['x' => '5'], [], 'he');
+        $journalled->release('c');
+        $journalled->commitIncremental();
+
+        $expectedRows       = $journalled->rowsByOrdinal();
+        $expectedSize       = $journalled->pageTableSize();
+        $expectedTombstones = $journalled->tombstones();
+        sort($expectedTombstones);
+
+        // A fresh instance sees the snapshot plus the journal.
+        $reloaded = $this->ledger();
+        $actualTombstones = $reloaded->tombstones();
+        sort($actualTombstones);
+
+        $this->assertSame($expectedRows, $reloaded->rowsByOrdinal());
+        $this->assertSame($expectedSize, $reloaded->pageTableSize());
+        $this->assertSame($expectedTombstones, $actualTombstones);
+        $this->assertNull($reloaded->ordinalFor('b'), 'A released id came back from the journal.');
+        $this->assertNull($reloaded->ordinalFor('c'), 'A released id came back from the journal.');
+        $this->assertSame($journalled->ordinalFor('e'), $reloaded->ordinalFor('e'));
+    }
+
+    public function testAReleasedOrdinalIsReusedIdenticallyAfterAJournalReload(): void
+    {
+        $first = $this->ledger();
+        $first->allocate('a', '/a');
+        $first->allocate('b', '/b');
+        $first->save();
+
+        $freed = $first->release('a');
+        $first->commitIncremental();
+
+        // The free list has to survive the reload, or the next new id takes a
+        // fresh ordinal and the page table grows a permanent hole.
+        $reloaded = $this->ledger();
+        $this->assertSame($freed, $reloaded->allocate('z', '/z'));
+        $this->assertSame(2, $reloaded->pageTableSize());
+    }
+
+    public function testCommitIncrementalSnapshotsOnceTheJournalGrowsPastTheThreshold(): void
+    {
+        $ledger = $this->ledger();
+        $ledger->allocate('a', '/a');
+        $ledger->save();
+
+        $journal = $this->stateDir . '/' . PageTableLedger::JOURNAL_FILENAME;
+
+        // Below the threshold: append, journal survives.
+        $ledger->allocate('b', '/b');
+        $ledger->commitIncremental();
+        $this->assertFileExists($journal);
+
+        // Above it: snapshot, which truncates the journal. Otherwise a site that
+        // only ever runs incremental updates grows one forever and pays for it
+        // on every load.
+        $ledger->allocate('c', '/c');
+        $ledger->commitIncremental(compactBytes: 1);
+        $this->assertFileDoesNotExist($journal);
+
+        $reloaded = $this->ledger();
+        $this->assertSame($ledger->rowsByOrdinal(), $reloaded->rowsByOrdinal());
+    }
+
+    public function testASnapshotAfterJournalledReleasesDropsTheJournal(): void
+    {
+        $ledger = $this->ledger();
+        $ledger->allocate('a', '/a');
+        $ledger->allocate('b', '/b');
+        $ledger->save();
+        $ledger->release('a');
+        $ledger->commitIncremental();
+
+        $ledger->save();
+        $this->assertFileDoesNotExist($this->stateDir . '/' . PageTableLedger::JOURNAL_FILENAME);
+
+        $reloaded = $this->ledger();
+        $this->assertNull($reloaded->ordinalFor('a'));
+        $this->assertSame(2, $reloaded->pageTableSize());
+    }
+
+    public function testACorruptJournalLineDoesNotLoseTheRestOfTheJournal(): void
+    {
+        $ledger = $this->ledger();
+        $ledger->allocate('a', '/a');
+        $ledger->save();
+        $ledger->allocate('b', '/b');
+        $ledger->commitIncremental();
+
+        $journal = $this->stateDir . '/' . PageTableLedger::JOURNAL_FILENAME;
+        file_put_contents($journal, "!!!not base64!!!\n", FILE_APPEND);
+
+        $ledger->release('a');
+        $ledger->commitIncremental();
+
+        $reloaded = $this->ledger();
+        $this->assertNull($reloaded->ordinalFor('a'), 'The release after a corrupt line was skipped.');
+        $this->assertNotNull($reloaded->ordinalFor('b'));
+    }
 }

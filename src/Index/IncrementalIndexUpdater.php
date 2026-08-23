@@ -366,7 +366,10 @@ final class IncrementalIndexUpdater
         // then is the superseded pf_meta removed.
         $this->removeSupersededMeta($metaPath);
 
-        $this->ledger->save();
+        // Appended, not snapshotted. The whole table is the largest single
+        // thing an update writes, and the journal now records releases as well
+        // as allocations, so it is a complete description of this commit.
+        $this->ledger->commitIncremental();
 
         // Saved, not pruned. Pruning drops every hash this process did not look
         // up, which at the end of a full build means the pages that are gone
