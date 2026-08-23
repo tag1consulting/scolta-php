@@ -13,6 +13,7 @@ use Tag1\Scolta\Index\IncrementalUpdateUnavailable;
 use Tag1\Scolta\Index\IndexBuildOrchestrator;
 use Tag1\Scolta\Index\MemoryBudget;
 use Tag1\Scolta\Index\PageTableLedger;
+use Tag1\Scolta\Index\PfIndexCodec;
 use Tag1\Scolta\Storage\FilesystemDriver;
 use Tag1\Scolta\Tests\Support\SyntheticCorpus;
 
@@ -245,6 +246,236 @@ final class IncrementalDifferentialTest extends TestCase
      * matching a word it no longer contains. Tree equality catches that more
      * thoroughly than inspecting one posting would.
      */
+    public function testFourOperationsInOneCommitMatchAFullRebuild(): void
+    {
+        // Two edits, one new page and one delete, committed together, and every
+        // one of them written from vocabulary the corpus already has. The
+        // byte-level chunk patch has to get all four right in one pass over each
+        // touched chunk, and the interesting part is that they interleave: a
+        // delete and an insert can land in the same posting run, where one moves
+        // a delta down and the other moves it back up.
+        //
+        // Vocabulary-neutral deliberately. See
+        // {@see self::assertSameLogicalIndex()} for why a change that adds or
+        // removes a term cannot be asserted byte-identical at all.
+        $items = SyntheticCorpus::generate(80, seed: 5);
+        $this->seedBoth($items);
+
+        $editA = $items[10]->cloneWith(['bodyHtml' => $items[41]->bodyHtml]);
+        $editB = $items[55]->cloneWith(['bodyHtml' => $items[62]->bodyHtml]);
+        $added = SyntheticCorpus::item(81, seed: 5)->cloneWith(['bodyHtml' => $items[7]->bodyHtml]);
+        $gone  = $items[30];
+
+        $next     = $items;
+        $next[10] = $editA;
+        $next[55] = $editB;
+        unset($next[30]);
+        $next   = array_values($next);
+        $next[] = $added;
+
+        $updater = $this->updater();
+        $updater->stageUpsert($editA);
+        $updater->stageUpsert($editB);
+        $updater->stageUpsert($added);
+        $updater->stageDelete($gone->id);
+        $result = $updater->commit();
+
+        $this->assertSame(3, $result->pagesUpdated);
+        $this->assertSame(1, $result->pagesDeleted);
+        $this->assertGreaterThan(0, $result->chunksRewritten);
+
+        // The reference is rebuilt in the same two steps the commit took, and
+        // that is not a technicality. A full build allocates every page it is
+        // handed *during* the stream and only calls releaseStaleRows() at the
+        // end, so a page deleted at the source frees its ordinal after the new
+        // page has already taken a fresh one. The updater deletes first, so the
+        // new page reuses the freed ordinal. Both are correct and they number
+        // the two pages differently — and an ordinal names its fragment. So the
+        // comparison is against a reference that saw the delete and the insert
+        // in the same order, which is the strongest statement that is true here.
+        $survivors = array_values(array_filter(
+            $next,
+            static fn(ContentItem $i): bool => $i->id !== $added->id,
+        ));
+        $this->rebuildReference($survivors);
+        $this->rebuildReference($next);
+        $this->assertTreesMatch(
+            'Two edits, an insert and a delete in one commit must produce what a full rebuild produces.',
+        );
+    }
+
+    public function testATermThatLeavesTheVocabularyIsRemovedFromItsChunk(): void
+    {
+        // A page carrying a word no other page has. Editing that word away takes
+        // the term out of the chunk entirely, which is the one operation that
+        // shrinks a chunk's word list.
+        $items   = SyntheticCorpus::generate(40, seed: 9);
+        $unique  = 'zzquixotrophic';
+        $items[] = SyntheticCorpus::item(41, seed: 9)
+            ->cloneWith(['bodyHtml' => '<p>' . $unique . ' appears only here.</p>']);
+        $items   = array_values($items);
+        $this->seedBoth($items);
+
+        $this->assertTrue(
+            $this->indexContainsTerm($unique),
+            'The fixture never got the unique term into the index.',
+        );
+
+        $replacement = SyntheticCorpus::item(41, seed: 9)
+            ->cloneWith(['bodyHtml' => '<p>ordinary words about reading.</p>']);
+        $next        = $items;
+        $next[40]    = $replacement;
+
+        $updater = $this->updater();
+        $updater->stageUpsert($replacement);
+        $updater->commit();
+
+        $this->assertFalse(
+            $this->indexContainsTerm($unique),
+            'The term left the corpus but its postings are still in the index.',
+        );
+
+        $this->rebuildReference($next);
+        $this->assertSameLogicalIndex('A term leaving the vocabulary');
+    }
+
+    public function testANewTermJoinsItsChunk(): void
+    {
+        $items = SyntheticCorpus::generate(40, seed: 11);
+        $this->seedBoth($items);
+
+        $novel       = 'zzflibbertigibbet';
+        $replacement = SyntheticCorpus::item(20, seed: 11)
+            ->cloneWith(['bodyHtml' => '<p>' . $novel . ' now appears here.</p>']);
+        $next        = $items;
+        $next[19]    = $replacement;
+
+        $updater = $this->updater();
+        $updater->stageUpsert($replacement);
+        $updater->commit();
+
+        $this->assertTrue($this->indexContainsTerm($novel), 'A new term did not reach the index.');
+
+        $this->rebuildReference($next);
+        $this->assertSameLogicalIndex('A term joining the vocabulary');
+    }
+
+    public function testANumericLookingTermIsRoutedAndStoredLikeTheMergeOrderedIt(): void
+    {
+        // Term order inside a chunk is PHP's standard comparison, the one
+        // SplMinHeap used when the chunks were built, and it disagrees with
+        // strcmp on numeric-looking terms. A patch that re-sorted with the other
+        // one would produce a searchable index a rebuild would not reproduce,
+        // rather than an error.
+        $items   = SyntheticCorpus::generate(30, seed: 13);
+        $items[] = SyntheticCorpus::item(31, seed: 13)
+            ->cloneWith(['bodyHtml' => '<p>census 2024 and 9 and 10 and 100 counted.</p>']);
+        $items   = array_values($items);
+        $this->seedBoth($items);
+
+        $replacement = SyntheticCorpus::item(31, seed: 13)
+            ->cloneWith(['bodyHtml' => '<p>census 2024 and 9 and 10 and 100 and 2025 counted.</p>']);
+        $next        = $items;
+        $next[30]    = $replacement;
+
+        $updater = $this->updater();
+        $updater->stageUpsert($replacement);
+        $updater->commit();
+
+        $this->rebuildReference($next);
+        $this->assertSameLogicalIndex('A numeric-looking term');
+
+        // And every chunk is still internally ordered the way the merge orders
+        // terms, which is what keeps the frozen range table a valid cover.
+        foreach (glob($this->incrementalOut . '/pagefind/index/*.pf_index') ?: [] as $path) {
+            $words  = PfIndexCodec::wordList(PfIndexCodec::splitEntriesFromFile($path));
+            $sorted = $words;
+            usort($sorted, static fn(string $a, string $b): int => $a <=> $b);
+            $this->assertSame($sorted, $words, 'Chunk ' . basename($path) . ' is not in merge order.');
+        }
+    }
+
+    /**
+     * Compare the two trees on content rather than on chunk layout.
+     *
+     * Byte identity is the right assertion for every operation that leaves the
+     * vocabulary alone, and it is not available for one that does not. The
+     * updater treats the `pf_meta[2]` range table as frozen on purpose — that is
+     * what stops one new term renaming most of the index — while a full rebuild
+     * re-cuts chunk boundaries by byte size over whatever vocabulary it is
+     * handed. So when a term joins or leaves, the two agree on every posting and
+     * disagree on which chunk file carries it. Asserting bytes there would be
+     * asserting that the frozen range table does not work.
+     *
+     * What must still hold exactly: the same terms, each with the same postings,
+     * and the same fragments.
+     */
+    private function assertSameLogicalIndex(string $because): void
+    {
+        $this->assertSame(
+            self::allPostings($this->fullOut),
+            self::allPostings($this->incrementalOut),
+            $because . ' must leave the same terms and postings as a full rebuild.',
+        );
+        $this->assertSame(
+            self::fragmentHashes($this->fullOut),
+            self::fragmentHashes($this->incrementalOut),
+            $because . ' must leave the same fragments as a full rebuild.',
+        );
+    }
+
+    /**
+     * Every term in the index with its postings, independent of chunk layout.
+     *
+     * @return array<string, string>
+     */
+    private static function allPostings(string $out): array
+    {
+        $terms = [];
+        foreach (glob($out . '/pagefind/index/*.pf_index') ?: [] as $path) {
+            foreach (PfIndexCodec::decodeChunkFile($path) as $word => $entry) {
+                ksort($entry);
+                $terms[(string) $word] = hash('sha256', serialize($entry));
+            }
+        }
+        ksort($terms);
+
+        return $terms;
+    }
+
+    /** @return array<string, string> Fragment filename => sha256 of its decompressed bytes. */
+    private static function fragmentHashes(string $out): array
+    {
+        $hashes = [];
+        foreach (glob($out . '/pagefind/fragment/*.pf_fragment') ?: [] as $path) {
+            $hashes[basename($path)] = hash('sha256', (string) gzdecode((string) file_get_contents($path)));
+        }
+        ksort($hashes);
+
+        return $hashes;
+    }
+
+    /**
+     * True when any index chunk still carries a term derived from $word.
+     *
+     * Matched on the stem's prefix rather than the surface form: terms are
+     * stemmed on the way in, so asking for the word as written finds nothing
+     * even when its postings are right there.
+     */
+    private function indexContainsTerm(string $word): bool
+    {
+        $stem = (new \Tag1\Scolta\Index\Stemmer('en'))->stem(strtolower($word));
+        foreach (glob($this->incrementalOut . '/pagefind/index/*.pf_index') ?: [] as $path) {
+            foreach (array_keys(PfIndexCodec::splitEntriesFromFile($path)) as $term) {
+                if ((string) $term === $stem) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     public function testDroppingAttachmentTextLeavesNoOrphanedPosting(): void
     {
         $items = SyntheticCorpus::generate(80, seed: 5);

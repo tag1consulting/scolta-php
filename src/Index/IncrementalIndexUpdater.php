@@ -371,53 +371,74 @@ final class IncrementalIndexUpdater
 
         $rewritten = 0;
         foreach ($byChunk as $chunkIdx => $terms) {
-            $row      = $indexChunkMeta[$chunkIdx];
-            $path     = $this->indexDir() . '/index/' . $row['hash'] . '.pf_index';
-            $chunk    = PfIndexCodec::decodeChunkFile($path);
-            $original = $chunk;
+            $row  = $indexChunkMeta[$chunkIdx];
+            $path = $this->indexDir() . '/index/' . $row['hash'] . '.pf_index';
 
-            foreach (array_keys($terms) as $term) {
-                $term = (string) $term;
+            // Split, not decoded. A common word's entry on a real corpus holds
+            // around 100,000 postings, and the terms an edit touches are 78% of
+            // a touched chunk's bytes — so decoding "only the touched entries"
+            // saves almost nothing and the work has to stay inside the entry.
+            // Untouched entries are carried across as the bytes they already
+            // are, and touched ones are spliced. See PfIndexCodec::patchEntry().
+            $rawEntries = PfIndexCodec::splitEntriesFromFile($path);
+            $changed    = false;
 
-                foreach ($removals[$term] ?? [] as $ordinal) {
-                    unset($chunk[$term][$ordinal]);
-                    if (isset($chunk[$term]['_variants'])) {
-                        foreach ($chunk[$term]['_variants'] as $form => $ordinals) {
-                            $kept = array_values(array_filter($ordinals, static fn(int $o): bool => $o !== $ordinal));
-                            if ($kept === []) {
-                                unset($chunk[$term]['_variants'][$form]);
-                            } else {
-                                $chunk[$term]['_variants'][$form] = $kept;
-                            }
-                        }
-                        if ($chunk[$term]['_variants'] === []) {
-                            unset($chunk[$term]['_variants']);
-                        }
+            foreach (array_keys($terms) as $rawTerm) {
+                $term         = (string) $rawTerm;
+                $termRemovals = $removals[$term] ?? [];
+                $termAdds     = $additions[$term] ?? [];
+                $termVariants = $variantAdds[$term] ?? [];
+
+                if (!isset($rawEntries[$term])) {
+                    // A term that was not in the vocabulary joins this chunk.
+                    if ($termAdds === [] && $termVariants === []) {
+                        continue;
                     }
+                    $entry = $termAdds;
+                    foreach ($termVariants as $form => $ordinals) {
+                        $merged = array_map(intval(...), $ordinals);
+                        sort($merged, SORT_NUMERIC);
+                        $entry['_variants'][(string) $form] = array_values(array_unique($merged));
+                    }
+                    $rawEntries[$term] = PfIndexCodec::encodeWordEntry($this->cbor, $term, $entry);
+                    $changed           = true;
+                    continue;
                 }
 
-                foreach ($additions[$term] ?? [] as $ordinal => $entry) {
-                    $chunk[$term][$ordinal] = $entry;
+                $patched = PfIndexCodec::patchEntry(
+                    $this->cbor,
+                    $rawEntries[$term],
+                    array_map(intval(...), $termRemovals),
+                    $termAdds,
+                    $termVariants,
+                );
+
+                if ($patched === null) {
+                    // A term whose last posting went away leaves the vocabulary,
+                    // which is the only way an update shrinks a chunk's word list.
+                    unset($rawEntries[$term]);
+                    $changed = true;
+                    continue;
                 }
 
-                foreach ($variantAdds[$term] ?? [] as $form => $ordinals) {
-                    $merged = array_merge($chunk[$term]['_variants'][$form] ?? [], $ordinals);
-                    sort($merged);
-                    $chunk[$term]['_variants'][$form] = array_values(array_unique($merged));
-                }
-
-                // A term whose last posting went away leaves the vocabulary,
-                // which is the only way an update shrinks a chunk's word list.
-                if (isset($chunk[$term]) && $this->pageCount($chunk[$term]) === 0) {
-                    unset($chunk[$term]);
+                if ($patched !== $rawEntries[$term]) {
+                    $rawEntries[$term] = $patched;
+                    $changed           = true;
                 }
             }
 
-            if ($chunk === $original) {
+            // Compared on bytes, which is the comparison that means something.
+            // The array-identity check this replaces included key order, so an
+            // unset followed by a re-add of the same ordinal read as a change
+            // even when the encoding was identical: measured, 78 chunks
+            // rewritten where 11 had actually changed bytes. A rewrite is not
+            // free — the filename follows the contents, so it publishes a new
+            // file and unlinks the old one.
+            if (!$changed) {
                 continue;
             }
 
-            if ($chunk === []) {
+            if ($rawEntries === []) {
                 throw new IncrementalUpdateUnavailable(
                     'An index chunk would be left with no terms. Removing a chunk changes the '
                     . 'pf_meta[2] range table in a way this updater does not implement; run a full build.',
@@ -427,11 +448,11 @@ final class IncrementalIndexUpdater
             // Terms inside a chunk must stay in ascending order: the range
             // table is a sorted, non-overlapping cover and the writer emitted
             // each chunk's words in order.
-            uksort($chunk, self::compareTerms(...));
+            uksort($rawEntries, self::compareTerms(...));
 
-            $words   = PfIndexCodec::wordList($chunk);
-            $body    = PfIndexCodec::encodeChunk($this->cbor, $chunk);
-            $newHash = PfIndexCodec::chunkHash($chunk, $body);
+            $words   = PfIndexCodec::wordList($rawEntries);
+            $body    = PfIndexCodec::assembleChunk($this->cbor, $rawEntries);
+            $newHash = IndexFileNaming::chunkHash($words, $body);
 
             $newPath = $this->indexDir() . "/index/{$newHash}.pf_index";
             $gzipped = gzencode(self::DELIMITER . $body, $this->budget->compressionLevel());
@@ -511,13 +532,6 @@ final class IncrementalIndexUpdater
         // standard comparison does is the point: that is what SplMinHeap used
         // when these chunks were ordered.
         return $a <=> $b;
-    }
-
-    /** Number of real page postings in a term entry, ignoring the variants key. */
-    /** @param array<int|string, mixed> $entry */
-    private function pageCount(array $entry): int
-    {
-        return count($entry) - (isset($entry['_variants']) ? 1 : 0);
     }
 
     // ── Reading the existing index ─────────────────────────────────────────
