@@ -64,6 +64,14 @@ class FacetIndexWriter
     private const TAG_BITMAP = 1;
 
     /**
+     * @param int $compressionLevel gzip level for the artifact; see
+     *                              {@see MemoryBudget::DEFAULT_COMPRESSION_LEVEL}.
+     */
+    public function __construct(
+        private readonly int $compressionLevel = MemoryBudget::DEFAULT_COMPRESSION_LEVEL,
+    ) {}
+
+    /**
      * Build the artifact bytes.
      *
      * Single-value dimensions are kept: they cost almost nothing here (a
@@ -144,7 +152,7 @@ class FacetIndexWriter
     public function write(string $buildDir, array $filterData, array $pageHashes, string $indexHash = ''): void
     {
         $path       = rtrim($buildDir, '/') . '/' . self::FILENAME;
-        $compressed = gzencode($this->build($filterData, $pageHashes, $indexHash), 9);
+        $compressed = gzencode($this->build($filterData, $pageHashes, $indexHash), $this->compressionLevel);
         if ($compressed === false) {
             throw new \RuntimeException('Failed to gzip the facet index.');
         }

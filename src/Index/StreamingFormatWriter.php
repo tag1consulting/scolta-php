@@ -74,6 +74,9 @@ class StreamingFormatWriter
     /** Active flush threshold (bytes), derived from the MemoryBudget. */
     private int $flushBytes;
 
+    /** Active gzip level, derived from the MemoryBudget. */
+    private int $compressionLevel;
+
     /** Build-scoped instrumentation; null disables phase emission. */
     private ?MemoryTelemetry $telemetry = null;
 
@@ -84,7 +87,8 @@ class StreamingFormatWriter
         private readonly string $pagefindVersion = '',
         ?MemoryBudget $budget = null,
     ) {
-        $this->flushBytes = $budget?->fragmentFlushBytes() ?? self::DEFAULT_FLUSH_BYTES;
+        $this->flushBytes       = $budget?->fragmentFlushBytes() ?? self::DEFAULT_FLUSH_BYTES;
+        $this->compressionLevel = $budget?->compressionLevel() ?? MemoryBudget::DEFAULT_COMPRESSION_LEVEL;
     }
 
     /**
@@ -174,7 +178,7 @@ class StreamingFormatWriter
         }
 
         $hash       = IndexFileNaming::fragmentHash($pageNum, (string) $pageData['url'], $fragment);
-        $compressed = gzencode(self::DELIMITER . $fragment, 9);
+        $compressed = gzencode(self::DELIMITER . $fragment, $this->compressionLevel);
         $fragPath   = $this->buildDir . "/fragment/{$hash}.pf_fragment";
         if (file_put_contents($fragPath, $compressed) === false) {
             throw new \RuntimeException("Failed to write file: {$fragPath}");
@@ -305,7 +309,7 @@ class StreamingFormatWriter
         // the requirement has one home.
         $this->telemetry?->emit('endwrite_metadata', ['items' => count($this->pageMeta)]);
 
-        (new IndexMetadataWriter($this->cbor))->write(
+        (new IndexMetadataWriter($this->cbor, $this->compressionLevel))->write(
             $this->buildDir,
             $this->pageMeta,
             $this->filterData,
@@ -330,7 +334,7 @@ class StreamingFormatWriter
         $innerArray = $this->cbor->encodeArray($this->currentChunkItems);
         $cborData   = $this->cbor->encodeArray([$innerArray]);
         $hash       = IndexFileNaming::chunkHash($this->currentChunkWords, $cborData);
-        $compressed = gzencode(self::DELIMITER . $cborData, 9);
+        $compressed = gzencode(self::DELIMITER . $cborData, $this->compressionLevel);
         $indexPath  = $this->buildDir . "/index/{$hash}.pf_index";
         if (file_put_contents($indexPath, $compressed) === false) {
             throw new \RuntimeException("Failed to write file: {$indexPath}");

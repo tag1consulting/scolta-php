@@ -69,6 +69,7 @@ final class IncrementalIndexUpdater
     private readonly Stemmer $stemmer;
     private readonly CborEncoder $cbor;
     private readonly string $outputDir;
+    private readonly MemoryBudget $budget;
 
     /** @var list<ContentItem> */
     private array $upserts = [];
@@ -76,12 +77,19 @@ final class IncrementalIndexUpdater
     /** @var list<string> */
     private array $deletes = [];
 
+    /**
+     * @param MemoryBudget|null $budget Supplies the gzip level for the artifacts
+     *                                  this update rewrites, so an update and a
+     *                                  full build of the same host compress
+     *                                  alike. Defaults to the runtime default.
+     */
     public function __construct(
         string $stateDir,
         string $outputDir,
         string $language = 'en',
         ?StorageDriverInterface $storage = null,
         ?LoggerInterface $logger = null,
+        ?MemoryBudget $budget = null,
     ) {
         $normalized = rtrim($outputDir, '/');
         if (str_ends_with($normalized, '/pagefind')) {
@@ -91,6 +99,7 @@ final class IncrementalIndexUpdater
 
         $this->storage = $storage ?? new FilesystemDriver();
         $this->logger  = $logger  ?? new NullLogger();
+        $this->budget  = $budget  ?? MemoryBudget::default();
         $this->cbor    = new CborEncoder();
         $this->stemmer = new Stemmer($language);
         $this->builder = new InvertedIndexBuilder(new Tokenizer(), $this->stemmer);
@@ -276,7 +285,7 @@ final class IncrementalIndexUpdater
         // partial rewrite of any of them has no meaning.
         [$filterData, $sortFields] = $this->rebuildCorpusTables($pageMeta);
 
-        (new IndexMetadataWriter($this->cbor))->write(
+        (new IndexMetadataWriter($this->cbor, $this->budget->compressionLevel()))->write(
             $this->indexDir(),
             $pageMeta,
             $filterData,
@@ -425,7 +434,8 @@ final class IncrementalIndexUpdater
             $newHash = PfIndexCodec::chunkHash($chunk, $body);
 
             $newPath = $this->indexDir() . "/index/{$newHash}.pf_index";
-            if (file_put_contents($newPath, gzencode(self::DELIMITER . $body, 9)) === false) {
+            $gzipped = gzencode(self::DELIMITER . $body, $this->budget->compressionLevel());
+            if (file_put_contents($newPath, $gzipped) === false) {
                 throw new \RuntimeException("Failed to write index chunk: {$newPath}");
             }
             if ($newHash !== $row['hash'] && is_file($path)) {
@@ -628,7 +638,8 @@ final class IncrementalIndexUpdater
 
         $hash = IndexFileNaming::fragmentHash($ordinal, (string) $pageData['url'], $fragment);
         $path = $this->indexDir() . "/fragment/{$hash}.pf_fragment";
-        if (file_put_contents($path, gzencode(self::DELIMITER . $fragment, 9)) === false) {
+        $gzipped = gzencode(self::DELIMITER . $fragment, $this->budget->compressionLevel());
+        if (file_put_contents($path, $gzipped) === false) {
             throw new \RuntimeException("Failed to write fragment: {$path}");
         }
 

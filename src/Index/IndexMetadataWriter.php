@@ -30,7 +30,10 @@ final class IndexMetadataWriter
     /** Runtime assets copied next to the index. */
     private const ASSETS = ['pagefind.js', 'pagefind-worker.js', 'wasm.en.pagefind', 'wasm.unknown.pagefind'];
 
-    public function __construct(private readonly CborEncoder $cbor) {}
+    public function __construct(
+        private readonly CborEncoder $cbor,
+        private readonly int $compressionLevel = MemoryBudget::DEFAULT_COMPRESSION_LEVEL,
+    ) {}
 
     /**
      * Write all four artifacts into $buildDir.
@@ -73,14 +76,17 @@ final class IndexMetadataWriter
 
         $metaCbor   = $this->buildMetadata($pageMeta, $indexChunkMeta, $filterHashes, $sortFields, $metaFields, $version);
         $metaHash   = 'en_' . substr(hash('sha256', $metaCbor), 0, 10);
-        self::putFile($buildDir . "/pagefind.{$metaHash}.pf_meta", gzencode(self::DELIMITER . $metaCbor, 9));
+        self::putFile(
+            $buildDir . "/pagefind.{$metaHash}.pf_meta",
+            gzencode(self::DELIMITER . $metaCbor, $this->compressionLevel),
+        );
 
         // The facet index carries EVERY dimension, including the single-value
         // ones writeFilterChunks() skips: a dimension Scolta can be asked to
         // apply (AUTO_LANGUAGE_FILTER applies `language`) needs a posting list
         // even when it is useless as a facet. It is stamped with the pf_meta
         // hash so the browser can detect a stale cached artifact.
-        (new FacetIndexWriter())->write(
+        (new FacetIndexWriter($this->compressionLevel))->write(
             $buildDir,
             $filterData,
             array_map(static fn(array $meta): string => $meta['fragmentHash'], $pageMeta),
@@ -172,7 +178,10 @@ final class IndexMetadataWriter
             self::ensureDir($buildDir . '/filter');
             foreach ($bodies as $filterName => $body) {
                 $hash = 'en_' . substr(hash('sha256', $body), 0, 10);
-                self::putFile($buildDir . "/filter/{$hash}.pf_filter", gzencode(self::DELIMITER . $body, 9));
+                self::putFile(
+                    $buildDir . "/filter/{$hash}.pf_filter",
+                    gzencode(self::DELIMITER . $body, $this->compressionLevel),
+                );
                 $hashes[$filterName] = $hash;
             }
         }
