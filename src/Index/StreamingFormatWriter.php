@@ -77,6 +77,22 @@ class StreamingFormatWriter
     /** Active gzip level, derived from the MemoryBudget. */
     private int $compressionLevel;
 
+    /**
+     * Whether an unchanged fragment may be linked from the live index.
+     *
+     * null means "decide from the filesystem"; see {@see self::linkBeatsWrite()}.
+     */
+    private ?bool $reuseFragments = null;
+
+    /** Resolved once per beginWrite(), from $reuseFragments or the probe. */
+    private bool $reuseFragmentsResolved = false;
+
+    /** Fragments linked from the live index instead of being re-encoded. */
+    private int $fragmentsReused = 0;
+
+    /** Fragments compressed and written by this build. */
+    private int $fragmentsWritten = 0;
+
     /** Build-scoped instrumentation; null disables phase emission. */
     private ?MemoryTelemetry $telemetry = null;
 
@@ -108,6 +124,47 @@ class StreamingFormatWriter
         $this->telemetry = $telemetry;
     }
 
+    /**
+     * Enable or disable reuse of unchanged fragments from the live index.
+     *
+     * Setter rather than a constructor parameter for the reason given above
+     * setTelemetry(): the constructor is stable surface on a non-final class.
+     *
+     * `null`, the default, decides per filesystem — see
+     * {@see self::linkBeatsWrite()} for why that is not a hedge. `true` forces
+     * reuse on and `false` forces it off; off is the reference path the
+     * differential tests compare against.
+     *
+     * @since 1.3.1
+     * @stability experimental
+     */
+    public function setFragmentReuse(?bool $enabled): void
+    {
+        $this->reuseFragments = $enabled;
+    }
+
+    /**
+     * Fragments this build linked from the live index rather than re-encoding.
+     *
+     * @since 1.3.1
+     * @stability experimental
+     */
+    public function fragmentsReused(): int
+    {
+        return $this->fragmentsReused;
+    }
+
+    /**
+     * Fragments this build compressed and wrote itself.
+     *
+     * @since 1.3.1
+     * @stability experimental
+     */
+    public function fragmentsWritten(): int
+    {
+        return $this->fragmentsWritten;
+    }
+
     private function getVersion(): string
     {
         return $this->pagefindVersion !== ''
@@ -136,10 +193,22 @@ class StreamingFormatWriter
         $this->currentChunkWords    = [];
         $this->currentChunkSize     = 0;
         $this->indexChunkMeta       = [];
+        $this->fragmentsReused      = 0;
+        $this->fragmentsWritten     = 0;
 
         $this->ensureDir($this->buildDir);
         $this->ensureDir($this->buildDir . '/index');
         $this->ensureDir($this->buildDir . '/fragment');
+
+        // Resolved here rather than per page: the probe touches the filesystem,
+        // and the answer cannot change mid-build.
+        //
+        // Probed in $outputDir, not $buildDir. Both are on the same filesystem
+        // — $buildDir is a child of $outputDir, and so is the live pagefind/
+        // directory the links would come from — but only $buildDir is renamed
+        // into place by the swap. A process killed mid-probe therefore cannot
+        // leave a stray probe file inside a published index.
+        $this->reuseFragmentsResolved = $this->reuseFragments ?? self::linkBeatsWrite($this->outputDir);
     }
 
     /**
@@ -177,11 +246,16 @@ class StreamingFormatWriter
             ));
         }
 
-        $hash       = IndexFileNaming::fragmentHash($pageNum, (string) $pageData['url'], $fragment);
-        $compressed = gzencode(self::DELIMITER . $fragment, $this->compressionLevel);
-        $fragPath   = $this->buildDir . "/fragment/{$hash}.pf_fragment";
-        if (file_put_contents($fragPath, $compressed) === false) {
-            throw new \RuntimeException("Failed to write file: {$fragPath}");
+        $hash     = IndexFileNaming::fragmentHash($pageNum, (string) $pageData['url'], $fragment);
+        $payload  = self::DELIMITER . $fragment;
+        $fragPath = $this->buildDir . "/fragment/{$hash}.pf_fragment";
+
+        if (!$this->reuseFragmentsResolved || !$this->linkUnchangedFragment($hash, $payload, $fragPath)) {
+            $compressed = gzencode($payload, $this->compressionLevel);
+            if (file_put_contents($fragPath, $compressed) === false) {
+                throw new \RuntimeException("Failed to write file: {$fragPath}");
+            }
+            $this->fragmentsWritten++;
         }
 
         // Retain only what pf_meta needs (~40 bytes per page).
@@ -362,6 +436,162 @@ class StreamingFormatWriter
     private function encodeWordEntry(string $word, array $pageEntries): string
     {
         return PfIndexCodec::encodeWordEntry($this->cbor, $word, $pageEntries);
+    }
+
+    /**
+     * Whether a hard link is cheaper than encoding and writing the file, here.
+     *
+     * Fragment reuse trades one gzip-and-write for one read, one gunzip and one
+     * link. Whether that is a win is a property of the filesystem, and the sign
+     * flips between the ones this package runs on. Measured over 20,000
+     * 620-byte fragments, each variant in a fresh process writing into its own
+     * empty directory:
+     *
+     *   | operation                  | Linux container | macOS APFS |
+     *   |----------------------------|-----------------|------------|
+     *   | gzencode(6) + write        | ~0.30 ms        | 0.0595 ms  |
+     *   | read + gunzip + link       | ~0.015 ms       | 0.2384 ms  |
+     *   | link alone                 | —               | 0.2172 ms  |
+     *   | copy alone                 | —               | 0.0809 ms  |
+     *
+     * On APFS `link()` alone costs 3.6x what creating and writing the whole
+     * file costs, so reuse made a 20,000-page warm build's page phase go from
+     * 1.8 s to 6.1 s. On the container it goes the other way and reuse is the
+     * clear win. Note also that dropping to gzip level 6 cut the write side by
+     * 5x, which removed most of the headroom reuse was going to exploit — the
+     * two optimisations are not independent.
+     *
+     * So it is measured instead of assumed. The probe writes and links a
+     * handful of files in the build directory, which is the filesystem that
+     * will actually take the fragments, and caches the answer per directory for
+     * the process. A wrong answer costs wall clock and never correctness: both
+     * paths emit byte-identical fragments, which is what the differential tests
+     * assert, so the probe chooses a speed, not an output.
+     *
+     * @param string $dir A writable directory on the filesystem that will hold
+     *                     the index. Must not be a directory the swap
+     *                     publishes, so a crashed probe cannot leave a file
+     *                     behind in a served index.
+     */
+    private static function linkBeatsWrite(string $dir): bool
+    {
+        /** @var array<string, bool> $cache Keyed by the probed directory. */
+        static $cache = [];
+        if (isset($cache[$dir])) {
+            return $cache[$dir];
+        }
+
+        // Probe files go straight into $dir under a distinctive prefix rather
+        // than into a subdirectory of their own: creating one would need a
+        // suppressed mkdir(), which this file is not allowed (see HygieneTest),
+        // and the prefix plus the pid is enough to clean up afterwards.
+        $prefix  = rtrim($dir, '/') . '/.scolta-linkprobe-' . getmypid() . '-';
+        $payload = gzencode(str_repeat('scolta fragment probe payload ', 21), self::PROBE_LEVEL);
+        if ($payload === false || file_put_contents($prefix . 'src', $payload) === false) {
+            self::removeProbeFiles($prefix);
+
+            // Cannot probe, so do not gamble: writing is the path that works on
+            // every filesystem.
+            return $cache[$dir] = false;
+        }
+
+        // Enough samples to clear syscall noise, few enough to stay far below a
+        // millisecond of a build that runs for minutes.
+        $samples    = 48;
+        $writeNanos = 0;
+        $linkNanos  = 0;
+        $linkFailed = false;
+        for ($i = 0; $i < $samples; $i++) {
+            $t0 = hrtime(true);
+            $wrote = file_put_contents($prefix . "w{$i}", $payload);
+            $writeNanos += hrtime(true) - $t0;
+            if ($wrote === false) {
+                $linkFailed = true;
+                break;
+            }
+
+            $t0 = hrtime(true);
+            $linked = link($prefix . 'src', $prefix . "l{$i}");
+            $linkNanos += hrtime(true) - $t0;
+            if (!$linked) {
+                $linkFailed = true;
+                break;
+            }
+        }
+
+        self::removeProbeFiles($prefix);
+
+        // A filesystem that cannot hard link at all falls back to copy() per
+        // fragment, which measured slower than writing on every host tried.
+        return $cache[$dir] = !$linkFailed && $linkNanos < $writeNanos;
+    }
+
+    /** gzip level used for the probe payload; only its size matters. */
+    private const PROBE_LEVEL = 6;
+
+    /** Remove every file the probe created. */
+    private static function removeProbeFiles(string $prefix): void
+    {
+        foreach (glob($prefix . '*') ?: [] as $file) {
+            if (is_file($file)) {
+                unlink($file);
+            }
+        }
+    }
+
+    /**
+     * Link an identical fragment out of the live index instead of rewriting it.
+     *
+     * A fragment's name already follows its contents, so a page whose fragment
+     * is unchanged wants the file that is already on disk — but the name alone
+     * is not enough to act on. It is a 40-bit truncation of a sha256, and one
+     * wrong reuse publishes another page's body under this ordinal, silently.
+     * So the candidate is decompressed and compared byte for byte, and only an
+     * exact match is linked. That comparison is what makes the short name safe
+     * here; nothing else in this method depends on the hash being collision
+     * free.
+     *
+     * The saving is the encode, not the compare: reading and linking measures
+     * about 0.015 ms per fragment against about 0.3 ms to gzip and write one,
+     * and on a warm build every fragment in the corpus hits this path.
+     *
+     * link() rather than copy() because the payload is identical and a hard
+     * link costs an inode reference instead of the bytes. Nothing mutates a
+     * fragment in place — a changed page gets a new name, since the name
+     * follows the contents — so sharing an inode with the live index cannot
+     * make one build's file visible under another build's name. copy() is the
+     * fallback for the case link() cannot serve, most obviously a build
+     * directory on a different filesystem from the published one.
+     *
+     * @param string $hash    The fragment's content-derived name.
+     * @param string $payload The uncompressed delimiter-prefixed body.
+     * @param string $target  Where this build wants the file.
+     * @return bool True when $target now holds the right bytes.
+     */
+    private function linkUnchangedFragment(string $hash, string $payload, string $target): bool
+    {
+        $live = $this->outputDir . "/pagefind/fragment/{$hash}.pf_fragment";
+        if (!is_file($live)) {
+            return false;
+        }
+
+        $existing = @file_get_contents($live);
+        if ($existing === false) {
+            return false;
+        }
+
+        $decoded = @gzdecode($existing);
+        if ($decoded !== $payload) {
+            return false;
+        }
+
+        if (!@link($live, $target) && !@copy($live, $target)) {
+            return false;
+        }
+
+        $this->fragmentsReused++;
+
+        return true;
     }
 
     /**

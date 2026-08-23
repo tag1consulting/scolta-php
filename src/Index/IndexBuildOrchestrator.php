@@ -89,6 +89,16 @@ final class IndexBuildOrchestrator
         ?StorageDriverInterface $storage = null,
         /** @var (\Closure(): bool)|null Injected in tests to force voluntary yield without real RSS pressure. */
         private readonly ?\Closure $memoryPressureProbe = null,
+        /**
+         * Link unchanged fragments out of the live index instead of re-encoding
+         * them. null, the default, decides from the filesystem, because whether
+         * a hard link beats a write is a property of the filesystem and the sign
+         * flips between the ones this package runs on; see
+         * {@see StreamingFormatWriter::linkBeatsWrite()} for the measurements.
+         * true forces it on, false forces it off — off is the reference path the
+         * differential tests compare against.
+         */
+        private readonly ?bool $reuseFragments = null,
     ) {
         // Strip a trailing /pagefind suffix if already present. atomicSwap()
         // always appends /pagefind internally, so a doubly-suffixed path would
@@ -460,6 +470,7 @@ final class IndexBuildOrchestrator
             $chunkFiles   = $this->coordinator->chunkFiles();
             $streamWriter = new StreamingFormatWriter(new CborEncoder(), budget: $budget);
             $streamWriter->setTelemetry($telemetry);
+            $streamWriter->setFragmentReuse($this->reuseFragments);
             $this->merger->setTelemetry($telemetry);
             $telemetry->emit('writer_start');
             $streamWriter->beginWrite($this->outputDir);
@@ -488,10 +499,21 @@ final class IndexBuildOrchestrator
             /** @var array<string, int|bool> $gc */
             $gc = gc_status();
             $telemetry->emit('build_complete', [
-                'items'        => $pagesForReport,
-                'gc_runs'      => (int) ($gc['runs'] ?? -1),
-                'gc_collected' => (int) ($gc['collected'] ?? -1),
+                'items'             => $pagesForReport,
+                'gc_runs'           => (int) ($gc['runs'] ?? -1),
+                'gc_collected'      => (int) ($gc['collected'] ?? -1),
+                'fragments_reused'  => $streamWriter->fragmentsReused(),
+                'fragments_written' => $streamWriter->fragmentsWritten(),
             ]);
+            if ($streamWriter->fragmentsReused() > 0) {
+                $logger->info(
+                    '[scolta] {reused} of {total} fragments were unchanged and linked from the previous index.',
+                    [
+                        'reused' => $streamWriter->fragmentsReused(),
+                        'total'  => $streamWriter->fragmentsReused() + $streamWriter->fragmentsWritten(),
+                    ],
+                );
+            }
             $telemetry->emitPhaseSummary();
 
             return $this->makeStatusReport(
@@ -761,6 +783,7 @@ final class IndexBuildOrchestrator
             $telemetry->emit('merge_start');
             $streamWriter = new StreamingFormatWriter(new CborEncoder(), budget: $budget);
             $streamWriter->setTelemetry($telemetry);
+            $streamWriter->setFragmentReuse($this->reuseFragments);
             $this->merger->setTelemetry($telemetry);
             $streamWriter->beginWrite($this->outputDir);
             $this->merger->mergeStreaming($chunkFiles, $streamWriter, $budget);
@@ -782,7 +805,11 @@ final class IndexBuildOrchestrator
             $this->tsManifest->pruneAndSave();
             $this->ledger->save();
 
-            $telemetry->emit('build_complete', ['items' => $pagesProcessed]);
+            $telemetry->emit('build_complete', [
+                'items'             => $pagesProcessed,
+                'fragments_reused'  => $streamWriter->fragmentsReused(),
+                'fragments_written' => $streamWriter->fragmentsWritten(),
+            ]);
             $telemetry->emitPhaseSummary();
 
             return $this->makeStatusReport(
