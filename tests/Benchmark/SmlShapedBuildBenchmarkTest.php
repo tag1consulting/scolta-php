@@ -188,6 +188,11 @@ final class PhaseSummaryLogger extends AbstractLogger
     /** @var list<string> */
     public array $phaseSummaries = [];
 
+    /**
+     * @param mixed                $level
+     * @param string|\Stringable    $message
+     * @param array<string, mixed> $context
+     */
     public function log($level, $message, array $context = []): void
     {
         $message = (string) $message;
