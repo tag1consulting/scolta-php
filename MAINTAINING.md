@@ -5,9 +5,11 @@ bundle. Publishes to Packagist.
 
 Everything true of more than one Scolta repo lives in
 [scolta-core/MAINTAINING.md](https://github.com/tag1consulting/scolta-core/blob/main/MAINTAINING.md):
-the package list, the version rules, the release order, the fleet checks. How the bundle is copied and
-checked is in
-[scolta-core/ASSETS.md](https://github.com/tag1consulting/scolta-core/blob/main/ASSETS.md).
+the package list, the version rules, the release order, the fleet checks. Which packages carry a copy of
+the bundle and how each one is checked is in
+[scolta-core/ASSETS.md](https://github.com/tag1consulting/scolta-core/blob/main/ASSETS.md) — its
+scolta-drupal entries predate that adapter's move to deploying from vendor, so read the bullets below
+first.
 
 **What it is.** The reference implementation, and the source the other bindings port from. It depends on
 `scolta-core` (the vendored WASM). The three PHP adapters depend on this.
@@ -39,13 +41,22 @@ it hasn't updated, before any adapter tags.
 
 **Watch out for.**
 
-- The four files under `assets/` are canonical and other packages copy them. Never edit a copy in
-  scolta-drupal, scolta-wp, scolta-node or scolta-python: change it here, then re-vendor there.
+- The four files under `assets/` are canonical. Never edit a copy anywhere else: change it here, then
+  re-vendor in the three packages that still carry one — scolta-wp, scolta-node and scolta-python.
+  scolta-drupal and scolta-laravel carry no copy and need no re-vendor commit: Drupal deploys the bundle
+  out of `vendor/tag1/scolta-php` into `public://scolta-assets` at install and on every cache rebuild
+  (scolta-drupal PR #227), Laravel publishes it from vendor, so both pick a change up through
+  `composer.lock`.
 - `assets/js/scolta.js.sha256` is extracted from `assets/ASSETS.sha256`, never hashed separately.
-  Regenerate both with `composer update-js-checksum`. scolta-laravel reads that bare hash at run time.
+  Regenerate both with `composer update-js-checksum`. scolta-laravel reads that bare hash at run time to
+  detect a stale published asset, and the Drupal deployer compares hashes to decide what to re-copy, so
+  a wrong manifest now misleads two adapters at run time rather than only failing a CI check here.
 - There is no workflow here that propagates a bundle change to the carriers. Each carrier is re-vendored
-  by a person running that repo's own command, and each adapter's `assets-in-sync` job stays red until
-  this repo's side merges. That red is correct signal.
+  by a person running that repo's own command (`composer copy-assets` in scolta-wp,
+  `node scripts/vendor-assets.mjs` in scolta-node, `python scripts/vendor_assets.py` in scolta-python),
+  and scolta-wp's `assets-in-sync` job stays red until this repo's side merges. That red is correct
+  signal. scolta-node and scolta-python have no parity job, so their copies fall behind silently;
+  scolta-drupal's job was removed with its committed copy.
 - `src/prompts.rs` in scolta-core is the source of the prompt text; the templates here are a mirror of
   it, and scolta-node and scolta-python fail CI when their mirrors drift. A prompt change lands in
   scolta-core first.
