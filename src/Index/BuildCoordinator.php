@@ -96,6 +96,28 @@ final class BuildCoordinator
     }
 
     /**
+     * Account for a chunk whose file was linked into place, not written.
+     *
+     * @since 1.3.1
+     * @stability experimental
+     */
+    public function commitReusedChunk(int $chunkNumber, int $pageCount): void
+    {
+        $this->state->recordReusedChunk($chunkNumber, $pageCount);
+    }
+
+    /**
+     * The state directory this build's chunk files live in.
+     *
+     * @since 1.3.1
+     * @stability experimental
+     */
+    public function chunkPath(int $chunkNumber): string
+    {
+        return $this->stateDir . '/' . sprintf('chunk-%03d.dat', $chunkNumber);
+    }
+
+    /**
      * Return paths to all chunk files written so far.
      *
      * @return string[]
