@@ -5381,7 +5381,7 @@
     const filterLabel = Object.keys(activeFilters).length > 0
       ? ' in ' + Object.entries(activeFilters)
           .filter(([, vals]) => vals instanceof Set && vals.size > 0)
-          .map(([dim, vals]) => [...vals].map(v => filterDisplayValue(dim, v)).join(', '))
+          .map(([dim, vals]) => [...vals].map(v => escapeHtml(filterDisplayValue(dim, v))).join(', '))
           .join('; ')
       : '';
     // The OR fallback is a retrieval mode, not a failure. Only call it out as
