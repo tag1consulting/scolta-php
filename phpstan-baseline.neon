@@ -399,7 +399,7 @@ parameters:
 		-
 			message: '#^Access to an undefined property object\:\:\$id\.$#'
 			identifier: property.notFound
-			count: 2
+			count: 1
 			path: src/Index/IndexBuildOrchestrator.php
 
 		-
@@ -423,7 +423,7 @@ parameters:
 		-
 			message: '#^Access to an undefined property object\:\:\$url\.$#'
 			identifier: property.notFound
-			count: 2
+			count: 1
 			path: src/Index/IndexBuildOrchestrator.php
 
 		-
@@ -759,12 +759,6 @@ parameters:
 		-
 			message: '#^Property Tag1\\Scolta\\Index\\StreamingFormatWriter\:\:\$indexChunkMeta type has no value type specified in iterable type array\.$#'
 			identifier: missingType.iterableValue
-			count: 1
-			path: src/Index/StreamingFormatWriter.php
-
-		-
-			message: '#^Property Tag1\\Scolta\\Index\\StreamingFormatWriter\:\:\$outputDir is never read, only written\.$#'
-			identifier: property.onlyWritten
 			count: 1
 			path: src/Index/StreamingFormatWriter.php
 

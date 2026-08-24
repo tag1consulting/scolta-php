@@ -69,6 +69,7 @@ final class IncrementalIndexUpdater
     private readonly Stemmer $stemmer;
     private readonly CborEncoder $cbor;
     private readonly string $outputDir;
+    private readonly MemoryBudget $budget;
 
     /** @var list<ContentItem> */
     private array $upserts = [];
@@ -76,12 +77,19 @@ final class IncrementalIndexUpdater
     /** @var list<string> */
     private array $deletes = [];
 
+    /**
+     * @param MemoryBudget|null $budget Supplies the gzip level for the artifacts
+     *                                  this update rewrites, so an update and a
+     *                                  full build of the same host compress
+     *                                  alike. Defaults to the runtime default.
+     */
     public function __construct(
         string $stateDir,
         string $outputDir,
         string $language = 'en',
         ?StorageDriverInterface $storage = null,
         ?LoggerInterface $logger = null,
+        ?MemoryBudget $budget = null,
     ) {
         $normalized = rtrim($outputDir, '/');
         if (str_ends_with($normalized, '/pagefind')) {
@@ -91,6 +99,7 @@ final class IncrementalIndexUpdater
 
         $this->storage = $storage ?? new FilesystemDriver();
         $this->logger  = $logger  ?? new NullLogger();
+        $this->budget  = $budget  ?? MemoryBudget::default();
         $this->cbor    = new CborEncoder();
         $this->stemmer = new Stemmer($language);
         $this->builder = new InvertedIndexBuilder(new Tokenizer(), $this->stemmer);
@@ -187,12 +196,23 @@ final class IncrementalIndexUpdater
 
         $touchedFragments = 0;
 
+        // Whether anything happened that the whole-corpus tables depend on.
+        // They are a function of the entire page table, so any page joining or
+        // leaving it, and any change to a page's filter or sortable values,
+        // means they have to be rebuilt. A body-only edit means none of that:
+        // no posting in scolta.facets moves, no .pf_filter chunk changes, and
+        // the sorts table keeps its order. Decided while staging, because it
+        // depends on the ledger's *previous* values and allocate() overwrites
+        // them.
+        $corpusTablesChanged = false;
+
         foreach ($this->deletes as $id) {
             $ordinal = $this->ledger->ordinalFor($id);
             if ($ordinal === null) {
                 continue;
             }
             $this->collectRemovals($id, $ordinal, $removals);
+            $corpusTablesChanged = true;
 
             $superseded         = $pageMeta[$ordinal]['fragmentHash'] ?? null;
             $pageMeta[$ordinal] = $this->writeTombstoneFragment($ordinal);
@@ -207,11 +227,21 @@ final class IncrementalIndexUpdater
 
             $existingOrdinal = $this->ledger->ordinalFor($item->id);
 
+            // Read before allocate(), which overwrites both.
+            if ($existingOrdinal === null
+                || InvertedIndexBuilder::effectiveFilters($item) !== $this->ledger->filtersFor($item->id)
+                || InvertedIndexBuilder::effectiveSortable($item) !== $this->ledger->sortableFor($item->id)
+            ) {
+                $corpusTablesChanged = true;
+            }
+
             if ($tokenData === null) {
                 // Body too short to index. An existing page becomes a
                 // tombstone; a new one is simply not added, matching what a
                 // full build would do with it.
                 if ($existingOrdinal !== null) {
+                    // A page that becomes a tombstone leaves the live table.
+                    $corpusTablesChanged = true;
                     $this->collectRemovals($item->id, $existingOrdinal, $removals);
                     $superseded                 = $pageMeta[$existingOrdinal]['fragmentHash'] ?? null;
                     $pageMeta[$existingOrdinal] = $this->writeTombstoneFragment($existingOrdinal);
@@ -272,19 +302,62 @@ final class IncrementalIndexUpdater
 
         $chunkStats = $this->applyTermDeltas($removals, $additions, $variantAdds, $indexChunkMeta);
 
-        // The whole-corpus artifacts are rebuilt in full: they are small, and a
-        // partial rewrite of any of them has no meaning.
-        [$filterData, $sortFields] = $this->rebuildCorpusTables($pageMeta);
+        $metadataWriter = new IndexMetadataWriter($this->cbor, $this->budget->compressionLevel());
+        $corpusTableRoute = 'rebuilt';
 
-        (new IndexMetadataWriter($this->cbor))->write(
-            $this->indexDir(),
-            $pageMeta,
-            $filterData,
-            $sortFields,
-            $indexChunkMeta,
-            $metaFields,
-            $version,
-        );
+        if ($corpusTablesChanged) {
+            // Rebuilt in full: they are small relative to the index, and a
+            // partial rewrite of any of them has no meaning once pages have
+            // joined or left the table.
+            [$filterData, $sortFields] = $this->rebuildCorpusTables($pageMeta);
+
+            $metadataWriter->write(
+                $this->indexDir(),
+                $pageMeta,
+                $filterData,
+                $sortFields,
+                $indexChunkMeta,
+                $metaFields,
+                $version,
+            );
+        } else {
+            // Nothing a corpus-wide table describes has moved, so the filter
+            // chunks are left on disk untouched, the sorts table keeps the order
+            // it had, and the facet index is restamped from its own bytes rather
+            // than having every posting list re-encoded. A refusal from the
+            // restamp falls back to the full path rather than publishing
+            // anything doubtful.
+            try {
+                $corpusTableRoute = 'reused';
+                $metadataWriter->writeReusingCorpusTables(
+                    $this->indexDir(),
+                    $pageMeta,
+                    // array_values(): a CBOR array decodes in order, and the
+                    // order is the whole content of both tables.
+                    is_array($meta[3] ?? null) ? array_values($meta[3]) : [],
+                    is_array($meta[4] ?? null) ? array_values($meta[4]) : [],
+                    $indexChunkMeta,
+                    $metaFields,
+                    $version,
+                );
+            } catch (\RuntimeException $e) {
+                $corpusTableRoute = 'rebuilt';
+                $this->logger->info(
+                    '[scolta] Reusing the corpus tables was refused ({reason}); rebuilding them.',
+                    ['reason' => $e->getMessage()],
+                );
+                [$filterData, $sortFields] = $this->rebuildCorpusTables($pageMeta);
+                $metadataWriter->write(
+                    $this->indexDir(),
+                    $pageMeta,
+                    $filterData,
+                    $sortFields,
+                    $indexChunkMeta,
+                    $metaFields,
+                    $version,
+                );
+            }
+        }
 
         // Publish order matters. New chunks were written under new names before
         // this point and the old pf_meta still pointed at the old ones, so a
@@ -293,7 +366,10 @@ final class IncrementalIndexUpdater
         // then is the superseded pf_meta removed.
         $this->removeSupersededMeta($metaPath);
 
-        $this->ledger->save();
+        // Appended, not snapshotted. The whole table is the largest single
+        // thing an update writes, and the journal now records releases as well
+        // as allocations, so it is a complete description of this commit.
+        $this->ledger->commitIncremental();
 
         // Saved, not pruned. Pruning drops every hash this process did not look
         // up, which at the end of a full build means the pages that are gone
@@ -314,11 +390,13 @@ final class IncrementalIndexUpdater
         );
 
         $this->logger->info(
-            '[scolta] Incremental update: {updated} updated, {deleted} deleted, {chunks} index chunks rewritten in {secs}s (tombstones {pct}%).',
+            '[scolta] Incremental update: {updated} updated, {deleted} deleted, {chunks} index chunks rewritten, '
+            . 'corpus tables {tables}, in {secs}s (tombstones {pct}%).',
             [
                 'updated' => $result->pagesUpdated,
                 'deleted' => $result->pagesDeleted,
                 'chunks'  => $result->chunksRewritten,
+                'tables'  => $corpusTableRoute,
                 'secs'    => $result->durationSeconds,
                 'pct'     => round($result->tombstoneRatio * 100, 1),
             ],
@@ -362,53 +440,74 @@ final class IncrementalIndexUpdater
 
         $rewritten = 0;
         foreach ($byChunk as $chunkIdx => $terms) {
-            $row      = $indexChunkMeta[$chunkIdx];
-            $path     = $this->indexDir() . '/index/' . $row['hash'] . '.pf_index';
-            $chunk    = PfIndexCodec::decodeChunkFile($path);
-            $original = $chunk;
+            $row  = $indexChunkMeta[$chunkIdx];
+            $path = $this->indexDir() . '/index/' . $row['hash'] . '.pf_index';
 
-            foreach (array_keys($terms) as $term) {
-                $term = (string) $term;
+            // Split, not decoded. A common word's entry on a real corpus holds
+            // around 100,000 postings, and the terms an edit touches are 78% of
+            // a touched chunk's bytes — so decoding "only the touched entries"
+            // saves almost nothing and the work has to stay inside the entry.
+            // Untouched entries are carried across as the bytes they already
+            // are, and touched ones are spliced. See PfIndexCodec::patchEntry().
+            $rawEntries = PfIndexCodec::splitEntriesFromFile($path);
+            $changed    = false;
 
-                foreach ($removals[$term] ?? [] as $ordinal) {
-                    unset($chunk[$term][$ordinal]);
-                    if (isset($chunk[$term]['_variants'])) {
-                        foreach ($chunk[$term]['_variants'] as $form => $ordinals) {
-                            $kept = array_values(array_filter($ordinals, static fn(int $o): bool => $o !== $ordinal));
-                            if ($kept === []) {
-                                unset($chunk[$term]['_variants'][$form]);
-                            } else {
-                                $chunk[$term]['_variants'][$form] = $kept;
-                            }
-                        }
-                        if ($chunk[$term]['_variants'] === []) {
-                            unset($chunk[$term]['_variants']);
-                        }
+            foreach (array_keys($terms) as $rawTerm) {
+                $term         = (string) $rawTerm;
+                $termRemovals = $removals[$term] ?? [];
+                $termAdds     = $additions[$term] ?? [];
+                $termVariants = $variantAdds[$term] ?? [];
+
+                if (!isset($rawEntries[$term])) {
+                    // A term that was not in the vocabulary joins this chunk.
+                    if ($termAdds === [] && $termVariants === []) {
+                        continue;
                     }
+                    $entry = $termAdds;
+                    foreach ($termVariants as $form => $ordinals) {
+                        $merged = array_map(intval(...), $ordinals);
+                        sort($merged, SORT_NUMERIC);
+                        $entry['_variants'][(string) $form] = array_values(array_unique($merged));
+                    }
+                    $rawEntries[$term] = PfIndexCodec::encodeWordEntry($this->cbor, $term, $entry);
+                    $changed           = true;
+                    continue;
                 }
 
-                foreach ($additions[$term] ?? [] as $ordinal => $entry) {
-                    $chunk[$term][$ordinal] = $entry;
+                $patched = PfIndexCodec::patchEntry(
+                    $this->cbor,
+                    $rawEntries[$term],
+                    array_map(intval(...), $termRemovals),
+                    $termAdds,
+                    $termVariants,
+                );
+
+                if ($patched === null) {
+                    // A term whose last posting went away leaves the vocabulary,
+                    // which is the only way an update shrinks a chunk's word list.
+                    unset($rawEntries[$term]);
+                    $changed = true;
+                    continue;
                 }
 
-                foreach ($variantAdds[$term] ?? [] as $form => $ordinals) {
-                    $merged = array_merge($chunk[$term]['_variants'][$form] ?? [], $ordinals);
-                    sort($merged);
-                    $chunk[$term]['_variants'][$form] = array_values(array_unique($merged));
-                }
-
-                // A term whose last posting went away leaves the vocabulary,
-                // which is the only way an update shrinks a chunk's word list.
-                if (isset($chunk[$term]) && $this->pageCount($chunk[$term]) === 0) {
-                    unset($chunk[$term]);
+                if ($patched !== $rawEntries[$term]) {
+                    $rawEntries[$term] = $patched;
+                    $changed           = true;
                 }
             }
 
-            if ($chunk === $original) {
+            // Compared on bytes, which is the comparison that means something.
+            // The array-identity check this replaces included key order, so an
+            // unset followed by a re-add of the same ordinal read as a change
+            // even when the encoding was identical: measured, 78 chunks
+            // rewritten where 11 had actually changed bytes. A rewrite is not
+            // free — the filename follows the contents, so it publishes a new
+            // file and unlinks the old one.
+            if (!$changed) {
                 continue;
             }
 
-            if ($chunk === []) {
+            if ($rawEntries === []) {
                 throw new IncrementalUpdateUnavailable(
                     'An index chunk would be left with no terms. Removing a chunk changes the '
                     . 'pf_meta[2] range table in a way this updater does not implement; run a full build.',
@@ -418,14 +517,15 @@ final class IncrementalIndexUpdater
             // Terms inside a chunk must stay in ascending order: the range
             // table is a sorted, non-overlapping cover and the writer emitted
             // each chunk's words in order.
-            uksort($chunk, self::compareTerms(...));
+            uksort($rawEntries, self::compareTerms(...));
 
-            $words   = PfIndexCodec::wordList($chunk);
-            $body    = PfIndexCodec::encodeChunk($this->cbor, $chunk);
-            $newHash = PfIndexCodec::chunkHash($chunk, $body);
+            $words   = PfIndexCodec::wordList($rawEntries);
+            $body    = PfIndexCodec::assembleChunk($this->cbor, $rawEntries);
+            $newHash = IndexFileNaming::chunkHash($words, $body);
 
             $newPath = $this->indexDir() . "/index/{$newHash}.pf_index";
-            if (file_put_contents($newPath, gzencode(self::DELIMITER . $body, 9)) === false) {
+            $gzipped = gzencode(self::DELIMITER . $body, $this->budget->compressionLevel());
+            if (file_put_contents($newPath, $gzipped) === false) {
                 throw new \RuntimeException("Failed to write index chunk: {$newPath}");
             }
             if ($newHash !== $row['hash'] && is_file($path)) {
@@ -501,13 +601,6 @@ final class IncrementalIndexUpdater
         // standard comparison does is the point: that is what SplMinHeap used
         // when these chunks were ordered.
         return $a <=> $b;
-    }
-
-    /** Number of real page postings in a term entry, ignoring the variants key. */
-    /** @param array<int|string, mixed> $entry */
-    private function pageCount(array $entry): int
-    {
-        return count($entry) - (isset($entry['_variants']) ? 1 : 0);
     }
 
     // ── Reading the existing index ─────────────────────────────────────────
@@ -628,7 +721,8 @@ final class IncrementalIndexUpdater
 
         $hash = IndexFileNaming::fragmentHash($ordinal, (string) $pageData['url'], $fragment);
         $path = $this->indexDir() . "/fragment/{$hash}.pf_fragment";
-        if (file_put_contents($path, gzencode(self::DELIMITER . $fragment, 9)) === false) {
+        $gzipped = gzencode(self::DELIMITER . $fragment, $this->budget->compressionLevel());
+        if (file_put_contents($path, $gzipped) === false) {
             throw new \RuntimeException("Failed to write fragment: {$path}");
         }
 
