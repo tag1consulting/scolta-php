@@ -44,7 +44,7 @@ namespace Tag1\Scolta\Index;
  * Getting this wrong deletes the translations of every entity that is still
  * published, which is why it is a parameter rather than a guess.
  *
- * @since 1.3.1
+ * @since 1.4.0
  * @stability experimental
  */
 final class ChangeSetPlanner
@@ -78,7 +78,7 @@ final class ChangeSetPlanner
      * that as unchanged is how an index quietly stops reflecting the site.
      *
      * @param iterable<array{0: string, 1: int}> $published Entity key and its changed timestamp.
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public function plan(iterable $published): ChangeSet

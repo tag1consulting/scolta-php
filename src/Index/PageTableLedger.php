@@ -670,7 +670,7 @@ final class PageTableLedger
      * $compactBytes the ledger snapshots instead, which truncates it.
      *
      * @param int $compactBytes Journal size at which to snapshot instead.
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public function commitIncremental(int $compactBytes = 8 * 1024 * 1024): void

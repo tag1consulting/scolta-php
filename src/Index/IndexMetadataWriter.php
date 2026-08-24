@@ -139,7 +139,7 @@ final class IndexMetadataWriter
      * @param list<string>                                            $metaFields
      * @return string The new pf_meta hash.
      * @throws \RuntimeException When the previous facet index cannot be reused.
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public function writeReusingCorpusTables(

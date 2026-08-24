@@ -182,7 +182,7 @@ class FacetIndexWriter
      * @param array<int, string> $pageHashes Page number => fragment hash, in page order.
      * @param string             $indexHash  The new pf_meta hash to stamp.
      * @return bool False when the previous artifact cannot be reused; nothing is written.
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public function rewriteWithNewPageTable(string $buildDir, array $pageHashes, string $indexHash): bool
