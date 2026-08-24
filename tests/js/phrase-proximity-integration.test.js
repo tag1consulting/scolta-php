@@ -213,4 +213,60 @@ describe('phrase-proximity integration (WASM boundary)', () => {
         expect(scored.length).toBe(2);
     });
 
+    test('quoted phrase with an interior stop word keeps exact matches', () => {
+        // Mirrors Rust: score_results_forced_phrase_with_interior_stop_word_keeps_exact_matches
+        //
+        // "of" is a stop word: the filter must match the raw phrase and budget
+        // the span from the raw token count, or every exact-phrase document is
+        // dropped. The matched positions of the exact document sit one word
+        // apart because "of" occupies the index between them.
+        const literalTitle = makeResult(
+            'https://example.com/liberty',
+            'Visiting the Statue of Liberty',
+            'planning a trip',
+            1.0,
+            [3, 90],
+        );
+        const adjacentLocations = makeResult(
+            'https://example.com/monument',
+            'National Monuments',
+            'harbor landmarks and their history',
+            1.0,
+            [10, 12],
+        );
+        const scattered = makeResult(
+            'https://example.com/scattered',
+            'Liberty Bell Facts',
+            'a statue stands elsewhere in the city',
+            1.0,
+            [3, 40],
+        );
+
+        const scored = scoreViaWasm('"statue of liberty"', [
+            literalTitle,
+            adjacentLocations,
+            scattered,
+        ]);
+
+        const urls = scored.map((r) => r.url);
+        expect(urls).toContain('https://example.com/liberty');
+        expect(urls).toContain('https://example.com/monument');
+        expect(urls).not.toContain('https://example.com/scattered');
+    });
+
+    test('quoted query keeps a result with fewer locations than terms (fail open)', () => {
+        // Mirrors Rust: forced_phrase_keeps_results_with_fewer_locations_than_terms
+        const sparse = makeResult(
+            'https://example.com/sparse',
+            'Primary Sources',
+            'colonial era content',
+            1.0,
+            [5],
+        );
+
+        const scored = scoreViaWasm('"boston massacre"', [sparse]);
+
+        expect(scored.length).toBe(1);
+    });
+
 });

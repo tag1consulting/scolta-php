@@ -3038,7 +3038,10 @@
           date: data.meta?.date || '',
           pagefind_index: i,
           score: loaded.length > 1 ? 1 - (i / (loaded.length - 1)) : 1,
-          locations: contentLocations || data.locations || [],
+          // Never fall back to data.locations: Pagefind's values are not
+          // word positions, and the forced-phrase filter treats locations
+          // as adjacency evidence — an empty array fails open instead.
+          locations: contentLocations || [],
         };
       });
       // WASM config keys are snake_case; getInstanceConfig() returns
