@@ -12,6 +12,8 @@ use Tag1\Scolta\Index\CachedContentReference;
 use Tag1\Scolta\Index\IndexBuildOrchestrator;
 use Tag1\Scolta\Index\MemoryBudget;
 use Tag1\Scolta\Index\PhpIndexer;
+use Tag1\Scolta\Index\TimestampManifest;
+use Tag1\Scolta\Storage\FilesystemDriver;
 use Tag1\Scolta\Tests\Support\SyntheticCorpus;
 
 /**
@@ -29,6 +31,13 @@ use Tag1\Scolta\Tests\Support\SyntheticCorpus;
  * — an operator wiping state/, a restore that missed a directory, an
  * incremental update that pruned it — every reference misses, and the build
  * reported success while replacing a whole index with tombstones.
+ *
+ * The other half of the same subject is where those cleared caches came from,
+ * and most of them were self-inflicted: a build that did not run to completion
+ * in one process destroyed the token cache and the timestamp manifest itself.
+ * The two halves have to be tested together, because the obvious way to stop
+ * the wipe is to stop refusing, and that is the one thing this file must never
+ * let happen: a cache emptied by a real loss still has to refuse to publish.
  */
 #[CoversClass(IndexBuildOrchestrator::class)]
 final class CachedReferenceCacheLossTest extends TestCase
@@ -124,6 +133,64 @@ final class CachedReferenceCacheLossTest extends TestCase
         return $names;
     }
 
+    /**
+     * Seed the timestamp manifest the way an adapter's gatherer does.
+     *
+     * Nothing in this package writes it — the gatherer that decides an entity
+     * is unchanged does — so a test about losing it has to put it there.
+     *
+     * @param list<ContentItem> $items
+     */
+    private function seedTimestampManifest(array $items): void
+    {
+        $manifest = new TimestampManifest($this->stateDir, new FilesystemDriver());
+        foreach ($items as $i => $item) {
+            $manifest->put((string) $item->id, 1_700_000_000 + $i, [[
+                'hash' => PhpIndexer::contentHash($item),
+                'id'   => $item->id,
+                'url'  => $item->url,
+            ]]);
+        }
+        $manifest->pruneAndSave();
+    }
+
+    /**
+     * The token-cache manifest as it sits on disk: content hash => chunk number.
+     *
+     * @return array<string, int>
+     */
+    private function tokenCacheManifest(): array
+    {
+        return self::readSerialized($this->stateDir . '/token-cache-manifest.php');
+    }
+
+    /**
+     * The timestamp manifest as it sits on disk: entity key => entry.
+     *
+     * @return array<string, mixed>
+     */
+    private function timestampManifest(): array
+    {
+        return self::readSerialized($this->stateDir . '/timestamp-manifest.php');
+    }
+
+    /** @return array<array-key, mixed> */
+    private static function readSerialized(string $path): array
+    {
+        if (!is_file($path)) {
+            return [];
+        }
+        $data = @unserialize((string) file_get_contents($path), ['allowed_classes' => false]);
+
+        return is_array($data) ? $data : [];
+    }
+
+    /** How many chunk files the token cache still has on disk. */
+    private function tokenCacheChunkCount(): int
+    {
+        return count(glob($this->stateDir . '/token-cache/chunk-*.php') ?: []);
+    }
+
     public function testABuildWhoseCachedReferencesAllMissRefusesToPublish(): void
     {
         $items = SyntheticCorpus::generate(40, seed: 3);
@@ -151,11 +218,12 @@ final class CachedReferenceCacheLossTest extends TestCase
     /**
      * The abort must leave the cache recoverable rather than finish it off.
      *
-     * A fresh build's prepare() unlinks every file in the state directory,
-     * token-cache-manifest.php included, and the cache goes on working only
-     * because its manifest is already in memory. Returning without writing it
-     * back therefore turns "the manifest was missing" into "the manifest and
-     * every chunk are orphaned".
+     * prepare() no longer unlinks the manifest, so the last good copy is on
+     * disk throughout the run and this save writes a superset of it. It is
+     * kept because the in-memory copy is the newer one — it holds whatever
+     * this run cached before the misses were counted — and because saving
+     * without pruning is the only correct way to write a run that did not look
+     * up every live page.
      */
     public function testTheAbortWritesTheTokenCacheManifestBackToDisk(): void
     {
@@ -251,5 +319,204 @@ final class CachedReferenceCacheLossTest extends TestCase
 
         $this->assertTrue($result->success, 'A first build of an empty site must not fail: ' . ($result->error ?? ''));
         $this->assertSame(0, $result->pagesProcessed);
+    }
+
+    // -------------------------------------------------------------------
+    // Build state survives an interrupted build
+    // -------------------------------------------------------------------
+
+    /**
+     * A build killed before its completion save leaves the last good state.
+     *
+     * This is the hard-crash case — an OOM kill, a forced pod eviction, a
+     * segfault — reproduced by dying after prepare() and before any save. It
+     * used to leave nothing: prepare() had already unlinked
+     * token-cache-manifest.php and both timestamp manifests, and the copies
+     * that were keeping the build alive were in memory in a process that is
+     * gone. The next build then read no manifest, treated the whole corpus as
+     * changed, and re-tokenized all of it.
+     */
+    public function testABuildKilledBeforeItsCompletionSaveLeavesTheLastGoodBuildState(): void
+    {
+        $items = SyntheticCorpus::generate(40, seed: 3);
+        $cold  = $this->build($items);
+        $this->assertTrue($cold->success, 'Cold build failed: ' . ($cold->error ?? ''));
+        $this->seedTimestampManifest($items);
+
+        $tokenCacheBefore = $this->tokenCacheManifest();
+        $timestampsBefore = $this->timestampManifest();
+        $chunksBefore     = $this->tokenCacheChunkCount();
+        $this->assertCount(40, $tokenCacheBefore, 'A cold build caches one entry per page.');
+        $this->assertCount(40, $timestampsBefore);
+        $this->assertGreaterThan(0, $chunksBefore);
+
+        $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
+        $report       = $orchestrator->build(
+            BuildIntent::fresh(40, MemoryBudget::conservative()),
+            (static function () use ($items): \Generator {
+                yield $items[0];
+
+                throw new \RuntimeException('the process died here');
+            })(),
+        );
+
+        $this->assertFalse($report->success, 'A build that died mid-corpus must not report success.');
+
+        $manifest = $this->stateDir . '/token-cache-manifest.php';
+        $this->assertFileExists($manifest, 'The last good token-cache manifest must still be on disk.');
+        $this->assertGreaterThan(
+            strlen(serialize([])),
+            (int) filesize($manifest),
+            'The manifest must not have been reduced to the 6-byte empty array.',
+        );
+        $this->assertSame($tokenCacheBefore, $this->tokenCacheManifest());
+        $this->assertSame($timestampsBefore, $this->timestampManifest());
+        $this->assertSame($chunksBefore, $this->tokenCacheChunkCount(), 'No cache chunk file may be deleted.');
+    }
+
+    /**
+     * The voluntary memory yield has not looked up the tail, so it must not
+     * prune.
+     *
+     * pruneAndSave() drops every hash the process did not look up, which is
+     * only ever true of the pages that are gone at the end of a run that
+     * looked all of them up. A yield happens by definition part-way through:
+     * every page after the yield point reads as deleted, its manifest entry
+     * goes, and pruneAndSave() deletes the chunk files that then have no live
+     * entries — so the state the resumed segment needs is destroyed by the
+     * yield that scheduled it.
+     */
+    public function testTheMemoryYieldSavesWithoutPruningTheTailItNeverLookedUp(): void
+    {
+        $items = SyntheticCorpus::generate(40, seed: 3);
+        $this->assertTrue($this->build($items)->success);
+        $this->seedTimestampManifest($items);
+
+        $report = $this->buildYieldingOnce($items);
+        $this->assertSame('memory_abort', $report->error, 'The probe must have forced a yield.');
+
+        $this->assertCount(
+            40,
+            $this->tokenCacheManifest(),
+            'The yield dropped the token-cache entries of the pages it had not reached yet.',
+        );
+        $this->assertCount(
+            40,
+            $this->timestampManifest(),
+            'The yield dropped the timestamp-manifest entries of the pages it had not reached yet.',
+        );
+
+        // Saved without pruning means saved as plain chunk numbers, never the
+        // negative in-memory seen marker.
+        foreach ($this->tokenCacheManifest() as $hash => $chunk) {
+            $this->assertGreaterThanOrEqual(0, $chunk, "Manifest entry {$hash} was saved as a seen marker.");
+        }
+    }
+
+    /**
+     * finalize() never gathered, so it has nothing to prune with.
+     *
+     * A merge-only pass — `drush scolta:finalize`, the deferred-merge recovery
+     * the pipeline itself recommends — loads the manifest from disk in a fresh
+     * process and looks up not one page. pruneAndSave() there keeps nothing at
+     * all: it wrote the 6-byte a:0:{} manifest and deleted every file in
+     * token-cache/, which is exactly the state observed on the real corpus
+     * after a crash followed by a finalize.
+     */
+    public function testAFinalizeOnlyRunDoesNotPruneTheStateItNeverGathered(): void
+    {
+        $items = SyntheticCorpus::generate(40, seed: 3);
+        $this->assertTrue($this->build($items)->success);
+        $this->seedTimestampManifest($items);
+
+        // Leave committed chunks and no merge behind, the way a deferred merge
+        // does. The yield's own save is asserted by the test above; here it is
+        // only the setup.
+        $this->assertSame('memory_abort', $this->buildYieldingOnce($items)->error);
+        $this->assertCount(40, $this->tokenCacheManifest(), 'Precondition: the yield kept the token cache.');
+        $this->assertCount(40, $this->timestampManifest(), 'Precondition: the yield kept the timestamp manifest.');
+        $chunksBefore = $this->tokenCacheChunkCount();
+        $this->assertGreaterThan(0, $chunksBefore);
+
+        $finalizer = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
+        $report    = $finalizer->finalize(MemoryBudget::conservative());
+        $this->assertTrue($report->success, 'Finalize failed: ' . ($report->error ?? ''));
+
+        $manifest = $this->stateDir . '/token-cache-manifest.php';
+        $this->assertFileExists($manifest);
+        $this->assertGreaterThan(
+            strlen(serialize([])),
+            (int) filesize($manifest),
+            'finalize() reduced the token-cache manifest to the 6-byte empty array.',
+        );
+        $this->assertCount(40, $this->tokenCacheManifest(), 'finalize() must not prune a cache it never read.');
+        $this->assertCount(40, $this->timestampManifest(), 'finalize() must not prune a manifest it never read.');
+        $this->assertSame($chunksBefore, $this->tokenCacheChunkCount(), 'finalize() must not delete cache chunk files.');
+    }
+
+    /**
+     * A build completed across resume segments must not prune either.
+     *
+     * The final segment is handed the whole corpus again — no adapter can
+     * translate "pages committed" into a position in its own query — and skips
+     * every id the ledger says an earlier segment already committed, before it
+     * would have looked the page up. So on the success path at the end of a
+     * resumed segment, "not looked up" covers every page the earlier segments
+     * did, and pruning drops all of them: a build that succeeded across three
+     * segments left a token cache holding only the third one's pages.
+     */
+    public function testABuildCompletedAcrossResumeSegmentsKeepsTheWholeCorpusCached(): void
+    {
+        $items = SyntheticCorpus::generate(40, seed: 3);
+        $this->assertTrue($this->build($items)->success);
+        $this->seedTimestampManifest($items);
+
+        $segments = 0;
+        do {
+            $report = $this->buildYieldingOnce($items, fresh: $segments === 0);
+            $segments++;
+        } while ($report->error === 'memory_abort' && $segments < 20);
+
+        $this->assertTrue($report->success, 'The segmented build must ultimately succeed: ' . ($report->error ?? ''));
+        $this->assertGreaterThan(1, $segments, 'The test is meaningless unless the build actually resumed.');
+
+        $this->assertCount(
+            40,
+            $this->tokenCacheManifest(),
+            'The final segment pruned the token-cache entries of the pages earlier segments committed.',
+        );
+        $this->assertCount(
+            40,
+            $this->timestampManifest(),
+            'The final segment pruned the timestamp-manifest entries of the pages earlier segments committed.',
+        );
+    }
+
+    /**
+     * Run a build that yields for memory pressure after its first chunk.
+     *
+     * @param list<ContentItem> $items
+     */
+    private function buildYieldingOnce(array $items, bool $fresh = true): \Tag1\Scolta\Index\StatusReport
+    {
+        $yielded      = false;
+        $orchestrator = new IndexBuildOrchestrator(
+            $this->stateDir,
+            $this->outputDir,
+            memoryPressureProbe: static function () use (&$yielded): bool {
+                if ($yielded) {
+                    return false;
+                }
+
+                return $yielded = true;
+            },
+        );
+
+        $budget = MemoryBudget::conservative()->withChunkSize(5);
+
+        return $orchestrator->build(
+            $fresh ? BuildIntent::fresh(count($items), $budget) : BuildIntent::resume($budget),
+            $items,
+        );
     }
 }

@@ -353,6 +353,68 @@ class TimestampManifestTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // saveWithoutPruning — the interrupted-build paths
+    // -------------------------------------------------------------------------
+
+    /**
+     * A process that did not gather the whole corpus cannot tell a deleted
+     * entity from one it simply has not reached, so it must keep both.
+     */
+    public function test_save_without_pruning_keeps_entries_the_build_never_touched(): void
+    {
+        $m1 = $this->make();
+        $m1->put('reached', 1_000, []);
+        $m1->put('not-reached', 2_000, []);
+        $m1->pruneAndSave();
+
+        // A segment that yielded after seeing one of the two.
+        $m2 = $this->make();
+        $m2->markSeen('reached');
+        $m2->saveWithoutPruning();
+
+        $m3 = $this->make();
+        $this->assertNotNull($m3->get('reached'));
+        $this->assertNotNull($m3->get('not-reached'), 'A yield must not delete the entities it had not reached.');
+        $this->assertSame(2, $m3->count());
+    }
+
+    public function test_save_without_pruning_keeps_known_empty_hashes_the_build_never_read(): void
+    {
+        $m1 = $this->make();
+        $m1->put('entity', 1_000, []);
+        $m1->markEmpty('hash-a');
+        $m1->markEmpty('hash-b');
+        $m1->pruneAndSave();
+
+        $m2 = $this->make();
+        $m2->isKnownEmpty('hash-a');
+        $m2->saveWithoutPruning();
+
+        $m3 = $this->make();
+        $this->assertTrue($m3->isKnownEmpty('hash-a'));
+        $this->assertTrue($m3->isKnownEmpty('hash-b'), 'A yield must not delete the known-empty hashes it never read.');
+    }
+
+    /**
+     * Writing whenever the file is missing is the same rule pruneAndSave()
+     * needs, for the same reason: a segment in which nothing changed marks
+     * nothing dirty, and is exactly the one that can least afford to lose the
+     * manifest.
+     */
+    public function test_save_without_pruning_rewrites_a_manifest_that_was_deleted_mid_build(): void
+    {
+        $m1 = $this->make();
+        $m1->put('entity', 1_000, []);
+        $m1->pruneAndSave();
+
+        $m2 = $this->make();
+        unlink($this->stateDir . '/timestamp-manifest.php');
+        $m2->saveWithoutPruning();
+
+        $this->assertNotNull($this->make()->get('entity'));
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 

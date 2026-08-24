@@ -383,7 +383,26 @@ class BuildState
     }
 
     /**
-     * Clean up all state files.
+     * Clean up the state this class owns: the lock, the manifest and the
+     * committed chunk files.
+     *
+     * Deliberately not the whole directory, which is what it used to be. The
+     * state directory is shared: PageWordCache keeps token-cache-manifest.php
+     * in it, TimestampManifest keeps two files, PageTableLedger keeps a
+     * snapshot and a journal. BuildCoordinator::prepare() calls this at the top
+     * of every fresh build and release() calls it again after a successful one,
+     * so all of that was deleted twice per build, and it survived only because
+     * each of those classes loads its state in its own constructor and writes
+     * it back at the end. A build that never reached its write — a crash, an
+     * OOM kill, a forced pod eviction, a deferred merge, a finalize-only run —
+     * left the directory holding none of it, and the next build read an empty
+     * manifest, treated the whole corpus as changed, and ran fully cold.
+     *
+     * Nothing here ever needed those files gone. What a fresh build needs is
+     * the chunk files of the abandoned one cleared, so that its own chunk
+     * numbering starts from an empty set; every other file in the directory
+     * belongs to a component that manages its own lifecycle and is the only
+     * thing that knows when an entry is stale.
      *
      * @since 1.0.0
      * @stability stable
@@ -394,14 +413,41 @@ class BuildState
             return;
         }
 
-        $files = glob($this->stateDir . '/*');
-        if ($files !== false) {
-            foreach ($files as $file) {
-                if (is_file($file)) {
-                    unlink($file);
-                }
+        foreach ($this->ownedFiles() as $file) {
+            if (is_file($file)) {
+                unlink($file);
             }
         }
+    }
+
+    /**
+     * Every path this class writes into the state directory.
+     *
+     * The manifest temp files are included because commitManifest() names them
+     * per writer (pid + uniqid), so a writer killed between the write and the
+     * rename leaves one behind and readManifest() falls back to the newest of
+     * them — which must not outlive the build it describes.
+     *
+     * @return list<string>
+     */
+    private function ownedFiles(): array
+    {
+        $files = [
+            $this->stateDir . '/' . self::LOCK_FILE,
+            $this->stateDir . '/' . self::MANIFEST_FILE,
+        ];
+
+        $patterns = [
+            '/' . self::MANIFEST_FILE . self::MANIFEST_TMP_SUFFIX . '*',
+            '/chunk-*.dat',
+        ];
+        foreach ($patterns as $pattern) {
+            foreach (glob($this->stateDir . $pattern) ?: [] as $path) {
+                $files[] = $path;
+            }
+        }
+
+        return $files;
     }
 
     /**
