@@ -671,3 +671,135 @@ describe("facetMode 'disabled' removes faceting entirely", () => {
         assertNeverAskedPagefindForFilters(calls);
     });
 });
+
+/**
+ * Scolta.setFilterRenderer() — the platform facet renderer.
+ *
+ * The counterpart to setResultRenderer()/setSuggestionRenderer(), covered here
+ * rather than in render-seam.test.js because rendering a facet group at all
+ * needs the real artifact this file already serves. What is pinned is the
+ * contract a consumer writes against: it is called once per rendered dimension,
+ * null and a throw both fall back per-dimension, an instance renderer beats the
+ * global one, and every value carries the checkbox the delegated change handler
+ * dispatches on.
+ */
+describe('Scolta.setFilterRenderer()', () => {
+    const groups = (w) => [...w.document.querySelectorAll('#scolta-filters .scolta-filter-group')];
+    const themed = (w) => [...w.document.querySelectorAll('#scolta-filters .platform-facet')];
+
+    test('replaces the built-in group for every rendered dimension', async () => {
+        const { mock } = createMockPagefind(Array.from({ length: 150 }, (_, k) => k));
+        const env = await boot(mock);
+        const seen = [];
+        env.window.Scolta.setFilterRenderer((dim, ctx) => {
+            seen.push({ dim, label: ctx.label, values: ctx.values.length });
+            return `<div class="platform-facet" data-dim="${dim}">${ctx.itemsHtml}</div>`;
+        });
+        await initAndSearch(env);
+
+        expect(seen.length).toBeGreaterThan(0);
+        expect(themed(env.window)).toHaveLength(seen.length);
+        // The built-in group is replaced, not wrapped around the themed one.
+        expect(groups(env.window)).toHaveLength(0);
+        // Every dimension arrived with a label and at least one value.
+        for (const s of seen) {
+            expect(typeof s.label).toBe('string');
+            expect(s.label.length).toBeGreaterThan(0);
+            expect(s.values).toBeGreaterThan(0);
+        }
+    });
+
+    test('each value carries the checkbox the change handler dispatches on', async () => {
+        // The failure this guards is a themed facet that renders correctly and
+        // does nothing when clicked, because the renderer composed its own
+        // input and dropped the data-scolta-* attributes.
+        const { mock } = createMockPagefind(Array.from({ length: 150 }, (_, k) => k));
+        const env = await boot(mock);
+        let firstCtx = null;
+        env.window.Scolta.setFilterRenderer((dim, ctx) => {
+            if (!firstCtx) firstCtx = { dim, values: ctx.values };
+            return `<div class="platform-facet" data-dim="${dim}">`
+                + ctx.values.map(v => v.inputHtml).join('') + '</div>';
+        });
+        await initAndSearch(env);
+
+        for (const v of firstCtx.values) {
+            expect(v.inputHtml).toContain(`data-scolta-filter-dim="${firstCtx.dim}"`);
+            expect(v.inputHtml).toContain(`data-scolta-filter-val="${v.value}"`);
+            expect(typeof v.count).toBe('number');
+            expect(typeof v.active).toBe('boolean');
+            expect(typeof v.disabled).toBe('boolean');
+        }
+        // Scoped to the dimension captured above: the renderer runs for every
+        // dimension, so counting the whole panel would count the others too.
+        const painted = env.window.document.querySelectorAll(
+            `#scolta-filters .platform-facet[data-dim="${firstCtx.dim}"] input[data-scolta-filter-dim]`);
+        expect(painted.length).toBe(firstCtx.values.length);
+    });
+
+    test('returning null falls back to the built-in group for that dimension only', async () => {
+        const { mock } = createMockPagefind(Array.from({ length: 150 }, (_, k) => k));
+        const env = await boot(mock);
+        let firstDim = null;
+        env.window.Scolta.setFilterRenderer((dim, ctx) => {
+            if (firstDim === null) firstDim = dim;
+            return dim === firstDim ? null : `<div class="platform-facet">${ctx.itemsHtml}</div>`;
+        });
+        await initAndSearch(env);
+
+        // The declined dimension kept the built-in group; the others are themed.
+        expect(groups(env.window)).toHaveLength(1);
+        expect(themed(env.window).length).toBeGreaterThan(0);
+    });
+
+    test('a renderer that throws falls back and warns', async () => {
+        const { mock } = createMockPagefind(Array.from({ length: 150 }, (_, k) => k));
+        const env = await boot(mock);
+        env.window.Scolta.setFilterRenderer(() => { throw new Error('boom'); });
+        await initAndSearch(env);
+
+        expect(themed(env.window)).toHaveLength(0);
+        expect(groups(env.window).length).toBeGreaterThan(0);
+        expect(env.warnings.some(w => /facet renderer threw/.test(w))).toBe(true);
+    });
+
+    test('an instance renderer overrides the global one', async () => {
+        const { mock } = createMockPagefind(Array.from({ length: 150 }, (_, k) => k));
+        const env = await boot(mock);
+        env.window.Scolta.setFilterRenderer(() => '<div class="platform-facet">global</div>');
+        env.window.Scolta.init('#scolta-search');
+        for (let i = 0; i < 80; i++) {
+            await new Promise(r => setTimeout(r, 5));
+            if (env.window.document.querySelector('#scolta-query')) break;
+        }
+        env.window.Scolta.defaultInstance.setFilterRenderer(
+            () => '<div class="platform-facet instance-facet">instance</div>');
+        const input = env.window.document.querySelector('#scolta-query');
+        input.value = 'things';
+        await env.window.Scolta.doSearch(false);
+        await new Promise(r => setTimeout(r, 60));
+
+        expect(env.window.document.querySelectorAll('#scolta-filters .instance-facet').length)
+            .toBeGreaterThan(0);
+        expect(env.window.document.body.innerHTML).not.toContain('>global<');
+    });
+
+    test('registering a non-function is refused', async () => {
+        const { mock } = createMockPagefind(Array.from({ length: 150 }, (_, k) => k));
+        const env = await boot(mock);
+        // The throw comes from the JSDOM realm, whose TypeError is a different
+        // constructor than this one — match the message, not the identity.
+        expect(() => env.window.Scolta.setFilterRenderer('nope'))
+            .toThrow(/expects a function or null/);
+        // null clears it and is not an error.
+        expect(() => env.window.Scolta.setFilterRenderer(null)).not.toThrow();
+    });
+
+    test('registering nothing renders the built-in group unchanged', async () => {
+        const { mock } = createMockPagefind(Array.from({ length: 150 }, (_, k) => k));
+        const env = await boot(mock);
+        await initAndSearch(env);
+        expect(groups(env.window).length).toBeGreaterThan(0);
+        expect(themed(env.window)).toHaveLength(0);
+    });
+});
