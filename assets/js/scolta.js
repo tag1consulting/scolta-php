@@ -5581,13 +5581,23 @@
           <div id="scolta-filter-indicator" style="display:none;"></div>
           <div class="scolta-results-header" id="scolta-results-header"></div>
           <div id="scolta-results"></div>
+          <!-- Inside the results column, right after #scolta-results, not a
+               sibling of .scolta-layout. As a sibling it stacked below BOTH
+               grid columns, so on a real site the facet aside's full height
+               (~3000px) pushed "No results found." thousands of pixels below
+               the fold: the empty branch of renderResults() empties
+               #scolta-results but leaves the layout displayed, so the aside
+               keeps its height and the message lands under it. Nested here it
+               renders next to the results header where the visitor is looking.
+               No data-scolta-scaffold: that attribute marks the top-level nodes
+               this instance owns for non-destructive init()/destroy(), and this
+               node is now carried by #scolta-layout, which has it. -->
+          <div class="scolta-no-results" id="scolta-no-results" style="display:none;">
+            <p style="font-size:1.2rem;">No results found.</p>
+            <p style="margin-top:0.5rem;">Try different keywords or clear your site filters.</p>
+          </div>
           <button class="scolta-load-more" id="scolta-load-more" style="display:none;">Show more results</button>
         </div>
-      </div>
-
-      <div class="scolta-no-results" id="scolta-no-results" style="display:none;" data-scolta-scaffold>
-        <p style="font-size:1.2rem;">No results found.</p>
-        <p style="margin-top:0.5rem;">Try different keywords or clear your site filters.</p>
       </div>
     `;
 
