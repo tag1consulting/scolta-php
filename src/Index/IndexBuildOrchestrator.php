@@ -20,7 +20,6 @@ use Tag1\Scolta\Storage\StorageDriverInterface;
  *
  * Previously this logic was duplicated across scolta-laravel, scolta-drupal,
  * and scolta-wp (~85 lines each). Those adapters are now thin wrappers.
-  * @phpstan-import-type SlimPage from BuildChunkReuse
  */
 final class IndexBuildOrchestrator
 {
@@ -58,29 +57,6 @@ final class IndexBuildOrchestrator
      * returning blocks that the next chunk immediately asked for again.
      */
     private const MEM_CACHES_EVERY_CHUNKS = 20;
-
-    /**
-     * Ranges that may sit part-filled before the oldest is committed anyway.
-     *
-     * Cutting chunks on ordinal ranges means a range only completes once every
-     * page in it has arrived, and nothing obliges a gatherer to yield pages in
-     * ordinal order. Without a bound, a corpus whose gather order is unrelated
-     * to its ordinals would hold the entire corpus in buffers. Flushing the
-     * oldest part-filled range costs that range its reusability next build and
-     * nothing else.
-     */
-    private const MAX_PENDING_RANGES = 40;
-
-    /**
-     * Chunks' worth of token data that may sit in the buffers at once.
-     *
-     * The range count above bounds how many ranges are open; this bounds the
-     * part that actually has bulk. A deferred page holds a proxy and three
-     * strings, but a resolved one holds its token data, which on a
-     * long-document corpus is most of what a chunk weighs. Two chunks' worth
-     * keeps that close to the single chunk the arrival-order buffer always cost.
-     */
-    private const MAX_PENDING_RESOLVED_CHUNKS = 2;
 
     private readonly BuildCoordinator $coordinator;
     private readonly InvertedIndexBuilder $builder;
@@ -123,12 +99,6 @@ final class IndexBuildOrchestrator
          * differential tests compare against.
          */
         private readonly ?bool $reuseFragments = null,
-        /**
-         * Carry unchanged chunk files forward instead of rebuilding them. On by
-         * default; the differential tests turn it off to produce the reference
-         * output to compare against. Ignored on a resumed or forced build.
-         */
-        private readonly bool $reuseChunks = true,
     ) {
         // Strip a trailing /pagefind suffix if already present. atomicSwap()
         // always appends /pagefind internally, so a doubly-suffixed path would
@@ -270,39 +240,9 @@ final class IndexBuildOrchestrator
             $totalChunks = $totalPages > 0 ? (int) ceil($totalPages / $chunkSize) : 1;
             $progress->start($totalChunks, 'Indexing');
 
+            $chunk       = [];
             $chunkNum    = $startChunk;
             $pagesInRun  = 0;
-
-            // Chunks are cut on ordinal ranges rather than on arrival order, so
-            // that a chunk's membership is a property of its pages and not of
-            // the corpus around them. See BuildChunkReuse for why that is the
-            // only cut that lets an unchanged chunk be recognised at all.
-            $reuse = new BuildChunkReuse($this->stateDir, $this->storage);
-            $reuse->begin(
-                // A forced build is an instruction to redo the work, and a
-                // resumed one must see the files its earlier segments wrote.
-                enabled: $this->reuseChunks && $intent->isFresh() && !$force,
-                rangeSize: $chunkSize,
-                language: $this->language,
-                hmacSecret: $this->hmacSecret,
-            );
-
-            // What each range is expected to hold, read once at build start. A
-            // range is complete when every ordinal listed here has arrived.
-            $expectedByRange = $reuse->isEnabled() ? $this->ledger->liveOrdinalsByRange($chunkSize) : [];
-
-            /** @var array<int, list<array{ordinal: int, page: SlimPage, contentHash: string, entityKey: ?string, tokenData: array<string, mixed>|null}>> Range => buffered pages. */
-            $pending = [];
-            /** @var array<int, array<int, string>> Range => ordinal => identity. */
-            $pendingIdentities = [];
-            /** @var array<int, true> Ranges already committed this build. */
-            $flushedRanges = [];
-            /** @var list<array{ordinal: int, page: SlimPage, contentHash: string, entityKey: ?string, tokenData: array<string, mixed>|null}> Pages that arrived after their range was committed. */
-            $overflow = [];
-            /** @var int Buffered pages carrying token data, which is the part with a memory cost. */
-            $pendingResolved = 0;
-            $chunksReused    = 0;
-            $pagesReused     = 0;
             /** @var list<array{id: string, reason: string}> Items given to the build that produced no page. */
             $skipped     = [];
             $resumeSkips = 0;
@@ -344,91 +284,33 @@ final class IndexBuildOrchestrator
 
                 $itemsSeen++;
 
-                // The voluntary-yield check below must fire after a chunk is
-                // committed and not after every page: state is only safe to
-                // abandon at a chunk boundary, and a probe that fired mid-range
-                // would return a build that committed nothing.
-                $chunkNumAtArrival = $chunkNum;
-
-                // Which range a page belongs to is decided from the ordinal the
-                // ledger already holds for it, read without allocating: a page
-                // whose body turns out to be too short must not burn an ordinal,
-                // and allocation is still deferred to makeChunkEntry() for
-                // exactly that reason.
-                $existingOrdinal = $this->ledger->ordinalFor((string) $page->id);
-
-                // Set by whichever branch buffers the page, and read once
-                // afterwards to decide whether its range is now complete.
-                // Tracked explicitly rather than inferred from whatever the
-                // branches happened to leave behind.
-                $bufferedOrdinal = null;
-                $bufferedRange   = null;
-                $tokenData       = null;
-                $deferred        = false;
                 if ($page instanceof CachedContentReference) {
-                    $contentHash = $page->contentHash;
-
-                    // Cheap and in-memory: a body the exporter already dropped
-                    // for being too short never had token data and never will,
-                    // so this is not an eviction. Keep the manifest entry and
-                    // let the next build skip the entity rather than re-gather
-                    // it to drop it again. Checked before anything else so the
-                    // page never reaches a chunk buffer.
-                    if ($existingOrdinal === null && $this->tsManifest->isKnownEmpty($contentHash)) {
+                    $t0        = hrtime(true);
+                    $tokenData = $this->cache()->get($page->contentHash);
+                    $telemetry->recordSubTimer('token_cache_get', (hrtime(true) - $t0) / 1e9, 1);
+                    if ($tokenData !== null) {
+                        $this->tsManifest->markSeen($page->entityKey);
+                        $chunk[] = $this->makeChunkEntry($page, $tokenData, $page->contentHash);
+                    } elseif ($this->tsManifest->isKnownEmpty($page->contentHash)) {
+                        // A body the exporter has already dropped for being too
+                        // short. It never had token data and never will, so the
+                        // miss is the expected outcome rather than an eviction:
+                        // keep the manifest entry (markSeen) and let the next
+                        // build skip the entity instead of re-gathering it to
+                        // drop it again. Not a warning — nothing is lost.
                         $this->tsManifest->markSeen($page->entityKey);
                         $expectedEmpty++;
-                        continue;
-                    }
-
-                    if ($existingOrdinal !== null) {
-                        $identity = BuildChunkReuse::pageIdentity($existingOrdinal, $contentHash, $page);
-                        $range    = intdiv($existingOrdinal, $chunkSize);
-                        // Deferring the cache lookup is the point of the whole
-                        // item: a reused chunk must not load token data for a
-                        // single one of its pages. touch() keeps the entry alive
-                        // and reports whether it is there at all, which is what
-                        // makes it safe to skip reading it.
-                        if ($reuse->previousIdentity($range, $existingOrdinal) === $identity
-                            && $this->cache()->touch($contentHash)
-                        ) {
-                            $this->tsManifest->markSeen($page->entityKey);
-                            $pending[$range][] = [
-                                'ordinal'     => $existingOrdinal,
-                                'page'        => $this->makeSlimProxy($page),
-                                'contentHash' => $contentHash,
-                                'entityKey'   => $page->entityKey,
-                                'tokenData'   => null,
-                            ];
-                            $pendingIdentities[$range][$existingOrdinal] = $identity;
-                            $bufferedOrdinal                            = $existingOrdinal;
-                            $bufferedRange                              = $range;
-                            $deferred                                   = true;
-                        }
-                    }
-
-                    if (!$deferred) {
-                        $t0        = hrtime(true);
-                        $tokenData = $this->cache()->get($contentHash);
-                        $telemetry->recordSubTimer('token_cache_get', (hrtime(true) - $t0) / 1e9, 1);
-                        if ($tokenData !== null) {
-                            $this->tsManifest->markSeen($page->entityKey);
-                        } elseif ($this->tsManifest->isKnownEmpty($contentHash)) {
-                            $this->tsManifest->markSeen($page->entityKey);
-                            $expectedEmpty++;
-                            continue;
-                        } else {
-                            // On cache miss: skip markSeen → manifest entry is pruned →
-                            // entity is treated as changed on the next build.
-                            $cachedRefMisses++;
-                            $skipped[] = ['id' => (string) $page->id, 'reason' => 'token cache miss on a cached reference'];
-                            continue;
-                        }
+                    } else {
+                        // On cache miss: skip markSeen → manifest entry is pruned →
+                        // entity is treated as changed on the next build.
+                        $cachedRefMisses++;
+                        $skipped[] = ['id' => (string) $page->id, 'reason' => 'token cache miss on a cached reference'];
                     }
                 } else {
-                    $contentHash = PhpIndexer::contentHash($page);
+                    $hash = PhpIndexer::contentHash($page);
                     if (!$force) {
                         $t0        = hrtime(true);
-                        $tokenData = $this->cache()->get($contentHash);
+                        $tokenData = $this->cache()->get($hash);
                         $telemetry->recordSubTimer('token_cache_get', (hrtime(true) - $t0) / 1e9, 1);
                     } else {
                         $tokenData = null;
@@ -439,184 +321,53 @@ final class IndexBuildOrchestrator
                         $telemetry->recordSubTimer('tokenize', (hrtime(true) - $t0) / 1e9, 1);
                         if ($tokenData !== null) {
                             $t0 = hrtime(true);
-                            $this->cache()->put($contentHash, $tokenData);
+                            $this->cache()->put($hash, $tokenData);
                             $telemetry->recordSubTimer('token_cache_put', (hrtime(true) - $t0) / 1e9, 1);
                         }
                     }
 
-                    if ($tokenData === null) {
-                        $skipped[] = ['id' => (string) $page->id, 'reason' => 'no indexable text after HTML cleaning'];
-                        continue;
-                    }
-                }
-
-                if (!$deferred) {
-                    if ($tokenData === null) {
-                        // Unreachable: every path that leaves $tokenData null
-                        // above continues the loop. Stated rather than assumed,
-                        // because a future branch that forgets to would
-                        // otherwise buffer a page with no token data and fail
-                        // deep inside the index builder.
-                        $skipped[] = ['id' => (string) $page->id, 'reason' => 'no token data resolved'];
-                        continue;
-                    }
-
-                    // A page with token data in hand needs its ordinal now, and
-                    // allocate() is what stamps the generation that stops
-                    // releaseStaleRows() tombstoning it.
-                    $entry   = $this->makeChunkEntry($page, $tokenData, $contentHash);
-                    $ordinal = $entry['ordinal'];
-                    $range   = intdiv($ordinal, $chunkSize);
-                    $record  = [
-                        'ordinal'     => $ordinal,
-                        'page'        => $entry['item'],
-                        'contentHash' => $contentHash,
-                        'entityKey'   => $page instanceof CachedContentReference ? $page->entityKey : null,
-                        'tokenData'   => $entry['tokenData'],
-                    ];
-
-                    // A page that landed in a range already committed cannot
-                    // join it. It goes to an overflow chunk instead: ordinal
-                    // uniqueness across chunks is all the merge needs, and that
-                    // is preserved. Such a chunk is never reusable, which is
-                    // correct rather than unfortunate — nothing about it is a
-                    // function of one range.
-                    if (isset($flushedRanges[$range])) {
-                        $overflow[] = $record;
-                        $pendingResolved++;
+                    if ($tokenData !== null) {
+                        $chunk[] = $this->makeChunkEntry($page, $tokenData, $hash);
                     } else {
-                        $pending[$range][] = $record;
-                        $pendingIdentities[$range][$ordinal] = BuildChunkReuse::pageIdentity($ordinal, $contentHash, $entry['item']);
-                        $pendingResolved++;
-                        $bufferedOrdinal = $ordinal;
-                        $bufferedRange   = $range;
+                        $skipped[] = ['id' => (string) $page->id, 'reason' => 'no indexable text after HTML cleaning'];
                     }
                 }
 
-                // Whatever arrived, the range it went to may now be complete.
-                if ($bufferedRange !== null && $bufferedOrdinal !== null && isset($pending[$bufferedRange])) {
-                    $range = $bufferedRange;
-                    unset($expectedByRange[$range][$bufferedOrdinal]);
-                    $rangeIsFull = count($pending[$range]) >= $chunkSize;
-                    // isset(), not an empty-array test: unsetting the last
-                    // expected ordinal leaves an empty array with its key
-                    // intact, which is what distinguishes "every page the
-                    // ledger listed has arrived" from "the ledger listed none",
-                    // and the latter must wait for the range to fill or for the
-                    // tail. Conflating them cut one chunk per page on a first
-                    // build.
-                    $rangeIsComplete = isset($expectedByRange[$range]) && $expectedByRange[$range] === [];
-                    if ($rangeIsFull || $rangeIsComplete) {
-                        $this->flushRangeChunk(
-                            $range,
-                            $pending,
-                            $pendingIdentities,
-                            $flushedRanges,
-                            $pendingResolved,
-                            $reuse,
-                            $chunkNum,
-                            $currentOffset,
-                            $pagesInRun,
-                            $chunksReused,
-                            $pagesReused,
-                            $cachedRefMisses,
-                            $skipped,
+                if (count($chunk) >= $chunkSize) {
+                    $this->flushChunk($chunk, $chunkNum, $currentOffset, $pagesInRun, $telemetry, $progress);
+                    $chunkNum++;
+                    $chunk = [];
+
+                    // Voluntary yield: exit cleanly when heap pressure is high after cleanup.
+                    // State is already committed; the next invocation resumes from here.
+                    if ($this->isUnderMemoryPressure($telemetry)) {
+                        $committedChunks = count($this->coordinator->chunkFiles());
+                        $committedPages  = $this->coordinator->buildState()->getPagesProcessed();
+                        $this->cache()->pruneAndSave();
+                        $this->tsManifest->pruneAndSave();
+                        $this->coordinator->releaseLockOnly();
+                        $logger->info(sprintf(
+                            '[scolta] Memory pressure detected after chunk %d — yielding for restart (%d pages committed).',
+                            $chunkNum - 1,
+                            $committedPages,
+                        ));
+                        return $this->makeStatusReport(
                             $telemetry,
-                            $progress,
+                            $budget,
+                            $startTime,
+                            pagesProcessed: $committedPages,
+                            chunksWritten: $committedChunks,
+                            success: false,
+                            error: 'memory_abort',
                         );
                     }
                 }
-
-                // Two bounds on the buffer, both flushing the oldest pending
-                // range as-is. The range count keeps a corpus whose gather order
-                // is scrambled relative to its ordinals from holding the whole
-                // corpus; the resolved-page count keeps token data — the only
-                // part of a buffered page with real bulk — near what a single
-                // chunk always cost. A range flushed early is simply not
-                // reusable next time.
-                while (count($pending) > self::MAX_PENDING_RANGES
-                    || $pendingResolved > self::MAX_PENDING_RESOLVED_CHUNKS * $chunkSize
-                ) {
-                    $oldest = array_key_first($pending);
-                    if ($oldest === null) {
-                        break;
-                    }
-                    $this->flushRangeChunk(
-                        $oldest,
-                        $pending,
-                        $pendingIdentities,
-                        $flushedRanges,
-                        $pendingResolved,
-                        $reuse,
-                        $chunkNum,
-                        $currentOffset,
-                        $pagesInRun,
-                        $chunksReused,
-                        $pagesReused,
-                        $cachedRefMisses,
-                        $skipped,
-                        $telemetry,
-                        $progress,
-                    );
-                }
-
-
-                // Voluntary yield: exit cleanly when heap pressure is high after cleanup.
-                // State is already committed; the next invocation resumes from here.
-                if ($chunkNum > $chunkNumAtArrival && $this->isUnderMemoryPressure($telemetry)) {
-                    $committedChunks = count($this->coordinator->chunkFiles());
-                    $committedPages  = $this->coordinator->buildState()->getPagesProcessed();
-                    $this->cache()->pruneAndSave();
-                    $this->tsManifest->pruneAndSave();
-                    $this->coordinator->releaseLockOnly();
-                    $logger->info(sprintf(
-                        '[scolta] Memory pressure detected after chunk %d — yielding for restart (%d pages committed).',
-                        max(0, $chunkNum - 1),
-                        $committedPages,
-                    ));
-                    return $this->makeStatusReport(
-                        $telemetry,
-                        $budget,
-                        $startTime,
-                        pagesProcessed: $committedPages,
-                        chunksWritten: $committedChunks,
-                        success: false,
-                        error: 'memory_abort',
-                    );
-                }
             }
 
-            // Tail: every range still buffered, in ordinal order so the chunk
-            // sequence is reproducible, then anything that overflowed.
-            ksort($pending, SORT_NUMERIC);
-            foreach (array_keys($pending) as $range) {
-                $this->flushRangeChunk(
-                    $range,
-                    $pending,
-                    $pendingIdentities,
-                    $flushedRanges,
-                    $pendingResolved,
-                    $reuse,
-                    $chunkNum,
-                    $currentOffset,
-                    $pagesInRun,
-                    $chunksReused,
-                    $pagesReused,
-                    $cachedRefMisses,
-                    $skipped,
-                    $telemetry,
-                    $progress,
-                );
-            }
-
-            if ($overflow !== []) {
-                $resolved = $this->resolveDeferred($overflow, $cachedRefMisses, $skipped, $telemetry);
-                if ($resolved !== []) {
-                    $this->flushChunk($resolved, $chunkNum, $currentOffset, $pagesInRun, $telemetry, $progress);
-                    $chunkNum++;
-                }
-                $pendingResolved = 0;
-                $overflow        = [];
+            // Tail chunk.
+            if (!empty($chunk)) {
+                $this->flushChunk($chunk, $chunkNum, $currentOffset, $pagesInRun, $telemetry, $progress);
+                $chunk = [];
             }
 
             $progress->finish("{$pagesInRun} pages indexed");
@@ -737,12 +488,6 @@ final class IndexBuildOrchestrator
 
             $this->verifyOutputHasFragments($pagesForReport);
 
-            // After the merge has read the chunk files and before release()
-            // wipes the state directory. chunks-prev/ is a subdirectory and
-            // BuildState::cleanup() only unlinks files, so what is moved there
-            // survives for the next build to link from.
-            $reuse->promote($this->coordinator->chunkPath(...));
-
             $this->coordinator->release();
 
             $this->cache()->pruneAndSave();
@@ -759,19 +504,7 @@ final class IndexBuildOrchestrator
                 'gc_collected'      => (int) ($gc['collected'] ?? -1),
                 'fragments_reused'  => $streamWriter->fragmentsReused(),
                 'fragments_written' => $streamWriter->fragmentsWritten(),
-                'chunks_reused'     => $chunksReused,
-                'pages_reused'      => $pagesReused,
             ]);
-            if ($chunksReused > 0) {
-                $logger->info(
-                    '[scolta] {chunks} of {total} index chunks were unchanged and carried forward, covering {pages} pages.',
-                    [
-                        'chunks' => $chunksReused,
-                        'total'  => $chunksWritten,
-                        'pages'  => $pagesReused,
-                    ],
-                );
-            }
             if ($streamWriter->fragmentsReused() > 0) {
                 $logger->info(
                     '[scolta] {reused} of {total} fragments were unchanged and linked from the previous index.',
@@ -859,7 +592,7 @@ final class IndexBuildOrchestrator
      */
     /**
      * @param array<string, mixed> $tokenData
-     * @return array{item: SlimPage, tokenData: array<string, mixed>, ordinal: int}
+     * @return array{item: object, tokenData: array<string, mixed>, ordinal: int}
      */
     private function makeChunkEntry(object $page, array $tokenData, string $contentHash): array
     {
@@ -878,7 +611,6 @@ final class IndexBuildOrchestrator
         ];
     }
 
-    /** @return SlimPage */
     private function makeSlimProxy(object $page): object
     {
         return (object) [
@@ -895,183 +627,6 @@ final class IndexBuildOrchestrator
             // corpus-wide entry into the eagerly loaded pf_meta sorts table.
             'metadata' => $page->metadata ?? [],
         ];
-    }
-
-    /**
-     * Commit one ordinal range, reusing the previous build's file if it fits.
-     *
-     * Two outcomes. Either the range's membership is identical to what the
-     * previous build recorded for it, and the file it wrote is linked into place
-     * without a byte being re-serialised; or the range is rebuilt, which means
-     * resolving the token data of any page whose lookup was deferred and then
-     * going down the ordinary chunk path.
-     *
-     * A reused range still has to do the bookkeeping a written chunk does:
-     * allocate() to stamp the generation that stops releaseStaleRows()
-     * tombstoning the page, markSeen() so the timestamp manifest keeps the
-     * entity, and touch() so the token cache keeps the entry. Skipping any of
-     * those makes the *next* build wrong rather than this one, which is the kind
-     * of bug that surfaces a week later.
-     *
-     * @param array<int, list<array{ordinal: int, page: SlimPage, contentHash: string, entityKey: ?string, tokenData: array<string, mixed>|null}>> $pending
-     * @param array<int, array<int, string>>          $pendingIdentities
-     * @param array<int, true>                        $flushedRanges
-     * @param list<array{id: string, reason: string}> $skipped
-     */
-    private function flushRangeChunk(
-        int $range,
-        array &$pending,
-        array &$pendingIdentities,
-        array &$flushedRanges,
-        int &$pendingResolved,
-        BuildChunkReuse $reuse,
-        int &$chunkNum,
-        int &$currentOffset,
-        int &$pagesInRun,
-        int &$chunksReused,
-        int &$pagesReused,
-        int &$cachedRefMisses,
-        array &$skipped,
-        MemoryTelemetry $telemetry,
-        ProgressReporterInterface $progress,
-    ): void {
-        $records    = $pending[$range] ?? [];
-        $identities = $pendingIdentities[$range] ?? [];
-        unset($pending[$range], $pendingIdentities[$range]);
-        $flushedRanges[$range] = true;
-
-        foreach ($records as $record) {
-            if ($record['tokenData'] !== null) {
-                $pendingResolved--;
-            }
-        }
-
-        if ($records === []) {
-            return;
-        }
-
-        // Only a range whose every page was deferred can be reused: a page that
-        // had to be resolved is a page whose identity did not match, and one
-        // mismatch changes the chunk.
-        $allDeferred = true;
-        foreach ($records as $record) {
-            if ($record['tokenData'] !== null) {
-                $allDeferred = false;
-                break;
-            }
-        }
-
-        if ($allDeferred && $reuse->canReuse($range, $identities)) {
-            $target = $this->coordinator->chunkPath($chunkNum);
-            if ($reuse->linkInto($range, $target)) {
-                foreach ($records as $record) {
-                    $this->ledger->allocate(
-                        (string) $record['page']->id,
-                        (string) $record['page']->url,
-                        InvertedIndexBuilder::effectiveFilters($record['page']),
-                        InvertedIndexBuilder::effectiveSortable($record['page']),
-                        $record['contentHash'],
-                    );
-                    if ($record['entityKey'] !== null) {
-                        $this->tsManifest->markSeen($record['entityKey']);
-                    }
-                    $this->cache()->touch($record['contentHash']);
-                }
-
-                // Same ordering rule as a written chunk: the ordinals reach
-                // disk before the chunk that references them.
-                $this->ledger->checkpoint();
-                $this->coordinator->commitReusedChunk($chunkNum, count($records));
-
-                $currentOffset += count($records);
-                $pagesInRun    += count($records);
-                $chunksReused++;
-                $pagesReused += count($records);
-
-                $reuse->recordRange($range, $chunkNum, $identities, reused: true);
-                $telemetry->emit("chunk_reused({$chunkNum})", ['items' => count($records)]);
-                $progress->advance(1, "Chunk {$chunkNum} reused ({$pagesInRun} pages)");
-                $chunkNum++;
-
-                return;
-            }
-        }
-
-        $resolved = $this->resolveDeferred($records, $cachedRefMisses, $skipped, $telemetry);
-        if ($resolved === []) {
-            return;
-        }
-
-        // The identities recorded for the next build describe what actually
-        // reached this chunk, which after a deferred lookup missed is not what
-        // arrived.
-        $written = [];
-        foreach ($resolved as $entry) {
-            $written[$entry['ordinal']] = $identities[$entry['ordinal']]
-                ?? BuildChunkReuse::pageIdentity($entry['ordinal'], $entry['contentHash'], $entry['item']);
-        }
-
-        $reuse->recordRange($range, $chunkNum, $written, reused: false);
-        $this->flushChunk($resolved, $chunkNum, $currentOffset, $pagesInRun, $telemetry, $progress);
-        $chunkNum++;
-    }
-
-    /**
-     * Turn buffered records into chunk entries, resolving deferred lookups.
-     *
-     * A deferred record is one whose token data was never read because its page
-     * looked unchanged. When the range turns out not to be reusable the data is
-     * needed after all, and it comes from the token cache — which is sound
-     * because deferral only ever happened for a page the cache reported holding.
-     *
-     * A miss here is treated exactly as a miss on the eager path: the page is
-     * skipped and counted, and markSeen() is deliberately not called, so the
-     * entity is treated as changed next build. The corpus-wide miss ratio guard
-     * downstream is what turns a wiped cache into a refusal rather than an index
-     * full of empty fragments.
-     *
-     * @param list<array{ordinal: int, page: SlimPage, contentHash: string, entityKey: ?string, tokenData: array<string, mixed>|null}> $records
-     * @param list<array{id: string, reason: string}> $skipped
-     * @return list<array{item: SlimPage, tokenData: array<string, mixed>, ordinal: int, contentHash: string}>
-     */
-    private function resolveDeferred(
-        array $records,
-        int &$cachedRefMisses,
-        array &$skipped,
-        MemoryTelemetry $telemetry,
-    ): array {
-        $entries = [];
-        foreach ($records as $record) {
-            $tokenData = $record['tokenData'];
-            if ($tokenData === null) {
-                $t0        = hrtime(true);
-                $tokenData = $this->cache()->get($record['contentHash']);
-                $telemetry->recordSubTimer('token_cache_get', (hrtime(true) - $t0) / 1e9, 1);
-                if ($tokenData === null) {
-                    $cachedRefMisses++;
-                    $skipped[] = [
-                        'id'     => (string) $record['page']->id,
-                        'reason' => 'token cache miss on a cached reference',
-                    ];
-                    continue;
-                }
-            }
-
-            $entries[] = [
-                'item'      => $record['page'],
-                'tokenData' => $tokenData,
-                'ordinal'   => $this->ledger->allocate(
-                    (string) $record['page']->id,
-                    (string) $record['page']->url,
-                    InvertedIndexBuilder::effectiveFilters($record['page']),
-                    InvertedIndexBuilder::effectiveSortable($record['page']),
-                    $record['contentHash'],
-                ),
-                'contentHash' => $record['contentHash'],
-            ];
-        }
-
-        return $entries;
     }
 
     /**
