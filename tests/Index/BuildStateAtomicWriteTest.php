@@ -77,11 +77,13 @@ class BuildStateAtomicWriteTest extends TestCase
         $this->assertNull($manifest, 'Corrupt manifest with no .tmp backup must yield fresh build');
     }
 
-    public function testAtomicWriteUsesLockEx(): void
+    public function testACommitLeavesOnlyAValidManifestAndNoTempFile(): void
     {
-        // Verify the write mechanism: commit writes to .tmp then renames.
-        // We intercept by checking that after a successful initiateBuild the
-        // .tmp file is gone (renamed) and the primary manifest is valid JSON.
+        // Named for the mechanism, not the implementation: the commit no longer
+        // takes a LOCK_EX, because a unique-per-writer temp path plus an atomic
+        // rename() gives mutual exclusion without a lock that NFS can strand.
+        // What must hold either way is that a successful initiateBuild() leaves
+        // the temp file renamed away and the primary manifest parseable.
         $state = new BuildState($this->tmpDir);
         $state->initiateBuild(['total_pages' => 1]);
 
