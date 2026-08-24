@@ -338,7 +338,12 @@ final class PageTableLedger
         flock($fp, LOCK_UN);
         fclose($fp);
 
-        if ($written === false) {
+        // A short write counts as a failure, not just an outright false. fwrite()
+        // returns a byte count, and a truncated trailing line is precisely the
+        // silent corruption this journal exists to prevent: the reader skips an
+        // unparseable line, so the ordinals it described are handed out again on
+        // resume and the merge drops every page but one.
+        if ($written !== strlen($payload)) {
             throw new \RuntimeException(
                 "Failed to append to the page-table journal at {$path}. "
                 . 'Refusing to continue: the chunk about to be written would reference '
