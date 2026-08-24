@@ -19,6 +19,9 @@
  *      localStorage values the visitor typed — all of which reach innerHTML.
  *      Fragment metadata is a fifth channel offered to consumers but never
  *      rendered by the built-in row, including on the renderer fallback path.
+ *   6. The results count header interpolates the active facet values, which
+ *      arrive from the f_<dimension> URL parameters and from LLM-applied
+ *      filter hints — neither validated against the facet index.
  */
 
 const fs = require('fs');
@@ -40,10 +43,12 @@ async function ticks(n) { for (let i = 0; i < n; i++) await tick(); }
 //   config           -> scoring config overrides
 //   expandResponse   -> body returned by the /expand endpoint
 //   summarizeResponse-> body returned by the /summarize endpoint
-function setup({ rowsFor, config = {}, sayt = {}, expandResponse = { terms: [] }, summarizeResponse = {} } = {}) {
+//   url              -> the page URL to boot at, so a crafted ?q=/?f_ link can
+//                        drive the load bootstrap
+function setup({ rowsFor, config = {}, sayt = {}, expandResponse = { terms: [] }, summarizeResponse = {}, url = 'https://example.com' } = {}) {
     const dom = new JSDOM(
         `<!DOCTYPE html><html><body><div id="scolta-search"></div></body></html>`,
-        { url: 'https://example.com', runScripts: 'dangerously' }
+        { url: url, runScripts: 'dangerously' }
     );
     const window = dom.window;
 
@@ -468,5 +473,92 @@ describe('stripHtml — inert parsing', () => {
         expect(fnSource).toBeTruthy();
         expect(fnSource[0]).toContain('DOMParser');
         expect(fnSource[0]).not.toContain('div.innerHTML');
+    });
+});
+
+describe('results count header — active facet values (escapeHtml)', () => {
+    // The header's filter label is built from activeFilters, which two
+    // untrusted channels feed: the f_<dimension> URL parameters (parsed by
+    // filtersFromUrlParams(), never validated against the facet index) and the
+    // LLM filter hints the recall guard applies. Both reach the same
+    // interpolation, beside a query that is already escaped on the same line.
+    //
+    // The label renders whenever the filtered set is non-empty. On a real site
+    // that is the ordinary OR-within-a-dimension case — ?f_topic=Fruit,<evil>
+    // keeps every Fruit page and adds the hostile value to the label — which is
+    // why this harness's Pagefind mock, which matches regardless of the filter,
+    // reproduces the render path rather than dodging it.
+    const HOSTILE = '<img src=x onerror="window.__pwned=true">';
+
+    async function bootAt(url) {
+        const h = setup({
+            url: url,
+            rowsFor: () => [
+                { url: '/a', title: 'Git Branching', content: 'git branch merge' },
+                { url: '/b', title: 'Git Merging', content: 'git merge branch' },
+            ],
+        });
+        await ticks(60);
+        return h;
+    }
+
+    const headerOf = h => h.$('#scolta-results-header');
+
+    test('a hostile f_ value from the URL renders as inert text, not markup', async () => {
+        const h = await bootAt(
+            'https://example.com/search?q=git&f_topic=' + encodeURIComponent(HOSTILE));
+        const header = headerOf(h);
+
+        expect(header.textContent).toMatch(/\d+ results? for "git"/);
+        expect(h.window.__pwned).toBeUndefined();
+        expect(header.querySelector('img')).toBeNull();
+        // The value the URL named is still shown, as text.
+        expect(header.textContent).toContain(HOSTILE);
+    });
+
+    test('an applied hostile filter value is escaped in the header too', async () => {
+        // toggleFilter() is the same seam the LLM filter hints write through:
+        // partitionFilterHintByRecall()'s applied entries are added to
+        // activeFilters and rendered by the same label.
+        const h = setup({
+            rowsFor: () => [{ url: '/a', title: 'Git Branching', content: 'git branch' }],
+        });
+        await ticks(15);
+        h.$('#scolta-query').value = 'git';
+        await h.window.Scolta.toggleFilter('topic', HOSTILE);
+        await ticks(40);
+        const header = headerOf(h);
+
+        expect(h.window.__pwned).toBeUndefined();
+        expect(header.querySelector('img')).toBeNull();
+        expect(header.textContent).toContain(HOSTILE);
+    });
+
+    test('`<`, `>` and `&` survive as readable text (escaped, not stripped)', async () => {
+        const raw = 'Fruit & <Veg> "Q"';
+        const h = await bootAt(
+            'https://example.com/search?q=git&f_topic=' + encodeURIComponent(raw));
+        const header = headerOf(h);
+
+        expect(header.textContent).toContain(raw);
+        expect(header.innerHTML).toContain('Fruit &amp; &lt;Veg&gt;');
+        // A text node, not an attribute: escapeHtml leaves `"` alone, and
+        // switching this call site to escapeAttr would show the visitor &quot;.
+        expect(header.innerHTML).toContain('"Q"');
+    });
+
+    test('multiple values across multiple dimensions keep their `, ` and `; ` shape', async () => {
+        const h = await bootAt(
+            'https://example.com/search?q=git&f_topic=Fruit,Veg&f_level=Beginner');
+        const header = headerOf(h);
+
+        expect(header.textContent).toContain(' in Fruit, Veg; Beginner');
+    });
+
+    test('the language display mapping still applies', async () => {
+        const h = await bootAt('https://example.com/search?q=git&f_language=en');
+        const header = headerOf(h);
+
+        expect(header.textContent).toContain(' in English');
     });
 });
