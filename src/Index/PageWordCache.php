@@ -153,35 +153,6 @@ final class PageWordCache
     }
 
     /**
-     * Keep $hash in the cache without reading its token data.
-     *
-     * get() marks a hash seen as a side effect of looking it up, which is fine
-     * while every page that survives a build is a page the build read. Chunk
-     * reuse breaks that: a reused chunk's pages are never tokenized and their
-     * token data is never wanted, but their cache entries must still survive
-     * pruneAndSave() or the next build finds nothing and re-tokenizes the whole
-     * corpus. Calling get() to achieve that would load — and on a cold cache,
-     * decompress — one chunk file per page, which is the exact work reuse
-     * exists to avoid.
-     *
-     * Returns whether the cache actually holds the hash, which the caller needs
-     * before it may throw away a page body on the strength of "this page is
-     * unchanged": a corpus past {@see MemoryBudget::tokenCacheManifestEntries()}
-     * has unchanged pages with no cache entry at all, and dropping their bodies
-     * would leave them unindexable.
-     *
-     * @return bool True when token data for $hash is on hand.
-     * @since 1.3.1
-     * @stability experimental
-     */
-    public function touch(string $hash): bool
-    {
-        $this->markSeen($hash);
-
-        return isset($this->manifest[$hash]) || isset($this->writeBuffer[$hash]);
-    }
-
-    /**
      * Look up cached token data for a content hash.
      *
      * Records the hash as "used" for pruning regardless of hit/miss.

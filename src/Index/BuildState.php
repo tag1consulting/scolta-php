@@ -129,33 +129,6 @@ class BuildState
     }
 
     /**
-     * Account for a chunk whose file was put in place without being written.
-     *
-     * Chunk reuse links the previous build's file into position rather than
-     * re-serialising identical data, so the file exists but recordChunk() never
-     * ran and the manifest would under-report both counters — leaving
-     * getChunkFiles() short of the files on disk and pages_processed short of
-     * the pages in them. This is recordChunk()'s bookkeeping half, with the
-     * write removed.
-     *
-     * @param int $chunkNumber Chunk number (0-based).
-     * @param int $pageCount   Pages the linked chunk file contains.
-     * @since 1.3.1
-     * @stability experimental
-     */
-    public function recordReusedChunk(int $chunkNumber, int $pageCount): void
-    {
-        $manifest = $this->readManifest();
-        if ($manifest === null) {
-            return;
-        }
-
-        $manifest['chunks_written']  = $chunkNumber + 1;
-        $manifest['pages_processed'] = ($manifest['pages_processed'] ?? 0) + $pageCount;
-        $this->commitManifest($manifest);
-    }
-
-    /**
      * Read a chunk from disk (v2 streaming format only).
      *
      * @param int $chunkNumber Chunk number (0-based).

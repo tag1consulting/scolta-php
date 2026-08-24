@@ -486,43 +486,6 @@ final class PageTableLedger
     }
 
     /**
-     * Live ordinals grouped by fixed-width ordinal range.
-     *
-     * The membership a build chunk is expected to have when chunks are cut on
-     * ordinal ranges rather than on arrival order: range k holds the live
-     * ordinals in `[k * $rangeSize, (k + 1) * $rangeSize)`. A build compares
-     * what actually arrives for a range against this to decide whether the
-     * range is complete, and therefore whether the previous build's chunk file
-     * for it can stand.
-     *
-     * Ints only, and one entry per live page: the same order of magnitude as
-     * the token-cache manifest the budget already accounts for, and far smaller
-     * than {@see self::rowsByOrdinal()}, which carries every row's filters and
-     * sortable values.
-     *
-     * @param int $rangeSize Ordinals per range; must be at least 1. Not typed
-     *                       positive-int because it arrives from operator
-     *                       configuration, which is exactly why it is checked.
-     * @return array<int, array<int, true>> Range index => ordinal => true.
-     * @since 1.3.1
-     * @stability experimental
-     */
-    public function liveOrdinalsByRange(int $rangeSize): array
-    {
-        if ($rangeSize < 1) {
-            throw new \InvalidArgumentException('Range size must be at least 1.');
-        }
-
-        $byRange = [];
-        foreach ($this->byId as $row) {
-            $ordinal                                        = (int) $row['ordinal'];
-            $byRange[intdiv($ordinal, $rangeSize)][$ordinal] = true;
-        }
-
-        return $byRange;
-    }
-
-    /**
      * Total size of the page table, live rows plus tombstones.
      *
      * This is the length `pf_meta[1]` must have and the `pageCount` the facet

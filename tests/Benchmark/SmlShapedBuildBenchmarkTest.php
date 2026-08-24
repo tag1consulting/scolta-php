@@ -7,7 +7,7 @@ namespace Tag1\Scolta\Tests\Benchmark;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\AbstractLogger;
-use Psr\Log\AbstractLogger as PsrAbstractLogger;
+use Psr\Log\NullLogger;
 use Tag1\Scolta\Index\BuildIntent;
 use Tag1\Scolta\Index\IncrementalIndexUpdater;
 use Tag1\Scolta\Index\IndexBuildOrchestrator;
@@ -205,22 +205,35 @@ final class SmlShapedBuildBenchmarkTest extends TestCase
      *
      * Asserted at 20,000 pages or more, never less: see the note in the body.
      *
-     * So the band asserted is the property the work actually established: **a
-     * warm build is faster than a cold one.** Before this round it was 1.57x
-     * *slower* at 20,000 pages (14.4 s against 9.2 s), because every page was
-     * re-serialised into a chunk file identical to the one already on disk and
-     * the build forced a garbage collection 400 times on the way. Both hosts
-     * above clear the band with room; a regression to the old behaviour misses
-     * it by a factor of two.
+     * The two rows above were measured with chunk reuse in place. That
+     * optimisation has since been withdrawn (it corrupted the heap on the real
+     * corpus), and with it went the claim that a warm build is *faster* than a
+     * cold one: on Apple silicon at 20,000 pages warm went from 0.77 of cold to
+     * 1.09 of it. The withdrawal is cheap for the same reason the ratio is a
+     * weak signal — reuse was only 3.6% of a warm build at 109,308 pages, since
+     * the merge, which reuse never touched, dominates both builds.
+     *
+     * **So warm/cold is no longer asserted at all, only printed.** It is not a
+     * number a threshold can be drawn across once reuse is gone, because it
+     * moves with the corpus: measured on Apple silicon after the withdrawal,
+     * 1.09 of cold at 20,000 pages but 1.32 at 109,308, on an idle machine. A
+     * warm build still runs the whole chunk pipeline and pays the token-cache
+     * reads on top, and the cache grows with the corpus, so the ratio drifts
+     * upward with size. Since SCOLTA_BENCH_PAGES makes the size a runtime
+     * choice, any fixed ceiling here is a threshold that passes or fails on
+     * which corpus somebody happened to run, which is the same failure mode as
+     * the ratio-to-a-third this test was written to avoid. The number is still
+     * printed, because it is worth an operator's eye; it is simply not an
+     * assertion.
+     *
+     * For the record, before this round it was 1.57x *slower* at 20,000 pages
+     * (14.4 s against 9.2 s), against 1.09 now, so the GC and compression work
+     * did move it. That is a real gain, just not one this test can police.
      *
      * The edit band is the one that transfers: an incremental update's cost is a
      * function of what changed, so it stays near 5% of a warm build on both
      * hosts, and 10% is a real ceiling rather than a restatement of the
      * measurement.
-     *
-     * Alongside them is an assertion that does not depend on wall clock at all:
-     * a warm build over an unchanged corpus must reuse *every* chunk. That is
-     * the mechanism the timing depends on, and it either happened or it did not.
      */
     public function testTheThreeBuildsStayWithinTheirMeasuredBands(): void
     {
@@ -238,7 +251,7 @@ final class SmlShapedBuildBenchmarkTest extends TestCase
             $items[] = $item;
         }
 
-        $coldLog = new ReuseCountingLogger();
+        $coldLog = new NullLogger();
         $t0      = microtime(true);
         $cold    = $this->build($items, $coldLog);
         $coldSeconds = microtime(true) - $t0;
@@ -249,7 +262,7 @@ final class SmlShapedBuildBenchmarkTest extends TestCase
             $references[] = $corpus->cachedReference($item);
         }
 
-        $warmLog = new ReuseCountingLogger();
+        $warmLog = new NullLogger();
         $t0      = microtime(true);
         $warm    = $this->build($references, $warmLog);
         $warmSeconds = microtime(true) - $t0;
@@ -263,8 +276,7 @@ final class SmlShapedBuildBenchmarkTest extends TestCase
         $this->assertSame(1, $update->pagesUpdated);
 
         printf(
-            "\n%s bands: %d pages\n  cold %6.2fs  warm %6.2fs (%.2f of cold)  edit %6.3fs (%.3f of warm)\n"
-            . "  chunks reused on the warm build: %d of %d\n",
+            "\n%s bands: %d pages\n  cold %6.2fs  warm %6.2fs (%.2f of cold)  edit %6.3fs (%.3f of warm)\n",
             self::class,
             $pages,
             $coldSeconds,
@@ -272,28 +284,13 @@ final class SmlShapedBuildBenchmarkTest extends TestCase
             $coldSeconds > 0.0 ? $warmSeconds / $coldSeconds : 0.0,
             $editSeconds,
             $warmSeconds > 0.0 ? $editSeconds / $warmSeconds : 0.0,
-            $warmLog->chunksReused,
-            $warm->chunksWritten,
         );
 
-        // Host-independent: the mechanism either fired or it did not.
-        $this->assertSame(
-            $warm->chunksWritten,
-            $warmLog->chunksReused,
-            'A warm build over an unchanged corpus rebuilt chunks it already had.',
-        );
-
-        $this->assertLessThan(
-            $coldSeconds,
-            $warmSeconds,
-            sprintf(
-                'A warm build took %.2fs against a cold build\'s %.2fs. It used to be 1.57x slower; '
-                . 'being slower again means chunk reuse or the GC fix has regressed.',
-                $warmSeconds,
-                $coldSeconds,
-            ),
-        );
-
+        // No warm/cold assertion: see the class note. "Warm beats cold" was
+        // chunk reuse's claim and went with it, and the replacement ratio moves
+        // with corpus size (1.09 at 20,000 pages, 1.32 at 109,308), so any fixed
+        // ceiling here would be a test of which corpus was run. Printed above,
+        // asserted nowhere.
         $this->assertLessThan(
             $warmSeconds * 0.10,
             $editSeconds,
@@ -308,10 +305,10 @@ final class SmlShapedBuildBenchmarkTest extends TestCase
     /**
      * Every optimisation switched off must publish the same index.
      *
-     * The differential proof for the round. Chunk reuse and fragment reuse both
-     * skip reading the data they are reproducing, so "the index looks fine" is
-     * not evidence of anything. The reference is the same pipeline with both
-     * switched off, over a *copy of the same state directory* — a fresh state
+     * The differential proof for the round. Fragment reuse skips reading the
+     * data it is reproducing, so "the index looks fine" is not evidence of
+     * anything. The reference is the same pipeline with it switched off, over a
+     * *copy of the same state directory* — a fresh state
      * directory means a fresh ledger, which renumbers the corpus and so renames
      * every fragment for a reason that has nothing to do with the optimisations.
      *
@@ -319,8 +316,7 @@ final class SmlShapedBuildBenchmarkTest extends TestCase
      *
      * For a **warm build** the claim is byte equality over the whole directory,
      * and it is exact: the corpus has not changed, so the vocabulary has not
-     * changed, so there is nothing for the two paths to disagree about. This is
-     * the assertion chunk reuse lives or dies by.
+     * changed, so there is nothing for the two paths to disagree about.
      *
      * For a state reached by **incremental updates** the claim is equality of
      * fragments, of the page table, and of every posting of every term — but not
@@ -339,7 +335,7 @@ final class SmlShapedBuildBenchmarkTest extends TestCase
     {
         $pages  = self::pages();
         $corpus = new SmlShapedCorpus($pages);
-        $logger = new ReuseCountingLogger();
+        $logger = new NullLogger();
 
         $items = [];
         foreach ($corpus->items() as $item) {
@@ -411,7 +407,7 @@ final class SmlShapedBuildBenchmarkTest extends TestCase
         $this->assertSame(
             [],
             $warmDiff,
-            'A warm build that reused its chunks published a different index than the reference path.',
+            'A warm build published a different index than the reference path.',
         );
         $this->assertSame([], $editContent, 'A one-page edit changed index content the reference path did not.');
         $this->assertSame(
@@ -470,7 +466,6 @@ final class SmlShapedBuildBenchmarkTest extends TestCase
             $state,
             $out,
             reuseFragments: false,
-            reuseChunks: false,
         ))->build(
             BuildIntent::fresh(count($pages), MemoryBudget::default()),
             $pages,
@@ -598,27 +593,5 @@ final class PhaseSummaryLogger extends AbstractLogger
         }
 
         $this->phaseSummaries[] = $message;
-    }
-}
-
-/**
- * Keeps the reuse counts the build reports, so a timing test can assert the
- * mechanism fired rather than only that the clock agreed.
- */
-final class ReuseCountingLogger extends PsrAbstractLogger
-{
-    public int $chunksReused = 0;
-
-    /**
-     * @param mixed                $level
-     * @param string|\Stringable    $message
-     * @param array<string, mixed> $context
-     */
-    public function log($level, $message, array $context = []): void
-    {
-        $message = (string) $message;
-        if (str_contains($message, 'index chunks were unchanged')) {
-            $this->chunksReused = (int) ($context['chunks'] ?? 0);
-        }
     }
 }
