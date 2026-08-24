@@ -176,9 +176,21 @@ class PhpIndexer
             $fileCount = $this->countFiles($this->outputDir . '/pagefind');
 
             $this->coordinator->release();
-            $this->prepared = false;
 
-            $this->cache->pruneAndSave();
+            // Prune only if this instance is the one that gathered. Pruning
+            // drops every hash the process did not look up, which means "the
+            // page is gone" only for a run that looked up every live page.
+            // ScoltaBatchOperations builds a fresh PhpIndexer per batch step,
+            // so the instance that finalizes has looked up nothing at all, and
+            // pruning there kept nothing at all: a 6-byte manifest on disk and
+            // an empty token-cache/ directory, which made the next rebuild
+            // re-tokenize the whole corpus. Leave it as the gathering step
+            // left it.
+            if ($this->prepared) {
+                $this->cache->pruneAndSave();
+            }
+
+            $this->prepared = false;
 
             $elapsed = microtime(true) - $startTime;
 

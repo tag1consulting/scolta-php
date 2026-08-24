@@ -406,6 +406,53 @@
   // and deliberately a registration function rather than a config key.
   let globalSuggestionRenderer = null;
 
+  // --- Per-visitor expansion opt-out ---
+  //
+  // A visitor's ad-hoc "not on this search" choice, held in localStorage rather
+  // than a cookie or a server-side preference. The gate it feeds is entirely
+  // client-side — expandQuery() returns before the fetch leaves the browser —
+  // so nothing server-side needs to read it, and a value that is never sent
+  // costs nothing at the cache layer: no session for an anonymous visitor, no
+  // Vary, no cookie for an edge cache to bypass on. The delivered HTML is
+  // byte-identical for every visitor and the choice is applied after it lands.
+  //
+  // This is the complement to a platform's own access rule (in scolta-drupal,
+  // the scolta.ai_access service), not a substitute for it: that rule is
+  // per-account and permanent, this is per-browser and reversible. The two
+  // compose in one direction only — see the ALLOWED/effective split in
+  // getInstanceConfig().
+  //
+  // Module-scoped, not per-instance: the key is per-origin, so two search
+  // instances on one page share the visitor's answer rather than disagreeing.
+  const EXPANSION_OPT_OUT_KEY = 'scolta:expansion-disabled';
+
+  // In-memory source of truth, seeded lazily from storage. Storage can throw
+  // (Safari private mode, disabled cookies, quota) or be absent entirely; when
+  // it does, the toggle still works for the life of the page and simply does
+  // not persist, which is a better failure than a control that does nothing.
+  let expansionOptOut = null;
+
+  function expansionOptedOut() {
+    if (expansionOptOut === null) {
+      try {
+        expansionOptOut = global.localStorage.getItem(EXPANSION_OPT_OUT_KEY) === '1';
+      } catch (e) {
+        expansionOptOut = false;
+      }
+    }
+    return expansionOptOut;
+  }
+
+  function setExpansionOptOut(off) {
+    expansionOptOut = !!off;
+    try {
+      if (expansionOptOut) global.localStorage.setItem(EXPANSION_OPT_OUT_KEY, '1');
+      else global.localStorage.removeItem(EXPANSION_OPT_OUT_KEY);
+    } catch (e) {
+      debugLog('[scolta:expand] opt-out not persisted (storage unavailable)');
+    }
+  }
+
   function createInstance(containerSelector, instanceConfig) {
 
   // --- Instance state (local to this closure) ---
@@ -520,7 +567,29 @@
       EXCERPT_LENGTH: s.EXCERPT_LENGTH ?? 300,
       RESULTS_PER_PAGE: s.RESULTS_PER_PAGE ?? 10,
       MAX_PAGEFIND_RESULTS: s.MAX_PAGEFIND_RESULTS ?? 50,
-      AI_EXPAND_QUERY: s.AI_EXPAND_QUERY ?? true,
+      // Two values, and the difference between them is load-bearing.
+      //
+      // ALLOWED is what the deployment offers this visitor. It is already the
+      // conjunction of everything decided server-side: the site's own setting
+      // and, on a platform that gates AI per account, that gate too — the
+      // Drupal block hands over `config && access` folded into one boolean, so
+      // a site with expansion switched off and a user who has permanently
+      // opted out of AI arrive here identically, and correctly so.
+      //
+      // AI_EXPAND_QUERY is that, narrowed by the visitor's own ad-hoc choice.
+      // Every existing gate reads it — expandQuery(), the SAYT enrichment
+      // scheduler, doSearch()'s expansionInFlight — so the opt-out reaches all
+      // three by being applied once, here, rather than at each of them. And
+      // because getInstanceConfig() recomputes on every call, a toggle takes
+      // effect on the next search with no reload.
+      //
+      // The narrowing runs one way only: `&&` cannot turn a false ALLOWED
+      // true, so no localStorage value can hand a visitor a feature the
+      // deployment withheld. Rendering the toggle reads ALLOWED rather than
+      // the effective value, or the control would delete itself on first use.
+      AI_EXPAND_QUERY_ALLOWED: s.AI_EXPAND_QUERY ?? true,
+      AI_EXPAND_QUERY: (s.AI_EXPAND_QUERY ?? true) && !expansionOptedOut(),
+      EXPANSION_TOGGLE: s.EXPANSION_TOGGLE ?? true,
       AI_SUMMARIZE: s.AI_SUMMARIZE ?? true,
       AI_SUMMARY_TOP_N: s.AI_SUMMARY_TOP_N ?? 10,
       AI_SUMMARY_MAX_CHARS: s.AI_SUMMARY_MAX_CHARS ?? 4000,
@@ -1590,6 +1659,20 @@
           ? `<div class="scolta-ai-summary-disclaimer">${escapeHtml(disclaimer)}</div>`
           : '';
 
+        // With follow-ups turned off, the endpoint refuses every one of them
+        // and submitFollowUp() returns early, so an input here would be a
+        // dead field labelled "0 remaining". Emit neither it nor the thread
+        // it would append to.
+        const followUpHtml = CONFIG.AI_MAX_FOLLOWUPS > 0
+          ? `<div id="scolta-followup-thread" class="scolta-ai-followup-thread" style="display:none;"></div>
+          <div class="scolta-ai-followup-input" id="scolta-followup-input">
+            <input type="text" id="scolta-followup-field" placeholder="Ask a follow-up question..."
+                   data-scolta-followup-input>
+            <button id="scolta-followup-btn" data-scolta-followup-submit>Ask</button>
+            <span class="scolta-ai-followup-counter" id="scolta-followup-counter">${CONFIG.AI_MAX_FOLLOWUPS} remaining</span>
+          </div>`
+          : '';
+
         // The full text is always in the DOM, clipped by the box rather than
         // truncated, so find-in-page and assistive tech reach all of it in
         // either state.
@@ -1598,13 +1681,7 @@
           <div class="scolta-ai-summary-text" id="${SUMMARY_TEXT_ID}">${formatted}</div>
           <button type="button" class="scolta-ai-summary-toggle" data-scolta-summary-toggle
                   aria-expanded="false" aria-controls="${SUMMARY_TEXT_ID}" hidden>Show more</button>
-          <div id="scolta-followup-thread" class="scolta-ai-followup-thread" style="display:none;"></div>
-          <div class="scolta-ai-followup-input" id="scolta-followup-input">
-            <input type="text" id="scolta-followup-field" placeholder="Ask a follow-up question..."
-                   data-scolta-followup-input>
-            <button id="scolta-followup-btn" data-scolta-followup-submit>Ask</button>
-            <span class="scolta-ai-followup-counter" id="scolta-followup-counter">${CONFIG.AI_MAX_FOLLOWUPS} remaining</span>
-          </div>
+          ${followUpHtml}
           ${disclaimerHtml}`;
         updateSummaryClamp();
         // The decision above is only true for the width it measured at.
@@ -2013,6 +2090,36 @@
     // by BM25 relevance. We can't simply swap arrays — the sorted result set
     // excluded pages that lacked price metadata, so the relevance set is different.
     doSearch(true);
+  }
+
+  // Flip the visitor's expansion opt-out and re-run the search they are looking
+  // at, so the toggle answers immediately rather than at the next query.
+  //
+  // doSearch(false, ...) rather than doSearch(true), which is what every other
+  // in-place re-run here uses. preserveFilters short-circuits the expansion to
+  // `Promise.resolve(lastExpandedTerms)` — correct for a facet toggle or a sort,
+  // which must not re-bill an AI call for a query that has not changed, but it
+  // is precisely the wrong thing here: re-enabling would reuse the stored terms
+  // (null, just cleared) and never issue the request the visitor just asked
+  // for. A false cycle re-decides expansion from scratch; the filters ride
+  // across as initialFilters, the same seam the URL bootstrap uses.
+  //
+  // The Sets are copied because doSearch() only shallow-copies initialFilters
+  // and then owns the result — handing it the live objects would leave two
+  // names for one Set across a cycle that reassigns activeFilters.
+  function toggleExpansion() {
+    setExpansionOptOut(!expansionOptedOut());
+    // Terms from the previous cycle describe a search run under the old
+    // answer. Leaving them set would show "Also try:" chips for an expansion
+    // that is now off, and would be inherited by the next preserveFilters run.
+    lastExpandedTerms = null;
+    els.expandedTerms.style.display = 'none';
+    const carried = {};
+    for (const dim of Object.keys(activeFilters)) {
+      const vals = activeFilters[dim];
+      if (vals instanceof Set && vals.size > 0) carried[dim] = new Set(vals);
+    }
+    doSearch(false, Object.keys(carried).length > 0 ? carried : null);
   }
 
   function renderFilterBadges() {
@@ -4436,10 +4543,11 @@
     // relevance signal, an expansion, terms to highlight — not about rendering
     // something else. There is no separate empty state.
     //
-    // A page that loads with no ?q= never reaches here: the bootstrap only
-    // calls doSearch() when the parameter is present, so this is entered by an
-    // explicit submit, a facet toggle or a sort, never by arriving at a search
-    // page.
+    // A page that loads with neither ?q= nor an f_ parameter never reaches
+    // here: the bootstrap only calls doSearch() when one of them is present,
+    // so this is entered by an explicit submit, a facet toggle, a sort, or a
+    // landing on a URL that names a query or facet state — never by arriving
+    // at a bare search page.
     const isBrowse = query === '';
 
     // The user committed. Any pending or in-flight suggest work is now noise:
@@ -5175,6 +5283,49 @@
     return Array.prototype.slice.call(tpl.content.childNodes);
   }
 
+  // The visitor-facing expansion switch, or nothing at all.
+  //
+  // Gated on ALLOWED rather than on the effective AI_EXPAND_QUERY, which is the
+  // one thing this must not get wrong: the effective value is false the instant
+  // the visitor opts out, so reading it would make the control delete itself on
+  // first use and leave no way back. Absent when the deployment withholds
+  // expansion from this visitor — a site that switched it off, or a platform
+  // access rule that says no — so nobody is offered a switch for something they
+  // would not get; and absent when a site wants expansion without handing
+  // visitors a control over it (EXPANSION_TOGGLE).
+  //
+  // The label names the action, so it is its own accessible name; no
+  // aria-pressed, which would contradict a label that already changes. Which
+  // wording depends on the OPT-OUT, never on isExpanded, or the link would
+  // contradict what clicking it does — the short "disable" is only safe inside
+  // the "(with expanded terms - …)" parenthetical, where the surrounding text
+  // says what is being disabled. A render with expansion on but nothing
+  // expanded (a browse, an expansion that returned no terms, the phase-1 paint
+  // before one lands) has no such parenthetical, so it spells the noun out.
+  //
+  // "Expanded terms" and not "AI", deliberately: this governs query expansion
+  // alone, and a platform may separately offer a broader, permanent AI opt-out
+  // that this must not be mistaken for.
+  function expansionToggleLink(CONFIG, isExpanded) {
+    if (!CONFIG.EXPANSION_TOGGLE || !CONFIG.AI_EXPAND_QUERY_ALLOWED) return '';
+    const label = expansionOptedOut()
+      ? 'expand terms'
+      : (isExpanded ? 'disable' : 'disable expanded terms');
+    return '<button type="button" class="scolta-expansion-toggle" data-scolta-expansion-toggle>' +
+      label + '</button>';
+  }
+
+  // The switch as it appears beside the result count: folded into the
+  // "(with expanded terms)" parenthetical when there is one, and hung off a
+  // dash when there is not.
+  function expansionCountLabel(CONFIG, isExpanded) {
+    const link = expansionToggleLink(CONFIG, isExpanded);
+    if (isExpanded) {
+      return link ? ' (with expanded terms - ' + link + ')' : ' (with expanded terms)';
+    }
+    return link ? ' - ' + link : '';
+  }
+
   function renderResults(isExpanded, renderReason) {
     isExpanded = isExpanded || false;
     const reason = renderReason || 'search';
@@ -5211,7 +5362,13 @@
       container.innerHTML = "";
       paintedEntries = [];
       paintedHighlightSignature = null;
-      header.innerHTML = "";
+      // The toggle survives an empty result set, unlike the count it normally
+      // sits beside. Finding nothing is the moment a visitor who turned
+      // expansion off is most likely to want it back, and clearing the header
+      // here would strand them with no way to ask for it.
+      header.innerHTML = expansionToggleLink(CONFIG, false)
+        ? "<span>" + expansionToggleLink(CONFIG, false) + "</span>"
+        : "";
       noResults.style.display = "block";
       loadMore.style.display = "none";
       emitResultsRendered([], [], [], false);
@@ -5229,7 +5386,7 @@
     const startIndex = displayedCount;
     const appended = startIndex > 0;
     const showing = Math.min(startIndex + CONFIG.RESULTS_PER_PAGE, filtered.length);
-    const expandLabel = isExpanded ? ' (with expanded terms)' : '';
+    const expandLabel = expansionCountLabel(CONFIG, isExpanded);
     const filterLabel = Object.keys(activeFilters).length > 0
       ? ' in ' + Object.entries(activeFilters)
           .filter(([, vals]) => vals instanceof Set && vals.size > 0)
@@ -5574,6 +5731,11 @@
         dismissSortOverride();
         return;
       }
+      // Results-header expansion switch → flip the opt-out and re-run
+      if (e.target.closest("[data-scolta-expansion-toggle]")) {
+        toggleExpansion();
+        return;
+      }
       // Filter badge dismiss → remove that LLM-applied filter
       const filterDismissEl = e.target.closest("[data-scolta-filter-dismiss]");
       if (filterDismissEl) {
@@ -5613,27 +5775,40 @@
       }
     });
 
-    // Handle browser back/forward navigation between searches.
+    // The filter state a URL carries: one f_<dimension> parameter per
+    // dimension, comma-separated values — the same shape doSearch()'s URL
+    // sync writes. Shared by the popstate handler and the load bootstrap.
+    // Under AUTO_LANGUAGE_FILTER a URL naming only other languages is
+    // clamped to the page's own, the same override every search applies.
+    function filtersFromUrlParams(urlParams) {
+      var filters = {};
+      for (const [key, val] of urlParams.entries()) {
+        if (key.startsWith('f_') && val) {
+          var filterDim = key.slice(2);
+          var filterVals = val.split(',').filter(Boolean);
+          if (filterVals.length > 0) filters[filterDim] = new Set(filterVals);
+        }
+      }
+      if (getInstanceConfig().AUTO_LANGUAGE_FILTER && defaultLangCode && filters.language) {
+        if (!filters.language.has(defaultLangCode)) {
+          filters.language = new Set([defaultLangCode]);
+        }
+      }
+      return filters;
+    }
+
+    // Handle browser back/forward navigation between searches. A state with
+    // a query or facet state re-runs it — a browse writes no q param, so its
+    // history entries carry f_ parameters alone; a state with neither is the
+    // pre-search page, which clears.
     window.addEventListener("popstate", () => {
       try {
         var urlParams = new URLSearchParams(window.location.search);
         var urlQuery = urlParams.get('q');
-        if (urlQuery) {
-          els.queryInput.value = urlQuery;
-          els.searchClear.style.display = "block";
-          var restoredFilters = {};
-          for (const [key, val] of urlParams.entries()) {
-            if (key.startsWith('f_') && val) {
-              var filterDim = key.slice(2);
-              var filterVals = val.split(',').filter(Boolean);
-              if (filterVals.length > 0) restoredFilters[filterDim] = new Set(filterVals);
-            }
-          }
-          if (getInstanceConfig().AUTO_LANGUAGE_FILTER && defaultLangCode && restoredFilters.language) {
-            if (!restoredFilters.language.has(defaultLangCode)) {
-              restoredFilters.language = new Set([defaultLangCode]);
-            }
-          }
+        var restoredFilters = filtersFromUrlParams(urlParams);
+        if (urlQuery || Object.keys(restoredFilters).length > 0) {
+          els.queryInput.value = urlQuery || '';
+          els.searchClear.style.display = urlQuery ? "block" : "none";
           doSearch(false, Object.keys(restoredFilters).length > 0 ? restoredFilters : null);
         } else {
           clearSearch();
@@ -5647,25 +5822,20 @@
     Promise.all([initPagefind(), initScoltaWasm()]).then(() => {
       debugLog("[scolta] Ready — Pagefind + WASM loaded");
 
-      // If URL contains ?q=<query>, auto-execute the search and restore filter state.
+      // If the URL carries a query (?q=<query>) or facet state (f_*
+      // parameters), auto-execute it. A facet-only URL is what a browse's own
+      // URL sync writes — the link a filtered browse shares — and an f_ param
+      // is explicit intent, so landing on one runs the filtered browse.
+      // A bare /search still does nothing: browsing the full corpus on every
+      // search-page load stays off.
       try {
         var urlParams = new URLSearchParams(window.location.search);
         var urlQuery = urlParams.get('q');
-        if (urlQuery) {
-          els.queryInput.value = urlQuery;
-          els.searchClear.style.display = "block";
-          var initialFilters = {};
-          for (const [key, val] of urlParams.entries()) {
-            if (key.startsWith('f_') && val) {
-              var filterDim = key.slice(2);
-              var filterVals = val.split(',').filter(Boolean);
-              if (filterVals.length > 0) initialFilters[filterDim] = new Set(filterVals);
-            }
-          }
-          if (getInstanceConfig().AUTO_LANGUAGE_FILTER && defaultLangCode && initialFilters.language) {
-            if (!initialFilters.language.has(defaultLangCode)) {
-              initialFilters.language = new Set([defaultLangCode]);
-            }
+        var initialFilters = filtersFromUrlParams(urlParams);
+        if (urlQuery || Object.keys(initialFilters).length > 0) {
+          if (urlQuery) {
+            els.queryInput.value = urlQuery;
+            els.searchClear.style.display = "block";
           }
           doSearch(false, Object.keys(initialFilters).length > 0 ? initialFilters : null);
         }
@@ -5697,6 +5867,19 @@
     showMore,
     setResultRenderer,
     setSuggestionRenderer,
+    toggleExpansion,
+    // Set the visitor's expansion opt-out from a host's own control, for a
+    // platform that would rather place the switch in its own chrome than take
+    // the one in the results header (which it turns off with EXPANSION_TOGGLE).
+    // Narrowing only, exactly like the built-in toggle: passing true cannot
+    // give a visitor expansion the deployment withheld, because the gate is a
+    // conjunction and this only ever writes one side of it.
+    setExpansionEnabled: function(on) {
+      setExpansionOptOut(!on);
+    },
+    isExpansionEnabled: function() {
+      return getInstanceConfig().AI_EXPAND_QUERY;
+    },
     destroy: function() {
       if (abortController) abortController.abort();
       // Timers outlive the DOM they would write to; cancelSuggest() clears the
@@ -5872,6 +6055,9 @@
       global.Scolta.doSearch = inst.doSearch;
       global.Scolta.showMore = inst.showMore;
       global.Scolta.batchScoreResults = inst.batchScoreResults;
+      global.Scolta.toggleExpansion = inst.toggleExpansion;
+      global.Scolta.setExpansionEnabled = inst.setExpansionEnabled;
+      global.Scolta.isExpansionEnabled = inst.isExpansionEnabled;
     }
   };
 

@@ -123,6 +123,7 @@ factor before being added to the final score; the title boost is unaffected.
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `aiExpandQuery` | bool | `true` | Enable AI query expansion |
+| `expansionToggle` | bool | `true` | Offer visitors a switch in the results header that turns query expansion off for themselves. Separate from `aiExpandQuery`, which decides whether expansion runs at all: a site can want expansion on with no visitor-facing control over it. The choice is held in browser storage and narrows only — it cannot enable expansion where `aiExpandQuery` is false or a platform access rule refused it, and no switch is rendered in either case. Nothing server-side reads it, so it needs no session and is invisible to HTTP caches |
 | `aiSummarize` | bool | `true` | Enable AI result summarization |
 | `aiSummaryTopN` | int | `10` | Number of top results sent to AI for summarization |
 | `aiSummaryMaxChars` | int | `4000` | Maximum characters of content sent to AI for summarization |

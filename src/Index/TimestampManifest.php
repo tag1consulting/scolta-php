@@ -25,8 +25,11 @@ use Tag1\Scolta\Storage\StorageDriverInterface;
  *     - Unchanged: gatherer yields CachedContentReference(s), orchestrator
  *       calls markSeen() on cache hit.
  *     - Changed: gatherer loads entity, yields ContentItem, calls put().
- *  3. After build, pruneAndSave() removes entries for deleted entities and
- *     persists the updated manifest atomically.
+ *  3. After a full build that ran to completion in one process,
+ *     pruneAndSave() removes entries for deleted entities and persists the
+ *     manifest atomically. Any process that stopped part-way, or that only
+ *     merged, calls saveWithoutPruning() instead — it has not seen the whole
+ *     corpus, so "not seen" does not mean "deleted" there.
  *
  * Known-empty content hashes are tracked alongside the entries, in their own
  * file. An entity whose body is too short to index is still recorded by the
@@ -203,14 +206,34 @@ final class TimestampManifest
             }
         }
 
-        // A fresh build's prepare() calls BuildState::cleanup(), which unlinks
-        // every file in the state directory — this manifest included. Both
-        // copies live in memory by then, so the build runs correctly and the
-        // loss is invisible until the NEXT build finds no manifest and
-        // re-gathers the whole corpus. Saving only when something changed is
-        // therefore not enough: a build in which every entity is unchanged has
-        // nothing to mark dirty, and is exactly the build that can least afford
-        // to lose the manifest. Write whenever the file is missing.
+        $this->saveWithoutPruning();
+    }
+
+    /**
+     * Save without dropping anything this process never looked up.
+     *
+     * The counterpart of {@see PageWordCache::saveWithoutPruning()}, and needed
+     * for the same reason: pruning asks "which entities did this process not
+     * see?" and answers "the ones that were deleted", which is only true of a
+     * full build that ran to completion in one process and therefore saw every
+     * live entity. A process that stopped part-way — the voluntary memory
+     * yield, the deferred-merge return — has not reached the tail of the
+     * corpus, so pruning there deletes the entry of every entity after the
+     * point it stopped, and the segment that resumes re-gathers all of them.
+     * A merge-only pass gathered nothing at all, so pruning keeps nothing at
+     * all. Both manifests are kept in lockstep with the token cache, because
+     * they describe the same pages and are useful only together.
+     *
+     * Saving only when something changed is not enough: a segment in which
+     * every entity was unchanged has nothing to mark dirty, and is exactly the
+     * one that can least afford to lose the manifest. So write whenever the
+     * file is missing too.
+     *
+     * @since 1.3.1
+     * @stability experimental
+     */
+    public function saveWithoutPruning(): void
+    {
         if ($this->dirty || ($this->data !== [] && !$this->storage->exists($this->path(self::FILENAME)))) {
             $this->saveToDisk();
             $this->dirty = false;

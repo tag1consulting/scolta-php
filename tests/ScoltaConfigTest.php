@@ -633,7 +633,7 @@ class ScoltaConfigTest extends TestCase
             'EXACT_TITLE_MATCH_BOOST',
             'CONTENT_MATCH_BOOST', 'PHRASE_ADJACENT_MULTIPLIER', 'PHRASE_NEAR_MULTIPLIER',
             'PHRASE_NEAR_WINDOW', 'PHRASE_WINDOW', 'EXCERPT_LENGTH', 'RESULTS_PER_PAGE',
-            'MAX_PAGEFIND_RESULTS', 'AI_EXPAND_QUERY', 'AI_SUMMARIZE', 'AI_SUMMARY_TOP_N',
+            'MAX_PAGEFIND_RESULTS', 'AI_EXPAND_QUERY', 'EXPANSION_TOGGLE', 'AI_SUMMARIZE', 'AI_SUMMARY_TOP_N',
             'AI_SUMMARY_MAX_CHARS', 'EXPAND_PRIMARY_WEIGHT', 'CROSS_LIST_BONUS', 'EXPAND_SUBWORD_MAX_FREQ',
             'EXPAND_SUBWORD_DENYLIST',
             'SPECIFICITY_WEIGHTING', 'SPECIFICITY_FLOOR', 'SPECIFICITY_STRONG_MATCH',
@@ -648,7 +648,7 @@ class ScoltaConfigTest extends TestCase
             $this->assertArrayHasKey($key, $js, "Missing key: {$key}");
         }
 
-        $this->assertCount(40, $js, 'Expected exactly 40 keys in toJsScoringConfig()');
+        $this->assertCount(41, $js, 'Expected exactly 41 keys in toJsScoringConfig()');
     }
 
     public function testToJsScoringConfigValuesMatchConfig(): void
@@ -1250,11 +1250,35 @@ class ScoltaConfigTest extends TestCase
         $this->assertSame('navigate', $config->toBrowserConfig()['saytSuggestionAction']);
     }
 
+    /**
+     * expansionToggle decides whether visitors are OFFERED a switch, which is
+     * a different question from whether expansion runs. Keeping them separate
+     * is the point: a site can want expansion on with no control over it, and
+     * a site that turns expansion off must not have the control implied for it.
+     */
+    public function testExpansionToggleIsIndependentOfAiExpandQuery(): void
+    {
+        $default = (new ScoltaConfig())->toJsScoringConfig();
+        $this->assertTrue($default['EXPANSION_TOGGLE'], 'the switch is offered by default');
+        $this->assertTrue($default['AI_EXPAND_QUERY']);
+
+        // Expansion on, no visitor-facing control.
+        $noControl = ScoltaConfig::fromArray(['expansion_toggle' => false])->toJsScoringConfig();
+        $this->assertFalse($noControl['EXPANSION_TOGGLE']);
+        $this->assertTrue($noControl['AI_EXPAND_QUERY'], 'suppressing the control leaves expansion running');
+
+        // Expansion off. The flag still travels as set; scolta.js renders no
+        // control regardless, because there would be nothing behind it.
+        $off = ScoltaConfig::fromArray(['ai_expand_query' => false])->toJsScoringConfig();
+        $this->assertFalse($off['AI_EXPAND_QUERY']);
+        $this->assertTrue($off['EXPANSION_TOGGLE']);
+    }
+
     public function testSaytKeysDoNotChangeTheScoringKeyCount(): void
     {
-        // SAYT settings are UI behaviour, not ranking. The 40-key scoring
-        // contract with the WASM scorer must be untouched by all ten of them.
-        $this->assertCount(40, (new ScoltaConfig())->toJsScoringConfig());
+        // SAYT settings are UI behaviour, not ranking. The scoring contract
+        // with the WASM scorer must be untouched by all ten of them.
+        $this->assertCount(41, (new ScoltaConfig())->toJsScoringConfig());
     }
 
     /**

@@ -31,6 +31,33 @@ final class IndexBuildOrchestrator
      */
     private const MEMORY_PRESSURE_RATIO = 0.75;
 
+    /**
+     * Fraction of the items in a run that may miss the token cache on a
+     * cached reference before the build refuses to publish.
+     *
+     * A cached reference carries no body: the whole point is that the
+     * gatherer did not load one, because the token cache already holds the
+     * page. A miss therefore cannot be recovered in this run — the page is
+     * dropped, its ledger row is released as stale, and the merge writes a
+     * tombstone in its place. One or two are ordinary (an evicted entry past
+     * the manifest cap). A thousand mean the cache is gone, and the index the
+     * build is about to swap in is empty.
+     *
+     * Ten percent is well above the eviction rate a manifest cap produces and
+     * well below anything a lost cache looks like.
+     */
+    private const MAX_CACHED_REFERENCE_MISS_RATIO = 0.10;
+
+    /**
+     * Chunks between two gc_mem_caches() calls.
+     *
+     * Trimming the allocator's caches is worth doing on a long build and is
+     * not worth doing 2,187 times: it measured 5.35 ms per call against a
+     * 198 MB heap, so once per chunk spent 2.3 s of a 14.4 s warm build
+     * returning blocks that the next chunk immediately asked for again.
+     */
+    private const MEM_CACHES_EVERY_CHUNKS = 20;
+
     private readonly BuildCoordinator $coordinator;
     private readonly InvertedIndexBuilder $builder;
     private readonly IndexMerger $merger;
@@ -45,6 +72,9 @@ final class IndexBuildOrchestrator
      * the two paths behaved differently under the same flag.
      */
     private ?PageWordCache $cache = null;
+
+    /** Chunks committed since the last gc_mem_caches(). */
+    private int $chunksSinceMemCaches = 0;
     private readonly TimestampManifest $tsManifest;
     private readonly PageTableLedger $ledger;
     private readonly string $outputDir;
@@ -59,6 +89,16 @@ final class IndexBuildOrchestrator
         ?StorageDriverInterface $storage = null,
         /** @var (\Closure(): bool)|null Injected in tests to force voluntary yield without real RSS pressure. */
         private readonly ?\Closure $memoryPressureProbe = null,
+        /**
+         * Link unchanged fragments out of the live index instead of re-encoding
+         * them. null, the default, decides from the filesystem, because whether
+         * a hard link beats a write is a property of the filesystem and the sign
+         * flips between the ones this package runs on; see
+         * {@see StreamingFormatWriter::linkBeatsWrite()} for the measurements.
+         * true forces it on, false forces it off — off is the reference path the
+         * differential tests compare against.
+         */
+        private readonly ?bool $reuseFragments = null,
     ) {
         // Strip a trailing /pagefind suffix if already present. atomicSwap()
         // always appends /pagefind internally, so a doubly-suffixed path would
@@ -163,15 +203,18 @@ final class IndexBuildOrchestrator
 
         $budget = $intent->memoryBudget();
 
-        // Order matters, and it is not obvious. A fresh build's prepare() calls
-        // BuildState::cleanup(), which unlinks every *file* in the state
-        // directory — including token-cache-manifest.php, while leaving the
-        // token-cache/ subdirectory of chunk files intact. The cache is usable
-        // afterwards only because its manifest was already read into memory.
-        // TimestampManifest and PageTableLedger survive the same wipe the same
-        // way, both loading in their constructors. Touch the cache here, before
-        // prepare(), or every fresh build silently starts with an empty one and
-        // re-tokenizes the entire corpus.
+        // Build the cache here, because this is the only place the budget is
+        // in scope: cache() sizes it from the first budget it is handed, and
+        // every later call in the loop passes none. Asking for it after
+        // prepare() would size it from MemoryBudget::default() instead.
+        //
+        // It used to have to be here for a second reason, which no longer
+        // holds: BuildState::cleanup() unlinked every file in the state
+        // directory, token-cache-manifest.php included, and the cache was
+        // usable afterwards only because its manifest had already been read
+        // into memory. cleanup() now removes only the files BuildState owns,
+        // so the last good manifest stays on disk until a completed build
+        // atomically replaces it.
         $this->cache($budget);
 
         try {
@@ -208,6 +251,10 @@ final class IndexBuildOrchestrator
             $resumeSkips = 0;
             /** @var int Cached references whose entity is already known to produce no page. */
             $expectedEmpty = 0;
+            /** @var int Items the run actually considered, resume skips excluded. */
+            $itemsSeen = 0;
+            /** @var int Cached references whose token data was gone. */
+            $cachedRefMisses = 0;
 
             // The generator that yields $pages does the CMS-side gathering, so
             // the time it spends is only visible as the gap between one
@@ -238,6 +285,8 @@ final class IndexBuildOrchestrator
                     continue;
                 }
 
+                $itemsSeen++;
+
                 if ($page instanceof CachedContentReference) {
                     $t0        = hrtime(true);
                     $tokenData = $this->cache()->get($page->contentHash);
@@ -257,6 +306,7 @@ final class IndexBuildOrchestrator
                     } else {
                         // On cache miss: skip markSeen → manifest entry is pruned →
                         // entity is treated as changed on the next build.
+                        $cachedRefMisses++;
                         $skipped[] = ['id' => (string) $page->id, 'reason' => 'token cache miss on a cached reference'];
                     }
                 } else {
@@ -296,8 +346,14 @@ final class IndexBuildOrchestrator
                     if ($this->isUnderMemoryPressure($telemetry)) {
                         $committedChunks = count($this->coordinator->chunkFiles());
                         $committedPages  = $this->coordinator->buildState()->getPagesProcessed();
-                        $this->cache()->pruneAndSave();
-                        $this->tsManifest->pruneAndSave();
+                        // Without pruning: this run has not reached the tail of
+                        // the corpus, so a page it never looked up is a page it
+                        // has not got to yet, not a page that is gone. Pruning
+                        // here deleted the token-cache entry and the manifest
+                        // entry of every page after the yield point — the exact
+                        // state the segment this yield schedules needs.
+                        $this->cache()->saveWithoutPruning();
+                        $this->tsManifest->saveWithoutPruning();
                         $this->coordinator->releaseLockOnly();
                         $logger->info(sprintf(
                             '[scolta] Memory pressure detected after chunk %d — yielding for restart (%d pages committed).',
@@ -332,8 +388,13 @@ final class IndexBuildOrchestrator
             $limitBytes   = $telemetry->effectiveLimitBytes();
             $segmentBytes = $telemetry->getCurrentRssBytes();
             if ($limitBytes > 0 && $segmentBytes >= (int) ($limitBytes * self::MEMORY_PRESSURE_RATIO)) {
-                $this->cache()->pruneAndSave();
-                $this->tsManifest->pruneAndSave();
+                // The merge has not run, so this build is not over: finalize()
+                // completes it in a fresh process. Saving without pruning for
+                // the same reason as the yield above — and because the process
+                // that picks this up gathers nothing, so whatever is written
+                // here is what the next build gets.
+                $this->cache()->saveWithoutPruning();
+                $this->tsManifest->saveWithoutPruning();
                 $this->coordinator->releaseLockOnly();
                 $telemetry->emit('finalize_deferred', ['heap_pct' => round($segmentBytes / $limitBytes * 100, 1)]);
                 $logger->warning('[scolta] RSS at ' . round($segmentBytes / $limitBytes * 100, 1) . '% of memory limit after indexing. Merge deferred — run `drush scolta:finalize` to complete.');
@@ -361,6 +422,68 @@ final class IndexBuildOrchestrator
             }
             $this->logSkippedItems($skipped, $logger);
 
+            // Refuse to publish an index the token cache emptied.
+            //
+            // A cached reference that misses is a page this run cannot index:
+            // it was handed no body to fall back to. The pipeline downstream
+            // treats that as "the entity is gone" — releaseStaleRows() frees
+            // its ordinal, the merge fills the hole with a tombstone — and the
+            // swap publishes the result. That is correct for a page deleted at
+            // the source and catastrophic for a page whose cache entry was
+            // evicted, and nothing downstream can tell the two apart, because
+            // both look like an id the build never committed.
+            //
+            // So it is decided here, on the only evidence that separates them:
+            // how many. A wiped cache misses on nearly every reference, and a
+            // build in that state must not reach the merge at all.
+            $missBudget = (int) ($itemsSeen * self::MAX_CACHED_REFERENCE_MISS_RATIO);
+            if ($cachedRefMisses > 0 && ($pagesInRun === 0 || $cachedRefMisses > $missBudget)) {
+                // Nothing has been swapped, so the currently published index is
+                // still the last good one. The two manifests go opposite ways
+                // here, and both keep the state recoverable.
+                //
+                // The token cache is saved WITHOUT pruning: pruning drops the
+                // hashes this run did not look up and deletes the chunk files
+                // that then have no live entries, which is how a cache the
+                // re-run could still have used becomes one it cannot.
+                //
+                // The timestamp manifest IS pruned, when this run gathered the
+                // whole corpus. Its entry is the promise that a page's token
+                // data exists, and for the pages that just missed the promise
+                // is false: leave it and the next build yields the same
+                // unreadable references and aborts again, forever, until
+                // somebody passes --force. Dropping it is what lets the next
+                // build re-gather those pages from source and self-heal. A
+                // resumed segment did not gather the whole corpus, so it is in
+                // no position to say whose promise is false.
+                $this->cache()->saveWithoutPruning();
+                if ($isResume) {
+                    $this->tsManifest->saveWithoutPruning();
+                } else {
+                    $this->tsManifest->pruneAndSave();
+                }
+                $this->coordinator->releaseLockOnly();
+                $error = sprintf(
+                    'token cache lost; re-run with `--force`: %d of %d unchanged pages had no token data, '
+                    . 'so this build would have published %d empty fragments in place of them. '
+                    . 'The existing index has been left in place.',
+                    $cachedRefMisses,
+                    $itemsSeen,
+                    $cachedRefMisses,
+                );
+                $logger->error('[scolta] ' . $error);
+
+                return $this->makeStatusReport(
+                    $telemetry,
+                    $budget,
+                    $startTime,
+                    pagesProcessed: $pagesInRun,
+                    chunksWritten: $chunkNum,
+                    success: false,
+                    error: $error,
+                );
+            }
+
             // Merge and write.
             // Ids the ledger still holds but this build never yielded have been
             // deleted at the source. Release them so their ordinals are
@@ -372,10 +495,13 @@ final class IndexBuildOrchestrator
                 ]);
             }
 
+            $this->assertLedgerHasLivePages();
+
             $telemetry->emit('merge_start');
             $chunkFiles   = $this->coordinator->chunkFiles();
             $streamWriter = new StreamingFormatWriter(new CborEncoder(), budget: $budget);
             $streamWriter->setTelemetry($telemetry);
+            $streamWriter->setFragmentReuse($this->reuseFragments);
             $this->merger->setTelemetry($telemetry);
             $telemetry->emit('writer_start');
             $streamWriter->beginWrite($this->outputDir);
@@ -395,8 +521,24 @@ final class IndexBuildOrchestrator
 
             $this->coordinator->release();
 
-            $this->cache()->pruneAndSave();
-            $this->tsManifest->pruneAndSave();
+            // The one path that legitimately looked up every live page: a fresh
+            // build that reached the end of the corpus in this process, so a
+            // hash nobody asked for belongs to a page that is gone.
+            //
+            // A resumed segment is not that path even when it succeeds. It is
+            // handed the whole corpus again — no adapter can translate "pages
+            // committed" into a position in its own query — and skips every id
+            // the ledger says an earlier segment committed, before it would
+            // have looked the page up. So "not looked up" there covers almost
+            // the whole corpus, and pruning dropped it: a build that succeeded
+            // across three segments kept only the third one's pages.
+            if ($isResume) {
+                $this->cache()->saveWithoutPruning();
+                $this->tsManifest->saveWithoutPruning();
+            } else {
+                $this->cache()->pruneAndSave();
+                $this->tsManifest->pruneAndSave();
+            }
             $this->ledger->save();
 
             // gc_status() gained runs/collected in PHP 7.3; the array shape
@@ -404,10 +546,21 @@ final class IndexBuildOrchestrator
             /** @var array<string, int|bool> $gc */
             $gc = gc_status();
             $telemetry->emit('build_complete', [
-                'items'        => $pagesForReport,
-                'gc_runs'      => (int) ($gc['runs'] ?? -1),
-                'gc_collected' => (int) ($gc['collected'] ?? -1),
+                'items'             => $pagesForReport,
+                'gc_runs'           => (int) ($gc['runs'] ?? -1),
+                'gc_collected'      => (int) ($gc['collected'] ?? -1),
+                'fragments_reused'  => $streamWriter->fragmentsReused(),
+                'fragments_written' => $streamWriter->fragmentsWritten(),
             ]);
+            if ($streamWriter->fragmentsReused() > 0) {
+                $logger->info(
+                    '[scolta] {reused} of {total} fragments were unchanged and linked from the previous index.',
+                    [
+                        'reused' => $streamWriter->fragmentsReused(),
+                        'total'  => $streamWriter->fragmentsReused() + $streamWriter->fragmentsWritten(),
+                    ],
+                );
+            }
             $telemetry->emitPhaseSummary();
 
             return $this->makeStatusReport(
@@ -525,8 +678,11 @@ final class IndexBuildOrchestrator
 
     /**
      * Build, commit, and release one chunk of token data, advancing the page
-     * offset and run counter. GC runs after the partial is freed so
-     * chunk-sized allocations don't accumulate across the loop.
+     * offset and run counter.
+     *
+     * The partial is freed here rather than at the next loop iteration, and
+     * the allocator's caches are trimmed periodically afterwards; see the
+     * comment at the trim itself for why no cycle collection happens.
      */
     private function flushChunk(
         array $chunk,
@@ -559,15 +715,34 @@ final class IndexBuildOrchestrator
         $progress->advance(1, "Chunk {$chunkNum} ({$pagesInRun} pages)");
         unset($partial);
 
-        // Measured, not assumed: PHP's cycle collector fires on its own at a
-        // 10,001-entry root buffer and acyclic data is freed at refcount zero
-        // without it, so these two calls may be buying nothing. gc_status()
-        // runs/collected are reported alongside the timing so the question is
-        // answerable from one build log.
+        // The question the previous comment here left open is now answered, so
+        // the forced collection is gone. Probed on a 20,000-page SML-shaped
+        // build, 800 calls across a cold and a warm run: the root buffer sat
+        // at a median of 4,092 entries against the engine's own 10,001 trigger,
+        // and gc_collect_cycles() returned 0 on every single call — it never
+        // once found a cycle to break, because this pipeline's per-chunk data
+        // is acyclic and already freed at refcount zero.
+        //
+        // What it did cost is a scan proportional to the resident heap: 0.68 ms
+        // per call below the cold run's median heap against 3.27 ms at or above
+        // it, and 5.25 ms per call on the warm run's 198 MB heap. That was 2.1 s
+        // of a 14.4 s warm build, buying nothing. The engine collects on its own
+        // threshold and raises that threshold after a run that frees little,
+        // which is the adaptive behaviour a fixed per-chunk call overrides.
+        //
+        // gc_mem_caches() stays, because it does something different — it
+        // returns unused allocator blocks to the system rather than hunting
+        // cycles — but it is not free either (5.35 ms median per call on the
+        // warm heap, 2.3 s across the build), so it runs once per
+        // MEM_CACHES_EVERY_CHUNKS instead of once per chunk. The sub-timer and
+        // the gc_runs/gc_collected fields in build_complete stay so the
+        // decision remains answerable from a build log rather than from this
+        // comment.
         $t0 = hrtime(true);
-        gc_collect_cycles();
-        if (function_exists('gc_mem_caches')) {
+        $this->chunksSinceMemCaches++;
+        if ($this->chunksSinceMemCaches >= self::MEM_CACHES_EVERY_CHUNKS && function_exists('gc_mem_caches')) {
             gc_mem_caches();
+            $this->chunksSinceMemCaches = 0;
         }
         $telemetry->recordSubTimer('gc', (hrtime(true) - $t0) / 1e9, 1);
     }
@@ -650,9 +825,12 @@ final class IndexBuildOrchestrator
                 ]);
             }
 
+            $this->assertLedgerHasLivePages();
+
             $telemetry->emit('merge_start');
             $streamWriter = new StreamingFormatWriter(new CborEncoder(), budget: $budget);
             $streamWriter->setTelemetry($telemetry);
+            $streamWriter->setFragmentReuse($this->reuseFragments);
             $this->merger->setTelemetry($telemetry);
             $streamWriter->beginWrite($this->outputDir);
             $this->merger->mergeStreaming($chunkFiles, $streamWriter, $budget);
@@ -670,11 +848,22 @@ final class IndexBuildOrchestrator
 
             $this->coordinator->release();
 
-            $this->cache()->pruneAndSave();
-            $this->tsManifest->pruneAndSave();
+            // The token cache and the timestamp manifest are left exactly as
+            // the gathering segments left them. This pass only merges chunk
+            // files: it looked up not one page, so its in-memory copies hold
+            // the on-disk manifests with nothing marked as seen, and pruning
+            // them keeps nothing at all — it wrote a 6-byte a:0:{} manifest
+            // and deleted every file in token-cache/. That is the state a
+            // crash followed by `drush scolta:finalize` was leaving behind,
+            // and it made the next build fully cold. The ledger is saved
+            // because releaseStaleRows() above genuinely changed it.
             $this->ledger->save();
 
-            $telemetry->emit('build_complete', ['items' => $pagesProcessed]);
+            $telemetry->emit('build_complete', [
+                'items'             => $pagesProcessed,
+                'fragments_reused'  => $streamWriter->fragmentsReused(),
+                'fragments_written' => $streamWriter->fragmentsWritten(),
+            ]);
             $telemetry->emitPhaseSummary();
 
             return $this->makeStatusReport(
@@ -784,6 +973,40 @@ final class IndexBuildOrchestrator
     }
 
     /**
+     * Refuse a page table in which nothing is alive.
+     *
+     * A page whose content this build could not read looks exactly like a page
+     * that was deleted at the source: neither is committed, so releaseStaleRows()
+     * frees the ordinal and the merge pads the hole with a tombstone. One at a
+     * time that is correct. All of them at once is a corpus that vanished
+     * between two builds, and the difference between "the site was emptied" and
+     * "the build could not read the site" is not one this code can make — so it
+     * makes neither, and refuses to publish an index in which every document is
+     * a tombstone.
+     *
+     * Called before the merge, where refusing still leaves the previous index
+     * in place, and again from the integrity check afterwards for the paths
+     * that reach it another way.
+     *
+     * @throws \RuntimeException When the page table holds ordinals and no live page.
+     */
+    private function assertLedgerHasLivePages(): void
+    {
+        $pageTableSize = $this->ledger->pageTableSize();
+        if ($pageTableSize === 0 || $this->ledger->liveCount() > 0) {
+            return;
+        }
+
+        throw new \RuntimeException(sprintf(
+            'Index integrity check failed: the page table has %d ordinals and none of them is live, '
+            . 'so the index would contain nothing but tombstones. Either every page was deleted at '
+            . 'the source, or the build could not read the content it was handed. '
+            . 'The index must not be served. Re-run with --force to rebuild from the source content.',
+            $pageTableSize,
+        ));
+    }
+
+    /**
      * Verify the finished index accounts for every page the build indexed.
      *
      * The count that matters is the ledger's live rows: one row per id this
@@ -796,6 +1019,11 @@ final class IndexBuildOrchestrator
      */
     private function verifyOutputHasFragments(int $pagesProcessed): void
     {
+        // Before the zero-page exit, not after it: zero is the symptom here,
+        // not the exemption. Held back until after the exit, a build that lost
+        // every page reports success and serves an index of pure tombstones.
+        $this->assertLedgerHasLivePages();
+
         if ($pagesProcessed === 0) {
             return;
         }

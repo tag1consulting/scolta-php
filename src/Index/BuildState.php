@@ -383,7 +383,26 @@ class BuildState
     }
 
     /**
-     * Clean up all state files.
+     * Clean up the state this class owns: the lock, the manifest and the
+     * committed chunk files.
+     *
+     * Deliberately not the whole directory, which is what it used to be. The
+     * state directory is shared: PageWordCache keeps token-cache-manifest.php
+     * in it, TimestampManifest keeps two files, PageTableLedger keeps a
+     * snapshot and a journal. BuildCoordinator::prepare() calls this at the top
+     * of every fresh build and release() calls it again after a successful one,
+     * so all of that was deleted twice per build, and it survived only because
+     * each of those classes loads its state in its own constructor and writes
+     * it back at the end. A build that never reached its write — a crash, an
+     * OOM kill, a forced pod eviction, a deferred merge, a finalize-only run —
+     * left the directory holding none of it, and the next build read an empty
+     * manifest, treated the whole corpus as changed, and ran fully cold.
+     *
+     * Nothing here ever needed those files gone. What a fresh build needs is
+     * the chunk files of the abandoned one cleared, so that its own chunk
+     * numbering starts from an empty set; every other file in the directory
+     * belongs to a component that manages its own lifecycle and is the only
+     * thing that knows when an entry is stale.
      *
      * @since 1.0.0
      * @stability stable
@@ -394,34 +413,63 @@ class BuildState
             return;
         }
 
-        $files = glob($this->stateDir . '/*');
-        if ($files !== false) {
-            foreach ($files as $file) {
-                if (is_file($file)) {
-                    unlink($file);
-                }
+        foreach ($this->ownedFiles() as $file) {
+            if (is_file($file)) {
+                unlink($file);
             }
         }
     }
 
     /**
-     * Write the manifest atomically: write to .tmp, then rename.
+     * Every path this class writes into the state directory.
      *
-     * A process crash during the write leaves at most a .tmp file, which
-     * readManifest() reads as a fallback. After rename() succeeds the write is
-     * durable — rename() on POSIX is atomic; on Windows it is best-effort
-     * (falls back to copy+delete).
+     * The manifest temp files are included because commitManifest() names them
+     * per writer (pid + uniqid), so a writer killed between the write and the
+     * rename leaves one behind and readManifest() falls back to the newest of
+     * them — which must not outlive the build it describes.
+     *
+     * @return list<string>
+     */
+    private function ownedFiles(): array
+    {
+        $files = [
+            $this->stateDir . '/' . self::LOCK_FILE,
+            $this->stateDir . '/' . self::MANIFEST_FILE,
+        ];
+
+        $patterns = [
+            '/' . self::MANIFEST_FILE . self::MANIFEST_TMP_SUFFIX . '*',
+            '/chunk-*.dat',
+        ];
+        foreach ($patterns as $pattern) {
+            foreach (glob($this->stateDir . $pattern) ?: [] as $path) {
+                $files[] = $path;
+            }
+        }
+
+        return $files;
+    }
+
+    /**
+     * Write the manifest atomically: write to a unique temp file, then rename.
+     *
+     * The temp filename is unique per writer (pid + uniqid), so no two writers
+     * ever contend for the same path — no flock() is needed. A blocking
+     * LOCK_EX on a *fixed* temp path used to hang forever here on NFS-backed
+     * storage after an ungracefully-killed writer left a stale server-side
+     * lock behind (NFS lock state is tracked server-side; SIGKILL never
+     * releases it the way a local flock() would).
      *
      * @throws \RuntimeException on I/O failure.
      */
     private function commitManifest(array $manifest): void
     {
         $manifestPath = $this->stateDir . '/' . self::MANIFEST_FILE;
-        $tempPath     = $manifestPath . self::MANIFEST_TMP_SUFFIX;
+        $tempPath     = $manifestPath . self::MANIFEST_TMP_SUFFIX . '.' . getmypid() . '.' . uniqid('', true);
 
         $json = json_encode($manifest, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
 
-        if (file_put_contents($tempPath, $json, LOCK_EX) === false) {
+        if (file_put_contents($tempPath, $json) === false) {
             throw new \RuntimeException("Failed to write manifest temp file: {$tempPath}");
         }
 
@@ -435,20 +483,31 @@ class BuildState
     /**
      * Read the manifest file.
      *
-     * Primary path: manifest.json. If it is absent or contains invalid JSON
-     * (e.g. partial write during a crash), falls back to manifest.json.tmp —
-     * which may be a complete write that never got renamed. If neither file
-     * yields valid JSON, returns null (fresh build).
+     * Falls back to the newest manifest.json.tmp* temp file (each writer gets
+     * a unique one) if manifest.json is missing or invalid. Returns null if
+     * nothing yields valid JSON (fresh build).
      */
     private function readManifest(): ?array
     {
-        $path    = $this->stateDir . '/' . self::MANIFEST_FILE;
-        $tmpPath = $path . self::MANIFEST_TMP_SUFFIX;
+        $path = $this->stateDir . '/' . self::MANIFEST_FILE;
 
-        foreach ([$path, $tmpPath] as $candidate) {
-            if (!file_exists($candidate)) {
-                continue;
+        if (file_exists($path)) {
+            $data = file_get_contents($path);
+            if ($data !== false) {
+                $manifest = json_decode($data, true);
+                if (is_array($manifest)) {
+                    return $manifest;
+                }
             }
+        }
+
+        $candidates = glob($path . self::MANIFEST_TMP_SUFFIX . '*') ?: [];
+        usort(
+            $candidates,
+            static fn(string $a, string $b): int => (@filemtime($b) ?: 0) <=> (@filemtime($a) ?: 0),
+        );
+
+        foreach ($candidates as $candidate) {
             $data = file_get_contents($candidate);
             if ($data === false) {
                 continue;

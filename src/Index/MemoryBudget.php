@@ -35,7 +35,27 @@ final class MemoryBudget
         private readonly int $mergeOpenFileHandles,
         private readonly int $totalBudgetBytes,
         private readonly int $tokenCacheChunkBytes,
+        private readonly int $compressionLevel = self::DEFAULT_COMPRESSION_LEVEL,
     ) {}
+
+    /**
+     * Default gzip level for every index artifact.
+     *
+     * Level 9 was the original choice and it is the wrong trade for this
+     * format. Measured on the SML-shaped corpus: a 20 KB index chunk
+     * compresses in 6.3 ms at level 9 and 1.5 ms at level 6, for 3.1% more
+     * bytes. Across the whole index that is chunks +3.9%, filters +0.4%,
+     * meta +0.1% and facets +0.9%, against a saving that scales with the
+     * number of chunks — and the browser decompresses, so the level is not
+     * part of the format and the decompressed bytes are identical either way.
+     *
+     * Fragments are too small for the level to move them at all.
+     */
+    public const DEFAULT_COMPRESSION_LEVEL = 6;
+
+    /** Bounds zlib accepts. */
+    private const MIN_COMPRESSION_LEVEL = 1;
+    private const MAX_COMPRESSION_LEVEL = 9;
 
     /**
      * Conservative: the smallest of the three profiles, and the default.
@@ -66,6 +86,7 @@ final class MemoryBudget
             mergeOpenFileHandles: 50,
             totalBudgetBytes: 96 * 1024 * 1024,
             tokenCacheChunkBytes: 4 * 1024 * 1024,
+            compressionLevel: self::DEFAULT_COMPRESSION_LEVEL,
         );
     }
 
@@ -85,6 +106,7 @@ final class MemoryBudget
             mergeOpenFileHandles: 200,
             totalBudgetBytes: 384 * 1024 * 1024,
             tokenCacheChunkBytes: 16 * 1024 * 1024,
+            compressionLevel: self::DEFAULT_COMPRESSION_LEVEL,
         );
     }
 
@@ -104,6 +126,7 @@ final class MemoryBudget
             mergeOpenFileHandles: 500,
             totalBudgetBytes: 1024 * 1024 * 1024,
             tokenCacheChunkBytes: 64 * 1024 * 1024,
+            compressionLevel: self::DEFAULT_COMPRESSION_LEVEL,
         );
     }
 
@@ -167,6 +190,9 @@ final class MemoryBudget
             mergeOpenFileHandles: max(10, (int) round($this->mergeOpenFileHandles * $ratio)),
             totalBudgetBytes: $totalBytes,
             tokenCacheChunkBytes: max(1024 * 1024, (int) round($this->tokenCacheChunkBytes * $ratio)),
+            // Not a size, so it does not scale: the CPU-for-bytes trade a
+            // level represents is the same trade on a small host as a large one.
+            compressionLevel: $this->compressionLevel,
         );
     }
 
@@ -309,7 +335,50 @@ final class MemoryBudget
             mergeOpenFileHandles: max($chunkSize, $this->mergeOpenFileHandles),
             totalBudgetBytes: $this->totalBudgetBytes,
             tokenCacheChunkBytes: $this->tokenCacheChunkBytes,
+            compressionLevel: $this->compressionLevel,
         );
+    }
+
+    /**
+     * Return a copy of this budget with the gzip level overridden.
+     *
+     * Out-of-range values are clamped to what zlib accepts rather than
+     * throwing, matching how every other value here is bounded: a budget
+     * copied from a config file should degrade to something that runs.
+     *
+     * @param int $level 1 (fastest) to 9 (smallest).
+     * @since 1.3.1
+     * @stability experimental
+     */
+    public function withCompressionLevel(int $level): self
+    {
+        $level = max(self::MIN_COMPRESSION_LEVEL, min(self::MAX_COMPRESSION_LEVEL, $level));
+        if ($level === $this->compressionLevel) {
+            return $this;
+        }
+
+        return new self(
+            profile: $this->profile,
+            chunkSize: $this->chunkSize,
+            fragmentFlushBytes: $this->fragmentFlushBytes,
+            wordIndexChunkBytes: $this->wordIndexChunkBytes,
+            mergeOpenFileHandles: $this->mergeOpenFileHandles,
+            totalBudgetBytes: $this->totalBudgetBytes,
+            tokenCacheChunkBytes: $this->tokenCacheChunkBytes,
+            compressionLevel: $level,
+        );
+    }
+
+    /**
+     * gzip level for every index artifact this build writes.
+     *
+     * @see self::DEFAULT_COMPRESSION_LEVEL for the measurements behind the default.
+     * @since 1.3.1
+     * @stability experimental
+     */
+    public function compressionLevel(): int
+    {
+        return $this->compressionLevel;
     }
 
     /**
