@@ -77,11 +77,13 @@ class BuildStateAtomicWriteTest extends TestCase
         $this->assertNull($manifest, 'Corrupt manifest with no .tmp backup must yield fresh build');
     }
 
-    public function testAtomicWriteUsesLockEx(): void
+    public function testACommitLeavesOnlyAValidManifestAndNoTempFile(): void
     {
-        // Verify the write mechanism: commit writes to .tmp then renames.
-        // We intercept by checking that after a successful initiateBuild the
-        // .tmp file is gone (renamed) and the primary manifest is valid JSON.
+        // Named for the mechanism, not the implementation: the commit no longer
+        // takes a LOCK_EX, because a unique-per-writer temp path plus an atomic
+        // rename() gives mutual exclusion without a lock that NFS can strand.
+        // What must hold either way is that a successful initiateBuild() leaves
+        // the temp file renamed away and the primary manifest parseable.
         $state = new BuildState($this->tmpDir);
         $state->initiateBuild(['total_pages' => 1]);
 
@@ -91,6 +93,43 @@ class BuildStateAtomicWriteTest extends TestCase
 
         $data = json_decode(file_get_contents($manifestPath), true);
         $this->assertIsArray($data);
+    }
+
+    public function testManifestWriteUsesAUniquePerProcessTempFilenameNotAFixedPath(): void
+    {
+        $state = new BuildState($this->tmpDir);
+        $state->initiateBuild(['total_pages' => 1]);
+
+        $this->assertFileDoesNotExist($this->tmpDir . '/manifest.json.tmp');
+
+        $tempLeftovers = glob($this->tmpDir . '/manifest.json.tmp*') ?: [];
+        $this->assertSame([], $tempLeftovers, 'A successful commit must leave no temp file behind, unique-named or not');
+    }
+
+    public function testReadFallsBackToTheMostRecentOfSeveralOrphanedTempFiles(): void
+    {
+        $older = $this->tmpDir . '/manifest.json.tmp.111.aaa';
+        $newer = $this->tmpDir . '/manifest.json.tmp.222.bbb';
+
+        file_put_contents($older, json_encode([
+            'status' => 'building',
+            'total_pages' => 1,
+            'pages_processed' => 1,
+        ]));
+        touch($older, time() - 10);
+
+        file_put_contents($newer, json_encode([
+            'status' => 'building',
+            'total_pages' => 99,
+            'pages_processed' => 77,
+        ]));
+        touch($newer, time());
+
+        $state = new BuildState($this->tmpDir);
+        $manifest = $state->shouldResume();
+
+        $this->assertNotNull($manifest);
+        $this->assertSame(99, $manifest['total_pages'], 'Must prefer the most recently modified orphaned temp file');
     }
 
     public function testStaleLockIsReleasedOnNextAcquisition(): void

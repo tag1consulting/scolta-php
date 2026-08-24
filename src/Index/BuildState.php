@@ -405,23 +405,25 @@ class BuildState
     }
 
     /**
-     * Write the manifest atomically: write to .tmp, then rename.
+     * Write the manifest atomically: write to a unique temp file, then rename.
      *
-     * A process crash during the write leaves at most a .tmp file, which
-     * readManifest() reads as a fallback. After rename() succeeds the write is
-     * durable — rename() on POSIX is atomic; on Windows it is best-effort
-     * (falls back to copy+delete).
+     * The temp filename is unique per writer (pid + uniqid), so no two writers
+     * ever contend for the same path — no flock() is needed. A blocking
+     * LOCK_EX on a *fixed* temp path used to hang forever here on NFS-backed
+     * storage after an ungracefully-killed writer left a stale server-side
+     * lock behind (NFS lock state is tracked server-side; SIGKILL never
+     * releases it the way a local flock() would).
      *
      * @throws \RuntimeException on I/O failure.
      */
     private function commitManifest(array $manifest): void
     {
         $manifestPath = $this->stateDir . '/' . self::MANIFEST_FILE;
-        $tempPath     = $manifestPath . self::MANIFEST_TMP_SUFFIX;
+        $tempPath     = $manifestPath . self::MANIFEST_TMP_SUFFIX . '.' . getmypid() . '.' . uniqid('', true);
 
         $json = json_encode($manifest, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
 
-        if (file_put_contents($tempPath, $json, LOCK_EX) === false) {
+        if (file_put_contents($tempPath, $json) === false) {
             throw new \RuntimeException("Failed to write manifest temp file: {$tempPath}");
         }
 
@@ -435,20 +437,31 @@ class BuildState
     /**
      * Read the manifest file.
      *
-     * Primary path: manifest.json. If it is absent or contains invalid JSON
-     * (e.g. partial write during a crash), falls back to manifest.json.tmp —
-     * which may be a complete write that never got renamed. If neither file
-     * yields valid JSON, returns null (fresh build).
+     * Falls back to the newest manifest.json.tmp* temp file (each writer gets
+     * a unique one) if manifest.json is missing or invalid. Returns null if
+     * nothing yields valid JSON (fresh build).
      */
     private function readManifest(): ?array
     {
-        $path    = $this->stateDir . '/' . self::MANIFEST_FILE;
-        $tmpPath = $path . self::MANIFEST_TMP_SUFFIX;
+        $path = $this->stateDir . '/' . self::MANIFEST_FILE;
 
-        foreach ([$path, $tmpPath] as $candidate) {
-            if (!file_exists($candidate)) {
-                continue;
+        if (file_exists($path)) {
+            $data = file_get_contents($path);
+            if ($data !== false) {
+                $manifest = json_decode($data, true);
+                if (is_array($manifest)) {
+                    return $manifest;
+                }
             }
+        }
+
+        $candidates = glob($path . self::MANIFEST_TMP_SUFFIX . '*') ?: [];
+        usort(
+            $candidates,
+            static fn(string $a, string $b): int => (@filemtime($b) ?: 0) <=> (@filemtime($a) ?: 0),
+        );
+
+        foreach ($candidates as $candidate) {
             $data = file_get_contents($candidate);
             if ($data === false) {
                 continue;

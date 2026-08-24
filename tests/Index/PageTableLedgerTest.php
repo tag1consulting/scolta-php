@@ -433,6 +433,44 @@ final class PageTableLedgerTest extends TestCase
         $this->assertSame(0, $reloaded->ordinalFor('a'));
     }
 
+    // -------------------------------------------------------------------
+    // Bounded, non-blocking journal lock
+    // -------------------------------------------------------------------
+
+    public function testCheckpointSucceedsWhenTheJournalIsUncontended(): void
+    {
+        $l = new PageTableLedger($this->stateDir, new FilesystemDriver(), journalLockTimeoutSeconds: 1);
+        $l->beginBuild(fresh: true);
+        $l->allocate('a', '/a');
+        $l->checkpoint();
+
+        $this->assertFileExists($this->stateDir . '/' . PageTableLedger::JOURNAL_FILENAME);
+    }
+
+    public function testCheckpointGivesUpAndThrowsRatherThanBlockingForeverOnAHeldLock(): void
+    {
+        // flock() contends across open file descriptions even within one
+        // process, so holding the lock here stands in for another process.
+        $journalPath = $this->stateDir . '/' . PageTableLedger::JOURNAL_FILENAME;
+        touch($journalPath);
+        $heldFp = fopen($journalPath, 'r+');
+        $this->assertNotFalse($heldFp);
+        $this->assertTrue(flock($heldFp, LOCK_EX));
+
+        try {
+            $l = new PageTableLedger($this->stateDir, new FilesystemDriver(), journalLockTimeoutSeconds: 1);
+            $l->beginBuild(fresh: true);
+            $l->allocate('a', '/a');
+
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessage('Failed to acquire the page-table journal lock');
+            $l->checkpoint();
+        } finally {
+            flock($heldFp, LOCK_UN);
+            fclose($heldFp);
+        }
+    }
+
     // ── Journalled commits ─────────────────────────────────────────────────
 
     public function testJournalledEditsAndDeletesReloadToTheSameTableAsASnapshot(): void
