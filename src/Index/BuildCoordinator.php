@@ -12,6 +12,12 @@ namespace Tag1\Scolta\Index;
  * - On resume: verify resumable state exists, re-acquire lock.
  * - Exposes commitChunk / chunkFiles / release so callers never touch BuildState directly.
  *
+ * "Wipe state" means the lock, the manifest and the committed chunk files, and
+ * nothing else. The state directory is shared with PageWordCache,
+ * TimestampManifest and PageTableLedger, and clearing their files here is what
+ * made a build that did not run to completion in one process destroy the state
+ * that keeps the next one warm; see {@see BuildState::cleanup()}.
+ *
  * Critical bug fix vs. the old PhpIndexer::processChunk() logic:
  * The old code called cleanup() + initiateBuild() on every chunk-0 invocation,
  * wiping any in-progress resume state. prepare() now only fires once per build

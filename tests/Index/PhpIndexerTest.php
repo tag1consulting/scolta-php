@@ -65,6 +65,64 @@ class PhpIndexerTest extends TestCase
         $this->assertDirectoryExists($this->outputDir . '/pagefind');
     }
 
+    /**
+     * A finalize in a process that never processed a chunk must not prune the
+     * token cache.
+     *
+     * This is how the Drupal batch UI finalizes: ScoltaBatchOperations builds
+     * a fresh PhpIndexer per batch step, so the one that calls finalize() has
+     * looked up not one page. pruneAndSave() then kept nothing — the manifest
+     * on disk became the 6-byte empty array and every token-cache chunk file
+     * was deleted, so the next rebuild re-tokenized the whole corpus.
+     */
+    public function testFinalizeInAFreshProcessDoesNotPruneTheTokenCache(): void
+    {
+        $items = $this->makeItems(6);
+
+        // A completed rebuild, so the state directory is warm: the token cache
+        // holds one entry per page.
+        $first = new PhpIndexer($this->stateDir, $this->outputDir);
+        $first->processChunk($items, 0);
+        $this->assertTrue($first->finalize()->success);
+
+        $cachedBefore = $this->readTokenCacheManifest();
+        $this->assertCount(6, $cachedBefore, 'A completed rebuild caches one entry per page.');
+        $chunksBefore = count(glob($this->stateDir . '/token-cache/chunk-*.php') ?: []);
+        $this->assertGreaterThan(0, $chunksBefore);
+
+        // The next rebuild through the batch UI: one instance per step, so the
+        // instance that finalizes is not the one that gathered.
+        $gatherer = new PhpIndexer($this->stateDir, $this->outputDir);
+        $gatherer->processChunk($items, 0);
+
+        $finalizer = new PhpIndexer($this->stateDir, $this->outputDir);
+        $result    = $finalizer->finalize();
+        $this->assertTrue($result->success, 'Finalize failed: ' . ($result->error ?? ''));
+
+        $this->assertSame(
+            $cachedBefore,
+            $this->readTokenCacheManifest(),
+            'A merge-only finalize must not prune a token cache it never read.',
+        );
+        $this->assertSame(
+            $chunksBefore,
+            count(glob($this->stateDir . '/token-cache/chunk-*.php') ?: []),
+            'A merge-only finalize must not delete the token-cache chunk files.',
+        );
+    }
+
+    /** @return array<array-key, mixed> */
+    private function readTokenCacheManifest(): array
+    {
+        $file = $this->stateDir . '/token-cache-manifest.php';
+        if (!is_file($file)) {
+            return [];
+        }
+        $data = @unserialize((string) file_get_contents($file), ['allowed_classes' => false]);
+
+        return is_array($data) ? $data : [];
+    }
+
     public function testFinalizeCreatesEntryJson(): void
     {
         $indexer = new PhpIndexer($this->stateDir, $this->outputDir);

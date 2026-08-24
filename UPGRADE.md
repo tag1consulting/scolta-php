@@ -4,6 +4,19 @@ Breaking changes and migration steps between versions of scolta-php.
 
 ## Unreleased
 
+### The results header carries a visitor-facing expansion switch
+
+Nothing breaks and no code needs to change, but the control is on by default, so a site running query expansion will see a new link inside the result-count sentence after upgrading the bundle — `8 results for "search" (with expanded terms - disable)`, and `8 results for "search" - expand terms` once turned off. A visitor's choice lives in their own browser (`localStorage`, key `scolta:expansion-disabled`); nothing server-side reads it, so it starts no session and is invisible to page and edge caches.
+
+Set `expansionToggle` to `false` to keep expansion running with no visitor-facing control over it:
+
+```php
+$config->expansionToggle = false;
+// or: ScoltaConfig::fromArray(['expansion_toggle' => false])
+```
+
+The switch can only narrow. Where `aiExpandQuery` is false — or a platform's own access rule refused this account, which reaches the browser the same way — no control is rendered and no browser-held value can turn expansion back on.
+
 ## 1.2.0
 
 ### `AmazeeCredentials` no longer takes `operatorChosen`

@@ -64,6 +64,14 @@ class FacetIndexWriter
     private const TAG_BITMAP = 1;
 
     /**
+     * @param int $compressionLevel gzip level for the artifact; see
+     *                              {@see MemoryBudget::DEFAULT_COMPRESSION_LEVEL}.
+     */
+    public function __construct(
+        private readonly int $compressionLevel = MemoryBudget::DEFAULT_COMPRESSION_LEVEL,
+    ) {}
+
+    /**
      * Build the artifact bytes.
      *
      * Single-value dimensions are kept: they cost almost nothing here (a
@@ -144,13 +152,109 @@ class FacetIndexWriter
     public function write(string $buildDir, array $filterData, array $pageHashes, string $indexHash = ''): void
     {
         $path       = rtrim($buildDir, '/') . '/' . self::FILENAME;
-        $compressed = gzencode($this->build($filterData, $pageHashes, $indexHash), 9);
+        $compressed = gzencode($this->build($filterData, $pageHashes, $indexHash), $this->compressionLevel);
         if ($compressed === false) {
             throw new \RuntimeException('Failed to gzip the facet index.');
         }
         if (file_put_contents($path, $compressed) === false) {
             throw new \RuntimeException("Failed to write file: {$path}");
         }
+    }
+
+    /**
+     * Rewrite the artifact from its own previous bytes, with a new page table.
+     *
+     * The facet index is a function of the whole corpus, so an update rebuilds
+     * it in full — encoding every posting list of every value again — even when
+     * the only thing that changed about the corpus is one page's body. But a
+     * body-only edit cannot move a single posting: which pages carry which
+     * facet value is unchanged, and the only thing that moved is the fragment
+     * hash the changed page is named by, which lives in the id table.
+     *
+     * So the posting bodies are copied verbatim and only the header's stamp and
+     * the id table are rewritten. The refusal is the important part: if the
+     * previous artifact's `pageCount` no longer matches the page table, then
+     * pages have been added or removed, the posting lists index into positions
+     * that have moved, and copying them would silently attribute facet values
+     * to the wrong pages. That case returns false and the caller does the full
+     * rebuild.
+     *
+     * @param array<int, string> $pageHashes Page number => fragment hash, in page order.
+     * @param string             $indexHash  The new pf_meta hash to stamp.
+     * @return bool False when the previous artifact cannot be reused; nothing is written.
+     * @since 1.3.1
+     * @stability experimental
+     */
+    public function rewriteWithNewPageTable(string $buildDir, array $pageHashes, string $indexHash): bool
+    {
+        $path = rtrim($buildDir, '/') . '/' . self::FILENAME;
+        if (!is_file($path)) {
+            return false;
+        }
+
+        $raw = @gzdecode((string) @file_get_contents($path));
+        if ($raw === false || $raw === '') {
+            return false;
+        }
+
+        $headerEnd = strpos($raw, "\n");
+        if ($headerEnd === false) {
+            return false;
+        }
+
+        /** @var array<string, mixed>|null $header */
+        $header = json_decode(substr($raw, 0, $headerEnd), true);
+        if (!is_array($header) || ($header['format'] ?? null) !== self::FORMAT) {
+            return false;
+        }
+
+        $pageCount = count($pageHashes);
+        if (($header['pageCount'] ?? null) !== $pageCount) {
+            // Pages joined or left. Every posting list indexes into page
+            // positions that have moved, so none of them can be carried over.
+            return false;
+        }
+
+        // Step over exactly pageCount id lines to find where the bodies begin.
+        $offset = $headerEnd + 1;
+        for ($i = 0; $i < $pageCount; $i++) {
+            $lineEnd = strpos($raw, "\n", $offset);
+            if ($lineEnd === false) {
+                return false;
+            }
+            $offset = $lineEnd + 1;
+        }
+        $bodies = substr($raw, $offset);
+
+        $ids = [];
+        for ($i = 0; $i < $pageCount; $i++) {
+            if (!isset($pageHashes[$i])) {
+                throw new \RuntimeException(
+                    "Facet index needs a contiguous page table; page {$i} of {$pageCount} is missing.",
+                );
+            }
+            $ids[] = $pageHashes[$i];
+        }
+
+        // json_decode to an assoc array keeps insertion order, so re-encoding
+        // with the same flags reproduces build()'s header byte for byte apart
+        // from the stamp being replaced.
+        $header['indexHash'] = $indexHash;
+        $newHeader           = json_encode($header, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($newHeader === false) {
+            return false;
+        }
+
+        $content    = $newHeader . "\n" . ($pageCount > 0 ? implode("\n", $ids) . "\n" : '') . $bodies;
+        $compressed = gzencode($content, $this->compressionLevel);
+        if ($compressed === false) {
+            throw new \RuntimeException('Failed to gzip the facet index.');
+        }
+        if (file_put_contents($path, $compressed) === false) {
+            throw new \RuntimeException("Failed to write file: {$path}");
+        }
+
+        return true;
     }
 
     /**

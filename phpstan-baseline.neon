@@ -763,12 +763,6 @@ parameters:
 			path: src/Index/StreamingFormatWriter.php
 
 		-
-			message: '#^Property Tag1\\Scolta\\Index\\StreamingFormatWriter\:\:\$outputDir is never read, only written\.$#'
-			identifier: property.onlyWritten
-			count: 1
-			path: src/Index/StreamingFormatWriter.php
-
-		-
 			message: '#^Property Tag1\\Scolta\\Index\\StreamingFormatWriter\:\:\$pageMeta type has no value type specified in iterable type array\.$#'
 			identifier: missingType.iterableValue
 			count: 1

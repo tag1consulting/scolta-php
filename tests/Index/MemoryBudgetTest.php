@@ -237,4 +237,51 @@ class MemoryBudgetTest extends TestCase
         $this->assertGreaterThanOrEqual(1, $b->mergeOpenFileHandles());
         $this->assertGreaterThan(0, $b->tokenCacheChunkBytes());
     }
+
+    public function testEveryProfileDefaultsToTheSameCompressionLevel(): void
+    {
+        $this->assertSame(6, MemoryBudget::DEFAULT_COMPRESSION_LEVEL);
+        $this->assertSame(6, MemoryBudget::conservative()->compressionLevel());
+        $this->assertSame(6, MemoryBudget::balanced()->compressionLevel());
+        $this->assertSame(6, MemoryBudget::aggressive()->compressionLevel());
+        $this->assertSame(6, MemoryBudget::default()->compressionLevel());
+    }
+
+    public function testTheCompressionLevelCanBeOverridden(): void
+    {
+        $b = MemoryBudget::conservative()->withCompressionLevel(9);
+
+        $this->assertSame(9, $b->compressionLevel());
+        // Immutable: the original is untouched, and nothing else moved.
+        $this->assertSame(6, MemoryBudget::conservative()->compressionLevel());
+        $this->assertSame(MemoryBudget::conservative()->chunkSize(), $b->chunkSize());
+        $this->assertSame(MemoryBudget::conservative()->totalBudgetBytes(), $b->totalBudgetBytes());
+    }
+
+    public function testAnOutOfRangeCompressionLevelIsClampedRatherThanThrown(): void
+    {
+        // Clamped, not rejected: every other value here is bounded the same
+        // way, so a budget copied from a config file degrades to one that runs.
+        $this->assertSame(9, MemoryBudget::conservative()->withCompressionLevel(99)->compressionLevel());
+        $this->assertSame(1, MemoryBudget::conservative()->withCompressionLevel(0)->compressionLevel());
+        $this->assertSame(1, MemoryBudget::conservative()->withCompressionLevel(-7)->compressionLevel());
+    }
+
+    public function testTheCompressionLevelSurvivesScalingAndChunkOverrides(): void
+    {
+        // The level is a CPU-for-bytes trade, not a size, so resizing the
+        // budget must not silently reset it.
+        $b = MemoryBudget::balanced()->withCompressionLevel(1);
+
+        $this->assertSame(1, $b->scaledTo(64 * 1024 * 1024)->compressionLevel());
+        $this->assertSame(1, $b->withChunkSize(17)->compressionLevel());
+        $this->assertSame(1, $b->withCeiling(32 * 1024 * 1024)->compressionLevel());
+    }
+
+    public function testSettingTheLevelItAlreadyHasReturnsTheSameInstance(): void
+    {
+        $b = MemoryBudget::conservative();
+
+        $this->assertSame($b, $b->withCompressionLevel(6));
+    }
 }
