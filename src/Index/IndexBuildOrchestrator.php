@@ -203,15 +203,18 @@ final class IndexBuildOrchestrator
 
         $budget = $intent->memoryBudget();
 
-        // Order matters, and it is not obvious. A fresh build's prepare() calls
-        // BuildState::cleanup(), which unlinks every *file* in the state
-        // directory — including token-cache-manifest.php, while leaving the
-        // token-cache/ subdirectory of chunk files intact. The cache is usable
-        // afterwards only because its manifest was already read into memory.
-        // TimestampManifest and PageTableLedger survive the same wipe the same
-        // way, both loading in their constructors. Touch the cache here, before
-        // prepare(), or every fresh build silently starts with an empty one and
-        // re-tokenizes the entire corpus.
+        // Build the cache here, because this is the only place the budget is
+        // in scope: cache() sizes it from the first budget it is handed, and
+        // every later call in the loop passes none. Asking for it after
+        // prepare() would size it from MemoryBudget::default() instead.
+        //
+        // It used to have to be here for a second reason, which no longer
+        // holds: BuildState::cleanup() unlinked every file in the state
+        // directory, token-cache-manifest.php included, and the cache was
+        // usable afterwards only because its manifest had already been read
+        // into memory. cleanup() now removes only the files BuildState owns,
+        // so the last good manifest stays on disk until a completed build
+        // atomically replaces it.
         $this->cache($budget);
 
         try {
@@ -343,8 +346,14 @@ final class IndexBuildOrchestrator
                     if ($this->isUnderMemoryPressure($telemetry)) {
                         $committedChunks = count($this->coordinator->chunkFiles());
                         $committedPages  = $this->coordinator->buildState()->getPagesProcessed();
-                        $this->cache()->pruneAndSave();
-                        $this->tsManifest->pruneAndSave();
+                        // Without pruning: this run has not reached the tail of
+                        // the corpus, so a page it never looked up is a page it
+                        // has not got to yet, not a page that is gone. Pruning
+                        // here deleted the token-cache entry and the manifest
+                        // entry of every page after the yield point — the exact
+                        // state the segment this yield schedules needs.
+                        $this->cache()->saveWithoutPruning();
+                        $this->tsManifest->saveWithoutPruning();
                         $this->coordinator->releaseLockOnly();
                         $logger->info(sprintf(
                             '[scolta] Memory pressure detected after chunk %d — yielding for restart (%d pages committed).',
@@ -379,8 +388,13 @@ final class IndexBuildOrchestrator
             $limitBytes   = $telemetry->effectiveLimitBytes();
             $segmentBytes = $telemetry->getCurrentRssBytes();
             if ($limitBytes > 0 && $segmentBytes >= (int) ($limitBytes * self::MEMORY_PRESSURE_RATIO)) {
-                $this->cache()->pruneAndSave();
-                $this->tsManifest->pruneAndSave();
+                // The merge has not run, so this build is not over: finalize()
+                // completes it in a fresh process. Saving without pruning for
+                // the same reason as the yield above — and because the process
+                // that picks this up gathers nothing, so whatever is written
+                // here is what the next build gets.
+                $this->cache()->saveWithoutPruning();
+                $this->tsManifest->saveWithoutPruning();
                 $this->coordinator->releaseLockOnly();
                 $telemetry->emit('finalize_deferred', ['heap_pct' => round($segmentBytes / $limitBytes * 100, 1)]);
                 $logger->warning('[scolta] RSS at ' . round($segmentBytes / $limitBytes * 100, 1) . '% of memory limit after indexing. Merge deferred — run `drush scolta:finalize` to complete.');
@@ -425,12 +439,29 @@ final class IndexBuildOrchestrator
             $missBudget = (int) ($itemsSeen * self::MAX_CACHED_REFERENCE_MISS_RATIO);
             if ($cachedRefMisses > 0 && ($pagesInRun === 0 || $cachedRefMisses > $missBudget)) {
                 // Nothing has been swapped, so the currently published index is
-                // still the last good one. Save the token cache WITHOUT pruning:
-                // prepare() unlinked the manifest file at the top of this build
-                // and only the in-memory copy is left, so pruning here — or
-                // simply returning — is how a recoverable cache becomes an
-                // unrecoverable one.
+                // still the last good one. The two manifests go opposite ways
+                // here, and both keep the state recoverable.
+                //
+                // The token cache is saved WITHOUT pruning: pruning drops the
+                // hashes this run did not look up and deletes the chunk files
+                // that then have no live entries, which is how a cache the
+                // re-run could still have used becomes one it cannot.
+                //
+                // The timestamp manifest IS pruned, when this run gathered the
+                // whole corpus. Its entry is the promise that a page's token
+                // data exists, and for the pages that just missed the promise
+                // is false: leave it and the next build yields the same
+                // unreadable references and aborts again, forever, until
+                // somebody passes --force. Dropping it is what lets the next
+                // build re-gather those pages from source and self-heal. A
+                // resumed segment did not gather the whole corpus, so it is in
+                // no position to say whose promise is false.
                 $this->cache()->saveWithoutPruning();
+                if ($isResume) {
+                    $this->tsManifest->saveWithoutPruning();
+                } else {
+                    $this->tsManifest->pruneAndSave();
+                }
                 $this->coordinator->releaseLockOnly();
                 $error = sprintf(
                     'token cache lost; re-run with `--force`: %d of %d unchanged pages had no token data, '
@@ -490,8 +521,24 @@ final class IndexBuildOrchestrator
 
             $this->coordinator->release();
 
-            $this->cache()->pruneAndSave();
-            $this->tsManifest->pruneAndSave();
+            // The one path that legitimately looked up every live page: a fresh
+            // build that reached the end of the corpus in this process, so a
+            // hash nobody asked for belongs to a page that is gone.
+            //
+            // A resumed segment is not that path even when it succeeds. It is
+            // handed the whole corpus again — no adapter can translate "pages
+            // committed" into a position in its own query — and skips every id
+            // the ledger says an earlier segment committed, before it would
+            // have looked the page up. So "not looked up" there covers almost
+            // the whole corpus, and pruning dropped it: a build that succeeded
+            // across three segments kept only the third one's pages.
+            if ($isResume) {
+                $this->cache()->saveWithoutPruning();
+                $this->tsManifest->saveWithoutPruning();
+            } else {
+                $this->cache()->pruneAndSave();
+                $this->tsManifest->pruneAndSave();
+            }
             $this->ledger->save();
 
             // gc_status() gained runs/collected in PHP 7.3; the array shape
@@ -801,8 +848,15 @@ final class IndexBuildOrchestrator
 
             $this->coordinator->release();
 
-            $this->cache()->pruneAndSave();
-            $this->tsManifest->pruneAndSave();
+            // The token cache and the timestamp manifest are left exactly as
+            // the gathering segments left them. This pass only merges chunk
+            // files: it looked up not one page, so its in-memory copies hold
+            // the on-disk manifests with nothing marked as seen, and pruning
+            // them keeps nothing at all — it wrote a 6-byte a:0:{} manifest
+            // and deleted every file in token-cache/. That is the state a
+            // crash followed by `drush scolta:finalize` was leaving behind,
+            // and it made the next build fully cold. The ledger is saved
+            // because releaseStaleRows() above genuinely changed it.
             $this->ledger->save();
 
             $telemetry->emit('build_complete', [

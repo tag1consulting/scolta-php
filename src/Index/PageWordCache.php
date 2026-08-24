@@ -245,7 +245,11 @@ final class PageWordCache
      * updates manifest entries for buffered writes, and deletes orphaned
      * chunk files that no longer have any live entries.
      *
-     * Call once at the end of the build (finalize path).
+     * Call on exactly one path: a full build that ran to completion in a
+     * single process, and therefore looked up every live page. Anywhere else —
+     * an interrupted segment, a merge-only finalize, an incremental update —
+     * "not looked up" does not mean "gone", and {@see self::saveWithoutPruning()}
+     * is the correct call.
      *
      * @since 1.0.0
      * @stability stable
