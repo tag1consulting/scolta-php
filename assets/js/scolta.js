@@ -3145,7 +3145,10 @@
           date: data.meta?.date || '',
           pagefind_index: i,
           score: loaded.length > 1 ? 1 - (i / (loaded.length - 1)) : 1,
-          locations: contentLocations || data.locations || [],
+          // Never fall back to data.locations: Pagefind's values are not
+          // word positions, and the forced-phrase filter treats locations
+          // as adjacency evidence — an empty array fails open instead.
+          locations: contentLocations || [],
         };
       });
       // WASM config keys are snake_case; getInstanceConfig() returns
@@ -4674,10 +4677,16 @@
       // the last one would expand a search the user has left. Resolving null is
       // the shape the no-expansion path already takes when AI_EXPAND_QUERY is
       // off, so the phase-2 handler below needs no browse case of its own.
-      expandPromise = isBrowse
+      // A quoted forced-phrase query never expands, for the same reason it
+      // never takes the OR fallback below: the user asked for the exact
+      // phrase, and every document an expansion term seeds is one that
+      // matched something OTHER than that phrase. (The WASM scorer excludes
+      // non-adjacent primary matches for quoted queries; skipping expansion
+      // here closes the other door those documents came in through.)
+      expandPromise = (isBrowse || isForcedPhrase)
         ? Promise.resolve(null)
         : (preserveFilters ? Promise.resolve(lastExpandedTerms) : expandQuery(query));
-      expansionInFlight = !isBrowse && !preserveFilters && CONFIG.AI_EXPAND_QUERY;
+      expansionInFlight = !isBrowse && !isForcedPhrase && !preserveFilters && CONFIG.AI_EXPAND_QUERY;
 
       const primarySearch = await pagefindSearch(searchQuery, activeFilters);
       allScoredResults = isBrowse
