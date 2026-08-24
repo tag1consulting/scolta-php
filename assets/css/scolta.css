@@ -197,6 +197,25 @@
   overflow-wrap: break-word;
   word-wrap: break-word;
 }
+/* A button, not an anchor: it changes state on this page and navigates
+   nowhere, so there is no href that would mean anything. Styled as a link and
+   sized from its surroundings, because it sits inline in the result-count
+   sentence rather than beside it. */
+.scolta-expansion-toggle {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--scolta-primary);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.scolta-expansion-toggle:hover { text-decoration: none; }
+.scolta-expansion-toggle:focus-visible {
+  outline: 2px solid var(--scolta-primary);
+  outline-offset: 2px;
+}
 .scolta-result-card {
   background: var(--scolta-card-bg);
   border-radius: 8px;

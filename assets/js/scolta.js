@@ -406,6 +406,53 @@
   // and deliberately a registration function rather than a config key.
   let globalSuggestionRenderer = null;
 
+  // --- Per-visitor expansion opt-out ---
+  //
+  // A visitor's ad-hoc "not on this search" choice, held in localStorage rather
+  // than a cookie or a server-side preference. The gate it feeds is entirely
+  // client-side — expandQuery() returns before the fetch leaves the browser —
+  // so nothing server-side needs to read it, and a value that is never sent
+  // costs nothing at the cache layer: no session for an anonymous visitor, no
+  // Vary, no cookie for an edge cache to bypass on. The delivered HTML is
+  // byte-identical for every visitor and the choice is applied after it lands.
+  //
+  // This is the complement to a platform's own access rule (in scolta-drupal,
+  // the scolta.ai_access service), not a substitute for it: that rule is
+  // per-account and permanent, this is per-browser and reversible. The two
+  // compose in one direction only — see the ALLOWED/effective split in
+  // getInstanceConfig().
+  //
+  // Module-scoped, not per-instance: the key is per-origin, so two search
+  // instances on one page share the visitor's answer rather than disagreeing.
+  const EXPANSION_OPT_OUT_KEY = 'scolta:expansion-disabled';
+
+  // In-memory source of truth, seeded lazily from storage. Storage can throw
+  // (Safari private mode, disabled cookies, quota) or be absent entirely; when
+  // it does, the toggle still works for the life of the page and simply does
+  // not persist, which is a better failure than a control that does nothing.
+  let expansionOptOut = null;
+
+  function expansionOptedOut() {
+    if (expansionOptOut === null) {
+      try {
+        expansionOptOut = global.localStorage.getItem(EXPANSION_OPT_OUT_KEY) === '1';
+      } catch (e) {
+        expansionOptOut = false;
+      }
+    }
+    return expansionOptOut;
+  }
+
+  function setExpansionOptOut(off) {
+    expansionOptOut = !!off;
+    try {
+      if (expansionOptOut) global.localStorage.setItem(EXPANSION_OPT_OUT_KEY, '1');
+      else global.localStorage.removeItem(EXPANSION_OPT_OUT_KEY);
+    } catch (e) {
+      debugLog('[scolta:expand] opt-out not persisted (storage unavailable)');
+    }
+  }
+
   function createInstance(containerSelector, instanceConfig) {
 
   // --- Instance state (local to this closure) ---
@@ -520,7 +567,29 @@
       EXCERPT_LENGTH: s.EXCERPT_LENGTH ?? 300,
       RESULTS_PER_PAGE: s.RESULTS_PER_PAGE ?? 10,
       MAX_PAGEFIND_RESULTS: s.MAX_PAGEFIND_RESULTS ?? 50,
-      AI_EXPAND_QUERY: s.AI_EXPAND_QUERY ?? true,
+      // Two values, and the difference between them is load-bearing.
+      //
+      // ALLOWED is what the deployment offers this visitor. It is already the
+      // conjunction of everything decided server-side: the site's own setting
+      // and, on a platform that gates AI per account, that gate too — the
+      // Drupal block hands over `config && access` folded into one boolean, so
+      // a site with expansion switched off and a user who has permanently
+      // opted out of AI arrive here identically, and correctly so.
+      //
+      // AI_EXPAND_QUERY is that, narrowed by the visitor's own ad-hoc choice.
+      // Every existing gate reads it — expandQuery(), the SAYT enrichment
+      // scheduler, doSearch()'s expansionInFlight — so the opt-out reaches all
+      // three by being applied once, here, rather than at each of them. And
+      // because getInstanceConfig() recomputes on every call, a toggle takes
+      // effect on the next search with no reload.
+      //
+      // The narrowing runs one way only: `&&` cannot turn a false ALLOWED
+      // true, so no localStorage value can hand a visitor a feature the
+      // deployment withheld. Rendering the toggle reads ALLOWED rather than
+      // the effective value, or the control would delete itself on first use.
+      AI_EXPAND_QUERY_ALLOWED: s.AI_EXPAND_QUERY ?? true,
+      AI_EXPAND_QUERY: (s.AI_EXPAND_QUERY ?? true) && !expansionOptedOut(),
+      EXPANSION_TOGGLE: s.EXPANSION_TOGGLE ?? true,
       AI_SUMMARIZE: s.AI_SUMMARIZE ?? true,
       AI_SUMMARY_TOP_N: s.AI_SUMMARY_TOP_N ?? 10,
       AI_SUMMARY_MAX_CHARS: s.AI_SUMMARY_MAX_CHARS ?? 4000,
@@ -2021,6 +2090,36 @@
     // by BM25 relevance. We can't simply swap arrays — the sorted result set
     // excluded pages that lacked price metadata, so the relevance set is different.
     doSearch(true);
+  }
+
+  // Flip the visitor's expansion opt-out and re-run the search they are looking
+  // at, so the toggle answers immediately rather than at the next query.
+  //
+  // doSearch(false, ...) rather than doSearch(true), which is what every other
+  // in-place re-run here uses. preserveFilters short-circuits the expansion to
+  // `Promise.resolve(lastExpandedTerms)` — correct for a facet toggle or a sort,
+  // which must not re-bill an AI call for a query that has not changed, but it
+  // is precisely the wrong thing here: re-enabling would reuse the stored terms
+  // (null, just cleared) and never issue the request the visitor just asked
+  // for. A false cycle re-decides expansion from scratch; the filters ride
+  // across as initialFilters, the same seam the URL bootstrap uses.
+  //
+  // The Sets are copied because doSearch() only shallow-copies initialFilters
+  // and then owns the result — handing it the live objects would leave two
+  // names for one Set across a cycle that reassigns activeFilters.
+  function toggleExpansion() {
+    setExpansionOptOut(!expansionOptedOut());
+    // Terms from the previous cycle describe a search run under the old
+    // answer. Leaving them set would show "Also try:" chips for an expansion
+    // that is now off, and would be inherited by the next preserveFilters run.
+    lastExpandedTerms = null;
+    els.expandedTerms.style.display = 'none';
+    const carried = {};
+    for (const dim of Object.keys(activeFilters)) {
+      const vals = activeFilters[dim];
+      if (vals instanceof Set && vals.size > 0) carried[dim] = new Set(vals);
+    }
+    doSearch(false, Object.keys(carried).length > 0 ? carried : null);
   }
 
   function renderFilterBadges() {
@@ -5175,6 +5274,49 @@
     return Array.prototype.slice.call(tpl.content.childNodes);
   }
 
+  // The visitor-facing expansion switch, or nothing at all.
+  //
+  // Gated on ALLOWED rather than on the effective AI_EXPAND_QUERY, which is the
+  // one thing this must not get wrong: the effective value is false the instant
+  // the visitor opts out, so reading it would make the control delete itself on
+  // first use and leave no way back. Absent when the deployment withholds
+  // expansion from this visitor — a site that switched it off, or a platform
+  // access rule that says no — so nobody is offered a switch for something they
+  // would not get; and absent when a site wants expansion without handing
+  // visitors a control over it (EXPANSION_TOGGLE).
+  //
+  // The label names the action, so it is its own accessible name; no
+  // aria-pressed, which would contradict a label that already changes. Which
+  // wording depends on the OPT-OUT, never on isExpanded, or the link would
+  // contradict what clicking it does — the short "disable" is only safe inside
+  // the "(with expanded terms - …)" parenthetical, where the surrounding text
+  // says what is being disabled. A render with expansion on but nothing
+  // expanded (a browse, an expansion that returned no terms, the phase-1 paint
+  // before one lands) has no such parenthetical, so it spells the noun out.
+  //
+  // "Expanded terms" and not "AI", deliberately: this governs query expansion
+  // alone, and a platform may separately offer a broader, permanent AI opt-out
+  // that this must not be mistaken for.
+  function expansionToggleLink(CONFIG, isExpanded) {
+    if (!CONFIG.EXPANSION_TOGGLE || !CONFIG.AI_EXPAND_QUERY_ALLOWED) return '';
+    const label = expansionOptedOut()
+      ? 'expand terms'
+      : (isExpanded ? 'disable' : 'disable expanded terms');
+    return '<button type="button" class="scolta-expansion-toggle" data-scolta-expansion-toggle>' +
+      label + '</button>';
+  }
+
+  // The switch as it appears beside the result count: folded into the
+  // "(with expanded terms)" parenthetical when there is one, and hung off a
+  // dash when there is not.
+  function expansionCountLabel(CONFIG, isExpanded) {
+    const link = expansionToggleLink(CONFIG, isExpanded);
+    if (isExpanded) {
+      return link ? ' (with expanded terms - ' + link + ')' : ' (with expanded terms)';
+    }
+    return link ? ' - ' + link : '';
+  }
+
   function renderResults(isExpanded, renderReason) {
     isExpanded = isExpanded || false;
     const reason = renderReason || 'search';
@@ -5211,7 +5353,13 @@
       container.innerHTML = "";
       paintedEntries = [];
       paintedHighlightSignature = null;
-      header.innerHTML = "";
+      // The toggle survives an empty result set, unlike the count it normally
+      // sits beside. Finding nothing is the moment a visitor who turned
+      // expansion off is most likely to want it back, and clearing the header
+      // here would strand them with no way to ask for it.
+      header.innerHTML = expansionToggleLink(CONFIG, false)
+        ? "<span>" + expansionToggleLink(CONFIG, false) + "</span>"
+        : "";
       noResults.style.display = "block";
       loadMore.style.display = "none";
       emitResultsRendered([], [], [], false);
@@ -5229,7 +5377,7 @@
     const startIndex = displayedCount;
     const appended = startIndex > 0;
     const showing = Math.min(startIndex + CONFIG.RESULTS_PER_PAGE, filtered.length);
-    const expandLabel = isExpanded ? ' (with expanded terms)' : '';
+    const expandLabel = expansionCountLabel(CONFIG, isExpanded);
     const filterLabel = Object.keys(activeFilters).length > 0
       ? ' in ' + Object.entries(activeFilters)
           .filter(([, vals]) => vals instanceof Set && vals.size > 0)
@@ -5574,6 +5722,11 @@
         dismissSortOverride();
         return;
       }
+      // Results-header expansion switch → flip the opt-out and re-run
+      if (e.target.closest("[data-scolta-expansion-toggle]")) {
+        toggleExpansion();
+        return;
+      }
       // Filter badge dismiss → remove that LLM-applied filter
       const filterDismissEl = e.target.closest("[data-scolta-filter-dismiss]");
       if (filterDismissEl) {
@@ -5705,6 +5858,19 @@
     showMore,
     setResultRenderer,
     setSuggestionRenderer,
+    toggleExpansion,
+    // Set the visitor's expansion opt-out from a host's own control, for a
+    // platform that would rather place the switch in its own chrome than take
+    // the one in the results header (which it turns off with EXPANSION_TOGGLE).
+    // Narrowing only, exactly like the built-in toggle: passing true cannot
+    // give a visitor expansion the deployment withheld, because the gate is a
+    // conjunction and this only ever writes one side of it.
+    setExpansionEnabled: function(on) {
+      setExpansionOptOut(!on);
+    },
+    isExpansionEnabled: function() {
+      return getInstanceConfig().AI_EXPAND_QUERY;
+    },
     destroy: function() {
       if (abortController) abortController.abort();
       // Timers outlive the DOM they would write to; cancelSuggest() clears the
@@ -5880,6 +6046,9 @@
       global.Scolta.doSearch = inst.doSearch;
       global.Scolta.showMore = inst.showMore;
       global.Scolta.batchScoreResults = inst.batchScoreResults;
+      global.Scolta.toggleExpansion = inst.toggleExpansion;
+      global.Scolta.setExpansionEnabled = inst.setExpansionEnabled;
+      global.Scolta.isExpansionEnabled = inst.isExpansionEnabled;
     }
   };
 

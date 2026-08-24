@@ -241,6 +241,30 @@ class ScoltaConfig
 
     // -- AI feature toggles --
     public bool $aiExpandQuery = true;
+
+    /**
+     * Offer visitors a switch that turns query expansion off for themselves.
+     *
+     * Distinct from $aiExpandQuery, which says whether expansion is on at all:
+     * this says whether the results header carries a control over it. A site
+     * can reasonably want expansion running with no visitor-facing switch, so
+     * the two are separate rather than one tri-state.
+     *
+     * The switch narrows and never widens. A visitor's choice is held in
+     * browser storage and combined with what the deployment offers by `&&` in
+     * scolta.js, so it cannot turn expansion on where $aiExpandQuery is false
+     * or where a platform's own access rule refused it — and where either
+     * refuses, no switch is rendered, because there would be nothing behind it.
+     * Nothing server-side reads the choice: the gate runs in the browser before
+     * the expand request is made, which is what keeps it free of a session and
+     * invisible to any HTTP cache.
+     *
+     * @var bool
+     * @since 1.3.1
+     * @stability experimental
+     */
+    public bool $expansionToggle = true;
+
     public bool $aiSummarize = true;
     public int $aiSummaryTopN = 10;
     public int $aiSummaryMaxChars = 4000;
@@ -707,6 +731,7 @@ class ScoltaConfig
             'RESULTS_PER_PAGE' => $this->resultsPerPage,
             'MAX_PAGEFIND_RESULTS' => $this->maxPagefindResults,
             'AI_EXPAND_QUERY' => $this->aiExpandQuery,
+            'EXPANSION_TOGGLE' => $this->expansionToggle,
             'AI_SUMMARIZE' => $this->aiSummarize,
             'AI_SUMMARY_TOP_N' => $this->aiSummaryTopN,
             'AI_SUMMARY_MAX_CHARS' => $this->aiSummaryMaxChars,
