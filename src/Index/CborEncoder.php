@@ -89,4 +89,26 @@ class CborEncoder
     {
         return $this->head(4, count($items)) . implode('', $items);
     }
+
+    /**
+     * Encode just the header of an array of $count items.
+     *
+     * For a caller that already holds its items as one concatenated string and
+     * therefore cannot let encodeArray() count them — which is the whole point
+     * of patching a chunk in place, where a run of untouched postings is copied
+     * as a single slice rather than item by item. Passing such a slice to
+     * encodeArray() would write a count of one for a hundred items.
+     *
+     * @param int $count Number of items that will follow.
+     * @since 1.3.1
+     * @stability experimental
+     */
+    public function encodeArrayHead(int $count): string
+    {
+        if ($count < 0) {
+            throw new \InvalidArgumentException('encodeArrayHead requires a non-negative count');
+        }
+
+        return $this->head(4, $count);
+    }
 }

@@ -39,7 +39,7 @@ final class PageTableLedger
     public const FILENAME = 'page-table-ledger.php';
 
     /**
-     * Append-only record of allocations made since the last {@see self::save()}.
+     * Append-only record of allocations and releases since the last {@see self::save()}.
      *
      * The snapshot in FILENAME is only written when a build finishes. A build
      * that aborts part-way still has chunk files on disk that reference the
@@ -83,7 +83,7 @@ final class PageTableLedger
     /**
      * Journal records not yet appended to disk.
      *
-     * @var list<array{t: string, id: string, row?: array<string, mixed>, gen?: int}>
+     * @var list<array{t: string, id: string, row?: array<string, mixed>, gen?: int, ordinal?: int}>
      */
     private array $pendingJournal = [];
 
@@ -367,6 +367,11 @@ final class PageTableLedger
         $this->free[]              = $ordinal;
         $this->tombstones[$ordinal] = true;
         $this->dirty               = true;
+        // Journalled, which it was not before. A release that only lived in the
+        // snapshot meant any commit that deleted had to write the whole table:
+        // replaying an allocation journal over an older snapshot would resurrect
+        // the deleted row. With the removal recorded, checkpoint() is enough.
+        $this->pendingJournal[] = ['t' => 'r', 'id' => $id, 'ordinal' => $ordinal];
 
         return $ordinal;
     }
@@ -643,6 +648,41 @@ final class PageTableLedger
     }
 
     /**
+     * Persist an incremental commit: append to the journal, or snapshot.
+     *
+     * A full build ends with {@see self::save()}, which writes the whole table
+     * and truncates the journal, and on a corpus of any size that snapshot is
+     * the single largest thing an update does — 0.55 s on the reference corpus,
+     * to record a change to one page. An append is O(the change).
+     *
+     * That was only possible once {@see self::release()} started journalling,
+     * because a journal that records allocations but not removals replays into a
+     * table where deleted rows come back. Now both are recorded, so the journal
+     * is a complete description of what happened since the snapshot.
+     *
+     * The journal still has to be bounded, or a site that only ever runs
+     * incremental updates grows one forever and pays for it on every load. Past
+     * $compactBytes the ledger snapshots instead, which truncates it.
+     *
+     * @param int $compactBytes Journal size at which to snapshot instead.
+     * @since 1.3.1
+     * @stability experimental
+     */
+    public function commitIncremental(int $compactBytes = 8 * 1024 * 1024): void
+    {
+        $journal = $this->stateDir . '/' . self::JOURNAL_FILENAME;
+        $size    = $this->storage->exists($journal) ? (int) @filesize($journal) : 0;
+
+        if ($size >= $compactBytes) {
+            $this->save();
+
+            return;
+        }
+
+        $this->checkpoint();
+    }
+
+    /**
      * Discard every assignment.
      *
      * This is compaction: the next full build renumbers from zero in gather
@@ -743,6 +783,28 @@ final class PageTableLedger
 
             if (($record['t'] ?? '') === 'g') {
                 $this->generation = max($this->generation, (int) ($record['gen'] ?? 0));
+                continue;
+            }
+
+            if (($record['t'] ?? '') === 'r') {
+                // Mirror release(): drop the row, put the ordinal back on the
+                // free list, tombstone it. Read from the record rather than
+                // from $byId, because the row may already be absent — the
+                // snapshot this is replayed over can predate the allocation
+                // that the release removed.
+                $id      = (string) ($record['id'] ?? '');
+                $ordinal = (int) ($record['ordinal'] ?? -1);
+                if ($id === '' || $ordinal < 0) {
+                    continue;
+                }
+                unset($this->byId[$id]);
+                if (!in_array($ordinal, $this->free, true)) {
+                    $this->free[] = $ordinal;
+                }
+                $this->tombstones[$ordinal] = true;
+                if ($ordinal >= $this->next) {
+                    $this->next = $ordinal + 1;
+                }
                 continue;
             }
 
