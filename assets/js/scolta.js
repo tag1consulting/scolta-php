@@ -406,6 +406,12 @@
   // and deliberately a registration function rather than a config key.
   let globalSuggestionRenderer = null;
 
+  // Platform-supplied facet renderer, registered through
+  // Scolta.setFilterRenderer(). Same lifecycle and rationale as the two above:
+  // a platform that themes its result cards almost always needs to theme the
+  // facet list beside them, and neither can travel as config.
+  let globalFilterRenderer = null;
+
   // --- Per-visitor expansion opt-out ---
   //
   // A visitor's ad-hoc "not on this search" choice, held in localStorage rather
@@ -539,6 +545,7 @@
   let scaffoldNodes = [];               // exactly the nodes init() inserted — destroy() removes these and nothing else
   let instanceResultRenderer = null;    // per-instance override of globalResultRenderer
   let instanceSuggestionRenderer = null; // per-instance override of globalSuggestionRenderer
+  let instanceFilterRenderer = null;    // per-instance override of globalFilterRenderer
   // What is currently painted in #scolta-results, in DOM order:
   // [{ key, nodes: [Node, ...] }]. Drives the keyed reconcile in renderResults()
   // so a repaint that changes nothing moves no nodes.
@@ -4971,6 +4978,23 @@
     return instanceResultRenderer || globalResultRenderer;
   }
 
+  // --- Facet renderer registration ---
+  //
+  // Register a function that returns the markup for one facet dimension,
+  // replacing the built-in group. See the contract on
+  // Scolta.setFilterRenderer(); this is the per-instance form.
+  function setFilterRenderer(fn) {
+    if (fn !== null && fn !== undefined && typeof fn !== 'function') {
+      throw new TypeError('[scolta] setFilterRenderer expects a function or null');
+    }
+    instanceFilterRenderer = fn || null;
+    return instanceFilterRenderer;
+  }
+
+  function activeFilterRenderer() {
+    return instanceFilterRenderer || globalFilterRenderer;
+  }
+
   // --- Suggestion renderer registration ---
   //
   // Register a function that returns the inner markup for one suggestion row,
@@ -5121,6 +5145,11 @@
         (a, b) => filterDisplayValue(dim, a).localeCompare(filterDisplayValue(dim, b))
       );
       let itemsHtml = "";
+      // Per-value context, the same objects handed to a platform facet renderer.
+      // inputHtml is built once and used by both the built-in label and the
+      // renderer, so the data-scolta-* attributes the delegated change handler
+      // dispatches on cannot drift between the two.
+      const values = [];
       for (const val of vals) {
         const count = dimCounts[val] ?? 0;
         const isActive = dimFilters.has(val);
@@ -5131,9 +5160,18 @@
         const checked = isActive ? "checked" : "";
         const activeClass = isActive ? " active" : "";
         const disabled = isEmpty ? " disabled" : "";
+        const inputHtml = `<input type="checkbox" value="${escapeAttr(val)}" ${checked}${disabled}`
+          + ` data-scolta-filter-dim="${escapeAttr(dim)}" data-scolta-filter-val="${escapeAttr(val)}">`;
+        values.push({
+          value: val,
+          labelHtml: escapeHtml(filterDisplayValue(dim, val)),
+          count: count,
+          active: isActive,
+          disabled: isEmpty,
+          inputHtml: inputHtml,
+        });
         itemsHtml += `<label class="scolta-filter-item${activeClass}">
-          <input type="checkbox" value="${escapeAttr(val)}" ${checked}${disabled}
-                 data-scolta-filter-dim="${escapeAttr(dim)}" data-scolta-filter-val="${escapeAttr(val)}">
+          ${inputHtml}
           ${escapeHtml(filterDisplayValue(dim, val))} <span class="scolta-filter-count">(${count})</span>
         </label>`;
       }
@@ -5141,7 +5179,30 @@
       // group is just a dangling header. Under the opt-out itemsHtml is never
       // empty, so every dimension with values keeps its group.
       if (itemsHtml === "") continue;
-      html += `<div class="scolta-filter-group"><h3>${escapeHtml(filterDimLabel(dim))}</h3>${itemsHtml}</div>`;
+      const groupHtml = `<div class="scolta-filter-group" data-scolta-filter-group="${escapeAttr(dim)}"><h3>${escapeHtml(filterDimLabel(dim))}</h3>${itemsHtml}</div>`;
+
+      const filterRenderer = activeFilterRenderer();
+      if (filterRenderer) {
+        let out = null;
+        try {
+          out = filterRenderer(dim, {
+            label: filterDimLabel(dim),
+            labelHtml: escapeHtml(filterDimLabel(dim)),
+            values: values,
+            itemsHtml: itemsHtml,
+            groupHtml: groupHtml,
+          });
+        }
+        catch (e) {
+          console.warn('[scolta] facet renderer threw; falling back to the built-in group', e);
+          out = null;
+        }
+        if (typeof out === 'string') {
+          html += out;
+          continue;
+        }
+      }
+      html += groupHtml;
     }
     emitBeforeFilters();
     container.innerHTML = html;
@@ -5868,6 +5929,7 @@
     showMore,
     setResultRenderer,
     setSuggestionRenderer,
+    setFilterRenderer,
     toggleExpansion,
     // Set the visitor's expansion opt-out from a host's own control, for a
     // platform that would rather place the switch in its own chrome than take
@@ -5967,6 +6029,44 @@
       throw new TypeError('[scolta] Scolta.setResultRenderer expects a function or null');
     }
     globalResultRenderer = fn || null;
+  };
+
+  /**
+   * Register the platform's facet renderer.
+   *
+   *   Scolta.setFilterRenderer(function (dimension, ctx) { return html || null; });
+   *
+   * Called once per rendered facet dimension in place of the built-in group.
+   * `dimension` is the Pagefind filter key. `ctx` carries:
+   *
+   *   label      - the dimension's display label, RAW
+   *   labelHtml  - the same label, html-escaped
+   *   values     - one entry per value that survived the zero-count policy:
+   *                { value, labelHtml, count, active, disabled, inputHtml }
+   *                where inputHtml is the checkbox element the built-in group
+   *                would have rendered, carrying the data-scolta-* attributes
+   *   itemsHtml  - the built-in value rows, ready to drop into a slot
+   *   groupHtml  - the entire built-in group, for wrapping rather than replacing
+   *
+   * Return an HTML string, or null to fall back to the built-in group for that
+   * dimension - the right answer when a platform themes some dimensions and
+   * leaves the rest alone. A renderer that throws also falls back, with a
+   * console warning.
+   *
+   * The escaping and delegated-handler rules are the same as for
+   * Scolta.setResultRenderer(): compose from the pre-escaped ctx values, and
+   * keep each value's inputHtml (or its data-scolta-filter-dim /
+   * data-scolta-filter-val attributes) so the change handler bound on the mount
+   * point keeps working across renders.
+   *
+   * Applies to every instance that has not registered its own renderer via
+   * instance.setFilterRenderer(); safe to call before Scolta.init().
+   */
+  global.Scolta.setFilterRenderer = function(fn) {
+    if (fn !== null && fn !== undefined && typeof fn !== 'function') {
+      throw new TypeError('[scolta] Scolta.setFilterRenderer expects a function or null');
+    }
+    globalFilterRenderer = fn || null;
   };
 
   /**
