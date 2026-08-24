@@ -1,0 +1,10 @@
+{
+    "input": "The **Marrow &amp; Blood Cell Transplantation Program** treats children, and &amp;lt; keeps a layer.",
+    "mustContain": [
+        "Marrow &amp; Blood Cell Transplantation Program",
+        "&amp;lt;"
+    ],
+    "mustNotContain": [
+        "&amp;amp;"
+    ]
+}

@@ -80,6 +80,22 @@ final class MarkdownRenderer
     {
         $text = self::cleanBrokenLinks($text);
 
+        // The model sometimes HTML-escapes its own prose, so a bare "&" in the
+        // source comes back as "&amp;" and the escaping below would double it,
+        // showing a literal "&amp;" to the reader. Undo exactly one layer.
+        // "&amp;" is decoded last so a doubly-escaped entity loses one layer
+        // rather than two; this normalizes the model's escaping and is not a
+        // general entity decoder. Mirrors cleanBrokenMarkdown() in scolta.js.
+        $text = strtr($text, [
+            '&lt;' => '<',
+            '&gt;' => '>',
+            '&quot;' => '"',
+            '&apos;' => "'",
+            '&#39;' => "'",
+            '&nbsp;' => ' ',
+        ]);
+        $text = str_replace('&amp;', '&', $text);
+
         // Escape all HTML entities first for XSS safety.
         $text = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
 

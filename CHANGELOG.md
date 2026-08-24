@@ -4,6 +4,11 @@ All notable changes to scolta-php will be documented in this file.
 
 This project uses [Semantic Versioning](https://semver.org/). Each Scolta package versions independently; compatibility is expressed by the constraint an adapter declares for this package rather than by matching version numbers.
 
+## [Unreleased]
+
+### Fixed
+- **The model's own HTML escaping no longer reaches the reader (`assets/js/scolta.js`, `src/Util/MarkdownRenderer.php`).** An AI summary naming "Marrow & Blood Cell Transplantation Program" rendered as "Marrow &amp;amp; Blood Cell Transplantation Program". The excerpts are not at fault: the model escapes its own prose, returning `&amp;` where the source said `&`, and `formatSummary()` then escapes that again — correctly, for XSS — so the DOM holds `&amp;amp;` and the reader sees a literal `&amp;`. Measured against a 12,500-page health-system corpus: the `/summarize` request carried 41 bare ampersands and zero `&amp;`, and the response came back escaped in three of three cache-cleared generations, so this is the model's steady behaviour rather than a sampling artifact. Undone in `cleanBrokenMarkdown()`, which already exists to normalize model-output quirks and already runs immediately before the escape, so no new stage is introduced. **`&amp;` is decoded last** so a doubly-escaped entity (`&amp;lt;`) loses one layer rather than two. This is deliberately not a general entity decoder and **cannot widen the XSS surface**: the caller escapes the result either way, so a model emitting `&lt;script&gt;` still renders as visible text — the existing `html-escaping` parity fixture, whose input is raw markup, is unaffected because raw `<` is never touched. `stripHtml()` was **not** reused for this: its DOMParser round-trip would also strip raw tags, a larger behavioural change than the bug warrants. `MarkdownRenderer::renderInline()` carried the same escape-without-decode shape on the PHP path and gets the same normalization, so the two renderers stay in agreement. Pinned by `tests/fixtures/render-parity/model-self-escaped-entities.json`, asserted on both sides by that directory's parity gate; it fails before this change with the `&amp;amp;` the bug produces.
+
 ## [1.4.0] - 2026-08-24
 
 ### Changed

@@ -1825,6 +1825,22 @@
   function cleanBrokenMarkdown(text) {
     if (!text) return text;
 
+    // The model sometimes HTML-escapes its own prose: a bare "&" in the
+    // excerpts comes back as "&amp;", and formatSummary() then escapes it again
+    // for XSS, so the reader sees a literal "&amp;" where the source said "&".
+    // Undo exactly one layer, before the markdown repair below runs.
+    //
+    // "&amp;" is decoded LAST so a doubly-escaped entity ("&amp;lt;") loses one
+    // layer rather than two. This normalizes the model's own escaping; it is
+    // not a general entity decoder, and the caller escapes the result.
+    text = text
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&(?:apos|#0*39);/g, "'")
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&');
+
     // Fix unclosed markdown links: [text](url  or  [text](  or  [text
     text = text.replace(/\[([^\]]+)\]\([^)]*$/g, '**$1**');
     text = text.replace(/\[([^\]]+)$/g, '**$1**');
