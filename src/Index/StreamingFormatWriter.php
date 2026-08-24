@@ -135,7 +135,7 @@ class StreamingFormatWriter
      * reuse on and `false` forces it off; off is the reference path the
      * differential tests compare against.
      *
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public function setFragmentReuse(?bool $enabled): void
@@ -146,7 +146,7 @@ class StreamingFormatWriter
     /**
      * Fragments this build linked from the live index rather than re-encoding.
      *
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public function fragmentsReused(): int
@@ -157,7 +157,7 @@ class StreamingFormatWriter
     /**
      * Fragments this build compressed and wrote itself.
      *
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public function fragmentsWritten(): int

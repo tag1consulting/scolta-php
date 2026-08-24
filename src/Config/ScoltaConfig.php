@@ -260,7 +260,7 @@ class ScoltaConfig
      * invisible to any HTTP cache.
      *
      * @var bool
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public bool $expansionToggle = true;

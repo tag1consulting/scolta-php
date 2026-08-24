@@ -229,7 +229,7 @@ final class TimestampManifest
      * one that can least afford to lose the manifest. So write whenever the
      * file is missing too.
      *
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public function saveWithoutPruning(): void

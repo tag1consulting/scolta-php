@@ -32,7 +32,7 @@ use Tag1\Scolta\Index\PhpIndexer;
  * appends a paragraph to the body and changes nothing else, which is what lets
  * a body-only edit be told apart from a facet change.
  *
- * @since 1.3.1
+ * @since 1.4.0
  * @stability experimental
  */
 final class SmlShapedCorpus

@@ -17,7 +17,7 @@ namespace Tag1\Scolta\Tests\Benchmark\Support;
  * clock produces different files carrying the same index, and comparing the
  * compressed bytes would report that as a regression.
  *
- * @since 1.3.1
+ * @since 1.4.0
  * @stability experimental
  */
 final class IndexDirectoryComparer
