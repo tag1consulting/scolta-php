@@ -76,6 +76,31 @@ function resultsForPages(pages) {
 const ALL_PAGES = Array.from({ length: 200 }, (_, i) => i);
 
 /**
+ * Serve a Pagefind fragment as published — gzipped JSON behind the
+ * "pagefind_dcd" sentinel — for the artifact browse path, which fetches
+ * fragments by id instead of going through a result's data().
+ */
+function fragmentResponse(url) {
+    const m = String(url).match(/fragment\/(en_[0-9a-f]+)\.pf_fragment$/);
+    if (!m) return null;
+    const p = PAGE_IDS.indexOf(m[1]);
+    if (p === -1) return Promise.resolve({ ok: false, status: 404 });
+    const gz = zlib.gzipSync(Buffer.from('pagefind_dcd' + JSON.stringify({
+        url: '/p' + p,
+        content: 'Entry ' + p + ' content about things.',
+        word_count: 20,
+        meta: { title: 'Alpha' + p + ' Bravo' + p + ' Charlie' + p, url: '/p' + p },
+        filters: {},
+    })));
+    return Promise.resolve({
+        ok: true,
+        status: 200,
+        arrayBuffer: () => Promise.resolve(
+            gz.buffer.slice(gz.byteOffset, gz.byteOffset + gz.byteLength)),
+    });
+}
+
+/**
  * A Pagefind mock whose matches depend on the term, so an expansion term
  * ("beta") pulls in pages the primary term ("alpha") does not.
  *
@@ -162,6 +187,8 @@ async function boot(opts = {}) {
                 text: () => Promise.resolve('{}'),
             });
         }
+        const frag = fragmentResponse(u);
+        if (frag) return frag;
         return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve('') });
     };
 
@@ -346,8 +373,11 @@ describe('the results-header expansion switch', () => {
     });
 
     test('a barren browse offers no switch either', async () => {
-        const env = await boot({ barren: true });
-        await search(env, '');
+        // The artifact serves browses, so `barren` (a Pagefind mock knob)
+        // can't empty one; a selection no posting list carries can.
+        const env = await boot();
+        env.window.Scolta.doSearch(false, { topic: new Set(['Nonexistent']) });
+        await new Promise(r => setTimeout(r, 80));
 
         expect(cards(env.window).length).toBe(0);
         expect(toggle(env.window)).toBeNull();

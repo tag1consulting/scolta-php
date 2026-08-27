@@ -13,10 +13,13 @@
  * alternative — a full-corpus browse on every search-page load — stays off;
  * an f_ parameter is explicit intent, an empty page is not.
  *
- * The cost invariant from the browse work carries over: the landing browse
- * filters against the facet artifact, hands Pagefind no filters object, and
- * fetches no .pf_filter chunk. Asserted against the real committed artifact
- * fixture, the same one facet-index.test.js uses.
+ * The cost invariant from the browse work carries over, strengthened: the
+ * landing browse is served from the facet artifact alone — posting lists for
+ * the page set, direct fragment fetches for the data — so it hands Pagefind
+ * no filters object, fetches no .pf_filter chunk, and runs no Pagefind search
+ * at all (the old search(null) match-all streamed the whole word index:
+ * 38-44 s on a 119k-page corpus). Asserted against the real committed
+ * artifact fixture, the same one facet-index.test.js uses.
  */
 
 const fs = require('fs');
@@ -64,6 +67,32 @@ function resultsForPages(pages) {
 }
 
 const ALL_PAGES = Array.from({ length: 200 }, (_, i) => i);
+
+/**
+ * Serve a Pagefind fragment the way the published directory does: gzipped
+ * JSON behind the "pagefind_dcd" sentinel, addressed by result id. The
+ * artifact browse path fetches these directly instead of going through a
+ * Pagefind result's data().
+ */
+function fragmentResponse(url) {
+    const m = String(url).match(/fragment\/(en_[0-9a-f]+)\.pf_fragment$/);
+    if (!m) return null;
+    const p = PAGE_IDS.indexOf(m[1]);
+    if (p === -1) return Promise.resolve({ ok: false, status: 404 });
+    const gz = zlib.gzipSync(Buffer.from('pagefind_dcd' + JSON.stringify({
+        url: '/p' + p,
+        content: 'Entry ' + p + ' content about things.',
+        word_count: 20,
+        meta: { title: 'Alpha' + p + ' Bravo' + p + ' Charlie' + p, url: '/p' + p },
+        filters: {},
+    })));
+    return Promise.resolve({
+        ok: true,
+        status: 200,
+        arrayBuffer: () => Promise.resolve(
+            gz.buffer.slice(gz.byteOffset, gz.byteOffset + gz.byteLength)),
+    });
+}
 
 function createMockPagefind() {
     const calls = { filters: 0, searchOpts: [], queries: [] };
@@ -130,6 +159,8 @@ async function boot(mockPagefind, calls, url) {
                     b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)),
             });
         }
+        const frag = fragmentResponse(u);
+        if (frag) return frag;
         return Promise.resolve({ ok: false, status: 404 });
     };
 
@@ -205,12 +236,16 @@ describe('a facet-only URL browses on load', () => {
         expect(urls.every(u => isFruit(Number(u.replace('/p', ''))))).toBe(true);
     });
 
-    test('the landing browse carries a null term, never an empty string', async () => {
+    test('the landing browse runs no Pagefind search at all', async () => {
         const { mock, calls } = createMockPagefind();
-        await boot(mock, calls, 'http://localhost/search?f_topic=Fruit');
+        const env = await boot(mock, calls, 'http://localhost/search?f_topic=Fruit');
 
-        expect(userQueries(calls).length).toBeGreaterThan(0);
-        expect(userQueries(calls).some(q => q === null)).toBe(true);
+        // The browse used to reach Pagefind as search(null) — the match-all
+        // that streams the whole word index. It is now served from the
+        // artifact: posting lists for the page set, direct fragment fetches
+        // for the data.
+        expect(userQueries(calls)).toEqual([]);
+        expect(env.requested.some(u => /fragment\/en_[0-9a-f]+\.pf_fragment/.test(u))).toBe(true);
     });
 
     test('the landing browse hands Pagefind no filters and fetches no filter chunk', async () => {
@@ -262,11 +297,12 @@ describe('a facet-only URL browses on load', () => {
     test('popstate to a facet-only state re-runs the filtered browse', async () => {
         const { mock, calls } = createMockPagefind();
         const env = await boot(mock, calls, 'http://localhost/search?f_topic=Fruit');
-        const before = userQueries(calls).length;
+        // A browse never reaches Pagefind, so a search-call record cannot show
+        // the re-run. Blank the list instead: only a real repaint restores it.
+        env.window.document.querySelector('#scolta-results').innerHTML = '';
 
         await popstateTo(env, '/search?f_topic=Fruit');
 
-        expect(userQueries(calls).length).toBeGreaterThan(before);
         const urls = shownUrls(env.window);
         expect(urls.length).toBeGreaterThan(0);
         expect(urls.every(u => isFruit(Number(u.replace('/p', ''))))).toBe(true);

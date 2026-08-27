@@ -879,12 +879,18 @@
 
     // The id table: pageCount newline-separated fragment hashes. Page index is
     // the line number, and that is the numbering the posting lists refer to.
+    // Kept in both directions: pageOf (id -> page) for filtering and counting,
+    // idOf (page -> id) for the browse path, which enumerates pages and has no
+    // result list to take ids from.
     let off = newline + 1;
     const pageOf = new Map();
+    const idOf = new Array(header.pageCount);
     for (let i = 0; i < header.pageCount; i++) {
       const end = bytes.indexOf(10, off);
       if (end < 0) throw new Error('facet index id table truncated');
-      pageOf.set(decoder.decode(bytes.subarray(off, end)), i);
+      const id = decoder.decode(bytes.subarray(off, end));
+      pageOf.set(id, i);
+      idOf[i] = id;
       off = end + 1;
     }
 
@@ -924,6 +930,7 @@
       dimensions: header.dimensions,
       values: header.values,
       pageOf: pageOf,
+      idOf: idOf,
       postings: postings,
       mask: new Uint8Array(header.pageCount),
     };
@@ -1010,19 +1017,7 @@
   // filter object and triggering a chunk load.
   function applyFacetFilters(index, results, filters) {
     if (!filters || typeof filters !== 'object') return results;
-    const active = [];
-    for (const [dim, vals] of Object.entries(filters)) {
-      const selected = vals instanceof Set ? [...vals]
-        : Array.isArray(vals) ? vals
-          : (vals === undefined || vals === null || vals === '') ? [] : [vals];
-      if (selected.length === 0) continue;
-      // An unknown dimension matches nothing, which is what Pagefind does with
-      // a filter it has no index for. A stale saved facet must not silently
-      // widen the result set.
-      const dimPostings = index.postings[dim] || [];
-      const chosen = dimPostings.filter(p => selected.indexOf(p.value) !== -1);
-      active.push(chosen);
-    }
+    const active = activePostings(index, filters);
     if (active.length === 0) return results;
     return (results || []).filter(r => {
       const page = index.pageOf.get(r.id);
@@ -1032,15 +1027,104 @@
       // have hidden is a smaller failure than silently dropping results the user
       // searched for.
       if (page === undefined) return true;
-      for (const chosen of active) {
-        let hit = false;
-        for (const posting of chosen) {
-          if (postingHasPage(posting, page)) { hit = true; break; }
-        }
-        if (!hit) return false;
-      }
-      return true;
+      return pageMatchesActive(active, page);
     });
+  }
+
+  // Resolve a filter selection to its posting lists: one array per dimension
+  // that carries a selection, each holding the postings of that dimension's
+  // selected values. An unknown dimension resolves to an empty array — it
+  // matches nothing, which is what Pagefind does with a filter it has no index
+  // for; a stale saved facet must not silently widen the result set.
+  function activePostings(index, filters) {
+    const active = [];
+    if (!filters || typeof filters !== 'object') return active;
+    for (const [dim, vals] of Object.entries(filters)) {
+      const selected = vals instanceof Set ? [...vals]
+        : Array.isArray(vals) ? vals
+          : (vals === undefined || vals === null || vals === '') ? [] : [vals];
+      if (selected.length === 0) continue;
+      const dimPostings = index.postings[dim] || [];
+      active.push(dimPostings.filter(p => selected.indexOf(p.value) !== -1));
+    }
+    return active;
+  }
+
+  // OR within a dimension, AND across dimensions — the semantics both
+  // applyFacetFilters() and the browse enumeration below apply.
+  function pageMatchesActive(active, page) {
+    for (const chosen of active) {
+      let hit = false;
+      for (const posting of chosen) {
+        if (postingHasPage(posting, page)) { hit = true; break; }
+      }
+      if (!hit) return false;
+    }
+    return true;
+  }
+
+  // A facet-only browse, served from the artifact alone. It used to be
+  // pagefind.search(null, ...), and Pagefind resolves that match-all by
+  // streaming the ENTIRE word index through its worker — 38-44 s measured on a
+  // 119k-page corpus, on every page load, HTTP cache or not. The artifact
+  // already states which pages every facet value covers, so the result set is
+  // a walk over the posting lists and the word index is never woken.
+  //
+  // The returned object carries the surface the pipeline reads off a search:
+  // {id, score: 0, words: [], data()} results (exactly what a match-all
+  // reports), `unfilteredResultCount`, and the lazy `filters` counts getter.
+  // Order is the id-table order — verified identical to Pagefind's own
+  // match-all order, since both number pages the same way. data() fetches the
+  // fragment by id, which is all a match-all's data() amounts to (no terms, so
+  // no locations and no excerpt context).
+  function browseFromFacetIndex(index, filters) {
+    const active = activePostings(index, filters);
+    // One shared method rather than a closure per result: an unfiltered browse
+    // enumerates the whole corpus, and MAX_PAGEFIND_RESULTS of these ever run.
+    function loadData() { return loadFragmentById(this.id); }
+    const results = [];
+    for (let page = 0; page < index.pageCount; page++) {
+      if (active.length === 0 || pageMatchesActive(active, page)) {
+        results.push({ id: index.idOf[page], score: 0, words: [], data: loadData });
+      }
+    }
+    const out = { results: results, unfilteredResultCount: results.length };
+    let counts = null;
+    // Lazy for the same reason pagefindSearch()'s wrapper is: the count runs
+    // over the full matched set, and only the count pass ever reads it.
+    Object.defineProperty(out, 'filters', {
+      enumerable: true,
+      configurable: true,
+      get() {
+        if (counts === null) counts = facetCountsFor(index, results);
+        return counts;
+      },
+    });
+    return out;
+  }
+
+  // Fetch one Pagefind fragment by result id, without a search to hang it off:
+  // the gzipped JSON Pagefind's own data() reads, behind its "pagefind_dcd"
+  // sentinel. Pagefind's excerpt is built from matched terms; a browse has
+  // none, so the leading content stands in (the card truncates it anyway).
+  async function loadFragmentById(id) {
+    const resp = await fetch(
+      facetIndexBase(facetIndexPagefindPath) + 'fragment/' + id + '.pf_fragment');
+    if (!resp || !resp.ok) {
+      throw new Error('fragment ' + id + ' failed: HTTP ' + (resp && resp.status));
+    }
+    let bytes = new Uint8Array(await resp.arrayBuffer());
+    if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+      const stream = new Response(bytes).body.pipeThrough(new DecompressionStream('gzip'));
+      bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+    let text = new TextDecoder().decode(bytes);
+    if (text.startsWith('pagefind_dcd')) text = text.slice('pagefind_dcd'.length);
+    const data = JSON.parse(text);
+    if (data.excerpt === undefined) {
+      data.excerpt = String(data.content || '').split(/\s+/).slice(0, 80).join(' ');
+    }
+    return data;
   }
 
   // Load the facet taxonomy. The artifact is the fast path; an index built
@@ -2275,6 +2359,24 @@
     // A search with no selection still loads nothing.
     if (facetsDeferred() && !facetIndex && hasFacetSelection(filters)) {
       await ensureFacetTaxonomy();
+    }
+    // A null query is a browse, and with the artifact in hand it never needs
+    // Pagefind: the pages come off the posting lists, and the match-all —
+    // which streams the whole word index through the worker, tens of seconds
+    // on a large corpus — never runs. Worth loading the artifact for even
+    // under 'deferred' with no selection, because the alternative IS the
+    // match-all; a deferred keyword search still fetches nothing. A sortHint
+    // stays with Pagefind (the artifact has no sort fields), and so does
+    // 'disabled', which never has the artifact. No artifact after the load
+    // attempt (none built, stale, a merged second language) falls through to
+    // the match-all: slow, but correct for exactly those corpora.
+    if (query === null && !sortHint && !facetsDisabled()) {
+      if (!facetIndex) {
+        await ensureFacetTaxonomy();
+      }
+      if (facetIndex) {
+        return browseFromFacetIndex(facetIndex, filters);
+      }
     }
     const searchOpts = {};
     // 'disabled' runs no facet filtering at all. Nothing upstream should put a
