@@ -105,7 +105,7 @@ function createMockPagefind() {
     return { mock, calls };
 }
 
-async function boot(mockPagefind, calls) {
+async function boot(mockPagefind, calls, scoringExtra) {
     const dom = new JSDOM(
         '<!DOCTYPE html><html lang="en"><body><div id="scolta-search"></div></body></html>',
         { url: 'http://localhost/search', runScripts: 'outside-only' },
@@ -137,6 +137,14 @@ async function boot(mockPagefind, calls) {
                     b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)),
             });
         }
+        if (/\/s$/.test(url)) {
+            return Promise.resolve({
+                ok: true,
+                status: 200,
+                json: () => Promise.resolve({ summary: 'A useful summary.' }),
+                text: () => Promise.resolve('{}'),
+            });
+        }
         return Promise.resolve({ ok: false, status: 404 });
     };
 
@@ -160,10 +168,10 @@ async function boot(mockPagefind, calls) {
     window.mockPagefind = mockPagefind;
     window.scolta = {
         pagefindPath: '/pagefind/pagefind.js',
-        scoring: {
+        scoring: Object.assign({
             MAX_PAGEFIND_RESULTS: 75, RESULTS_PER_PAGE: 12,
             AI_EXPAND_QUERY: false, AI_SUMMARIZE: false,
-        },
+        }, scoringExtra),
         endpoints: { expand: '/e', summarize: '/s', followup: '/f' },
     };
 
@@ -346,5 +354,42 @@ describe('an empty query browses the corpus (SML-2791)', () => {
         await search(env, '');
 
         expect(env.requested.some(u => /\/e$/.test(u))).toBe(false);
+    });
+
+    /**
+     * There is nothing to summarize with no query, and the endpoint rejects an
+     * empty one with a 400 — every browse used to POST anyway. The keyword case
+     * proves this harness would see the request if one were made.
+     */
+    test('a browse requests no summary and reserves no summary slot', async () => {
+        const { mock, calls } = createMockPagefind();
+        const env = await boot(mock, calls, { AI_SUMMARIZE: true });
+        await search(env, '');
+
+        expect(env.requested.some(u => /\/s$/.test(u))).toBe(false);
+        // No stranded skeleton: the slot stays in the collapsed, disabled shape.
+        expect(env.window.document.querySelector('#scolta-ai-summary').style.display)
+            .toBe('none');
+    });
+
+    test('a keyword search still summarizes', async () => {
+        const { mock, calls } = createMockPagefind();
+        const env = await boot(mock, calls, { AI_SUMMARIZE: true });
+        await search(env, 'things');
+
+        expect(env.requested.some(u => /\/s$/.test(u))).toBe(true);
+    });
+
+    test('clearing the box after a search drops the summary with it', async () => {
+        const { mock, calls } = createMockPagefind();
+        const env = await boot(mock, calls, { AI_SUMMARIZE: true });
+        await search(env, 'things');
+        env.requested.length = 0;
+
+        await search(env, '');
+
+        expect(env.requested.some(u => /\/s$/.test(u))).toBe(false);
+        expect(env.window.document.querySelector('#scolta-ai-summary').style.display)
+            .toBe('none');
     });
 });

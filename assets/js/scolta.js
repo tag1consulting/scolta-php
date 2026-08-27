@@ -1573,7 +1573,9 @@
   async function summarizeResults(query, results, expandedTerms = [], sortHint = null, filterHint = null, userFilters = {}) {
     const CONFIG = getInstanceConfig();
     const endpoints = getInstanceEndpoints();
-    if (!CONFIG.AI_SUMMARIZE || results.length === 0) return null;
+    // No query means nothing to summarize — a browse must not reach the
+    // endpoint, which rejects an empty query with a 400.
+    if (!CONFIG.AI_SUMMARIZE || !query || results.length === 0) return null;
     const summaryEl = els.aiSummary;
     // Normally a no-op: the slot was already reserved in the frame the results
     // painted. It still matters for a direct call, and for the case where the
@@ -4915,12 +4917,17 @@
       // fetch failures, but the work before that fetch (candidate selection,
       // context assembly) is outside them, and on a malformed result set a
       // throw there used to strand the slot with no way back.
-      summarizeResults(query, allScoredResults, expandedLabel, sortHint, filterHint, activeFilters)
-        .catch(e => {
-          if (version !== searchVersion) return;
-          console.warn('[scolta:summarize] failed before the request:', e);
-          releaseSummarySlot();
-        });
+      // A browse skips summarization the way it skips expansion: there is no
+      // query to summarize, and the endpoint 400s an empty one. The result
+      // paint reserved no slot for a browse, so there is nothing to release.
+      if (!isBrowse) {
+        summarizeResults(query, allScoredResults, expandedLabel, sortHint, filterHint, activeFilters)
+          .catch(e => {
+            if (version !== searchVersion) return;
+            console.warn('[scolta:summarize] failed before the request:', e);
+            releaseSummarySlot();
+          });
+      }
     }).catch(e => {
       // The slot is reserved from the result paint, so anything that throws in
       // the expansion phase — between that paint and the summarize call — now
@@ -5386,7 +5393,8 @@
       // sits beside. Finding nothing is the moment a visitor who turned
       // expansion off is most likely to want it back, and clearing the header
       // here would strand them with no way to ask for it.
-      header.innerHTML = expansionToggleLink(CONFIG, false)
+      // No toggle on a browse: there is no query to expand.
+      header.innerHTML = currentQuery && expansionToggleLink(CONFIG, false)
         ? "<span>" + expansionToggleLink(CONFIG, false) + "</span>"
         : "";
       noResults.style.display = "block";
@@ -5401,12 +5409,16 @@
     // Waiting until the summarize call would put the box in later, on its own,
     // and push this list down — which is the shift. It is a sibling of
     // #scolta-results and touches nothing in the results write path below.
-    reserveSummarySlot();
+    // A browse gets no summary, so no slot: reserving one would leave the
+    // skeleton shimmering with nothing coming to resolve it.
+    if (currentQuery) reserveSummarySlot();
 
     const startIndex = displayedCount;
     const appended = startIndex > 0;
     const showing = Math.min(startIndex + CONFIG.RESULTS_PER_PAGE, filtered.length);
-    const expandLabel = expansionCountLabel(CONFIG, isExpanded);
+    // A browse has no query to expand, so the expansion toggle is meaningless
+    // there; keyword searches keep it.
+    const expandLabel = currentQuery ? expansionCountLabel(CONFIG, isExpanded) : '';
     const filterLabel = Object.keys(activeFilters).length > 0
       ? ' in ' + Object.entries(activeFilters)
           .filter(([, vals]) => vals instanceof Set && vals.size > 0)

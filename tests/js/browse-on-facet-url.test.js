@@ -98,7 +98,7 @@ function createMockPagefind() {
  * is not — initPagefind()'s warm-up pagefind.search("") — is what the
  * userQueries() helper below strips.
  */
-async function boot(mockPagefind, calls, url) {
+async function boot(mockPagefind, calls, url, scoringExtra) {
     const dom = new JSDOM(
         '<!DOCTYPE html><html lang="en"><body><div id="scolta-search"></div></body></html>',
         { url: url, runScripts: 'outside-only' },
@@ -153,10 +153,10 @@ async function boot(mockPagefind, calls, url) {
     window.mockPagefind = mockPagefind;
     window.scolta = {
         pagefindPath: '/pagefind/pagefind.js',
-        scoring: {
+        scoring: Object.assign({
             MAX_PAGEFIND_RESULTS: 75, RESULTS_PER_PAGE: 12,
             AI_EXPAND_QUERY: false, AI_SUMMARIZE: false,
-        },
+        }, scoringExtra),
         endpoints: { expand: '/e', summarize: '/s', followup: '/f' },
     };
 
@@ -272,6 +272,26 @@ describe('a facet-only URL browses on load', () => {
         expect(urls.every(u => isFruit(Number(u.replace('/p', ''))))).toBe(true);
         // The box stays empty and its clear control hidden: this is a browse.
         expect(env.window.document.querySelector('#scolta-query').value).toBe('');
+    });
+
+    test('the landing browse requests no summary and reserves no slot', async () => {
+        const { mock, calls } = createMockPagefind();
+        const env = await boot(mock, calls, 'http://localhost/search?f_topic=Fruit',
+            { AI_SUMMARIZE: true });
+
+        // No query, nothing to summarize — the endpoint 400s an empty one.
+        expect(env.requested.some(u => /\/s$/.test(u))).toBe(false);
+        expect(env.window.document.querySelector('#scolta-ai-summary').style.display)
+            .toBe('none');
+    });
+
+    test('the landing browse renders no expansion toggle', async () => {
+        const { mock, calls } = createMockPagefind();
+        const env = await boot(mock, calls, 'http://localhost/search?f_topic=Fruit',
+            { AI_EXPAND_QUERY: true });
+
+        expect(env.window.document.querySelector('[data-scolta-expansion-toggle]'))
+            .toBeNull();
     });
 
     test('popstate to a bare state clears', async () => {

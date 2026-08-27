@@ -328,6 +328,31 @@ describe('the results-header expansion switch', () => {
         expect(stillChecked.checked).toBe(true);
     });
 
+    /**
+     * A browse has no query to expand, so the switch would govern nothing:
+     * expansion is already skipped on the browse path (expandPromise resolves
+     * null), and a control over a no-op only misleads.
+     */
+    test('a browse offers no switch, and the next search brings it back', async () => {
+        const env = await boot();
+        await search(env, '');
+
+        expect(cards(env.window).length).toBeGreaterThan(0);
+        expect(toggle(env.window)).toBeNull();
+        expect(headerText(env.window)).not.toContain('expanded terms');
+
+        await search(env, 'alpha');
+        expect(toggle(env.window)).not.toBeNull();
+    });
+
+    test('a barren browse offers no switch either', async () => {
+        const env = await boot({ barren: true });
+        await search(env, '');
+
+        expect(cards(env.window).length).toBe(0);
+        expect(toggle(env.window)).toBeNull();
+    });
+
     test('an empty result set still offers the switch', async () => {
         const env = await boot({ barren: true });
         await search(env, 'alpha');

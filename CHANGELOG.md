@@ -9,6 +9,10 @@ This project uses [Semantic Versioning](https://semver.org/). Each Scolta packag
 ### Added
 - **User-facing UI strings in the browser widget are now overridable per site (`window.scolta.labels`, `ScoltaConfig::$labels`).** The widget's strings were hardcoded, so a site that wanted different wording had to patch the DOM from outside with a MutationObserver racing every `innerHTML` write. `labels` is one top-level map rather than a flat key per string; first entries are `expandedTerms` (default `'Also try:'`, the prefix before the AI-expanded query-term chips) and `aiOverview` (default `'AI Overview'`, the heading on the AI summary box). Values are HTML-escaped, and a missing, empty, or non-string value falls back to the default in both layers (`normalizedLabels()` in PHP, `getInstanceLabels()` in the browser). The expanded-terms label `<span>` also gains a `scolta-expanded-terms-label` class for site CSS.
 
+### Fixed
+- **A browse (empty query) no longer POSTs to the summarize endpoint (`assets/js/scolta.js`).** Every facet-only URL, empty-box submit, or facet toggle with an empty box sent an empty query the endpoint rejects with a 400. A browse now skips summarization the way it already skips expansion, and the result paint reserves no summary slot for it, so no skeleton is left shimmering.
+- **A browse renders no query-expansion toggle in the results header (`assets/js/scolta.js`).** With no query to expand the control governs nothing. Keyword searches keep it unchanged.
+
 ### Changed
 - **The results header reads as one sentence: `Showing 12 of 276 results for "dolly parton" (with expanded terms - disable)` (`assets/js/scolta.js`).** Previously the count sat on the left (`276 results for "dolly parton" (…)`) with a bare `Showing 12` in a second span on the right; the two figures describe the same list, and reading them together is what makes the second one mean anything. The filter, expansion-toggle, and partial-match clauses keep their positions after the count.
 
