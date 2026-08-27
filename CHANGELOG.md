@@ -11,6 +11,7 @@ This project uses [Semantic Versioning](https://semver.org/). Each Scolta packag
 
 ### Fixed
 - **A browse (empty query) no longer POSTs to the summarize endpoint (`assets/js/scolta.js`).** Every facet-only URL, empty-box submit, or facet toggle with an empty box sent an empty query the endpoint rejects with a 400. A browse now skips summarization the way it already skips expansion, and the result paint reserves no summary slot for it, so no skeleton is left shimmering.
+- **A browse header now reports the real match total (`assets/js/scolta.js`).** The "of N" figure was `allScoredResults.length` — the capped (`MAX_PAGEFIND_RESULTS`, default 50), title-deduped head of the match list — so a 109,293-document corpus showed "of 70", and toggling a facet moved the number by however much dedup happened to eat in each head. The browse path now captures Pagefind's raw match count (available up front, before any loading) and prints that. "Showing X" keeps its meaning (painted count), and since N is raw while the paged list is deduped, paging can exhaust before N — preferred over reporting a cap artifact as the total. Keyword searches are unchanged.
 - **A browse renders no query-expansion toggle in the results header (`assets/js/scolta.js`).** With no query to expand the control governs nothing. Keyword searches keep it unchanged.
 
 ### Changed
