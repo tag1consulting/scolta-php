@@ -337,15 +337,30 @@ describe('an empty query browses the corpus (SML-2791)', () => {
             .toBe('block');
     });
 
-    test('the cap bounds a browse of a large corpus the way it bounds a search', async () => {
+    test('a browse header reports the raw match total, not the loaded head', async () => {
         const { mock, calls } = createMockPagefind();
         const env = await boot(mock, calls);
         await search(env, '');
 
-        // MAX_PAGEFIND_RESULTS is 75: the corpus is 200 and nothing loads more
-        // than the cap, so the header can never claim the whole corpus.
+        // MAX_PAGEFIND_RESULTS is 75 against a 200-page corpus. Only a capped,
+        // title-deduped head is loaded, but Pagefind returned all 200 match ids
+        // up front, and that is the "of N" figure — a number that used to be
+        // an artifact of cap + dedup (75 minus whatever dedup ate) and moved
+        // when a facet was toggled.
         const total = Number(headerText(env.window).match(/Showing\s+[\d,]+\s+of\s+([\d,]+)/)[1].replace(/,/g, ''));
-        expect(total).toBeLessThanOrEqual(75);
+        expect(total).toBe(200);
+        // The cap still bounds what is loaded: paging can exhaust before N.
+        expect(cards(env.window).length).toBeLessThanOrEqual(75);
+    });
+
+    test('a keyword search header still reports the loaded list length', async () => {
+        const { mock, calls } = createMockPagefind();
+        const env = await boot(mock, calls);
+        await search(env, 'things');
+
+        // The term matches 20 pages; the keyword path is unchanged.
+        const total = Number(headerText(env.window).match(/Showing\s+[\d,]+\s+of\s+([\d,]+)/)[1].replace(/,/g, ''));
+        expect(total).toBe(20);
     });
 
     test('a browse runs no query expansion', async () => {

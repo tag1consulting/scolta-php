@@ -486,6 +486,10 @@
   // on-intent documents from a genuine content gap, so the "partial matches"
   // banner and the AI-summary absence hedge don't cry failure over a strong hit.
   let hadSpecificMatch = false;
+  // Raw Pagefind match count for the current browse; null on keyword searches.
+  // A browse loads only a capped, title-deduped head of the match list, so
+  // allScoredResults.length there is an artifact of cap + dedup, not a total.
+  let browseTotal = null;
   let pagefindBase = '';   // Set during initPagefind(); used by resolveUrl().
   let currentSortOverride = null;    // { field, direction } or null — active sort override
   let llmAppliedFilters = {};        // { dimension: value } — filters injected by LLM expansion
@@ -4614,6 +4618,7 @@
       displayedCount = 0;
       allScoredResults = [];
       hadSpecificMatch = false;
+      browseTotal = null;
       conversationMessages = [];
       followUpCount = 0;
       // Fresh cycle, fresh memo: identical searches are shared WITHIN a cycle
@@ -4711,6 +4716,9 @@
       expansionInFlight = !isBrowse && !preserveFilters && CONFIG.AI_EXPAND_QUERY;
 
       const primarySearch = await pagefindSearch(searchQuery, activeFilters);
+      // Pagefind returns every match id up front, so the true match total is
+      // free here — before the cap decides how few of them to load.
+      if (isBrowse) browseTotal = primarySearch.results.length;
       allScoredResults = isBrowse
         ? await loadBrowseResults(primarySearch)
         : await loadAndScoreSearch(primarySearch, scorerQuery, 1.0);
@@ -5432,11 +5440,19 @@
     const orFallbackLabel = usedOrFallback
       ? (hadSpecificMatch ? ' — showing best matches' : ' — no exact matches found, showing partial matches')
       : '';
-    const resultNoun = filtered.length === 1 ? 'result' : 'results';
+    // On a browse the "of N" figure is the raw Pagefind match count, not the
+    // loaded list's length: a browse loads only a capped head of the matches
+    // and then title-dedupes it, so the list length is an artifact of cap +
+    // dedup, not a corpus figure. The wrinkle is deliberate: N is the raw
+    // count while the paged list is deduped, so paging can exhaust before N —
+    // preferred over reporting a cap artifact as the total. "Showing X" keeps
+    // its meaning: how many are painted.
+    const totalCount = (!currentQuery && browseTotal !== null)
+      ? browseTotal
+      : filtered.length;
+    const resultNoun = totalCount === 1 ? 'result' : 'results';
     // A browse has no query to name, and `results for ""` is worse than saying
-    // nothing. The count itself keeps the same meaning it has on every other
-    // path: how many results were loaded and can be paged through, not how many
-    // documents the corpus holds.
+    // nothing.
     const forLabel = currentQuery
       ? ` for "${escapeHtml(displayQuery(currentQuery))}"`
       : '';
@@ -5444,7 +5460,7 @@
     // the right: the two figures describe the same list, and reading them
     // together ("Showing 12 of 276 results") is what makes the second one
     // mean anything.
-    header.innerHTML = `<span>Showing ${showing.toLocaleString()} of ${filtered.length.toLocaleString()} ${resultNoun}${forLabel}${filterLabel}${expandLabel}${orFallbackLabel}</span>`;
+    header.innerHTML = `<span>Showing ${showing.toLocaleString()} of ${totalCount.toLocaleString()} ${resultNoun}${forLabel}${filterLabel}${expandLabel}${orFallbackLabel}</span>`;
 
     const renderer = activeResultRenderer();
     // Cheap identity of the current highlight set. Expansion grows
