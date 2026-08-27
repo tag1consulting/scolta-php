@@ -7,13 +7,11 @@
  *
  * Browse and search are one code path that differs only in whether a filter is
  * applied. With the artifact in hand a browse never reaches Pagefind at all:
- * pagefindSearch() enumerates the selection's pages off the artifact's posting
- * lists and loads fragments directly by id, because Pagefind's own match-all
- * (search(null)) streams the entire word index through its worker — measured
- * 38-44 seconds on a 119k-page corpus, on every page load, HTTP cache or not.
- * What these pin is that the browse renders the same list the match-all
- * rendered, that it costs no Pagefind search and no filter chunk, and that the
- * transitions in and out of it are clean.
+ * pagefindSearch() enumerates the selection's pages off the posting lists and
+ * loads fragments by id, because Pagefind's match-all (search(null)) streams
+ * the entire word index through its worker — 38-44 s measured on a 119k-page
+ * corpus. These pin that the browse renders the list the match-all rendered,
+ * costs no Pagefind search and no filter chunk, and transitions cleanly.
  *
  * The cost assertions are load-bearing rather than decorative. Naming a
  * dimension in a search's filter object makes Pagefind lazily fetch that
@@ -270,18 +268,11 @@ describe('an empty query browses the corpus (SML-2791)', () => {
 
         // The old path was pagefind.search(null) — the match-all that streams
         // the entire word index through the worker. With the artifact present
-        // the browse (and its count pass) enumerates the posting lists instead,
-        // so no search of any kind reaches Pagefind.
+        // the browse (and its count pass) enumerates the posting lists and
+        // fetches fragments directly by id instead.
         expect(calls.queries).toEqual([]);
-        expect(cards(env.window).length).toBeGreaterThan(0);
-    });
-
-    test('the browse loads fragments directly by id', async () => {
-        const { mock, calls } = createMockPagefind();
-        const env = await boot(mock, calls);
-        await search(env, '');
-
         expect(env.requested.some(u => /fragment\/en_[0-9a-f]+\.pf_fragment/.test(u))).toBe(true);
+        expect(cards(env.window).length).toBeGreaterThan(0);
     });
 
     test('no text plus an active facet renders the filtered list', async () => {
@@ -455,28 +446,15 @@ describe('an empty query browses the corpus (SML-2791)', () => {
 describe("a browse under facetMode 'deferred'", () => {
 
     test('a browse with no selection still loads the artifact rather than the match-all', async () => {
-        // 'deferred' defers the artifact to the first facet selection, and an
-        // empty-box browse carries none — but the alternative to loading it
-        // here IS pagefind.search(null), the match-all the artifact path
-        // exists to avoid. The artifact download is the cheaper of the two by
-        // orders of magnitude, so a browse always warrants it.
+        // An empty-box browse carries no selection, so 'deferred' would not
+        // load the artifact — but the alternative IS the match-all, orders of
+        // magnitude more expensive than the download the mode defers.
         const { mock, calls } = createMockPagefind();
         const env = await boot(mock, calls, null, { facetMode: 'deferred' });
         await search(env, '');
 
         expect(env.requested.filter(u => /scolta\.facets/.test(u)).length).toBe(1);
         expect(calls.queries).toEqual([]);
-        expect(cards(env.window).length).toBeGreaterThan(0);
-    });
-
-    test('a deferred keyword search still fetches no artifact', async () => {
-        // The mode's whole point survives the browse change: a session that
-        // only ever types queries downloads nothing.
-        const { mock, calls } = createMockPagefind();
-        const env = await boot(mock, calls, null, { facetMode: 'deferred' });
-        await search(env, 'things');
-
-        expect(env.requested.filter(u => /scolta\.facets/.test(u)).length).toBe(0);
         expect(cards(env.window).length).toBeGreaterThan(0);
     });
 

@@ -879,10 +879,9 @@
 
     // The id table: pageCount newline-separated fragment hashes. Page index is
     // the line number, and that is the numbering the posting lists refer to.
-    // Kept in both directions: pageOf answers "which page is this result id"
-    // for filtering and counting, idOf answers "which result id is this page"
-    // for the browse path, which enumerates pages and has no result list to
-    // take ids from.
+    // Kept in both directions: pageOf (id -> page) for filtering and counting,
+    // idOf (page -> id) for the browse path, which enumerates pages and has no
+    // result list to take ids from.
     let off = newline + 1;
     const pageOf = new Map();
     const idOf = new Array(header.pageCount);
@@ -1064,23 +1063,20 @@
     return true;
   }
 
-  // A facet-only browse, served from the artifact alone. The browse used to be
-  // pagefind.search(null, ...) — a match-all — and Pagefind resolves a
-  // match-all by streaming the ENTIRE word index through its worker: measured
-  // on a 119,084-page corpus, 38-44 seconds on every page load, HTTP cache or
-  // not, while a warm keyword search took under 4. The artifact already states
-  // which pages every facet value covers, so the browse's result set is a walk
-  // over the posting lists and the word index is never woken.
+  // A facet-only browse, served from the artifact alone. It used to be
+  // pagefind.search(null, ...), and Pagefind resolves that match-all by
+  // streaming the ENTIRE word index through its worker — 38-44 s measured on a
+  // 119k-page corpus, on every page load, HTTP cache or not. The artifact
+  // already states which pages every facet value covers, so the result set is
+  // a walk over the posting lists and the word index is never woken.
   //
   // The returned object carries the surface the pipeline reads off a search:
-  // `results` as {id, score, words, data()} (score 0 and no words, exactly as
-  // Pagefind's match-all reports), `unfilteredResultCount`, and the same lazy
-  // `filters` counts getter pagefindSearch() puts on a wrapped search. Order is
-  // the id-table order, which is verified to be byte-for-byte the order
-  // Pagefind's own match-all returns — both number pages the same way. data()
-  // fetches the Pagefind fragment directly by result id, which is all a
-  // match-all's data() amounts to (no terms, so no locations and no excerpt
-  // context).
+  // {id, score: 0, words: [], data()} results (exactly what a match-all
+  // reports), `unfilteredResultCount`, and the lazy `filters` counts getter.
+  // Order is the id-table order — verified identical to Pagefind's own
+  // match-all order, since both number pages the same way. data() fetches the
+  // fragment by id, which is all a match-all's data() amounts to (no terms, so
+  // no locations and no excerpt context).
   function browseFromFacetIndex(index, filters) {
     const active = activePostings(index, filters);
     // One shared method rather than a closure per result: an unfiltered browse
@@ -1107,12 +1103,10 @@
     return out;
   }
 
-  // Fetch one Pagefind fragment by result id, without a search to hang it off.
-  // The file is the same gzipped JSON Pagefind's own data() reads, behind the
-  // "pagefind_dcd" sentinel Pagefind prefixes to everything it decompresses.
-  // The excerpt Pagefind would attach is built from matched terms; a browse has
-  // none, so the leading content stands in — the downstream card truncates it
-  // to EXCERPT_LENGTH regardless.
+  // Fetch one Pagefind fragment by result id, without a search to hang it off:
+  // the gzipped JSON Pagefind's own data() reads, behind its "pagefind_dcd"
+  // sentinel. Pagefind's excerpt is built from matched terms; a browse has
+  // none, so the leading content stands in (the card truncates it anyway).
   async function loadFragmentById(id) {
     const resp = await fetch(
       facetIndexBase(facetIndexPagefindPath) + 'fragment/' + id + '.pf_fragment');
@@ -2366,18 +2360,16 @@
     if (facetsDeferred() && !facetIndex && hasFacetSelection(filters)) {
       await ensureFacetTaxonomy();
     }
-    // A null query is a browse, and with the artifact in hand a browse never
-    // needs Pagefind at all: the selection's pages come off the posting lists
-    // and the match-all — which streams the whole word index through the
-    // worker, tens of seconds on a large corpus — never runs. Worth loading
-    // the artifact for even under 'deferred' with no selection (an empty-box
-    // submit browses the whole corpus), because the alternative IS the
+    // A null query is a browse, and with the artifact in hand it never needs
+    // Pagefind: the pages come off the posting lists, and the match-all —
+    // which streams the whole word index through the worker, tens of seconds
+    // on a large corpus — never runs. Worth loading the artifact for even
+    // under 'deferred' with no selection, because the alternative IS the
     // match-all; a deferred keyword search still fetches nothing. A sortHint
-    // stays with Pagefind — the artifact carries no sort fields — and so does
+    // stays with Pagefind (the artifact has no sort fields), and so does
     // 'disabled', which never has the artifact. No artifact after the load
     // attempt (none built, stale, a merged second language) falls through to
-    // the match-all: slow, but correct for exactly the corpora the artifact
-    // refuses to describe.
+    // the match-all: slow, but correct for exactly those corpora.
     if (query === null && !sortHint && !facetsDisabled()) {
       if (!facetIndex) {
         await ensureFacetTaxonomy();

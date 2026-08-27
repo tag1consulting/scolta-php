@@ -13,14 +13,13 @@
  * alternative — a full-corpus browse on every search-page load — stays off;
  * an f_ parameter is explicit intent, an empty page is not.
  *
- * The cost invariant from the browse work carries over, and has since
- * strengthened: the landing browse is served from the facet artifact alone —
- * pages enumerated off the posting lists, fragments fetched directly by id —
- * so it hands Pagefind no filters object, fetches no .pf_filter chunk, and
- * runs no Pagefind search at all (the old pagefind.search(null) match-all
- * streamed the whole word index through the worker: 38-44 s measured on a
- * 119k-page corpus). Asserted against the real committed artifact fixture,
- * the same one facet-index.test.js uses.
+ * The cost invariant from the browse work carries over, strengthened: the
+ * landing browse is served from the facet artifact alone — posting lists for
+ * the page set, direct fragment fetches for the data — so it hands Pagefind
+ * no filters object, fetches no .pf_filter chunk, and runs no Pagefind search
+ * at all (the old search(null) match-all streamed the whole word index:
+ * 38-44 s on a 119k-page corpus). Asserted against the real committed
+ * artifact fixture, the same one facet-index.test.js uses.
  */
 
 const fs = require('fs');
