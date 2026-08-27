@@ -1031,6 +1031,64 @@ class ScoltaConfigTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+    // labels — per-site overrides for user-facing UI strings
+    // ------------------------------------------------------------------
+
+    public function testLabelsDefaultsToEmpty(): void
+    {
+        // Empty means "every string is the bundle's default": the browser owns
+        // the default wording, so a site that has not heard of this setting
+        // renders exactly what it always did.
+        $config = new ScoltaConfig();
+        $this->assertSame([], $config->labels);
+        $this->assertSame([], $config->normalizedLabels());
+    }
+
+    public function testFromArrayMapsLabels(): void
+    {
+        $config = ScoltaConfig::fromArray(['labels' => ['expandedTerms' => 'Related searches:']]);
+        $this->assertSame(['expandedTerms' => 'Related searches:'], $config->labels);
+        $this->assertSame(['expandedTerms' => 'Related searches:'], $config->normalizedLabels());
+    }
+
+    public function testNormalizedLabelsDropsNonStringAndEmptyValues(): void
+    {
+        // A broken settings form must degrade to the stock label, not blank
+        // it: the browser treats an absent key and a filtered key identically.
+        $config = new ScoltaConfig();
+        $config->labels = [
+            'expandedTerms' => 'Related searches:',
+            'blank' => '',
+            'number' => 3,
+            'null' => null,
+            0 => 'integer-keyed',
+        ];
+        $this->assertSame(['expandedTerms' => 'Related searches:'], $config->normalizedLabels());
+    }
+
+    public function testNormalizedLabelsKeepsUnknownKeys(): void
+    {
+        // The browser ignores keys it does not read; filtering them here would
+        // couple this class to the bundle's release cadence.
+        $config = ScoltaConfig::fromArray(['labels' => ['futureString' => 'x']]);
+        $this->assertSame(['futureString' => 'x'], $config->normalizedLabels());
+    }
+
+    public function testToBrowserConfigEmitsLabelsTopLevel(): void
+    {
+        // Top-level in window.scolta, NOT nested under scoring, so scolta.js
+        // reads it via instanceConfig.labels (the hideEmptyFacets pattern).
+        $browser = (new ScoltaConfig())->toBrowserConfig();
+        $this->assertArrayHasKey('labels', $browser);
+        $this->assertSame([], $browser['labels']);
+        $this->assertArrayNotHasKey('labels', $browser['scoring']);
+
+        $set = ScoltaConfig::fromArray(['labels' => ['expandedTerms' => 'Related searches:', 'blank' => '']])
+            ->toBrowserConfig();
+        $this->assertSame(['expandedTerms' => 'Related searches:'], $set['labels']);
+    }
+
+    // ------------------------------------------------------------------
     // facetMode — when the facet index loads, or whether it loads at all
     // ------------------------------------------------------------------
 

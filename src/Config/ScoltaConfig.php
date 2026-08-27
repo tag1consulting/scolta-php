@@ -317,6 +317,25 @@ class ScoltaConfig
     public array $filterFieldDescriptions = [];
 
     /**
+     * Per-site overrides for user-facing UI strings in the browser widget.
+     *
+     * One map rather than a flat property per string. Keys the browser reads
+     * (see LABEL_DEFAULTS in assets/js/scolta.js): 'expandedTerms' (default
+     * 'Also try:') and 'aiOverview' (default 'AI Overview'). Values render as
+     * text (HTML-escaped); a missing, empty, or non-string value falls back
+     * to the browser's default, and unknown keys are ignored. Emitted
+     * top-level into window.scolta via normalizedLabels().
+     *
+     * Typed loosely because fromArray() assigns adapter config verbatim;
+     * normalizedLabels() is the guard.
+     *
+     * @var array<array-key, mixed>
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public array $labels = [];
+
+    /**
      * Hide facet values whose result count is zero for the current query.
      *
      * When true (default), the browser widget omits a zero-count value from the
@@ -783,6 +802,7 @@ class ScoltaConfig
             'filterFieldDescriptions' => $this->filterFieldDescriptions,
             'hideEmptyFacets' => $this->hideEmptyFacets,
             'facetMode' => $this->normalizedFacetMode(),
+            'labels' => $this->normalizedLabels(),
             // SAYT — top-level, not scoring keys. scolta.js reads each as
             // instanceConfig.<camelCase> with a fallback byte-equal to the
             // default here, and BrowserConfigParityTest diffs the two sets.
@@ -814,6 +834,30 @@ class ScoltaConfig
         return in_array($this->saytSuggestionAction, self::SAYT_SUGGESTION_ACTIONS, true)
             ? $this->saytSuggestionAction
             : 'navigate';
+    }
+
+    /**
+     * The label overrides, filtered to entries the browser could accept.
+     *
+     * Drops non-string and empty values, so a broken settings form degrades
+     * to the stock label instead of blanking it. Unknown keys pass through;
+     * the browser ignores them.
+     *
+     * @return array<string, string>
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function normalizedLabels(): array
+    {
+        $normalized = [];
+        foreach ($this->labels as $key => $value) {
+            if (is_string($key) && is_string($value) && $value !== '') {
+                $normalized[$key] = $value;
+            }
+        }
+
+        return $normalized;
     }
 
     /**

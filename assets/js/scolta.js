@@ -17,6 +17,14 @@
  *   container: '#scolta-search'            — CSS selector for the search container
  *   allowedLinkDomains: []                 — Domains allowed in summary links (empty = all)
  *   disclaimer: ''                         — Disclaimer text below AI summary (empty = none)
+ *   labels: {}                             — Optional: per-site overrides for user-facing UI strings.
+ *                                            Rendered as text (HTML-escaped). Keys and defaults:
+ *                                              expandedTerms: 'Also try:' — prefix before the
+ *                                                AI-expanded query-term chips.
+ *                                              aiOverview: 'AI Overview' — heading on the AI
+ *                                                summary box.
+ *                                            Missing, empty, or non-string values fall back to the
+ *                                            default; unknown keys are ignored.
  *   currentLanguage: null                  — Optional: 2-letter ISO language code (e.g. 'en', 'es').
  *                                            When set, search results are pre-filtered to this language.
  *                                            URL filter params (f_language=...) take precedence.
@@ -640,6 +648,26 @@
 
   function getInstancePriorityPages() {
     return (instanceConfig && instanceConfig.priority_pages) || [];
+  }
+
+  // User-facing UI strings a site may override — TOP-LEVEL instance config,
+  // the hideEmptyFacets pattern. One `labels` map rather than a flat key per
+  // string, so each string made overridable later joins this object instead
+  // of minting another top-level config key. A non-string or empty override
+  // falls back to the default: a broken settings form must degrade to the
+  // stock label, not blank it.
+  const LABEL_DEFAULTS = {
+    expandedTerms: 'Also try:',
+    aiOverview: 'AI Overview',
+  };
+
+  function getInstanceLabels() {
+    const l = (instanceConfig && instanceConfig.labels) || {};
+    const out = {};
+    for (const key of Object.keys(LABEL_DEFAULTS)) {
+      out[key] = (typeof l[key] === 'string' && l[key] !== '') ? l[key] : LABEL_DEFAULTS[key];
+    }
+    return out;
   }
 
   // SAYT settings are TOP-LEVEL instance config, not `scoring` keys — the
@@ -1378,7 +1406,7 @@
   function summaryLabelHtml(withDots) {
     return `<div class="scolta-ai-summary-label">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2z"/></svg>
-        <span>AI Overview</span>${withDots ? '\n        <span class="scolta-ai-dots"><span>.</span><span>.</span><span>.</span></span>' : ''}
+        <span>${escapeHtml(getInstanceLabels().aiOverview)}</span>${withDots ? '\n        <span class="scolta-ai-dots"><span>.</span><span>.</span><span>.</span></span>' : ''}
       </div>`;
   }
 
@@ -2058,7 +2086,8 @@
       return;
     }
     container.style.display = "flex";
-    container.innerHTML = '<span style="font-size:0.8rem;color:#666;margin-right:0.2rem;">Also try:</span>' +
+    container.innerHTML = '<span class="scolta-expanded-terms-label" style="font-size:0.8rem;color:#666;margin-right:0.2rem;">' +
+      escapeHtml(getInstanceLabels().expandedTerms) + '</span>' +
       filtered
         .map(t => `<span class="scolta-expanded-term" data-scolta-search-term="${escapeAttr(t)}">${escapeHtml(t)}</span>`)
         .join("");
