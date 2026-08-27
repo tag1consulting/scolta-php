@@ -5428,8 +5428,11 @@
     const forLabel = currentQuery
       ? ` for "${escapeHtml(displayQuery(currentQuery))}"`
       : '';
-    header.innerHTML = `<span>${filtered.length.toLocaleString()} ${resultNoun}${forLabel}${filterLabel}${expandLabel}${orFallbackLabel}</span>
-                        <span>Showing ${showing}</span>`;
+    // One sentence rather than a count on the left and a bare "Showing N" on
+    // the right: the two figures describe the same list, and reading them
+    // together ("Showing 12 of 276 results") is what makes the second one
+    // mean anything.
+    header.innerHTML = `<span>Showing ${showing.toLocaleString()} of ${filtered.length.toLocaleString()} ${resultNoun}${forLabel}${filterLabel}${expandLabel}${orFallbackLabel}</span>`;
 
     const renderer = activeResultRenderer();
     // Cheap identity of the current highlight set. Expansion grows
