@@ -319,23 +319,15 @@ class ScoltaConfig
     /**
      * Per-site overrides for user-facing UI strings in the browser widget.
      *
-     * One map rather than a flat property per string, so each string made
-     * overridable later joins this array instead of minting another top-level
-     * config key. Keys the browser currently reads (see LABEL_DEFAULTS in
-     * assets/js/scolta.js):
-     * - 'expandedTerms' — prefix before the AI-expanded query-term chips.
-     *   Default 'Also try:'.
-     * - 'aiOverview' — heading on the AI summary box. Default 'AI Overview'.
+     * One map rather than a flat property per string. Keys the browser reads
+     * (see LABEL_DEFAULTS in assets/js/scolta.js): 'expandedTerms' (default
+     * 'Also try:') and 'aiOverview' (default 'AI Overview'). Values render as
+     * text (HTML-escaped); a missing, empty, or non-string value falls back
+     * to the browser's default, and unknown keys are ignored. Emitted
+     * top-level into window.scolta via normalizedLabels().
      *
-     * Values are rendered as text (HTML-escaped) by the browser. A missing,
-     * empty, or non-string value falls back to the browser's default; unknown
-     * keys are ignored. Emitted top-level into window.scolta (filtered by
-     * normalizedLabels()) and read by scolta.js getInstanceLabels().
-     *
-     * Typed loosely rather than as array<string, string> because fromArray()
-     * assigns adapter config verbatim, so at runtime the array can hold
-     * whatever a settings layer produced; normalizedLabels() is the guard
-     * that only key => non-empty-string entries reach the page payload.
+     * Typed loosely because fromArray() assigns adapter config verbatim;
+     * normalizedLabels() is the guard.
      *
      * @var array<array-key, mixed>
      * @since 1.5.0
@@ -847,11 +839,9 @@ class ScoltaConfig
     /**
      * The label overrides, filtered to entries the browser could accept.
      *
-     * Drops non-string and empty values here as well as in the browser, so a
-     * broken settings form degrades to the stock label instead of blanking it.
-     * Unknown keys pass through: the browser ignores them, and filtering
-     * against its LABEL_DEFAULTS key set would couple this class to the
-     * bundle's release cadence.
+     * Drops non-string and empty values, so a broken settings form degrades
+     * to the stock label instead of blanking it. Unknown keys pass through;
+     * the browser ignores them.
      *
      * @return array<string, string>
      *
