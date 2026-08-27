@@ -332,7 +332,12 @@ class ScoltaConfig
      * keys are ignored. Emitted top-level into window.scolta (filtered by
      * normalizedLabels()) and read by scolta.js getInstanceLabels().
      *
-     * @var array<string, string>
+     * Typed loosely rather than as array<string, string> because fromArray()
+     * assigns adapter config verbatim, so at runtime the array can hold
+     * whatever a settings layer produced; normalizedLabels() is the guard
+     * that only key => non-empty-string entries reach the page payload.
+     *
+     * @var array<array-key, mixed>
      * @since 1.5.0
      * @stability experimental
      */
@@ -855,11 +860,14 @@ class ScoltaConfig
      */
     public function normalizedLabels(): array
     {
-        return array_filter(
-            $this->labels,
-            static fn ($value, $key) => is_string($key) && is_string($value) && $value !== '',
-            ARRAY_FILTER_USE_BOTH,
-        );
+        $normalized = [];
+        foreach ($this->labels as $key => $value) {
+            if (is_string($key) && is_string($value) && $value !== '') {
+                $normalized[$key] = $value;
+            }
+        }
+
+        return $normalized;
     }
 
     /**
