@@ -4,6 +4,11 @@ All notable changes to scolta-php will be documented in this file.
 
 This project uses [Semantic Versioning](https://semver.org/). Each Scolta package versions independently; compatibility is expressed by the constraint an adapter declares for this package rather than by matching version numbers.
 
+## [Unreleased]
+
+### Added
+- **User-facing UI strings in the browser widget are now overridable per site (`window.scolta.labels`, `ScoltaConfig::$labels`).** The strings the widget renders were hardcoded, so a site that wanted different wording — SML renames the query-expansion prefix "Also try:" to "Related searches:" — had to patch the DOM from outside with a MutationObserver racing every `innerHTML` write. `labels` is one top-level map rather than a flat key per string, so each string made overridable later joins it instead of minting another config key; its first entries are `expandedTerms` (default `'Also try:'`), the prefix before the AI-expanded query-term chips, and `aiOverview` (default `'AI Overview'`), the heading on the AI summary box — read via `getInstanceLabels()` and HTML-escaped by `renderExpandedTerms()` and `summaryLabelHtml()`. A missing, empty, or non-string value falls back to the default in both layers — `normalizedLabels()` filters in PHP and `getInstanceLabels()` clamps in the browser, since a direct `createInstance()` caller bypasses the class — so a broken settings form degrades to the stock label rather than blanking it. The label `<span>` also gains a `scolta-expanded-terms-label` class so a site can restyle it without selector gymnastics against inline styles.
+
 ## [1.4.0] - 2026-08-24
 
 ### Changed

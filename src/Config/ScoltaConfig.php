@@ -317,6 +317,28 @@ class ScoltaConfig
     public array $filterFieldDescriptions = [];
 
     /**
+     * Per-site overrides for user-facing UI strings in the browser widget.
+     *
+     * One map rather than a flat property per string, so each string made
+     * overridable later joins this array instead of minting another top-level
+     * config key. Keys the browser currently reads (see LABEL_DEFAULTS in
+     * assets/js/scolta.js):
+     * - 'expandedTerms' — prefix before the AI-expanded query-term chips.
+     *   Default 'Also try:'.
+     * - 'aiOverview' — heading on the AI summary box. Default 'AI Overview'.
+     *
+     * Values are rendered as text (HTML-escaped) by the browser. A missing,
+     * empty, or non-string value falls back to the browser's default; unknown
+     * keys are ignored. Emitted top-level into window.scolta (filtered by
+     * normalizedLabels()) and read by scolta.js getInstanceLabels().
+     *
+     * @var array<string, string>
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public array $labels = [];
+
+    /**
      * Hide facet values whose result count is zero for the current query.
      *
      * When true (default), the browser widget omits a zero-count value from the
@@ -783,6 +805,7 @@ class ScoltaConfig
             'filterFieldDescriptions' => $this->filterFieldDescriptions,
             'hideEmptyFacets' => $this->hideEmptyFacets,
             'facetMode' => $this->normalizedFacetMode(),
+            'labels' => $this->normalizedLabels(),
             // SAYT — top-level, not scoring keys. scolta.js reads each as
             // instanceConfig.<camelCase> with a fallback byte-equal to the
             // default here, and BrowserConfigParityTest diffs the two sets.
@@ -814,6 +837,29 @@ class ScoltaConfig
         return in_array($this->saytSuggestionAction, self::SAYT_SUGGESTION_ACTIONS, true)
             ? $this->saytSuggestionAction
             : 'navigate';
+    }
+
+    /**
+     * The label overrides, filtered to entries the browser could accept.
+     *
+     * Drops non-string and empty values here as well as in the browser, so a
+     * broken settings form degrades to the stock label instead of blanking it.
+     * Unknown keys pass through: the browser ignores them, and filtering
+     * against its LABEL_DEFAULTS key set would couple this class to the
+     * bundle's release cadence.
+     *
+     * @return array<string, string>
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function normalizedLabels(): array
+    {
+        return array_filter(
+            $this->labels,
+            static fn ($value, $key) => is_string($key) && is_string($value) && $value !== '',
+            ARRAY_FILTER_USE_BOTH,
+        );
     }
 
     /**
