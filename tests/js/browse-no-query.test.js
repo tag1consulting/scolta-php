@@ -336,7 +336,7 @@ describe('an empty query browses the corpus (SML-2791)', () => {
 
         // MAX_PAGEFIND_RESULTS is 75: the corpus is 200 and nothing loads more
         // than the cap, so the header can never claim the whole corpus.
-        const total = Number(headerText(env.window).match(/^(\d+)/)[1]);
+        const total = Number(headerText(env.window).match(/Showing\s+[\d,]+\s+of\s+([\d,]+)/)[1].replace(/,/g, ''));
         expect(total).toBeLessThanOrEqual(75);
     });
 
