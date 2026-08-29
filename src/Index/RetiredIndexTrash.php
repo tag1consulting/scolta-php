@@ -195,6 +195,10 @@ final class RetiredIndexTrash
         if ($workers === []) {
             return false;
         }
+        // Kept separate from $workers[$i]['proc'] because the loop below
+        // nulls out $workers[$i]['stdin'] as workers die, and PHPStan cannot
+        // tell that the sibling 'proc' key survives that partial update.
+        $procs = array_column($workers, 'proc');
 
         $complete = true;
         $subDirs  = [];
@@ -207,8 +211,16 @@ final class RetiredIndexTrash
                 \RecursiveIteratorIterator::CHILD_FIRST,
             );
 
-            $n     = 0;
-            $alive = count($workers);
+            // Indices into $workers that are still writable, in round-robin
+            // order. A dead worker is spliced out here rather than merely
+            // marked null-and-skipped: round-robining a fixed 16-slot modulo
+            // while only $alive tries are budgeted can walk straight through
+            // that many dead slots in a row without ever reaching a live one
+            // elsewhere in the array, abandoning the fast path even though a
+            // worker is still up. Indexing into a list that only ever holds
+            // live workers can't miss one that way.
+            $aliveIndices = array_keys($workers);
+            $n = 0;
             foreach ($items as $item) {
                 if ($item->isDir() && !$item->isLink()) {
                     // CHILD_FIRST yields children before parents, so this
@@ -221,20 +233,22 @@ final class RetiredIndexTrash
                     break;
                 }
 
-                // Round-robin across workers, skipping any whose pipe broke.
+                // Round-robin across the still-alive workers.
                 $written = false;
-                for ($try = 0; $try < $alive; $try++) {
-                    $w = $n++ % count($workers);
-                    if ($workers[$w]['stdin'] === null) {
-                        continue;
-                    }
-                    if (@fwrite($workers[$w]['stdin'], $item->getPathname() . "\0") !== false) {
+                while ($aliveIndices !== []) {
+                    $pos    = $n % count($aliveIndices);
+                    $w      = $aliveIndices[$pos];
+                    $stdin  = $workers[$w]['stdin'];
+                    if ($stdin !== null && @fwrite($stdin, $item->getPathname() . "\0") !== false) {
                         $written = true;
+                        $n++;
                         break;
                     }
-                    fclose($workers[$w]['stdin']);
+                    if ($stdin !== null) {
+                        fclose($stdin);
+                    }
                     $workers[$w]['stdin'] = null;
-                    $alive--;
+                    array_splice($aliveIndices, $pos, 1);
                 }
                 if (!$written) {
                     // Every worker is gone (xargs/rm unavailable, or all
@@ -248,7 +262,9 @@ final class RetiredIndexTrash
                 if ($w['stdin'] !== null) {
                     fclose($w['stdin']);
                 }
-                if (proc_close($w['proc']) !== 0) {
+            }
+            foreach ($procs as $proc) {
+                if (proc_close($proc) !== 0) {
                     $complete = false;
                 }
             }

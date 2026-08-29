@@ -514,7 +514,7 @@ final class IndexBuildOrchestrator
 
             $this->atomicSwap($logger);
             $telemetry->emit('swap_complete');
-            $this->trash->sweep($logger);
+            $sweptClean = $this->trash->sweep($logger);
 
             $totalPagesProcessed = $this->coordinator->pagesProcessed();
             $pagesForReport      = $totalPagesProcessed > 0 ? $totalPagesProcessed : $pagesInRun;
@@ -573,6 +573,7 @@ final class IndexBuildOrchestrator
                 pagesProcessed: $pagesForReport,
                 chunksWritten: $chunksWritten,
                 success: true,
+                warnings: $sweptClean ? null : 'Retired index cleanup left directories on disk; see the log for which. The next build or sweep will retry.',
             );
         } catch (\Throwable $e) {
             try {
@@ -767,6 +768,7 @@ final class IndexBuildOrchestrator
         bool $success,
         ?string $error = null,
         ?float $durationSeconds = null,
+        ?string $warnings = null,
     ): StatusReport {
         return new StatusReport(
             version: self::VERSION,
@@ -778,6 +780,7 @@ final class IndexBuildOrchestrator
             memoryBudgetBytes: $budget->totalBudgetBytes(),
             durationSeconds: $durationSeconds ?? round(microtime(true) - $startTime, 3),
             outputDir: $this->outputDir,
+            warnings: $warnings,
             success: $success,
             error: $error,
         );
@@ -843,7 +846,7 @@ final class IndexBuildOrchestrator
 
             $this->atomicSwap($logger);
             $telemetry->emit('swap_complete');
-            $this->trash->sweep($logger);
+            $sweptClean = $this->trash->sweep($logger);
 
             $pagesProcessed = $this->coordinator->pagesProcessed();
             $chunksFinalized = count($chunkFiles);
@@ -877,6 +880,7 @@ final class IndexBuildOrchestrator
                 pagesProcessed: $pagesProcessed,
                 chunksWritten: $chunksFinalized,
                 success: true,
+                warnings: $sweptClean ? null : 'Retired index cleanup left directories on disk; see the log for which. The next build or sweep will retry.',
             );
         } catch (\Throwable $e) {
             try {

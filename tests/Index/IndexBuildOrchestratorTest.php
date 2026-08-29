@@ -129,6 +129,65 @@ class IndexBuildOrchestratorTest extends TestCase
         $this->assertNotEmpty($sweepNotices, 'The sweep must announce itself so it is not mistaken for a hang');
     }
 
+    public function testReportCarriesAWarningWhenTrashCannotBeFullyDeleted(): void
+    {
+        // A sweep failure must never fail the build (it is best-effort by
+        // design), but it also must not vanish into the log alone — a caller
+        // that only inspects the returned report needs a way to know cleanup
+        // is still pending. StatusReport already had an unused $warnings
+        // field for exactly this kind of case.
+        $real = new FilesystemDriver();
+        $failDelete = new class ($real) implements StorageDriverInterface {
+            public function __construct(private readonly FilesystemDriver $inner) {}
+
+            public function deleteDirectory(string $path): bool
+            {
+                return str_contains($path, '.scolta-trash-') ? false : $this->inner->deleteDirectory($path);
+            }
+
+            public function exists(string $path): bool
+            {
+                return $this->inner->exists($path);
+            }
+            public function get(string $path): string
+            {
+                return $this->inner->get($path);
+            }
+            public function put(string $path, string $c): bool
+            {
+                return $this->inner->put($path, $c);
+            }
+            public function delete(string $path): bool
+            {
+                return $this->inner->delete($path);
+            }
+            public function makeDirectory(string $path): bool
+            {
+                return $this->inner->makeDirectory($path);
+            }
+            public function move(string $from, string $to): bool
+            {
+                return $this->inner->move($from, $to);
+            }
+            public function files(string $dir, string $p = '*'): array
+            {
+                return $this->inner->files($dir, $p);
+            }
+        };
+
+        // First build publishes a live index; the second's swap retires it
+        // to trash, which this storage can never actually delete.
+        $intent = fn() => BuildIntent::fresh(2, MemoryBudget::conservative());
+        (new IndexBuildOrchestrator($this->stateDir, $this->outputDir, storage: $failDelete))
+            ->build($intent(), $this->makeItems(2));
+        $report = (new IndexBuildOrchestrator($this->stateDir, $this->outputDir, storage: $failDelete))
+            ->build($intent(), $this->makeItems(2));
+
+        $this->assertTrue($report->success, 'A stuck trash directory must not fail the build');
+        $this->assertNotNull($report->warnings);
+        $this->assertNotEmpty(glob($this->outputDir . '/.scolta-trash-*') ?: []);
+    }
+
     public function testBuildCreatesFragmentFiles(): void
     {
         $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);

@@ -377,9 +377,12 @@ class PhpIndexer
         // took hours on NFS after the new index was already live, and it
         // read as a hang. This legacy indexer has no logger, so it does not
         // sweep the trash itself — the adapter's scheduled sweep (hook_cron
-        // / drush scolta:cleanup on Drupal) deletes it.
-        if ($this->storage->exists($oldDir)) {
-            $this->trash->retire($oldDir);
+        // / drush scolta:cleanup on Drupal) deletes it. If the rename itself
+        // fails (e.g. cross-filesystem), fall back to the old inline
+        // deletion rather than leaving the directory behind with no logger
+        // to report it and no trash sweep that will ever find it.
+        if ($this->storage->exists($oldDir) && !$this->trash->retire($oldDir)) {
+            $this->storage->deleteDirectory($oldDir);
         }
     }
 
