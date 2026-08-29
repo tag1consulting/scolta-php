@@ -243,6 +243,78 @@ class PhpIndexerTest extends TestCase
         $this->assertDirectoryDoesNotExist($this->outputDir . '/.scolta-building');
     }
 
+    public function testAtomicSwapFallsBackToInlineDeletionWhenRetireFails(): void
+    {
+        // This indexer has no logger, so a retire() failure that is merely
+        // discarded leaves the retired index on disk forever with no
+        // diagnostic trail and no sweep that will ever find it (trash sweeps
+        // look for .scolta-trash-*, not .scolta-old). Falling back to the
+        // old inline deletion is what the pre-trash behavior did, and is the
+        // only way this legacy path can still recover from a failed rename.
+        $real = new \Tag1\Scolta\Storage\FilesystemDriver();
+        $outputDir = $this->outputDir;
+        $failRetire = new class ($real, $outputDir) implements \Tag1\Scolta\Storage\StorageDriverInterface {
+            public function __construct(
+                private readonly \Tag1\Scolta\Storage\FilesystemDriver $inner,
+                private readonly string $outputDir,
+            ) {}
+
+            public function move(string $from, string $to): bool
+            {
+                if ($from === $this->outputDir . '/.scolta-old') {
+                    return false;
+                }
+                return $this->inner->move($from, $to);
+            }
+
+            public function exists(string $path): bool
+            {
+                return $this->inner->exists($path);
+            }
+            public function get(string $path): string
+            {
+                return $this->inner->get($path);
+            }
+            public function put(string $path, string $c): bool
+            {
+                return $this->inner->put($path, $c);
+            }
+            public function delete(string $path): bool
+            {
+                return $this->inner->delete($path);
+            }
+            public function deleteDirectory(string $path): bool
+            {
+                return $this->inner->deleteDirectory($path);
+            }
+            public function makeDirectory(string $path): bool
+            {
+                return $this->inner->makeDirectory($path);
+            }
+            public function files(string $dir, string $p = '*'): array
+            {
+                return $this->inner->files($dir, $p);
+            }
+        };
+
+        // First build publishes the index that the second build will retire.
+        $indexer1 = new PhpIndexer($this->stateDir, $this->outputDir, storage: $failRetire);
+        $indexer1->processChunk($this->makeItems(2), 0);
+        $indexer1->finalize();
+
+        $stateDir2 = $this->stateDir . '-2';
+        mkdir($stateDir2, 0755, true);
+        $indexer2 = new PhpIndexer($stateDir2, $this->outputDir, storage: $failRetire);
+        $indexer2->processChunk($this->makeItems(3), 0);
+        $indexer2->finalize();
+
+        $this->assertDirectoryExists($this->outputDir . '/pagefind');
+        $this->assertDirectoryDoesNotExist($this->outputDir . '/.scolta-old');
+        $this->assertSame([], glob($this->outputDir . '/.scolta-trash-*') ?: [], 'retire() never succeeded, so no trash directory should exist');
+
+        $this->removeDir($stateDir2);
+    }
+
     public function testFingerprintChangesWhenIndexerTypeWouldChange(): void
     {
         // The PHP indexer fingerprint must differ from a hypothetical binary

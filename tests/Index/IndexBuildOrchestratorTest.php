@@ -93,6 +93,101 @@ class IndexBuildOrchestratorTest extends TestCase
         $this->assertDirectoryDoesNotExist($this->outputDir . '/.scolta-building');
     }
 
+    public function testBuildSweepsRetiredIndexTrashAfterPublishing(): void
+    {
+        // The swap retires the previous live index by renaming it to a
+        // `.scolta-trash-*` directory — the inline unlink loop that used to
+        // run there took hours on NFS (~8 unlinks/sec against ~100k fragment
+        // files) after the new index was already published, which read as a
+        // hang. The build then sweeps all trash after the swap: post-publish
+        // so it gates nothing, announced at notice level, parallelized where
+        // the platform allows. Trash from a build that died before its own
+        // sweep is picked up here too.
+        mkdir($this->outputDir . '/.scolta-trash-crashed', 0755, true);
+        file_put_contents($this->outputDir . '/.scolta-trash-crashed/stale.pf_fragment', 'x');
+
+        $logger = new class extends \Psr\Log\AbstractLogger {
+            public array $notices = [];
+            public function log($level, string|\Stringable $message, array $context = []): void
+            {
+                if ($level === \Psr\Log\LogLevel::NOTICE) {
+                    $this->notices[] = (string) $message;
+                }
+            }
+        };
+        $intent = fn() => BuildIntent::fresh(2, MemoryBudget::conservative());
+        for ($i = 0; $i < 2; $i++) {
+            $report = (new IndexBuildOrchestrator($this->stateDir, $this->outputDir))
+                ->build($intent(), $this->makeItems(2), $logger);
+            $this->assertTrue($report->success, $report->error ?? 'No error');
+        }
+
+        $this->assertFileExists($this->outputDir . '/pagefind/pagefind-entry.json');
+        $this->assertDirectoryDoesNotExist($this->outputDir . '/.scolta-old');
+        $this->assertSame([], glob($this->outputDir . '/.scolta-trash-*') ?: []);
+        $sweepNotices = array_filter($logger->notices, fn($n) => str_contains($n, 'retired index'));
+        $this->assertNotEmpty($sweepNotices, 'The sweep must announce itself so it is not mistaken for a hang');
+    }
+
+    public function testReportCarriesAWarningWhenTrashCannotBeFullyDeleted(): void
+    {
+        // A sweep failure must never fail the build (it is best-effort by
+        // design), but it also must not vanish into the log alone — a caller
+        // that only inspects the returned report needs a way to know cleanup
+        // is still pending. StatusReport already had an unused $warnings
+        // field for exactly this kind of case.
+        $real = new FilesystemDriver();
+        $failDelete = new class ($real) implements StorageDriverInterface {
+            public function __construct(private readonly FilesystemDriver $inner) {}
+
+            public function deleteDirectory(string $path): bool
+            {
+                return str_contains($path, '.scolta-trash-') ? false : $this->inner->deleteDirectory($path);
+            }
+
+            public function exists(string $path): bool
+            {
+                return $this->inner->exists($path);
+            }
+            public function get(string $path): string
+            {
+                return $this->inner->get($path);
+            }
+            public function put(string $path, string $c): bool
+            {
+                return $this->inner->put($path, $c);
+            }
+            public function delete(string $path): bool
+            {
+                return $this->inner->delete($path);
+            }
+            public function makeDirectory(string $path): bool
+            {
+                return $this->inner->makeDirectory($path);
+            }
+            public function move(string $from, string $to): bool
+            {
+                return $this->inner->move($from, $to);
+            }
+            public function files(string $dir, string $p = '*'): array
+            {
+                return $this->inner->files($dir, $p);
+            }
+        };
+
+        // First build publishes a live index; the second's swap retires it
+        // to trash, which this storage can never actually delete.
+        $intent = fn() => BuildIntent::fresh(2, MemoryBudget::conservative());
+        (new IndexBuildOrchestrator($this->stateDir, $this->outputDir, storage: $failDelete))
+            ->build($intent(), $this->makeItems(2));
+        $report = (new IndexBuildOrchestrator($this->stateDir, $this->outputDir, storage: $failDelete))
+            ->build($intent(), $this->makeItems(2));
+
+        $this->assertTrue($report->success, 'A stuck trash directory must not fail the build');
+        $this->assertNotNull($report->warnings);
+        $this->assertNotEmpty(glob($this->outputDir . '/.scolta-trash-*') ?: []);
+    }
+
     public function testBuildCreatesFragmentFiles(): void
     {
         $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
