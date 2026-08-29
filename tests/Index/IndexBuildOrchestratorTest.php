@@ -93,6 +93,42 @@ class IndexBuildOrchestratorTest extends TestCase
         $this->assertDirectoryDoesNotExist($this->outputDir . '/.scolta-building');
     }
 
+    public function testBuildSweepsRetiredIndexTrashAfterPublishing(): void
+    {
+        // The swap retires the previous live index by renaming it to a
+        // `.scolta-trash-*` directory — the inline unlink loop that used to
+        // run there took hours on NFS (~8 unlinks/sec against ~100k fragment
+        // files) after the new index was already published, which read as a
+        // hang. The build then sweeps all trash after the swap: post-publish
+        // so it gates nothing, announced at notice level, parallelized where
+        // the platform allows. Trash from a build that died before its own
+        // sweep is picked up here too.
+        mkdir($this->outputDir . '/.scolta-trash-crashed', 0755, true);
+        file_put_contents($this->outputDir . '/.scolta-trash-crashed/stale.pf_fragment', 'x');
+
+        $logger = new class extends \Psr\Log\AbstractLogger {
+            public array $notices = [];
+            public function log($level, string|\Stringable $message, array $context = []): void
+            {
+                if ($level === \Psr\Log\LogLevel::NOTICE) {
+                    $this->notices[] = (string) $message;
+                }
+            }
+        };
+        $intent = fn() => BuildIntent::fresh(2, MemoryBudget::conservative());
+        for ($i = 0; $i < 2; $i++) {
+            $report = (new IndexBuildOrchestrator($this->stateDir, $this->outputDir))
+                ->build($intent(), $this->makeItems(2), $logger);
+            $this->assertTrue($report->success, $report->error ?? 'No error');
+        }
+
+        $this->assertFileExists($this->outputDir . '/pagefind/pagefind-entry.json');
+        $this->assertDirectoryDoesNotExist($this->outputDir . '/.scolta-old');
+        $this->assertSame([], glob($this->outputDir . '/.scolta-trash-*') ?: []);
+        $sweepNotices = array_filter($logger->notices, fn($n) => str_contains($n, 'retired index'));
+        $this->assertNotEmpty($sweepNotices, 'The sweep must announce itself so it is not mistaken for a hang');
+    }
+
     public function testBuildCreatesFragmentFiles(): void
     {
         $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);

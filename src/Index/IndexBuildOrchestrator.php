@@ -77,6 +77,7 @@ final class IndexBuildOrchestrator
     private int $chunksSinceMemCaches = 0;
     private readonly TimestampManifest $tsManifest;
     private readonly PageTableLedger $ledger;
+    private readonly RetiredIndexTrash $trash;
     private readonly string $outputDir;
     /** Warning message emitted when output_dir was already suffixed with /pagefind. */
     private readonly ?string $outputDirNormalizationWarning;
@@ -123,6 +124,7 @@ final class IndexBuildOrchestrator
         $this->storage     = $storage ?? new FilesystemDriver();
         $this->tsManifest  = new TimestampManifest($stateDir, $this->storage);
         $this->ledger      = new PageTableLedger($stateDir, $this->storage);
+        $this->trash       = new RetiredIndexTrash($this->storage, $this->outputDir);
     }
 
     /**
@@ -510,8 +512,9 @@ final class IndexBuildOrchestrator
             $streamWriter->endWrite();
             $telemetry->emit('writer_complete');
 
-            $this->atomicSwap();
+            $this->atomicSwap($logger);
             $telemetry->emit('swap_complete');
+            $this->trash->sweep($logger);
 
             $totalPagesProcessed = $this->coordinator->pagesProcessed();
             $pagesForReport      = $totalPagesProcessed > 0 ? $totalPagesProcessed : $pagesInRun;
@@ -838,8 +841,9 @@ final class IndexBuildOrchestrator
             $streamWriter->endWrite();
             $telemetry->emit('writer_complete');
 
-            $this->atomicSwap();
+            $this->atomicSwap($logger);
             $telemetry->emit('swap_complete');
+            $this->trash->sweep($logger);
 
             $pagesProcessed = $this->coordinator->pagesProcessed();
             $chunksFinalized = count($chunkFiles);
@@ -892,7 +896,7 @@ final class IndexBuildOrchestrator
         }
     }
 
-    private function atomicSwap(): void
+    private function atomicSwap(LoggerInterface $logger): void
     {
         $buildDir = $this->outputDir . '/.scolta-building';
         $finalDir = $this->outputDir . '/pagefind';
@@ -926,21 +930,36 @@ final class IndexBuildOrchestrator
             throw new \RuntimeException("Failed to publish new index: {$newDir} → {$finalDir}");
         }
 
-        if ($this->storage->exists($oldDir)) {
-            $this->storage->deleteDirectory($oldDir);
+        // Rename, never delete: the serial unlink loop that used to run here
+        // took hours on NFS after the new index was already live, and it
+        // read as a hang. The caller sweeps trash right after this swap —
+        // post-publish, announced at notice level, and parallelized where
+        // the platform allows — with cron/scolta:cleanup as the backstop
+        // for builds that die before their sweep.
+        if ($this->storage->exists($oldDir) && !$this->trash->retire($oldDir)) {
+            // Not fatal: the new index is published. clearStagingDir() will
+            // move it aside (or delete it) before the next swap.
+            $logger->warning('[scolta] Could not move retired index {dir} aside; the next build will remove it.', [
+                'dir' => $oldDir,
+            ]);
         }
     }
 
     /**
-     * Remove a staging directory left behind by an interrupted swap.
+     * Clear a staging directory left behind by an interrupted swap.
      *
-     * Failing loudly rather than pressing on: a staging path that cannot be
-     * cleared is a rename() target that is about to fail anyway, and the
-     * message names the directory an operator has to remove by hand.
+     * Retiring by rename keeps this O(1) on NFS; inline deletion is only the
+     * fallback. Failing loudly rather than pressing on: a staging path that
+     * cannot be cleared is a rename() target that is about to fail anyway,
+     * and the message names the directory an operator has to remove by hand.
      */
     private function clearStagingDir(string $dir): void
     {
         if (!$this->storage->exists($dir)) {
+            return;
+        }
+
+        if ($this->trash->retire($dir)) {
             return;
         }
 

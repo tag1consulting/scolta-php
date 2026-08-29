@@ -27,6 +27,7 @@ class PhpIndexer
     private readonly StorageDriverInterface $storage;
     private readonly MemoryBudget $budget;
     private readonly PageWordCache $cache;
+    private readonly RetiredIndexTrash $trash;
 
     /** Global page offset for sequential page numbering across chunks. */
     private int $currentPageOffset = 0;
@@ -43,6 +44,7 @@ class PhpIndexer
         ?MemoryBudget $budget = null,
     ) {
         $this->storage     = $storage ?? new FilesystemDriver();
+        $this->trash       = new RetiredIndexTrash($this->storage, $outputDir);
         $this->coordinator = new BuildCoordinator($stateDir, $hmacSecret);
         $this->budget      = $budget ?? MemoryBudget::default();
 
@@ -371,21 +373,31 @@ class PhpIndexer
 
         $this->storage->move($newDir, $finalDir);
 
+        // Rename, never delete: the serial unlink loop that used to run here
+        // took hours on NFS after the new index was already live, and it
+        // read as a hang. This legacy indexer has no logger, so it does not
+        // sweep the trash itself — the adapter's scheduled sweep (hook_cron
+        // / drush scolta:cleanup on Drupal) deletes it.
         if ($this->storage->exists($oldDir)) {
-            $this->storage->deleteDirectory($oldDir);
+            $this->trash->retire($oldDir);
         }
     }
 
     /**
-     * Remove a staging directory left behind by an interrupted swap.
+     * Clear a staging directory left behind by an interrupted swap.
      *
-     * Failing loudly rather than pressing on: a staging path that cannot be
-     * cleared is a rename() target that is about to fail anyway, and the
-     * message names the directory an operator has to remove by hand.
+     * Retiring by rename keeps this O(1) on NFS; inline deletion is only the
+     * fallback. Failing loudly rather than pressing on: a staging path that
+     * cannot be cleared is a rename() target that is about to fail anyway,
+     * and the message names the directory an operator has to remove by hand.
      */
     private function clearStagingDir(string $dir): void
     {
         if (!$this->storage->exists($dir)) {
+            return;
+        }
+
+        if ($this->trash->retire($dir)) {
             return;
         }
 
