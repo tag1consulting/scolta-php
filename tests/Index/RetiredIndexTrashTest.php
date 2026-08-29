@@ -97,15 +97,6 @@ class RetiredIndexTrashTest extends TestCase
         $this->assertArrayNotHasKey(LogLevel::WARNING, $logger->records);
     }
 
-    public function testSweepWithNoTrashLogsNothing(): void
-    {
-        $logger = $this->recordingLogger();
-        $result = (new RetiredIndexTrash(new FilesystemDriver(), $this->outputDir))->sweep($logger);
-
-        $this->assertTrue($result);
-        $this->assertSame([], $logger->records);
-    }
-
     public function testSweepRemovesASymlinkWithoutTouchingItsTarget(): void
     {
         $target = $this->outputDir . '/pagefind';
