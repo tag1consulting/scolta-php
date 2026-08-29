@@ -21,11 +21,15 @@ use Tag1\Scolta\Storage\StorageDriverInterface;
  * `.scolta-trash-*` sibling and returns immediately.
  *
  * sweep() deletes trash after the swap has published — parallel unlinking
- * makes that minutes rather than hours, and the notice it logs keeps the
- * wait from reading as a hang. The orchestrator sweeps right after each
- * swap; adapters also run it from scheduled maintenance as the backstop for
- * builds that die before their sweep (scolta-drupal: a time-boxed sweep
- * from hook_cron() and `drush scolta:cleanup` for on-demand runs).
+ * makes that minutes rather than hours under a CLI process (a build, `drush
+ * cron`, `drush scolta:cleanup`), and the notice it logs keeps the wait from
+ * reading as a hang. A caller running under a request-serving SAPI — a
+ * hook_cron() triggered by the web cron endpoint rather than drush — gets
+ * the serial fallback instead; see canFastDelete(). The orchestrator sweeps
+ * right after each swap; adapters also run it from scheduled maintenance as
+ * the backstop for builds that die before their sweep (scolta-drupal: a
+ * time-boxed sweep from hook_cron() and `drush scolta:cleanup` for on-demand
+ * runs).
  * $outputDir is the directory that holds the published `pagefind/` directory
  * — the same value the orchestrator's constructor takes, after its
  * `/pagefind`-suffix normalization.
@@ -173,13 +177,24 @@ final class RetiredIndexTrash
      *
      * Local filesystem only — a cloud storage driver has no local paths for
      * `rm` to act on (and no NFS latency problem either) — on a POSIX
-     * platform with process spawning enabled.
+     * platform with process spawning enabled. CLI only, deliberately: a
+     * request-serving SAPI (php-fpm, `php -S`, mod_php) owns its worker
+     * process's lifecycle in ways a CLI script does not — a web server may
+     * recycle or kill the worker mid-request, and some hosts sandbox web
+     * workers more tightly than CLI (seccomp/AppArmor profiles that permit
+     * `proc_open` for a shell but not for FastCGI). Sixteen child processes
+     * spawned from inside such a worker is new, uncommon ground; a CLI
+     * script — a build, `drush cron`, `drush scolta:cleanup` — owns its own
+     * process and is exactly the context every other caller of sweep()
+     * already runs in. A request-triggered `hook_cron()` (the one caller
+     * that is not CLI) falls back to serial deletion instead.
      */
     private function canFastDelete(): bool
     {
         return $this->storage instanceof FilesystemDriver
             && \PHP_OS_FAMILY !== 'Windows'
-            && \function_exists('proc_open');
+            && \function_exists('proc_open')
+            && \PHP_SAPI === 'cli';
     }
 
     /**
