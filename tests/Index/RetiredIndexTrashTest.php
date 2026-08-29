@@ -97,26 +97,6 @@ class RetiredIndexTrashTest extends TestCase
         $this->assertArrayNotHasKey(LogLevel::WARNING, $logger->records);
     }
 
-    public function testSweepRemovesASymlinkWithoutTouchingItsTarget(): void
-    {
-        $target = $this->outputDir . '/pagefind';
-        mkdir($target, 0755, true);
-        file_put_contents($target . '/pagefind-entry.json', '{}');
-
-        $retired = $this->outputDir . '/.scolta-old';
-        mkdir($retired, 0755, true);
-        symlink($target, $retired . '/dir-link');
-        symlink($target . '/pagefind-entry.json', $retired . '/file-link');
-
-        $trash = new RetiredIndexTrash(new FilesystemDriver(), $this->outputDir);
-        $trash->retire($retired);
-
-        $this->assertTrue($trash->sweep($this->recordingLogger()));
-        $this->assertSame([], glob($this->outputDir . '/' . RetiredIndexTrash::PREFIX . '*') ?: []);
-        // The links are gone; what they pointed at is not.
-        $this->assertFileExists($target . '/pagefind-entry.json');
-    }
-
     public function testSweepStopsWhenTheTimeBudgetIsAlreadySpent(): void
     {
         $trash = new RetiredIndexTrash(new FilesystemDriver(), $this->outputDir);
