@@ -709,11 +709,35 @@ final class PageTableLedger
      * from an older build's, and rewinding it could make a row written by a
      * later build look current.
      *
+     * @throws \RuntimeException When a file cannot be removed.
      * @since 1.2.0
      * @stability experimental
      */
     public function reset(): void
     {
+        // Unlink first, and refuse to continue if either file survives. A
+        // reset that cleared memory and shrugged off a failed delete would be
+        // the original bug wearing a different hat: the caller believes it is
+        // renumbering from zero, and the file it could not remove is replayed
+        // over the new assignments by the next process to read this directory.
+        // Better to fail here, before the build spends hours, and name the
+        // file so an operator can remove it themselves.
+        foreach ([self::FILENAME, self::JOURNAL_FILENAME] as $name) {
+            $path = $this->stateDir . '/' . $name;
+            if (!$this->storage->exists($path)) {
+                continue;
+            }
+
+            if (!$this->storage->delete($path)) {
+                throw new \RuntimeException(sprintf(
+                    'Failed to discard the page-table ledger: %s could not be removed. Refusing to '
+                    . 'renumber, because that file would be read back over the new assignments and hand '
+                    . 'one ordinal to two pages. Check its permissions, or remove it by hand, then re-run.',
+                    $path,
+                ));
+            }
+        }
+
         $this->next       = 0;
         $this->byId       = [];
         $this->free       = [];
@@ -722,13 +746,6 @@ final class PageTableLedger
         // checkpoint() after this would write them back out.
         $this->pendingJournal = [];
         $this->dirty          = true;
-
-        foreach ([self::FILENAME, self::JOURNAL_FILENAME] as $name) {
-            $path = $this->stateDir . '/' . $name;
-            if ($this->storage->exists($path)) {
-                $this->storage->delete($path);
-            }
-        }
     }
 
     /**

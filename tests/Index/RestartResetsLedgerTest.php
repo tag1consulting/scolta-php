@@ -16,6 +16,7 @@ use Tag1\Scolta\Index\MemoryBudget;
 use Tag1\Scolta\Index\PageTableLedger;
 use Tag1\Scolta\Index\StreamingFormatWriter;
 use Tag1\Scolta\Storage\FilesystemDriver;
+use Tag1\Scolta\Storage\StorageDriverInterface;
 use Tag1\Scolta\Tests\Support\SyntheticCorpus;
 
 /**
@@ -259,6 +260,124 @@ final class RestartResetsLedgerTest extends TestCase
         $this->assertNull($reloaded->ordinalFor('b'));
         $this->assertNull($reloaded->ordinalFor('c'));
         $this->assertSame(1, $reloaded->pageTableSize());
+    }
+
+    /**
+     * A delete that fails has to be loud. The whole point of the reset is that
+     * the old assignments are gone; a file that survives it is replayed over
+     * the new ones by the next process to read the directory, which is the
+     * duplicate-ordinal bug again.
+     */
+    public function testResetRefusesToRenumberWhenTheJournalCannotBeRemoved(): void
+    {
+        $real   = new FilesystemDriver();
+        $ledger = new PageTableLedger($this->stateDir, $real);
+        $ledger->allocate('a', '/a');
+        $ledger->save();
+        $ledger->allocate('b', '/b');
+        $ledger->checkpoint();
+
+        $stuckJournal = new PageTableLedger($this->stateDir, self::storageThatCannotDeleteTheJournal($real));
+        $this->assertSame(0, $stuckJournal->ordinalFor('a'), 'Precondition: the snapshot and journal loaded.');
+        $this->assertSame(1, $stuckJournal->ordinalFor('b'));
+
+        try {
+            $stuckJournal->reset();
+            $this->fail('reset() must not report success while a ledger file survives it.');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString(PageTableLedger::JOURNAL_FILENAME, $e->getMessage());
+            $this->assertStringContainsString('Refusing to renumber', $e->getMessage());
+        }
+
+        // The in-memory table is untouched, so nothing downstream can act on a
+        // half-applied reset: the caller sees the assignments it had.
+        $this->assertSame(0, $stuckJournal->ordinalFor('a'));
+        $this->assertSame(1, $stuckJournal->ordinalFor('b'));
+        $this->assertSame(2, $stuckJournal->pageTableSize());
+        $this->assertFalse($stuckJournal->isEmpty());
+    }
+
+    /**
+     * The operator-visible half of the same guard: the restart fails at the
+     * start with the file named, rather than after re-indexing the corpus.
+     */
+    public function testARestartFailsUpFrontWhenTheLedgerCannotBeDiscarded(): void
+    {
+        $real = new FilesystemDriver();
+        $this->buildFresh(SyntheticCorpus::generate(4, seed: 5));
+
+        // Leave a journal behind for the restart to trip over: the completed
+        // build's save() truncated it.
+        $ledger = new PageTableLedger($this->stateDir, $real);
+        $ledger->allocate('late-arrival', '/late-arrival');
+        $ledger->checkpoint();
+
+        $orchestrator = new IndexBuildOrchestrator(
+            $this->stateDir,
+            $this->outputDir,
+            storage: self::storageThatCannotDeleteTheJournal($real),
+        );
+        $report = $orchestrator->build(
+            BuildIntent::restart(4, MemoryBudget::conservative()),
+            SyntheticCorpus::generate(4, seed: 5),
+        );
+
+        $this->assertFalse($report->success, 'A restart that cannot discard the ledger must not report success.');
+        $this->assertStringContainsString(PageTableLedger::JOURNAL_FILENAME, (string) $report->error);
+        $this->assertSame(0, $report->pagesProcessed, 'It must fail before indexing, not after.');
+    }
+
+    /**
+     * A driver that refuses to unlink the journal — an unwritable state
+     * directory, or an NFS mount that reports success without removing it.
+     */
+    private static function storageThatCannotDeleteTheJournal(FilesystemDriver $inner): StorageDriverInterface
+    {
+        return new class ($inner) implements StorageDriverInterface {
+            public function __construct(private readonly FilesystemDriver $inner) {}
+
+            public function delete(string $path): bool
+            {
+                return str_ends_with($path, PageTableLedger::JOURNAL_FILENAME)
+                    ? false
+                    : $this->inner->delete($path);
+            }
+
+            public function exists(string $path): bool
+            {
+                return $this->inner->exists($path);
+            }
+
+            public function get(string $path): string
+            {
+                return $this->inner->get($path);
+            }
+
+            public function put(string $path, string $contents): bool
+            {
+                return $this->inner->put($path, $contents);
+            }
+
+            public function deleteDirectory(string $path): bool
+            {
+                return $this->inner->deleteDirectory($path);
+            }
+
+            public function makeDirectory(string $path): bool
+            {
+                return $this->inner->makeDirectory($path);
+            }
+
+            public function move(string $from, string $to): bool
+            {
+                return $this->inner->move($from, $to);
+            }
+
+            public function files(string $directory, string $pattern = '*'): array
+            {
+                return $this->inner->files($directory, $pattern);
+            }
+        };
     }
 
     /**
