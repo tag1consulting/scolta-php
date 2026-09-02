@@ -32,7 +32,7 @@ class BuildCoordinatorTest extends TestCase
 
         $this->assertIsArray($manifest);
         $this->assertSame(100, $manifest['total_pages']);
-        $this->assertTrue(file_exists($this->tmpDir . '/manifest.json'));
+        $this->assertTrue(file_exists($coord->manifestFile()));
         $this->assertTrue(file_exists($this->tmpDir . '/lock'));
 
         $coord->release();
@@ -102,8 +102,8 @@ class BuildCoordinatorTest extends TestCase
         $coord->release();
 
         self::assertForeignStateIntact($this->tmpDir, $foreign, 'release()');
-        $this->assertFileDoesNotExist($this->tmpDir . '/lock');
-        $this->assertFileDoesNotExist($this->tmpDir . '/manifest.json');
+        $this->assertFileDoesNotExist($coord->manifestFile());
+        $this->assertFalse($coord->buildState()->isRunning());
     }
 
     public function testCommitChunkWritesFile(): void
@@ -132,8 +132,8 @@ class BuildCoordinatorTest extends TestCase
         $coord->prepare($intent);
         $coord->release();
 
-        $this->assertFalse(file_exists($this->tmpDir . '/lock'));
-        $this->assertFalse(file_exists($this->tmpDir . '/manifest.json'));
+        $this->assertFalse($coord->buildState()->isRunning());
+        $this->assertFalse(file_exists($coord->manifestFile()));
     }
 
     public function testReleaseLockOnlyPreservesChunks(): void
@@ -149,8 +149,8 @@ class BuildCoordinatorTest extends TestCase
         $coord->commitChunk(0, $partial);
         $coord->releaseLockOnly();
 
-        // Lock should be gone but chunk file should remain.
-        $this->assertFalse(file_exists($this->tmpDir . '/lock'));
+        // Lock should be released but chunk files should remain.
+        $this->assertFalse($coord->buildState()->isRunning());
         $this->assertNotEmpty($coord->chunkFiles());
     }
 
