@@ -49,15 +49,6 @@ final class BuildCoordinator
     public function prepare(BuildIntent $intent): array
     {
         if ($intent->isFresh()) {
-            if ($this->state->isRunning()) {
-                throw new \RuntimeException(
-                    'Another index build is already running. '
-                    . 'Wait for it to complete, or kill the process and retry with --restart.',
-                );
-            }
-
-            $this->state->cleanup();
-
             $manifest = array_merge([
                 'total_pages' => $intent->totalPages() ?? 0,
                 'chunk_size'  => $intent->memoryBudget()->chunkSize(),
@@ -65,9 +56,17 @@ final class BuildCoordinator
                 'fingerprint' => $intent->sourceMeta()['fingerprint'] ?? '',
             ], $intent->sourceMeta());
 
+            // No isRunning() check and no cleanup() before this call. Both
+            // used to happen outside the lock: the check could clear a live
+            // build (a PID owned by another uid, or in another container,
+            // reads as dead) and cleanup() then deleted that build's lock,
+            // manifest and chunk files while it was still writing them.
+            // initiateBuild() takes the lock first and clears state after.
             if (!$this->state->initiateBuild($manifest)) {
                 throw new \RuntimeException(
-                    'Failed to acquire build lock — another process may have just started.',
+                    'Another index build is already running against this state directory. '
+                    . 'Wait for it to finish, or stop that process and retry. '
+                    . $this->lockDescription(),
                 );
             }
 
@@ -83,11 +82,36 @@ final class BuildCoordinator
             );
         }
 
-        if (!$this->state->initiateBuild($manifest)) {
-            throw new \RuntimeException('Failed to re-acquire build lock for resume.');
+        if (!$this->state->resumeBuild($manifest)) {
+            throw new \RuntimeException(
+                'Failed to re-acquire build lock for resume — another build is running. '
+                . $this->lockDescription(),
+            );
         }
 
         return $manifest;
+    }
+
+    /**
+     * Describe the current lock holder, so a refused build says who refused it.
+     *
+     * The production incident could not be explained after the fact because
+     * nothing recorded how the liveness question had been answered.
+     */
+    private function lockDescription(): string
+    {
+        $lock = $this->state->lockDiagnostics();
+        if ($lock === null) {
+            return 'No lock record is readable in ' . $this->stateDir . '.';
+        }
+
+        return sprintf(
+            'Lock held by pid %s on host %s (generation %s, %s).',
+            $lock['pid'] ?? 'unknown',
+            $lock['host'] ?? 'unknown',
+            $lock['generation'] ?? 'unknown',
+            $lock['liveness'],
+        );
     }
 
     /**
@@ -111,6 +135,17 @@ final class BuildCoordinator
     public function chunkFiles(): array
     {
         return $this->state->getChunkFiles();
+    }
+
+    /**
+     * Path to the manifest of the build currently in the state directory.
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function manifestFile(): string
+    {
+        return $this->state->manifestFile();
     }
 
     /**
