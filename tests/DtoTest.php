@@ -298,5 +298,4 @@ class DtoTest extends TestCase
         $this->assertEquals(0, $response->outputTokens);
         $this->assertEquals('', $response->model);
     }
-
 }

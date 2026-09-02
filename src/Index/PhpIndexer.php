@@ -427,5 +427,4 @@ class PhpIndexer
 
         return $count;
     }
-
 }
