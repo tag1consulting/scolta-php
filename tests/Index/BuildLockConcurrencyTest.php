@@ -218,6 +218,51 @@ class BuildLockConcurrencyTest extends TestCase
     }
 
     /**
+     * The manifest stays at the state directory root.
+     *
+     * Adapters read it there directly — scolta-laravel's queue dispatcher
+     * compares it across dispatches to decide whether anything changed — so
+     * only the chunk files are per-generation. The manifest names the
+     * generation instead, which is what lets a later process find the chunks.
+     */
+    public function testTheManifestStaysAtTheStateDirectoryRootAndNamesTheGeneration(): void
+    {
+        $coord = new BuildCoordinator($this->tmpDir);
+        $coord->prepare(BuildIntent::fresh(20, MemoryBudget::conservative()));
+        $coord->commitChunk(0, self::partial('a'));
+
+        $this->assertSame($this->tmpDir . '/manifest.json', $coord->manifestFile());
+        $this->assertFileExists($this->tmpDir . '/manifest.json');
+
+        $manifest = json_decode((string) file_get_contents($this->tmpDir . '/manifest.json'), true);
+        $this->assertSame($coord->buildState()->buildDirectory(), $this->tmpDir . '/builds/' . $manifest['generation']);
+        $this->assertStringStartsWith($this->tmpDir . '/builds/', $coord->chunkFiles()[0]);
+    }
+
+    /**
+     * A build whose manifest has been replaced by another build's aborts.
+     *
+     * The manifest is shared, so this is the guard that keeps the page counter
+     * from being incremented by two builds at once — 9000 pages recorded
+     * against a 1518-page build, in the incident.
+     */
+    public function testAChunkIsNotCountedIntoAnotherBuildsManifest(): void
+    {
+        $coord = new BuildCoordinator($this->tmpDir);
+        $coord->prepare(BuildIntent::fresh(20, MemoryBudget::conservative()));
+        $coord->commitChunk(0, self::partial('a'));
+
+        // Another build's manifest lands at the root.
+        $manifest = json_decode((string) file_get_contents($this->tmpDir . '/manifest.json'), true);
+        $manifest['generation'] = 'a-different-generation';
+        file_put_contents($this->tmpDir . '/manifest.json', json_encode($manifest, JSON_THROW_ON_ERROR));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('describes build generation');
+        $coord->commitChunk(1, self::partial('b'));
+    }
+
+    /**
      * A build that loses its lock aborts instead of writing into the winner's
      * generation.
      */

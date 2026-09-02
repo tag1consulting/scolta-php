@@ -27,10 +27,14 @@ namespace Tag1\Scolta\Index;
  *    working lock daemon state, so a lock acquired on one host says nothing
  *    about another; the record is consulted after flock() succeeds and a
  *    live foreign claim still refuses the build.
- * 3. A per-build generation directory. Chunk files and the manifest live under
+ * 3. A per-build generation directory. Chunk files live under
  *    `builds/<generation>/`, so even if both guards above were somehow
- *    defeated, two builds cannot write the same chunk filename or increment
- *    each other's page counter.
+ *    defeated, two builds cannot write the same chunk filename — the failure
+ *    that silently mixed one build's pages into the other's index. The
+ *    manifest stays at the state directory root, where adapters already read
+ *    it, and names the generation it describes; a writer whose generation no
+ *    longer matches it aborts rather than counting its pages into another
+ *    build's total.
  *
  * Liveness is decided by heartbeat age first. `posix_kill($pid, 0)` is only
  * corroborating evidence, and only when the record's host is this host: a live
@@ -46,9 +50,6 @@ class BuildState
 
     /** Directory holding one subdirectory per build generation. */
     private const BUILDS_DIR = 'builds';
-
-    /** Pointer file naming the generation the current/last build writes into. */
-    private const CURRENT_BUILD_FILE = 'current-build';
 
     /** Maximum heartbeat age before considering a lock stale (1 hour). */
     private const STALE_LOCK_SECONDS = 3600;
@@ -115,7 +116,6 @@ class BuildState
             $this->dropLockFileOnly();
             throw new \RuntimeException("Failed to create build directory: {$buildDir}");
         }
-        $this->writeCurrentBuildPointer($this->generation);
         $this->writeLockRecord();
 
         $manifest = array_merge([
@@ -179,6 +179,7 @@ class BuildState
     public function recordChunk(int $chunkNumber, array $partialData): void
     {
         $this->assertOwnership();
+        $this->assertManifestIsOurs();
 
         $path = $this->chunkPath($chunkNumber);
         (new ChunkWriter())->write($path, $partialData, $this->hmacSecret);
@@ -401,12 +402,11 @@ class BuildState
     }
 
     /**
-     * The directory this build's manifest and chunk files live in.
+     * The directory this build's chunk files live in.
      *
      * A per-build generation directory under `builds/`, or the state directory
-     * root for state written before 1.5.0. Callers that need to inspect the
-     * manifest (status commands, diagnostics, tests) must resolve it through
-     * here rather than assuming a path.
+     * root for chunks written before 1.5.0. Callers that need the chunk files
+     * themselves should prefer getChunkFiles().
      *
      * @since 1.5.0
      * @stability experimental
@@ -417,7 +417,7 @@ class BuildState
     }
 
     /**
-     * Path to the manifest of the build in buildDirectory().
+     * Path to the build manifest, at the state directory root.
      *
      * @since 1.5.0
      * @stability experimental
@@ -505,7 +505,7 @@ class BuildState
 
     /**
      * Clean up the state this class owns: the manifest and the committed chunk
-     * files of this build's generation.
+     * files of this build's generation, plus the generation's directory.
      *
      * Deliberately not the whole directory, which is what it used to be. The
      * state directory is shared: PageWordCache keeps token-cache-manifest.php
@@ -545,9 +545,6 @@ class BuildState
         $buildDir = $this->buildDir();
         if ($this->generation !== null && $buildDir !== $this->stateDir && is_dir($buildDir)) {
             @rmdir($buildDir);
-            if ($this->generation === $this->readCurrentBuildPointer()) {
-                @unlink($this->stateDir . '/' . self::CURRENT_BUILD_FILE);
-            }
         }
     }
 
@@ -627,17 +624,13 @@ class BuildState
      */
     private function ownedFiles(): array
     {
-        $buildDir = $this->buildDir();
-        $files = [$buildDir . '/' . self::MANIFEST_FILE];
+        $files = [$this->manifestPath()];
 
-        $patterns = [
-            '/' . self::MANIFEST_FILE . self::MANIFEST_TMP_SUFFIX . '*',
-            '/chunk-*.dat',
-        ];
-        foreach ($patterns as $pattern) {
-            foreach (glob($buildDir . $pattern) ?: [] as $path) {
-                $files[] = $path;
-            }
+        foreach (glob($this->manifestPath() . self::MANIFEST_TMP_SUFFIX . '*') ?: [] as $path) {
+            $files[] = $path;
+        }
+        foreach (glob($this->buildDir() . '/chunk-*.dat') ?: [] as $path) {
+            $files[] = $path;
         }
 
         return $files;
@@ -914,9 +907,9 @@ class BuildState
     }
 
     /**
-     * The directory holding this build's manifest and chunk files.
+     * The directory holding this build's chunk files.
      *
-     * Falls back to the state directory root for state written before 1.5.0,
+     * Falls back to the state directory root for chunks written before 1.5.0,
      * so an in-flight build survives the upgrade.
      */
     private function buildDir(): string
@@ -929,7 +922,14 @@ class BuildState
         return $this->stateDir . '/' . self::BUILDS_DIR . '/' . $generation;
     }
 
-    /** Resolve the current generation from the pointer file, if any. */
+    /**
+     * Resolve the generation from the manifest, which names it.
+     *
+     * The manifest is the pointer: it stays at the state directory root, one
+     * per state directory, and the build it describes is the one whose chunk
+     * files the next process should read. A manifest without the field was
+     * written before 1.5.0 and its chunks are at the root.
+     */
     private function resolveGeneration(): ?string
     {
         if ($this->generationResolved) {
@@ -937,8 +937,9 @@ class BuildState
         }
         $this->generationResolved = true;
 
-        $generation = $this->readCurrentBuildPointer();
-        if ($generation === null) {
+        $manifest = $this->readManifest();
+        $generation = $manifest['generation'] ?? null;
+        if (!is_string($generation) || preg_match('/^[0-9A-Za-z_.\-]+$/', $generation) !== 1) {
             return null;
         }
 
@@ -951,31 +952,28 @@ class BuildState
         return $generation;
     }
 
-    private function readCurrentBuildPointer(): ?string
+    /**
+     * Refuse to update a manifest that now describes a different build.
+     *
+     * @throws \RuntimeException When the manifest names another generation.
+     */
+    private function assertManifestIsOurs(): void
     {
-        $path = $this->stateDir . '/' . self::CURRENT_BUILD_FILE;
-        if (!file_exists($path)) {
-            return null;
+        if ($this->generation === null) {
+            return;
         }
 
-        $data = @file_get_contents($path);
-        if ($data === false) {
-            return null;
+        $manifest = $this->readManifest();
+        $generation = $manifest['generation'] ?? null;
+        if ($manifest === null || $generation === null || $generation === $this->generation) {
+            return;
         }
-        $data = trim($data);
 
-        return preg_match('/^[0-9A-Za-z_.\-]+$/', $data) === 1 ? $data : null;
-    }
-
-    private function writeCurrentBuildPointer(string $generation): void
-    {
-        $path = $this->stateDir . '/' . self::CURRENT_BUILD_FILE;
-        $temp = $path . '.tmp.' . getmypid() . '.' . uniqid('', true);
-
-        if (file_put_contents($temp, $generation) === false || !rename($temp, $path)) {
-            @unlink($temp);
-            throw new \RuntimeException("Failed to write current-build pointer: {$path}");
-        }
+        throw new \RuntimeException(
+            'The manifest in ' . $this->stateDir . ' now describes build generation '
+            . (string) $generation . ', not ' . $this->generation
+            . '. Aborting rather than counting this build\'s pages into another\'s.',
+        );
     }
 
     /**
@@ -987,7 +985,8 @@ class BuildState
      */
     private function purgeAbandonedBuilds(): void
     {
-        // Chunk and manifest files written at the root by pre-1.5.0 builds.
+        // The manifest of the previous build, and the chunk files a pre-1.5.0
+        // build wrote beside it at the root.
         $legacy = array_merge(
             [$this->stateDir . '/' . self::MANIFEST_FILE],
             glob($this->stateDir . '/' . self::MANIFEST_FILE . self::MANIFEST_TMP_SUFFIX . '*') ?: [],
@@ -1007,13 +1006,22 @@ class BuildState
             }
             @rmdir($dir);
         }
-
-        @unlink($this->stateDir . '/' . self::CURRENT_BUILD_FILE);
     }
 
+    /**
+     * The manifest path: the state directory root, always.
+     *
+     * It stays where every adapter already looks for it — the Laravel queue
+     * dispatcher reads it to decide whether a dispatch changed anything, and
+     * moving it under the generation directory broke that. Sharing one
+     * manifest is safe now for the reason sharing the chunk namespace was not:
+     * the lock is genuinely held, and a writer whose generation no longer
+     * matches the manifest's aborts instead of counting its pages into
+     * somebody else's total.
+     */
     private function manifestPath(): string
     {
-        return $this->buildDir() . '/' . self::MANIFEST_FILE;
+        return $this->stateDir . '/' . self::MANIFEST_FILE;
     }
 
     private function chunkPath(int $chunkNumber): string
