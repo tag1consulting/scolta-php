@@ -113,8 +113,19 @@ class BuildState
             // Release rather than leave the lock held by a build that never
             // started: a failure here throws before the manifest is written,
             // and a held-but-unstarted lock would refuse every build for up to
-            // an hour, until the heartbeat goes stale on its own.
-            $this->dropLockFileOnly();
+            // an hour, until the heartbeat goes stale on its own. Guarded so a
+            // failure in the release itself cannot mask the purge failure that
+            // is the actual problem here — dropLockFileOnly() cannot throw
+            // today, but nothing pins that down, and losing $e to a secondary
+            // failure would send the caller chasing the wrong exception.
+            try {
+                $this->dropLockFileOnly();
+            } catch (\Throwable) {
+                // Ignored: $e below is the failure worth reporting. Leaving
+                // the lock held here is no worse than the outcome this catch
+                // exists to avoid — it still expires on its own once the
+                // heartbeat goes stale.
+            }
             throw $e;
         }
 
