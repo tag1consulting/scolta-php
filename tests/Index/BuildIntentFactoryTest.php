@@ -45,6 +45,27 @@ class BuildIntentFactoryTest extends TestCase
         $this->assertSame('resume', $intent->mode());
     }
 
+    public function testResetLedgerFlagOptsAFreshBuildIntoAPageTableReset(): void
+    {
+        $intent = BuildIntentFactory::fromFlags(false, false, 500, MemoryBudget::conservative(), true);
+
+        $this->assertSame('fresh', $intent->mode());
+        $this->assertTrue($intent->resetsPageTable());
+    }
+
+    public function testRestartResetsThePageTableWithoutTheResetLedgerFlag(): void
+    {
+        $intent = BuildIntentFactory::fromFlags(false, true, 500, MemoryBudget::conservative());
+
+        $this->assertTrue($intent->resetsPageTable());
+    }
+
+    public function testResetLedgerIsRefusedOnAResume(): void
+    {
+        $this->expectException(\LogicException::class);
+        BuildIntentFactory::fromFlags(true, false, 500, MemoryBudget::conservative(), true);
+    }
+
     public function testBudgetIsPassedThrough(): void
     {
         $budget = MemoryBudget::aggressive();

@@ -16,6 +16,9 @@ class IndexMerger
     /** Build-scoped instrumentation; null disables phase emission. */
     private ?MemoryTelemetry $telemetry = null;
 
+    /** State directory, so a failure can name the file that holds the bad state. */
+    private ?string $stateDir = null;
+
     /**
      * Attach build-scoped telemetry so the merge reports its internal phases.
      *
@@ -33,6 +36,24 @@ class IndexMerger
     public function setTelemetry(?MemoryTelemetry $telemetry): void
     {
         $this->telemetry = $telemetry;
+    }
+
+    /**
+     * Tell the merger where the build state lives.
+     *
+     * Only used to name a concrete path in the duplicate-ordinal failure. An
+     * operator reading that message is being told to re-run the build; naming
+     * the file the state actually sits in is what makes the message diagnosable
+     * when the re-run does not help. Set through a setter for the same reason
+     * as {@see self::setTelemetry()}: mergeStreaming() is `@stability stable`
+     * and this class is not final.
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function setStateDir(?string $stateDir): void
+    {
+        $this->stateDir = $stateDir;
     }
 
     /**
@@ -181,10 +202,12 @@ class IndexMerger
                     throw new \RuntimeException(sprintf(
                         'Duplicate page ordinal %d across chunks: "%s" and "%s" both claim it. '
                         . 'Merging would keep one page and leave every posting list for the other '
-                        . 'pointing at the wrong document. Re-run with --restart to rebuild from scratch.',
+                        . 'pointing at the wrong document. Re-run with --restart, which discards the '
+                        . 'page-table ledger (%s) and renumbers every page from zero.',
                         $pageNum,
                         $claimedBy[$pageNum],
                         (string) ($pageData['id'] ?? '?'),
+                        $this->ledgerLocation(),
                     ));
                 }
                 $claimedBy[$pageNum] = (string) ($pageData['id'] ?? '?');
@@ -459,5 +482,19 @@ class IndexMerger
         }
 
         return $merged;
+    }
+
+    /**
+     * Where the page-table state lives, for the duplicate-ordinal message.
+     */
+    private function ledgerLocation(): string
+    {
+        if ($this->stateDir === null) {
+            return PageTableLedger::FILENAME . ' and ' . PageTableLedger::JOURNAL_FILENAME
+                . ' in the build state directory';
+        }
+
+        return $this->stateDir . '/' . PageTableLedger::FILENAME
+            . ' and ' . $this->stateDir . '/' . PageTableLedger::JOURNAL_FILENAME;
     }
 }

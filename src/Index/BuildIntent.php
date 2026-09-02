@@ -17,6 +17,7 @@ final class BuildIntent
         private readonly ?int $totalPages,
         private readonly MemoryBudget $memoryBudget,
         private readonly array $sourceMeta,
+        private readonly bool $resetsPageTable = false,
     ) {}
 
     /**
@@ -47,14 +48,54 @@ final class BuildIntent
     }
 
     /**
-     * Restart with fresh content, preserving the source manifest if it exists.
+     * Rebuild from scratch, discarding the page-table ledger.
+     *
+     * This is the difference between restart and fresh. A fresh build keeps
+     * the ledger, because ordinal continuity across builds is what lets an
+     * incremental update reuse the fragment files a full build wrote. A
+     * restart renumbers from zero, which is what "rebuild from scratch" has
+     * to mean for the advice printed by the merge's duplicate-ordinal check
+     * and the orchestrator's integrity checks to be actionable: the condition
+     * those errors report lives in the ledger, so a restart that inherited it
+     * would fail again the same way, and did.
+     *
+     * Only the ledger goes. The token cache and the timestamp manifest are
+     * content-hash keyed and expensive to rebuild, and neither can carry a
+     * bad ordinal.
      *
      * @since 1.0.0
      * @stability stable
      */
     public static function restart(int $totalPages, MemoryBudget $budget, array $sourceMeta = []): self
     {
-        return new self('restart', $totalPages, $budget, $sourceMeta);
+        return new self('restart', $totalPages, $budget, $sourceMeta, true);
+    }
+
+    /**
+     * This intent with the page-table ledger reset requested.
+     *
+     * The escape hatch for a corrupt ledger under a build that is not a
+     * restart — an operator's --reset-ledger. Renumbering invalidates every
+     * fragment filename in the index, so it is only meaningful on a build that
+     * rewrites the whole index; asking for it on a resume is refused rather
+     * than honoured, because a resume's chunks on disk already hold ordinals
+     * the reset would hand out a second time.
+     *
+     * @throws \LogicException When called on a resume intent.
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function withPageTableReset(): self
+    {
+        if ($this->mode === 'resume') {
+            throw new \LogicException(
+                'Cannot reset the page-table ledger on a resumed build: the chunk files already on disk '
+                . 'reference the ordinals it holds, and a reset would hand those same ordinals to different '
+                . 'pages. Run a restart instead.',
+            );
+        }
+
+        return new self($this->mode, $this->totalPages, $this->memoryBudget, $this->sourceMeta, true);
     }
 
     /**
@@ -108,5 +149,19 @@ final class BuildIntent
     public function isFresh(): bool
     {
         return $this->mode === 'fresh' || $this->mode === 'restart';
+    }
+
+    /**
+     * True when this build must discard the page-table ledger first.
+     *
+     * Always true for restart; true for fresh only when an operator asked for
+     * it via {@see self::withPageTableReset()}.
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function resetsPageTable(): bool
+    {
+        return $this->resetsPageTable;
     }
 }

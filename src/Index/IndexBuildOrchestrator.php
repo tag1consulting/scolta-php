@@ -121,6 +121,7 @@ final class IndexBuildOrchestrator
         // The binary/Pagefind path handles this correctly via <html lang="...">.
         $this->builder     = new InvertedIndexBuilder(new Tokenizer(), new Stemmer($language));
         $this->merger      = new IndexMerger();
+        $this->merger->setStateDir($stateDir);
         $this->storage     = $storage ?? new FilesystemDriver();
         $this->tsManifest  = new TimestampManifest($stateDir, $this->storage);
         $this->ledger      = new PageTableLedger($stateDir, $this->storage);
@@ -222,6 +223,24 @@ final class IndexBuildOrchestrator
         try {
             $manifest = $this->coordinator->prepare($intent);
             $telemetry->emit('build_start', ['mode' => $intent->mode()]);
+
+            // A restart means "rebuild from scratch", and the page table is
+            // the one piece of state a fresh build deliberately carries
+            // forward. Carrying it into a restart made the advice printed by
+            // the merge's duplicate-ordinal check unfollowable: the duplicate
+            // lives in the ledger's journal, so the restart inherited it,
+            // re-indexed the whole corpus, and refused to merge again — the
+            // only way out was deleting the journal by hand. Reset before
+            // beginBuild(), so the new generation is stamped on an empty
+            // table.
+            if ($intent->resetsPageTable()) {
+                $logger->notice(sprintf(
+                    '[scolta] %s: discarding the page-table ledger (%d ordinals) and renumbering from zero.',
+                    $intent->mode() === 'restart' ? 'Restart' : 'Ledger reset requested',
+                    $this->ledger->pageTableSize(),
+                ));
+                $this->ledger->reset();
+            }
 
             // A fresh build takes a new generation; a resumed one inherits the
             // generation its earlier segments stamped, so coverage is tracked

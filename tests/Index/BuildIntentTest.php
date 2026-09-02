@@ -47,6 +47,31 @@ class BuildIntentTest extends TestCase
         $this->assertSame([], $intent->sourceMeta());
     }
 
+    public function testOnlyRestartResetsThePageTableByDefault(): void
+    {
+        $this->assertTrue(BuildIntent::restart(1, MemoryBudget::default())->resetsPageTable());
+        $this->assertFalse(BuildIntent::fresh(1, MemoryBudget::default())->resetsPageTable());
+        $this->assertFalse(BuildIntent::resume(MemoryBudget::default())->resetsPageTable());
+    }
+
+    public function testWithPageTableResetOptsAFreshBuildIn(): void
+    {
+        $intent = BuildIntent::fresh(7, MemoryBudget::balanced(), ['language' => 'de'])->withPageTableReset();
+
+        $this->assertTrue($intent->resetsPageTable());
+        $this->assertSame('fresh', $intent->mode());
+        $this->assertSame(7, $intent->totalPages());
+        $this->assertSame('balanced', $intent->memoryBudget()->profile());
+        $this->assertSame(['language' => 'de'], $intent->sourceMeta());
+    }
+
+    public function testWithPageTableResetIsRefusedOnAResume(): void
+    {
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessageMatches('/resumed build/');
+        BuildIntent::resume(MemoryBudget::default())->withPageTableReset();
+    }
+
     public function testFreshAndRestartAreBothFresh(): void
     {
         $this->assertTrue(BuildIntent::fresh(1, MemoryBudget::default())->isFresh());
