@@ -1112,6 +1112,26 @@ class BuildState
      * a unique one) if manifest.json is missing or invalid. Returns null if
      * nothing yields valid JSON (fresh build).
      */
+    /**
+     * The build scope recorded by BuildCoordinator::prepare().
+     *
+     * Defaults to full for any manifest that predates the field — every build
+     * written before it existed did walk the whole corpus.
+     *
+     * @return string BuildIntent::SCOPE_FULL or BuildIntent::SCOPE_PARTIAL.
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function declaredScope(): string
+    {
+        $manifest = $this->readManifest();
+        $scope    = (string) ($manifest['scope'] ?? BuildIntent::SCOPE_FULL);
+
+        return $scope === BuildIntent::SCOPE_PARTIAL
+            ? BuildIntent::SCOPE_PARTIAL
+            : BuildIntent::SCOPE_FULL;
+    }
+
     private function readManifest(): ?array
     {
         $path = $this->manifestPath();

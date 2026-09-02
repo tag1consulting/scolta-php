@@ -235,6 +235,12 @@ final class IndexBuildOrchestrator
             $startChunk    = 0;
             $currentOffset = 0;
             $isResume      = $intent->mode() === 'resume';
+
+            // A resumed segment carries no scope of its own — BuildIntent::resume()
+            // is handed nothing but a memory budget — so it inherits the scope
+            // the manifest recorded when the build was started.
+            $isPartial = $intent->isPartial()
+                || ($manifest['scope'] ?? BuildIntent::SCOPE_FULL) === BuildIntent::SCOPE_PARTIAL;
             if ($isResume) {
                 $startChunk    = (int) ($manifest['chunks_written'] ?? 0);
                 $currentOffset = (int) ($manifest['pages_processed'] ?? 0);
@@ -459,7 +465,7 @@ final class IndexBuildOrchestrator
                 // resumed segment did not gather the whole corpus, so it is in
                 // no position to say whose promise is false.
                 $this->cache()->saveWithoutPruning();
-                if ($isResume) {
+                if ($isResume || $isPartial) {
                     $this->tsManifest->saveWithoutPruning();
                 } else {
                     $this->tsManifest->pruneAndSave();
@@ -487,14 +493,39 @@ final class IndexBuildOrchestrator
             }
 
             // Merge and write.
-            // Ids the ledger still holds but this build never yielded have been
-            // deleted at the source. Release them so their ordinals are
-            // reusable, and tombstone the rows so the page table stays dense.
-            $released = $this->ledger->releaseStaleRows();
-            if ($released !== []) {
-                $logger->info('[scolta] {count} pages removed since the last build; their ordinals are now tombstoned.', [
-                    'count' => count($released),
-                ]);
+            //
+            // For a full build, ids the ledger still holds but this build never
+            // yielded have been deleted at the source. Release them so their
+            // ordinals are reusable, and tombstone the rows so the page table
+            // stays dense.
+            //
+            // For a partial build that inference is false and its consequences
+            // are total, so the release is replaced by a refusal to publish.
+            // See partialScopeRefusal() for why there is no third option.
+            if ($isPartial) {
+                $refusal = $this->partialScopeRefusal($logger);
+                if ($refusal !== null) {
+                    $this->cache()->saveWithoutPruning();
+                    $this->tsManifest->saveWithoutPruning();
+                    $this->coordinator->release();
+
+                    return $this->makeStatusReport(
+                        $telemetry,
+                        $budget,
+                        $startTime,
+                        pagesProcessed: $pagesInRun,
+                        chunksWritten: $chunkNum,
+                        success: false,
+                        error: $refusal,
+                    );
+                }
+            } else {
+                $released = $this->ledger->releaseStaleRows();
+                if ($released !== []) {
+                    $logger->info('[scolta] {count} pages removed since the last build; their ordinals are now tombstoned.', [
+                        'count' => count($released),
+                    ]);
+                }
             }
 
             $this->assertLedgerHasLivePages();
@@ -535,7 +566,12 @@ final class IndexBuildOrchestrator
             // have looked the page up. So "not looked up" there covers almost
             // the whole corpus, and pruning dropped it: a build that succeeded
             // across three segments kept only the third one's pages.
-            if ($isResume) {
+            //
+            // A partial build is not that path either, for the same reason and
+            // more plainly: it was handed a subset and told so. Pruning there
+            // deletes the token data and the timestamps of every page outside
+            // the scope, which makes the next full build a cold one.
+            if ($isResume || $isPartial) {
                 $this->cache()->saveWithoutPruning();
                 $this->tsManifest->saveWithoutPruning();
             } else {
@@ -824,11 +860,31 @@ final class IndexBuildOrchestrator
             // deferred merge published an index with an unfilled page table and
             // left the ledger unsaved — the next build then renumbered from
             // whatever survived.
-            $released = $this->ledger->releaseStaleRows();
-            if ($released !== []) {
-                $logger->info('[scolta] {count} pages removed since the last build; their ordinals are now tombstoned.', [
-                    'count' => count($released),
-                ]);
+            // Scope read back off the manifest, because this process never saw
+            // the BuildIntent. Without it the deferred merge is a way to get
+            // the release build() just refused.
+            if ($this->coordinator->declaredScope() === BuildIntent::SCOPE_PARTIAL) {
+                $refusal = $this->partialScopeRefusal($logger);
+                if ($refusal !== null) {
+                    $this->coordinator->release();
+
+                    return $this->makeStatusReport(
+                        $telemetry,
+                        $budget,
+                        $startTime,
+                        pagesProcessed: 0,
+                        chunksWritten: count($chunkFiles),
+                        success: false,
+                        error: $refusal,
+                    );
+                }
+            } else {
+                $released = $this->ledger->releaseStaleRows();
+                if ($released !== []) {
+                    $logger->info('[scolta] {count} pages removed since the last build; their ordinals are now tombstoned.', [
+                        'count' => count($released),
+                    ]);
+                }
             }
 
             $this->assertLedgerHasLivePages();
@@ -1040,6 +1096,59 @@ final class IndexBuildOrchestrator
      *
      * @throws \RuntimeException If the index does not match the ledger.
      */
+    /**
+     * Decide whether a partial build may publish, and say why not if it may not.
+     *
+     * A scoped build is safe only when its scope happens to cover everything
+     * the index already holds. Otherwise there is no correct index for it to
+     * publish, and that is a property of the format rather than a gap here:
+     *
+     *  - The postings come from this run's chunk files alone. mergeStreaming()
+     *    reads nothing from the live index, so a page the run did not yield has
+     *    no term entries in the output at all.
+     *  - Its fragment is not carried over either. Fragment reuse is decided per
+     *    writePage() call, and no such call is made for a page the run never
+     *    gathered, so fillTombstones() pads the ordinal with an empty row.
+     *
+     * So the three ways out of a scoped build are: delete the rest of the site
+     * (what used to happen — releaseStaleRows() freed 14,648 ordinals and the
+     * merge published 1,518 live pages inside a 16,166-row page table); keep the
+     * rows live and publish empty fragments under them, which is the same data
+     * loss with the ledger now lying about it; or refuse. The refusal leaves the
+     * previously published index serving, untouched.
+     *
+     * The scope-aware path for a small change is IncrementalIndexUpdater, which
+     * edits the published index in place instead of rebuilding it.
+     *
+     * @return string|null Error for the StatusReport, or null when publishing is safe.
+     */
+    private function partialScopeRefusal(LoggerInterface $logger): ?string
+    {
+        $stale = $this->ledger->staleRowIds();
+        if ($stale === []) {
+            // The scope covered every id the ledger holds — a site that only
+            // ever indexes one bundle, say. Nothing is out of scope, so there
+            // is nothing to protect and nothing to release.
+            $logger->info('[scolta] Scoped build covered every page the index holds; publishing normally.');
+
+            return null;
+        }
+
+        $error = sprintf(
+            'scoped build refused: it gathered %d pages, but the index holds %d more that were outside its '
+            . 'scope and it cannot republish them — a merge only carries the pages this run yielded. '
+            . 'Publishing would have removed those %d pages from the index. The existing index has been left '
+            . 'in place. Re-run without --bundle/--entity-ids for a full rebuild, or let the queue apply the '
+            . 'change incrementally.',
+            $this->ledger->liveCount() - count($stale),
+            count($stale),
+            count($stale),
+        );
+        $logger->error('[scolta] ' . $error);
+
+        return $error;
+    }
+
     private function verifyOutputHasFragments(int $pagesProcessed): void
     {
         // Before the zero-page exit, not after it: zero is the symptom here,
