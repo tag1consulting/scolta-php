@@ -56,6 +56,12 @@ final class BuildCoordinator
                 'fingerprint' => $intent->sourceMeta()['fingerprint'] ?? '',
             ], $intent->sourceMeta());
 
+            // Written after the merge with sourceMeta, so an adapter cannot
+            // overwrite it by accident: a manifest that under-reports the
+            // scope is the manifest that lets finalize() delete the pages
+            // this build was never asked to look at.
+            $manifest['scope'] = $intent->scope();
+
             // No isRunning() check and no cleanup() before this call. Both
             // used to happen outside the lock: the check could clear a live
             // build (a PID owned by another uid, or in another container,
@@ -197,5 +203,22 @@ final class BuildCoordinator
     public function releaseLockOnly(): void
     {
         $this->state->releaseLockOnly();
+    }
+
+    /**
+     * The scope the build in the state directory declared.
+     *
+     * `drush scolta:finalize` runs in a process that never saw the
+     * BuildIntent, and it does the same stale-release and merge that build()
+     * does. Reading the scope back off the manifest is what stops the deferred
+     * merge from being the hole in the guard.
+     *
+     * @return string BuildIntent::SCOPE_FULL or BuildIntent::SCOPE_PARTIAL.
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function declaredScope(): string
+    {
+        return $this->state->declaredScope();
     }
 }
