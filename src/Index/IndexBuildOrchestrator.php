@@ -1188,5 +1188,4 @@ final class IndexBuildOrchestrator
             );
         }
     }
-
 }

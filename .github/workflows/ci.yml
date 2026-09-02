@@ -60,9 +60,13 @@ jobs:
       - name: Install dependencies
         run: composer update --no-interaction --prefer-dist ${{ matrix.composer-args }}
 
-      - name: Lint
+      - name: Lint (php-cs-fixer)
         if: matrix.lint
-        run: composer lint
+        run: composer lint-format
+
+      - name: Lint (phpcs)
+        if: matrix.lint
+        run: composer phpcs
 
       - name: Run tests
         run: composer test
