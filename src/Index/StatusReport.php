@@ -12,6 +12,18 @@ namespace Tag1\Scolta\Index;
  */
 final class StatusReport
 {
+    /**
+     * Error value meaning "this run yielded on memory pressure; resume it".
+     *
+     * A build that returns this has committed its work and stopped on purpose.
+     * It is the only failure a caller may answer by running another segment;
+     * every other error means the build is broken and the chain must stop.
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public const MEMORY_ABORT = 'memory_abort';
+
     public function __construct(
         public readonly string $version,
         public readonly string $pagefindVersion,
@@ -48,6 +60,17 @@ final class StatusReport
             elapsedSeconds: $this->durationSeconds,
             error: $this->error,
         );
+    }
+
+    /**
+     * Whether this run stopped to be resumed rather than because it failed.
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function isMemoryAbort(): bool
+    {
+        return !$this->success && $this->error === self::MEMORY_ABORT;
     }
 
     /**
