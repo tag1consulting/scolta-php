@@ -321,6 +321,82 @@ class BuildLockConcurrencyTest extends TestCase
     }
 
     /**
+     * A failed lock-release write aborts rather than assuming the release
+     * happened.
+     *
+     * assertCleanable() takes this path when an earlier process in the same
+     * generation died holding the lock: it writes the record as released so
+     * cleanup() may proceed. If that write fails, silently going on would
+     * leave the file still claiming the dead process holds it while this
+     * process deletes state on the strength of a release that never
+     * happened — so it must throw instead.
+     */
+    public function testAFailedLockReleaseWriteAbortsCleanupRatherThanAssumingItSucceeded(): void
+    {
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            $this->markTestSkipped('This test needs a write that the process is not privileged enough to force through.');
+        }
+
+        $first = new BuildCoordinator($this->tmpDir);
+        $first->prepare(BuildIntent::fresh(20, MemoryBudget::conservative()));
+        $first->commitChunk(0, self::partial('a'));
+        // The gathering process died without releasing — the segmented-build
+        // case assertCleanable() exists for — but the lock record is
+        // otherwise exactly what a live build's would be.
+
+        chmod($this->tmpDir . '/lock', 0444);
+        try {
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessage('Failed to write released lock record');
+            // @: file_put_contents() itself emits a PHP-level warning for the
+            // same permission failure the exception already reports; the
+            // assertion above is what proves the failure was not swallowed.
+            @(new BuildState($this->tmpDir))->cleanup();
+        } finally {
+            chmod($this->tmpDir . '/lock', 0644);
+        }
+    }
+
+    /**
+     * A purge that cannot fully clear abandoned state fails loudly and
+     * releases the lock, instead of leaving an unremovable generation
+     * directory to accumulate silently on every future fresh build.
+     */
+    public function testAPurgeThatCannotDeleteAbandonedStateAbortsAndReleasesTheLock(): void
+    {
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            $this->markTestSkipped('This test needs a write that the process is not privileged enough to force through.');
+        }
+
+        $abandoned = $this->tmpDir . '/builds/20200101T000000Z-deadbeef';
+        mkdir($abandoned, 0755, true);
+        file_put_contents($abandoned . '/chunk-000.dat', 'stale');
+        // No write permission on the directory itself: unlink() of the file
+        // inside it, and rmdir() of it, both fail.
+        chmod($abandoned, 0555);
+
+        $state = new BuildState($this->tmpDir);
+
+        try {
+            $state->initiateBuild(['total_pages' => 10]);
+            $this->fail('initiateBuild() should have failed to purge the abandoned generation.');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('Failed to clear abandoned build state', $e->getMessage());
+        }
+
+        // Not left held by a build that never actually started.
+        $this->assertFalse($state->isRunning());
+
+        // Once the underlying problem is fixed, the next build is not stuck
+        // behind it.
+        chmod($abandoned, 0755);
+        $this->assertTrue(
+            (new BuildState($this->tmpDir))->initiateBuild(['total_pages' => 10]),
+            'A failed purge must not block every future build behind an unremovable directory.',
+        );
+    }
+
+    /**
      * @param array<string, mixed> $overrides
      */
     private function writeLockRecord(array $overrides): void

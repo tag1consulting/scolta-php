@@ -107,7 +107,16 @@ class BuildState
         }
 
         // Safe now, and only now: nothing else can be writing here.
-        $this->purgeAbandonedBuilds();
+        try {
+            $this->purgeAbandonedBuilds();
+        } catch (\RuntimeException $e) {
+            // Release rather than leave the lock held by a build that never
+            // started: a failure here throws before the manifest is written,
+            // and a held-but-unstarted lock would refuse every build for up to
+            // an hour, until the heartbeat goes stale on its own.
+            $this->dropLockFileOnly();
+            throw $e;
+        }
 
         $this->generation = $this->newGeneration();
         $this->generationResolved = true;
@@ -597,6 +606,11 @@ class BuildState
      *
      * Only for the segmented-build finalize above; every other release goes
      * through the held handle.
+     *
+     * @throws \RuntimeException If the write fails. A silent failure here
+     *     would leave the file claiming the dead process still holds it,
+     *     and the caller (assertCleanable()) would go on to delete state on
+     *     the strength of a release that never actually happened.
      */
     private function markLockReleasedByPath(): void
     {
@@ -607,7 +621,9 @@ class BuildState
         }
 
         $record['state'] = 'released';
-        @file_put_contents($lockFile, json_encode($record, JSON_THROW_ON_ERROR));
+        if (file_put_contents($lockFile, json_encode($record, JSON_THROW_ON_ERROR)) === false) {
+            throw new \RuntimeException("Failed to write released lock record: {$lockFile}");
+        }
     }
 
     /**
@@ -983,8 +999,18 @@ class BuildState
      * generation directory still on disk at that point belongs to a build that
      * is over, however it ended.
      */
+    /**
+     * @throws \RuntimeException If any abandoned file or directory could not
+     *     be removed. A swallowed failure here does not just leave one file
+     *     behind — this is the one point that is allowed to assume every
+     *     generation directory on disk belongs to a finished build, so a
+     *     directory an unlink() failure leaves non-empty silently
+     *     accumulates, unremoved, on every subsequent fresh build forever.
+     */
     private function purgeAbandonedBuilds(): void
     {
+        $failures = [];
+
         // The manifest of the previous build, and the chunk files a pre-1.5.0
         // build wrote beside it at the root.
         $legacy = array_merge(
@@ -993,18 +1019,27 @@ class BuildState
             glob($this->stateDir . '/chunk-*.dat') ?: [],
         );
         foreach ($legacy as $file) {
-            if (is_file($file)) {
-                @unlink($file);
+            if (is_file($file) && !@unlink($file)) {
+                $failures[] = $file;
             }
         }
 
         foreach (glob($this->stateDir . '/' . self::BUILDS_DIR . '/*', GLOB_ONLYDIR) ?: [] as $dir) {
             foreach (glob($dir . '/*') ?: [] as $file) {
-                if (is_file($file)) {
-                    @unlink($file);
+                if (is_file($file) && !@unlink($file)) {
+                    $failures[] = $file;
                 }
             }
-            @rmdir($dir);
+            if (!@rmdir($dir) && is_dir($dir)) {
+                $failures[] = $dir;
+            }
+        }
+
+        if ($failures !== []) {
+            throw new \RuntimeException(
+                'Failed to clear abandoned build state in ' . $this->stateDir . ': '
+                . implode(', ', $failures),
+            );
         }
     }
 
