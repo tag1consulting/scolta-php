@@ -7,12 +7,14 @@ namespace Tag1\Scolta\Tests\Index;
 use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\Export\ContentItem;
 use Tag1\Scolta\Index\BuildIntent;
+use Tag1\Scolta\Index\BuildState;
 use Tag1\Scolta\Index\CborEncoder;
 use Tag1\Scolta\Index\ChunkWriter;
 use Tag1\Scolta\Index\IndexBuildOrchestrator;
 use Tag1\Scolta\Index\IndexMerger;
 use Tag1\Scolta\Index\MemoryBudget;
 use Tag1\Scolta\Index\PageTableLedger;
+use Tag1\Scolta\Index\StatusReport;
 use Tag1\Scolta\Index\Stemmer;
 use Tag1\Scolta\Index\StreamingFormatWriter;
 use Tag1\Scolta\Storage\FilesystemDriver;
@@ -221,6 +223,53 @@ class BuildIntegrityTest extends TestCase
             [$chunkDir . '/chunk-0.dat', $chunkDir . '/chunk-1.dat'],
             $streamWriter,
         );
+    }
+
+    // -------------------------------------------------------------------
+    // A segment says why it stopped, in a place another process can read
+    // -------------------------------------------------------------------
+
+    public function testAMemoryYieldRecordsItselfAsResumableInTheStateDir(): void
+    {
+        $items = $this->makeItems(30);
+
+        $report = $this->runSegment($items, MemoryBudget::conservative()->withChunkSize(5), fresh: true, yieldOnce: true);
+        $this->assertSame(StatusReport::MEMORY_ABORT, $report->error);
+
+        $outcome = (new BuildState($this->stateDir))->readOutcome();
+        $this->assertNotNull($outcome, 'A segment that yields must leave a note for the process driving it');
+        $this->assertFalse($outcome['success']);
+        $this->assertSame(StatusReport::MEMORY_ABORT, $outcome['error']);
+    }
+
+    /**
+     * The defect: a segment whose merge found the index corrupt exited
+     * non-zero, the parent read that as another memory yield, and the chain
+     * ran one more full-corpus segment to reach the same error — then blamed
+     * memory and told the operator to raise memory_limit, with the real error
+     * visible only in echoed child output.
+     */
+    public function testAMergeIntegrityFailureIsRecordedAsItselfNotAsAMemoryAbort(): void
+    {
+        $items  = $this->makeItems(30);
+        $budget = MemoryBudget::conservative()->withChunkSize(5);
+
+        $first = $this->runSegment($items, $budget, fresh: true, yieldOnce: true);
+        $this->assertSame(StatusReport::MEMORY_ABORT, $first->error);
+        $this->stripOrdinalAssignments();
+
+        $report = (new IndexBuildOrchestrator($this->stateDir, $this->outputDir))
+            ->build(BuildIntent::resume($budget), $items);
+        $this->assertFalse($report->success);
+
+        $outcome = (new BuildState($this->stateDir))->readOutcome();
+        $this->assertNotNull($outcome);
+        $this->assertNotSame(
+            StatusReport::MEMORY_ABORT,
+            $outcome['error'],
+            'An integrity failure recorded as a memory abort is what keeps the chain running',
+        );
+        $this->assertSame($report->error, $outcome['error'], 'The recorded error must be the real one');
     }
 
     // -------------------------------------------------------------------

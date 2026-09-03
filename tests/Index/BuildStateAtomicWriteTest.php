@@ -27,7 +27,7 @@ class BuildStateAtomicWriteTest extends TestCase
         $state = new BuildState($this->tmpDir);
         $state->initiateBuild(['total_pages' => 42]);
 
-        $manifestPath = $this->tmpDir . '/manifest.json';
+        $manifestPath = $state->manifestFile();
         $this->assertFileExists($manifestPath);
 
         $data = json_decode(file_get_contents($manifestPath), true);
@@ -87,7 +87,7 @@ class BuildStateAtomicWriteTest extends TestCase
         $state = new BuildState($this->tmpDir);
         $state->initiateBuild(['total_pages' => 1]);
 
-        $manifestPath = $this->tmpDir . '/manifest.json';
+        $manifestPath = $state->manifestFile();
         $this->assertFileExists($manifestPath);
         $this->assertFileDoesNotExist($manifestPath . '.tmp');
 

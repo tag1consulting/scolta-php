@@ -263,10 +263,7 @@ final class PageTableLedger
     public function releaseStaleRows(): array
     {
         $released = [];
-        foreach ($this->assignedIds() as $id) {
-            if (($this->byId[$id]['gen'] ?? 0) === $this->generation) {
-                continue;
-            }
+        foreach ($this->staleRowIds() as $id) {
             $ordinal = $this->release($id);
             if ($ordinal !== null) {
                 $released[] = $ordinal;
@@ -274,6 +271,34 @@ final class PageTableLedger
         }
 
         return $released;
+    }
+
+    /**
+     * The ids {@see self::releaseStaleRows()} would release, without releasing
+     * them.
+     *
+     * A caller that gathered only part of the corpus cannot let those rows go
+     * — "this build did not yield it" means "it was out of scope" there, not
+     * "it was deleted" — but it still has to know that the set is non-empty,
+     * because a merge of its own chunks alone would publish tombstones in
+     * place of every one of them. So the question and the release are separate
+     * calls.
+     *
+     * @return list<string> Ids the current build has not committed.
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function staleRowIds(): array
+    {
+        $stale = [];
+        foreach ($this->assignedIds() as $id) {
+            if (($this->byId[$id]['gen'] ?? 0) === $this->generation) {
+                continue;
+            }
+            $stale[] = $id;
+        }
+
+        return $stale;
     }
 
     /**
