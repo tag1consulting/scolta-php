@@ -146,7 +146,7 @@ async function boot(mockPagefind, {
                 }),
             });
         }
-        if (/scolta\.facets/.test(url)) {
+        if (/scolta\.[^/]+\.facets/.test(url)) {
             if (!serveArtifact) return Promise.resolve({ ok: false, status: 404 });
             const b = artifactBytes;
             return Promise.resolve({
@@ -370,7 +370,7 @@ describe('an index built before the artifact existed', () => {
         await initAndSearch(env);
 
         expect(calls.filters).toBe(1);
-        const warning = env.warnings.find(w => /scolta\.facets/.test(w));
+        const warning = env.warnings.find(w => /scolta\.[^/]+\.facets/.test(w));
         expect(warning).toBeDefined();
         expect(warning).toMatch(/Rebuild the search index/i);
         expect(warning).toMatch(/pagefind\.filters\(\)/);
@@ -403,16 +403,36 @@ describe('an index built before the artifact existed', () => {
         expect(env.warnings.find(w => /DecompressionStream/.test(w))).toBeDefined();
     });
 
-    test('a stale cached artifact from an earlier build is refused, not trusted', async () => {
-        // The artifact is stamped with the pf_meta hash it was built against. A
-        // cache can serve an old one while pagefind-entry.json, which is
-        // cache-busted, describes a newer index.
+    test('an artifact whose header disagrees with the hash it was fetched by is refused, not trusted', async () => {
+        // The artifact is fetched at a URL named after the pf_meta hash
+        // pagefind-entry.json (cache-busted) reports, so a stale cache can no
+        // longer answer in its place — a rebuild's artifact lives at a new URL
+        // nothing has cached yet. What this guards now is a build defect: the
+        // bytes found at that URL are stamped for a different index than the
+        // hash they were fetched by.
         const { mock, calls } = createMockPagefind([0], { taxonomy: { topic: { Fruit: 3, Veg: 197 } } });
         const env = await boot(mock, { entryHash: 'en_rebuilt99' });
         await initAndSearch(env);
 
         expect(calls.filters).toBe(1);
-        expect(env.warnings.find(w => /stale cached artifact/.test(w))).toBeDefined();
+        expect(env.warnings.find(w => /is stamped for a different index/.test(w))).toBeDefined();
+    });
+
+    test('an entry file with no index hash cannot name a URL, so it falls back without fetching one', async () => {
+        // The artifact's URL is built from the hash pagefind-entry.json reports.
+        // With none to build it from, no request is worth making — the fixed
+        // 'scolta.facets' name this replaced is exactly the hazard the hash-named
+        // URL exists to remove, so guessing at an unversioned one is not a
+        // fallback this takes.
+        const { mock, calls } = createMockPagefind([0], { taxonomy: { topic: { Fruit: 3, Veg: 197 } } });
+        // null, not undefined: boot()'s destructuring default would otherwise
+        // resub the usual fixture hash right back in.
+        const env = await boot(mock, { entryHash: null });
+        await initAndSearch(env);
+
+        expect(artifactFetches(env)).toBe(0);
+        expect(calls.filters).toBe(1);
+        expect(env.warnings.find(w => /index hash unknown/.test(w))).toBeDefined();
     });
 });
 
@@ -458,7 +478,7 @@ describe('the AI subject-to-filter mapper reads the artifact taxonomy', () => {
  * pagefind.filters() was never called.
  */
 function artifactFetches(env) {
-    return env.requested.filter(u => /scolta\.facets/.test(u)).length;
+    return env.requested.filter(u => /scolta\.[^/]+\.facets/.test(u)).length;
 }
 
 function assertNeverAskedPagefindForFilters(calls) {

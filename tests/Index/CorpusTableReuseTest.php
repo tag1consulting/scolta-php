@@ -275,7 +275,11 @@ final class CorpusTableReuseTest extends TestCase
 
     private static function facetPageCount(string $out): int
     {
-        $raw    = (string) gzdecode((string) file_get_contents($out . '/pagefind/scolta.facets'));
+        $matches = glob($out . '/pagefind/scolta.*.facets') ?: [];
+        if ($matches === []) {
+            return -1;
+        }
+        $raw    = (string) gzdecode((string) file_get_contents($matches[0]));
         $header = json_decode(substr($raw, 0, (int) strpos($raw, "\n")), true);
 
         return is_array($header) ? (int) ($header['pageCount'] ?? -1) : -1;

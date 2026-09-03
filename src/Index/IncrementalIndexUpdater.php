@@ -180,6 +180,14 @@ final class IncrementalIndexUpdater
             );
         }
 
+        // The facet index's filename follows this same hash (FacetIndexWriter
+        // mirrors pf_meta's own naming), so a corpus-table-reuse commit needs
+        // it to find the on-disk artifact it is restamping.
+        $previousIndexHash = basename($metaPath, '.pf_meta');
+        $previousIndexHash = str_starts_with($previousIndexHash, 'pagefind.')
+            ? substr($previousIndexHash, strlen('pagefind.'))
+            : $previousIndexHash;
+
         $meta           = CborDecoder::decodeArtifact($metaPath);
         $version        = (string) $meta[0];
         $pageMeta       = $this->readPageTable($meta[1]);
@@ -311,7 +319,7 @@ final class IncrementalIndexUpdater
             // joined or left the table.
             [$filterData, $sortFields] = $this->rebuildCorpusTables($pageMeta);
 
-            $metadataWriter->write(
+            $newMetaHash = $metadataWriter->write(
                 $this->indexDir(),
                 $pageMeta,
                 $filterData,
@@ -329,13 +337,14 @@ final class IncrementalIndexUpdater
             // anything doubtful.
             try {
                 $corpusTableRoute = 'reused';
-                $metadataWriter->writeReusingCorpusTables(
+                $newMetaHash = $metadataWriter->writeReusingCorpusTables(
                     $this->indexDir(),
                     $pageMeta,
                     // array_values(): a CBOR array decodes in order, and the
                     // order is the whole content of both tables.
                     is_array($meta[3] ?? null) ? array_values($meta[3]) : [],
                     is_array($meta[4] ?? null) ? array_values($meta[4]) : [],
+                    $previousIndexHash,
                     $indexChunkMeta,
                     $metaFields,
                     $version,
@@ -347,7 +356,7 @@ final class IncrementalIndexUpdater
                     ['reason' => $e->getMessage()],
                 );
                 [$filterData, $sortFields] = $this->rebuildCorpusTables($pageMeta);
-                $metadataWriter->write(
+                $newMetaHash = $metadataWriter->write(
                     $this->indexDir(),
                     $pageMeta,
                     $filterData,
@@ -363,8 +372,9 @@ final class IncrementalIndexUpdater
         // this point and the old pf_meta still pointed at the old ones, so a
         // reader mid-update saw a consistent older index throughout. The new
         // pf_meta and the entry file that names it are written last, and only
-        // then is the superseded pf_meta removed.
+        // then are the superseded pf_meta and facet index removed.
         $this->removeSupersededMeta($metaPath);
+        $this->removeSupersededFacets($previousIndexHash, $newMetaHash);
 
         // Appended, not snapshotted. The whole table is the largest single
         // thing an update writes, and the journal now records releases as well
@@ -623,6 +633,27 @@ final class IncrementalIndexUpdater
             if ($path === $keptOutOfDate) {
                 unlink($path);
             }
+        }
+    }
+
+    /**
+     * Removes the facet index this commit just superseded.
+     *
+     * The facet index's filename follows its pf_meta hash (FacetIndexWriter),
+     * so unlike pf_meta itself — one glob, one match — a stale one has to be
+     * found by the hash it was named for rather than by process of
+     * elimination. Guarded on the two hashes actually differing so a
+     * pathological case where they match never unlinks the file this commit
+     * just wrote.
+     */
+    private function removeSupersededFacets(string $previousIndexHash, string $newIndexHash): void
+    {
+        if ($previousIndexHash === $newIndexHash) {
+            return;
+        }
+        $path = $this->indexDir() . '/' . FacetIndexWriter::filename($previousIndexHash);
+        if (is_file($path)) {
+            unlink($path);
         }
     }
 

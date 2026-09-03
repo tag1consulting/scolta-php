@@ -12,7 +12,7 @@
  * real bundle to a real browser, and records every HTTP request the page makes.
  * The two files the modes are about are then directly observable:
  *
- *   pagefind/scolta.facets        — the Scolta facet artifact
+ *   pagefind/scolta.<hash>.facets — the Scolta facet artifact
  *   pagefind/filter/*.pf_filter   — Pagefind's own filter chunk, whose arrival
  *                                   is the regression this feature must never
  *                                   cause. Once one is loaded, Pagefind's
@@ -78,9 +78,11 @@ test.beforeAll(async () => {
         throw new Error('pagefind-entry.json not found after build');
     }
     // Fail the run, not a single assertion, if the corpus stopped carrying the
-    // two files every test below is about.
-    if (!fs.existsSync(path.join(pagefindDir, 'scolta.facets'))) {
-        throw new Error('the built index has no scolta.facets — nothing here would mean anything');
+    // two files every test below is about. The facet artifact's filename
+    // carries the pf_meta hash it was built against (FacetIndexWriter), so it
+    // is found by pattern rather than by a fixed name.
+    if ((fs.readdirSync(pagefindDir).filter(f => /^scolta\..+\.facets$/.test(f))).length === 0) {
+        throw new Error('the built index has no scolta.<hash>.facets — nothing here would mean anything');
     }
     const filterDir = path.join(pagefindDir, 'filter');
     if (!fs.existsSync(filterDir) || fs.readdirSync(filterDir).length === 0) {
@@ -165,7 +167,7 @@ async function openWidget(page, mode) {
 
     return {
         requests,
-        facetArtifactLoads: () => requests.filter(p => /scolta\.facets$/.test(p)).length,
+        facetArtifactLoads: () => requests.filter(p => /scolta\.[^/]+\.facets$/.test(p)).length,
         filterChunkLoads: () => requests.filter(p => /\.pf_filter$/.test(p)).length,
     };
 }
