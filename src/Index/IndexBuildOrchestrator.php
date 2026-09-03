@@ -375,7 +375,7 @@ final class IndexBuildOrchestrator
                             pagesProcessed: $committedPages,
                             chunksWritten: $committedChunks,
                             success: false,
-                            error: 'memory_abort',
+                            error: StatusReport::MEMORY_ABORT,
                         );
                     }
                 }
@@ -640,7 +640,7 @@ final class IndexBuildOrchestrator
                 pagesProcessed: $committedPages,
                 chunksWritten: $committedChunks,
                 success: false,
-                error: $isMemoryAbort ? 'memory_abort' : $e->getMessage(),
+                error: $isMemoryAbort ? StatusReport::MEMORY_ABORT : $e->getMessage(),
             );
         }
     }
@@ -806,6 +806,15 @@ final class IndexBuildOrchestrator
         ?float $durationSeconds = null,
         ?string $warnings = null,
     ): StatusReport {
+        // Every terminal report goes through here, so this is where the run
+        // leaves a note for whoever is driving it from another process. See
+        // BuildState::recordOutcome(): an exit status cannot tell a voluntary
+        // memory yield apart from a merge that found the index corrupt.
+        try {
+            $this->coordinator->buildState()->recordOutcome($success, $error, $pagesProcessed);
+        } catch (\Throwable) {
+        }
+
         return new StatusReport(
             version: self::VERSION,
             pagefindVersion: SupportedVersions::getVersionForMetadata(),

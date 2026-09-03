@@ -47,6 +47,7 @@ class BuildState
 {
     private const LOCK_FILE = 'lock';
     private const MANIFEST_FILE = 'manifest.json';
+    private const OUTCOME_FILE = 'segment-outcome.json';
 
     /** Directory holding one subdirectory per build generation. */
     private const BUILDS_DIR = 'builds';
@@ -524,6 +525,107 @@ class BuildState
     }
 
     /**
+     * Record how the run that is ending in this process finished.
+     *
+     * The manifest says how far a build got; it does not say why the process
+     * that was running it stopped. A parent driving resume segments only sees
+     * a child's exit status, and every failure exits non-zero — a voluntary
+     * memory yield that wants another segment looks exactly like a merge that
+     * found a corrupt index and wants the chain to stop. This file is the one
+     * place both processes can read the difference from.
+     *
+     * @param string|null $error
+     *   The terminating StatusReport's error, or null on success.
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function recordOutcome(bool $success, ?string $error, int $pagesProcessed): void
+    {
+        if (!is_dir($this->stateDir)) {
+            return;
+        }
+
+        $payload = json_encode([
+            'success' => $success,
+            'error' => $error,
+            'pages_processed' => $pagesProcessed,
+            'pid' => getmypid(),
+            'recorded_at' => gmdate('c'),
+        ], JSON_PRETTY_PRINT);
+
+        if ($payload === false) {
+            return;
+        }
+
+        $path = $this->outcomePath();
+        $temp = $path . '.tmp.' . getmypid() . '.' . uniqid('', true);
+
+        // Best-effort: this is diagnostic state written on the way out, often
+        // after a failure. It must never be the thing that turns a reportable
+        // error into an unreportable one.
+        if (@file_put_contents($temp, $payload) === false) {
+            return;
+        }
+        if (!@rename($temp, $path)) {
+            @unlink($temp);
+        }
+    }
+
+    /**
+     * The outcome the last run recorded, or null if none is on disk.
+     *
+     * Callers that drive segments should clearOutcome() before starting one,
+     * so a missing file after it exits is read as "the segment died without
+     * reporting" rather than as whatever the previous segment left behind.
+     *
+     * @return array{success: bool, error: string|null, pages_processed: int, pid: int|null, recorded_at: string|null}|null
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function readOutcome(): ?array
+    {
+        $path = $this->outcomePath();
+        if (!is_file($path)) {
+            return null;
+        }
+
+        $data = @file_get_contents($path);
+        if ($data === false) {
+            return null;
+        }
+
+        $decoded = json_decode($data, true);
+        if (!is_array($decoded) || !array_key_exists('success', $decoded)) {
+            return null;
+        }
+
+        return [
+            'success' => (bool) $decoded['success'],
+            'error' => isset($decoded['error']) ? (string) $decoded['error'] : null,
+            'pages_processed' => (int) ($decoded['pages_processed'] ?? 0),
+            'pid' => isset($decoded['pid']) ? (int) $decoded['pid'] : null,
+            'recorded_at' => isset($decoded['recorded_at']) ? (string) $decoded['recorded_at'] : null,
+        ];
+    }
+
+    /**
+     * Delete any recorded outcome.
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function clearOutcome(): void
+    {
+        $path = $this->outcomePath();
+        if (is_file($path)) {
+            // Suppress: file may already be removed by a concurrent process.
+            @unlink($path);
+        }
+    }
+
+    /**
      * Clean up the state this class owns: the manifest and the committed chunk
      * files of this build's generation, plus the generation's directory.
      *
@@ -651,9 +753,16 @@ class BuildState
      */
     private function ownedFiles(): array
     {
-        $files = [$this->manifestPath()];
+        // The outcome file is at the state directory root rather than in the
+        // generation directory: a process driving segments reads it without
+        // knowing which generation the segment took, and a segment that died
+        // early may not have taken one at all.
+        $files = [$this->manifestPath(), $this->outcomePath()];
 
         foreach (glob($this->manifestPath() . self::MANIFEST_TMP_SUFFIX . '*') ?: [] as $path) {
+            $files[] = $path;
+        }
+        foreach (glob($this->outcomePath() . '.tmp*') ?: [] as $path) {
             $files[] = $path;
         }
         foreach (glob($this->buildDir() . '/chunk-*.dat') ?: [] as $path) {
@@ -1068,6 +1177,18 @@ class BuildState
     private function manifestPath(): string
     {
         return $this->stateDir . '/' . self::MANIFEST_FILE;
+    }
+
+    /**
+     * The outcome file, at the state directory root beside the manifest.
+     *
+     * Not in the generation directory: the process that reads this is driving
+     * segments from outside and knows only the state directory, and a segment
+     * that died before taking a generation still has an outcome worth reading.
+     */
+    private function outcomePath(): string
+    {
+        return $this->stateDir . '/' . self::OUTCOME_FILE;
     }
 
     private function chunkPath(int $chunkNumber): string
