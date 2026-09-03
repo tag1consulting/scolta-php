@@ -45,6 +45,59 @@ class BuildIntentFactoryTest extends TestCase
         $this->assertSame('resume', $intent->mode());
     }
 
+    public function testResetLedgerFlagOptsAFreshBuildIntoAPageTableReset(): void
+    {
+        $intent = BuildIntentFactory::fromFlags(false, false, 500, MemoryBudget::conservative(), resetLedger: true);
+
+        $this->assertSame('fresh', $intent->mode());
+        $this->assertTrue($intent->resetsPageTable());
+    }
+
+    public function testRestartResetsThePageTableWithoutTheResetLedgerFlag(): void
+    {
+        $intent = BuildIntentFactory::fromFlags(false, true, 500, MemoryBudget::conservative());
+
+        $this->assertTrue($intent->resetsPageTable());
+    }
+
+    public function testResetLedgerIsRefusedOnAResume(): void
+    {
+        $this->expectException(\LogicException::class);
+        BuildIntentFactory::fromFlags(true, false, 500, MemoryBudget::conservative(), resetLedger: true);
+    }
+
+    public function testRestartCombinedWithAPartialScopeIsRefused(): void
+    {
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessageMatches('/scope-limited build/');
+        BuildIntentFactory::fromFlags(false, true, 500, MemoryBudget::conservative(), partial: true);
+    }
+
+    public function testResetLedgerCombinedWithAPartialScopeIsRefused(): void
+    {
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessageMatches('/scope-limited build/');
+        BuildIntentFactory::fromFlags(
+            false,
+            false,
+            500,
+            MemoryBudget::conservative(),
+            partial: true,
+            resetLedger: true,
+        );
+    }
+
+    public function testPartialAndResetLedgerAreIndependentOfEachOther(): void
+    {
+        $partial = BuildIntentFactory::fromFlags(false, false, 500, MemoryBudget::conservative(), partial: true);
+        $this->assertTrue($partial->isPartial());
+        $this->assertFalse($partial->resetsPageTable());
+
+        $reset = BuildIntentFactory::fromFlags(false, false, 500, MemoryBudget::conservative(), resetLedger: true);
+        $this->assertTrue($reset->resetsPageTable());
+        $this->assertFalse($reset->isPartial());
+    }
+
     public function testBudgetIsPassedThrough(): void
     {
         $budget = MemoryBudget::aggressive();

@@ -255,10 +255,19 @@ final class PartialScopeBuildTest extends TestCase
         $this->assertTrue(
             BuildIntentFactory::fromFlags(false, false, 10, $budget, partial: true)->isPartial(),
         );
-        $this->assertTrue(
-            BuildIntentFactory::fromFlags(false, true, 10, $budget, partial: true)->isPartial(),
-            '--restart is still a scoped build when the gather is scoped.',
-        );
+        // --restart used to be "still a scoped build when the gather is
+        // scoped": it declared partial scope, gathered, and was refused at the
+        // merge by partialScopeRefusal(). --restart now also discards the page
+        // table, and that cannot be combined with a scope — the reset empties
+        // the ledger the refusal reads, so the guard below would wave the build
+        // through and publish one bundle over the whole site. Refused up front
+        // instead, which is also hours earlier than the merge gate.
+        try {
+            BuildIntentFactory::fromFlags(false, true, 10, $budget, partial: true);
+            $this->fail('A scoped restart must be refused rather than allowed to renumber.');
+        } catch (\LogicException $e) {
+            $this->assertStringContainsString('scope-limited build', $e->getMessage());
+        }
 
         // Resume carries no scope of its own; the manifest supplies it.
         $this->assertFalse(

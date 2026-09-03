@@ -713,18 +713,56 @@ final class PageTableLedger
     }
 
     /**
-     * Discard every assignment.
+     * Discard every assignment, on disk as well as in memory.
      *
      * This is compaction: the next full build renumbers from zero in gather
      * order and drops every tombstone. It is the only operation that renumbers
      * and it invalidates every fragment filename in the index, so the caller
      * must follow it with a full build before serving the result.
      *
+     * The snapshot and the journal are unlinked here rather than left for the
+     * next {@see self::save()}. Clearing only memory is not a reset: the
+     * journal is opened in append mode, so the next {@see self::checkpoint()}
+     * would leave the discarded records sitting in front of the new ones, and
+     * a process that dies between the reset and the save would replay them —
+     * handing this build's ordinals back to pages that no longer hold them.
+     * That is the collision the journal exists to prevent, arrived at from the
+     * other direction.
+     *
+     * The generation counter is deliberately left alone. It only has to be
+     * monotonic for {@see self::releaseStaleRows()} to tell this build's rows
+     * from an older build's, and rewinding it could make a row written by a
+     * later build look current.
+     *
+     * @throws \RuntimeException When a file cannot be removed.
      * @since 1.2.0
      * @stability experimental
      */
     public function reset(): void
     {
+        // Unlink first, and refuse to continue if either file survives. A
+        // reset that cleared memory and shrugged off a failed delete would be
+        // the original bug wearing a different hat: the caller believes it is
+        // renumbering from zero, and the file it could not remove is replayed
+        // over the new assignments by the next process to read this directory.
+        // Better to fail here, before the build spends hours, and name the
+        // file so an operator can remove it themselves.
+        foreach ([self::FILENAME, self::JOURNAL_FILENAME] as $name) {
+            $path = $this->stateDir . '/' . $name;
+            if (!$this->storage->exists($path)) {
+                continue;
+            }
+
+            if (!$this->storage->delete($path)) {
+                throw new \RuntimeException(sprintf(
+                    'Failed to discard the page-table ledger: %s could not be removed. Refusing to '
+                    . 'renumber, because that file would be read back over the new assignments and hand '
+                    . 'one ordinal to two pages. Check its permissions, or remove it by hand, then re-run.',
+                    $path,
+                ));
+            }
+        }
+
         $this->next       = 0;
         $this->byId       = [];
         $this->free       = [];

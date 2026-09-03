@@ -52,6 +52,7 @@ class PhpIndexer
         $stemmer   = new Stemmer($language);
         $this->builder = new InvertedIndexBuilder($tokenizer, $stemmer);
         $this->merger  = new IndexMerger();
+        $this->merger->setStateDir($stateDir);
         $this->cache   = new PageWordCache(
             $stateDir,
             $this->storage,
