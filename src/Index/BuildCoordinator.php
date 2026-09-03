@@ -49,15 +49,6 @@ final class BuildCoordinator
     public function prepare(BuildIntent $intent): array
     {
         if ($intent->isFresh()) {
-            if ($this->state->isRunning()) {
-                throw new \RuntimeException(
-                    'Another index build is already running. '
-                    . 'Wait for it to complete, or kill the process and retry with --restart.',
-                );
-            }
-
-            $this->state->cleanup();
-
             $manifest = array_merge([
                 'total_pages' => $intent->totalPages() ?? 0,
                 'chunk_size'  => $intent->memoryBudget()->chunkSize(),
@@ -65,9 +56,23 @@ final class BuildCoordinator
                 'fingerprint' => $intent->sourceMeta()['fingerprint'] ?? '',
             ], $intent->sourceMeta());
 
+            // Written after the merge with sourceMeta, so an adapter cannot
+            // overwrite it by accident: a manifest that under-reports the
+            // scope is the manifest that lets finalize() delete the pages
+            // this build was never asked to look at.
+            $manifest['scope'] = $intent->scope();
+
+            // No isRunning() check and no cleanup() before this call. Both
+            // used to happen outside the lock: the check could clear a live
+            // build (a PID owned by another uid, or in another container,
+            // reads as dead) and cleanup() then deleted that build's lock,
+            // manifest and chunk files while it was still writing them.
+            // initiateBuild() takes the lock first and clears state after.
             if (!$this->state->initiateBuild($manifest)) {
                 throw new \RuntimeException(
-                    'Failed to acquire build lock — another process may have just started.',
+                    'Another index build is already running against this state directory. '
+                    . 'Wait for it to finish, or stop that process and retry. '
+                    . $this->lockDescription(),
                 );
             }
 
@@ -83,11 +88,36 @@ final class BuildCoordinator
             );
         }
 
-        if (!$this->state->initiateBuild($manifest)) {
-            throw new \RuntimeException('Failed to re-acquire build lock for resume.');
+        if (!$this->state->resumeBuild($manifest)) {
+            throw new \RuntimeException(
+                'Failed to re-acquire build lock for resume — another build is running. '
+                . $this->lockDescription(),
+            );
         }
 
         return $manifest;
+    }
+
+    /**
+     * Describe the current lock holder, so a refused build says who refused it.
+     *
+     * The production incident could not be explained after the fact because
+     * nothing recorded how the liveness question had been answered.
+     */
+    private function lockDescription(): string
+    {
+        $lock = $this->state->lockDiagnostics();
+        if ($lock === null) {
+            return 'No lock record is readable in ' . $this->stateDir . '.';
+        }
+
+        return sprintf(
+            'Lock held by pid %s on host %s (generation %s, %s).',
+            $lock['pid'] ?? 'unknown',
+            $lock['host'] ?? 'unknown',
+            $lock['generation'] ?? 'unknown',
+            $lock['liveness'],
+        );
     }
 
     /**
@@ -111,6 +141,17 @@ final class BuildCoordinator
     public function chunkFiles(): array
     {
         return $this->state->getChunkFiles();
+    }
+
+    /**
+     * Path to the manifest of the build currently in the state directory.
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function manifestFile(): string
+    {
+        return $this->state->manifestFile();
     }
 
     /**
@@ -162,5 +203,22 @@ final class BuildCoordinator
     public function releaseLockOnly(): void
     {
         $this->state->releaseLockOnly();
+    }
+
+    /**
+     * The scope the build in the state directory declared.
+     *
+     * `drush scolta:finalize` runs in a process that never saw the
+     * BuildIntent, and it does the same stale-release and merge that build()
+     * does. Reading the scope back off the manifest is what stops the deferred
+     * merge from being the hole in the guard.
+     *
+     * @return string BuildIntent::SCOPE_FULL or BuildIntent::SCOPE_PARTIAL.
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function declaredScope(): string
+    {
+        return $this->state->declaredScope();
     }
 }

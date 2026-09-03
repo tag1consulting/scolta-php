@@ -12,11 +12,18 @@ namespace Tag1\Scolta\Index;
  */
 final class BuildIntent
 {
+    /** The pages handed to build() are every page the corpus has. */
+    public const SCOPE_FULL = 'full';
+
+    /** The pages handed to build() are a subset the caller chose. */
+    public const SCOPE_PARTIAL = 'partial';
+
     private function __construct(
         private readonly string $mode,
         private readonly ?int $totalPages,
         private readonly MemoryBudget $memoryBudget,
         private readonly array $sourceMeta,
+        private readonly string $scope = self::SCOPE_FULL,
     ) {}
 
     /**
@@ -108,5 +115,58 @@ final class BuildIntent
     public function isFresh(): bool
     {
         return $this->mode === 'fresh' || $this->mode === 'restart';
+    }
+
+    /**
+     * Declare that the pages handed to build() are a subset of the corpus.
+     *
+     * Nothing downstream can work this out for itself, and the default is the
+     * dangerous way round: several stages treat "the build never yielded this"
+     * as "the source no longer has this", which is sound only when the build
+     * walked everything. {@see PageTableLedger::releaseStaleRows()} frees the
+     * ordinal of every id the run did not yield and the merge pads the hole
+     * with a tombstone; the token cache and the timestamp manifest drop every
+     * entry the run did not look up. A build scoped to one bundle therefore
+     * deleted the rest of the site from the index — 1,518 live pages published
+     * inside a 16,166-ordinal page table — because it had no way to say that
+     * the other 14,648 pages were never in its remit.
+     *
+     * This is that way. A caller that filters what it gathers — by bundle, by
+     * an explicit id list, by anything — must set it.
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function withPartialScope(): self
+    {
+        return new self(
+            $this->mode,
+            $this->totalPages,
+            $this->memoryBudget,
+            $this->sourceMeta,
+            self::SCOPE_PARTIAL,
+        );
+    }
+
+    /**
+     * "full" | "partial"
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function scope(): string
+    {
+        return $this->scope;
+    }
+
+    /**
+     * True when the caller declared the pages a subset of the corpus.
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function isPartial(): bool
+    {
+        return $this->scope === self::SCOPE_PARTIAL;
     }
 }
