@@ -936,9 +936,16 @@
     };
   }
 
-  async function loadFacetIndex(basePath) {
+  async function loadFacetIndex(basePath, indexHash) {
     if (typeof fetch !== 'function') throw new Error('fetch unavailable');
-    const url = basePath + 'scolta.facets';
+    // Named after the index it was built against — the same convention
+    // pagefind.{hash}.pf_meta already uses — so the URL itself changes on
+    // every rebuild. A browser or CDN cache holding a previous build's
+    // response at a previous build's URL is never handed to a request for
+    // this one, which is what made the old fixed 'scolta.facets' name a
+    // caching hazard: identical URL across rebuilds, so a cached response
+    // from before the last rebuild would silently outlive it.
+    const url = basePath + 'scolta.' + indexHash + '.facets';
     const resp = await fetch(url);
     if (!resp || !resp.ok) throw new Error('HTTP ' + (resp && resp.status));
     return parseFacetIndex(await gunzipToBytes(await resp.arrayBuffer()));
@@ -1139,11 +1146,23 @@
       if (facetIndexMergedLanguages) {
         throw new Error('a secondary language index was merged in');
       }
-      facetIndex = await loadFacetIndex(facetIndexBase(pagefindPath));
-      if (facetIndexExpectedHash && facetIndex.indexHash
-          && facetIndex.indexHash !== facetIndexExpectedHash) {
-        throw new Error('artifact was built against index ' + facetIndex.indexHash
-          + ' but the loaded index is ' + facetIndexExpectedHash + ' (stale cached artifact)');
+      // facetIndexExpectedHash comes from the cache-busted pagefind-entry.json
+      // fetched during initPagefind(), which always runs before this. Without
+      // it there is no trustworthy URL to ask for: the artifact is named
+      // after the index it was built for specifically so a stale cached
+      // response can never answer in its place, which means a request that
+      // cannot name that hash is not made at all.
+      if (!facetIndexExpectedHash) {
+        throw new Error('index hash unknown (pagefind-entry.json did not load)');
+      }
+      facetIndex = await loadFacetIndex(facetIndexBase(pagefindPath), facetIndexExpectedHash);
+      if (facetIndex.indexHash && facetIndex.indexHash !== facetIndexExpectedHash) {
+        // The URL itself is named after facetIndexExpectedHash, so landing
+        // here means the artifact's own header disagrees with the filename it
+        // was fetched under — a build inconsistency, not the stale-cache
+        // hazard the fixed 'scolta.facets' name used to risk.
+        throw new Error('artifact at hash ' + facetIndexExpectedHash
+          + ' is stamped for a different index (' + facetIndex.indexHash + ')');
       }
       cachedPagefindFilters = facetIndexTotals(facetIndex);
       debugLog('[scolta] Scolta facet index loaded:', facetIndex.dimensions.join(', '),
@@ -1152,7 +1171,8 @@
     } catch (e) {
       facetIndex = null;
       console.warn(
-        '[scolta] No Scolta facet index at ' + facetIndexBase(pagefindPath) + 'scolta.facets ('
+        '[scolta] No Scolta facet index at ' + facetIndexBase(pagefindPath)
+        + 'scolta.' + (facetIndexExpectedHash || '<unknown>') + '.facets ('
         + (e && e.message ? e.message : e) + '). Falling back to pagefind.filters(), which loads '
         + 'every filter chunk and makes each subsequent search cost time proportional to matched '
         + 'results times filter postings. Rebuild the search index to emit the facet index.',

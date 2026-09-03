@@ -547,7 +547,7 @@ final class SmlShapedBuildBenchmarkTest extends TestCase
             + count(glob($pf . '/fragment/*') ?: [])
             + count(glob($pf . '/filter/*') ?: [])
             + count(glob($pf . '/*.pf_meta') ?: [])
-            + count(glob($pf . '/scolta.facets') ?: []);
+            + count(glob($pf . '/scolta.*.facets') ?: []);
     }
 
     /**

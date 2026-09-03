@@ -150,7 +150,7 @@ async function boot(mockPagefind, calls, url) {
                 }),
             });
         }
-        if (/scolta\.facets/.test(u)) {
+        if (/scolta\.[^/]+\.facets/.test(u)) {
             const b = FIXTURE_GZ;
             return Promise.resolve({
                 ok: true,

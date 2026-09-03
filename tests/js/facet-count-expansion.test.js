@@ -203,7 +203,7 @@ async function createEnv({
                 text: () => Promise.resolve('{}'),
             });
         }
-        if (/scolta\.facets/.test(u)) {
+        if (/scolta\.[^/]+\.facets/.test(u)) {
             if (!artifact) return Promise.resolve({ ok: false, status: 404 });
             const b = FIXTURE_GZ;
             return Promise.resolve({
