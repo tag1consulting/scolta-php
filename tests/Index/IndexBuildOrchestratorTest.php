@@ -363,66 +363,31 @@ class IndexBuildOrchestratorTest extends TestCase
         $this->assertStringContainsString('Failed to stage', $report->error);
     }
 
+    /**
+     * An index with no fragments is refused.
+     *
+     * Driven through the check directly rather than by deleting the fragments
+     * a swap just published: the check now runs against the staged directory
+     * before the swap, precisely so a refusal leaves the live index alone, and
+     * nothing the storage driver is asked to do happens between the write and
+     * the check.
+     */
     public function testEmptyFragmentDirectoryReturnsFalse(): void
     {
-        $real      = new FilesystemDriver();
-        $outputDir = $this->outputDir;
-        $deletingStorage = new class ($real, $outputDir) implements StorageDriverInterface {
-            public function __construct(
-                private readonly FilesystemDriver $inner,
-                private readonly string $outputDir,
-            ) {}
+        $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
+        $report       = $orchestrator->build(BuildIntent::fresh(3, MemoryBudget::conservative()), $this->makeItems(3));
+        $this->assertTrue($report->success, (string) $report->error);
 
-            public function move(string $from, string $to): bool
-            {
-                $result = $this->inner->move($from, $to);
-                if ($result && $to === $this->outputDir . '/pagefind') {
-                    foreach (glob($to . '/fragment/*.pf_fragment') ?: [] as $f) {
-                        unlink($f);
-                    }
-                }
-                return $result;
-            }
+        // An index root shaped like the writer's output, with the fragments
+        // missing — the silent-write-failure the message names.
+        $staged = $this->outputDir . '/.scolta-staged-empty';
+        mkdir($staged . '/fragment', 0755, true);
 
-            public function exists(string $path): bool
-            {
-                return $this->inner->exists($path);
-            }
-            public function get(string $path): string
-            {
-                return $this->inner->get($path);
-            }
-            public function put(string $path, string $c): bool
-            {
-                return $this->inner->put($path, $c);
-            }
-            public function delete(string $path): bool
-            {
-                return $this->inner->delete($path);
-            }
-            public function deleteDirectory(string $path): bool
-            {
-                return $this->inner->deleteDirectory($path);
-            }
-            public function makeDirectory(string $path): bool
-            {
-                return $this->inner->makeDirectory($path);
-            }
-            public function files(string $dir, string $p = '*'): array
-            {
-                return $this->inner->files($dir, $p);
-            }
-        };
+        $method = new \ReflectionMethod(IndexBuildOrchestrator::class, 'verifyOutputHasFragments');
 
-        $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir, storage: $deletingStorage);
-        $items        = $this->makeItems(3);
-        $intent       = BuildIntent::fresh(3, MemoryBudget::conservative());
-
-        $report = $orchestrator->build($intent, $items);
-
-        $this->assertFalse($report->success);
-        $this->assertNotNull($report->error);
-        $this->assertStringContainsString('zero fragment files', $report->error);
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/zero fragment files/');
+        $method->invoke($orchestrator, 3, $staged);
     }
 
     public function testBuildWithNoItemsSucceeds(): void
