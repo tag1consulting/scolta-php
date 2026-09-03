@@ -186,7 +186,56 @@ class BuildIntegrityTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessageMatches('/must not be served/');
-        $method->invoke($orchestrator, count($items));
+        $method->invoke($orchestrator, count($items), $this->outputDir . '/pagefind');
+    }
+
+    /**
+     * The check that refuses an index must run before that index is published.
+     *
+     * Observed on production: the integrity check ran after atomicSwap(), so a
+     * build whose ledger and manifest disagreed published the index it then
+     * declared unservable, and search stayed broken until the next build.
+     */
+    public function testAFailedIntegrityCheckLeavesThePublishedIndexInPlace(): void
+    {
+        // A good index of 20 pages, published and worth protecting.
+        $refStateDir = $this->stateDir . '-published';
+        mkdir($refStateDir, 0755, true);
+        $published = new IndexBuildOrchestrator($refStateDir, $this->outputDir);
+        $report    = $published->build(BuildIntent::fresh(20, MemoryBudget::conservative()), $this->makeItems(20));
+        $this->assertTrue($report->success, (string) $report->error);
+
+        $before = $this->indexSnapshot();
+        $this->assertCount(20, glob($this->outputDir . '/pagefind/fragment/*.pf_fragment') ?: []);
+
+        // A second build over a smaller corpus — so the index it stages is
+        // demonstrably not the published one — that commits its chunks and
+        // then has its committed-page count disagree with the ledger's live
+        // rows: the disagreement the integrity check exists to catch.
+        $items  = $this->makeItems(12);
+        $budget = MemoryBudget::conservative()->withChunkSize(5);
+        $first  = $this->runSegment($items, $budget, fresh: true, yieldOnce: true);
+        $this->assertSame(StatusReport::MEMORY_ABORT, $first->error);
+        $this->inflateManifestPageCount(5);
+
+        $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
+        $report       = $orchestrator->build(BuildIntent::resume($budget), $items);
+
+        $this->assertFalse($report->success, 'A build whose bookkeeping disagrees must not report success');
+        $this->assertStringContainsString('must not be served', (string) $report->error);
+
+        $this->assertSame(
+            $before,
+            $this->indexSnapshot(),
+            'A build that failed its integrity check must leave the previously published index untouched',
+        );
+        $this->assertCount(
+            20,
+            glob($this->outputDir . '/pagefind/fragment/*.pf_fragment') ?: [],
+            'The refused 12-page index must not be the one being served',
+        );
+
+        $this->removeDir($refStateDir);
     }
 
     public function testTheMergeRefusesTwoChunksThatClaimTheSameOrdinal(): void
@@ -402,6 +451,57 @@ class BuildIntegrityTest extends TestCase
                 unlink($path);
             }
         }
+    }
+
+    /**
+     * Relative path => content hash for every file in the published index.
+     *
+     * Content rather than mtimes: the question is whether the bytes being
+     * served changed, and a republished identical index would be harmless.
+     *
+     * @return array<string, string>
+     */
+    private function indexSnapshot(): array
+    {
+        $root = $this->outputDir . '/pagefind';
+        if (!is_dir($root)) {
+            return [];
+        }
+
+        $snapshot = [];
+        $items    = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
+        );
+        foreach ($items as $item) {
+            if (!$item->isFile()) {
+                continue;
+            }
+            $relative            = substr($item->getPathname(), strlen($root) + 1);
+            $snapshot[$relative] = (string) sha1_file($item->getPathname());
+        }
+        ksort($snapshot);
+
+        return $snapshot;
+    }
+
+    /**
+     * Inflate the manifest's committed-page count.
+     *
+     * The manifest counts pages as chunks commit and the ledger counts the ids
+     * it kept; a page indexed twice or lost between the two shows up as this
+     * disagreement, so it is produced here directly rather than by trying to
+     * reproduce the upstream cause.
+     */
+    private function inflateManifestPageCount(int $extra): void
+    {
+        $path = (new BuildState($this->stateDir))->manifestFile();
+        $this->assertFileExists($path);
+
+        $manifest = json_decode((string) file_get_contents($path), true);
+        $this->assertIsArray($manifest);
+        $manifest['pages_processed'] = (int) ($manifest['pages_processed'] ?? 0) + $extra;
+
+        file_put_contents($path, json_encode($manifest, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
     }
 
     /**

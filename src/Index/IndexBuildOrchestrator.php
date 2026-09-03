@@ -556,21 +556,28 @@ final class IndexBuildOrchestrator
             $streamWriter->setFragmentReuse($this->reuseFragments);
             $this->merger->setTelemetry($telemetry);
             $telemetry->emit('writer_start');
+            $this->clearStagingDir($this->stagedIndexDir());
             $streamWriter->beginWrite($this->outputDir);
             $this->merger->mergeStreaming($chunkFiles, $streamWriter, $budget);
             $streamWriter->fillTombstones($this->ledger->pageTableSize());
             $streamWriter->endWrite();
             $telemetry->emit('writer_complete');
 
-            $this->atomicSwap($logger);
-            $telemetry->emit('swap_complete');
-            $sweptClean = $this->trash->sweep($logger);
-
             $totalPagesProcessed = $this->coordinator->pagesProcessed();
             $pagesForReport      = $totalPagesProcessed > 0 ? $totalPagesProcessed : $pagesInRun;
             $chunksWritten       = count($chunkFiles);
 
-            $this->verifyOutputHasFragments($pagesForReport);
+            // Checked against the staged directory, before the swap. This used
+            // to run after atomicSwap(), so a build that failed the check had
+            // already replaced a working index with the one it was declaring
+            // unservable — the state observed on production, where a 16166
+            // fragment index with 1518 live pages went live and then failed.
+            // Refusing here leaves the previously published index serving.
+            $this->verifyOutputHasFragments($pagesForReport, $this->stagedIndexDir());
+
+            $this->atomicSwap($logger);
+            $telemetry->emit('swap_complete');
+            $sweptClean = $this->trash->sweep($logger);
 
             $this->coordinator->release();
 
@@ -922,20 +929,22 @@ final class IndexBuildOrchestrator
             $streamWriter->setTelemetry($telemetry);
             $streamWriter->setFragmentReuse($this->reuseFragments);
             $this->merger->setTelemetry($telemetry);
+            $this->clearStagingDir($this->stagedIndexDir());
             $streamWriter->beginWrite($this->outputDir);
             $this->merger->mergeStreaming($chunkFiles, $streamWriter, $budget);
             $streamWriter->fillTombstones($this->ledger->pageTableSize());
             $streamWriter->endWrite();
             $telemetry->emit('writer_complete');
 
-            $this->atomicSwap($logger);
-            $telemetry->emit('swap_complete');
-            $sweptClean = $this->trash->sweep($logger);
-
             $pagesProcessed = $this->coordinator->pagesProcessed();
             $chunksFinalized = count($chunkFiles);
 
-            $this->verifyOutputHasFragments($pagesProcessed);
+            // Pre-swap, for the reason build() states.
+            $this->verifyOutputHasFragments($pagesProcessed, $this->stagedIndexDir());
+
+            $this->atomicSwap($logger);
+            $telemetry->emit('swap_complete');
+            $sweptClean = $this->trash->sweep($logger);
 
             $this->coordinator->release();
 
@@ -986,7 +995,7 @@ final class IndexBuildOrchestrator
 
     private function atomicSwap(LoggerInterface $logger): void
     {
-        $buildDir = $this->outputDir . '/.scolta-building';
+        $buildDir = $this->stagedIndexDir();
         $finalDir = $this->outputDir . '/pagefind';
         $oldDir   = $this->outputDir . '/.scolta-old';
         $newDir   = $this->outputDir . '/.scolta-new';
@@ -1031,6 +1040,18 @@ final class IndexBuildOrchestrator
                 'dir' => $oldDir,
             ]);
         }
+    }
+
+    /**
+     * The directory StreamingFormatWriter writes into, before the swap.
+     *
+     * atomicSwap() renames it to pagefind/, so it holds the same layout the
+     * live index does — which is what lets the integrity checks run against it
+     * while the previous index is still the one being served.
+     */
+    private function stagedIndexDir(): string
+    {
+        return $this->outputDir . '/.scolta-building';
     }
 
     /**
@@ -1114,17 +1135,6 @@ final class IndexBuildOrchestrator
     }
 
     /**
-     * Verify the finished index accounts for every page the build indexed.
-     *
-     * The count that matters is the ledger's live rows: one row per id this
-     * build kept, and one fragment per row. Comparing against it rather than
-     * against "more than zero" is what turns a dropped page into a failed
-     * build. An index that is short here has almost always lost pages to
-     * colliding ordinals, so the message says so.
-     *
-     * @throws \RuntimeException If the index does not match the ledger.
-     */
-    /**
      * Decide whether a partial build may publish, and say why not if it may not.
      *
      * A scoped build is safe only when its scope happens to cover everything
@@ -1177,7 +1187,22 @@ final class IndexBuildOrchestrator
         return $error;
     }
 
-    private function verifyOutputHasFragments(int $pagesProcessed): void
+    /**
+     * Verify the finished index accounts for every page the build indexed.
+     *
+     * The count that matters is the ledger's live rows: one row per id this
+     * build kept, and one fragment per row. Comparing against it rather than
+     * against "more than zero" is what turns a dropped page into a failed
+     * build. An index that is short here has almost always lost pages to
+     * colliding ordinals, so the message says so.
+     *
+     * $indexRoot is the directory that IS the index — the staging directory
+     * pre-swap, or the published pagefind/ directory. Callers pass the staged
+     * one: a check that runs after publication cannot protect anything.
+     *
+     * @throws \RuntimeException If the index does not match the ledger.
+     */
+    private function verifyOutputHasFragments(int $pagesProcessed, string $indexRoot): void
     {
         // Before the zero-page exit, not after it: zero is the symptom here,
         // not the exemption. Held back until after the exit, a build that lost
@@ -1188,7 +1213,7 @@ final class IndexBuildOrchestrator
             return;
         }
 
-        $fragmentDir   = $this->outputDir . '/pagefind/fragment';
+        $fragmentDir   = $indexRoot . '/fragment';
         $fragmentCount = is_dir($fragmentDir)
             ? count(glob($fragmentDir . '/*.pf_fragment') ?: [])
             : 0;
@@ -1231,7 +1256,7 @@ final class IndexBuildOrchestrator
             ));
         }
 
-        self::verifyIndexComplete($this->outputDir);
+        self::verifyIndexRootComplete($indexRoot);
     }
 
     /**
@@ -1302,7 +1327,21 @@ final class IndexBuildOrchestrator
      */
     public static function verifyIndexComplete(string $outputDir): void
     {
-        $entryPath = $outputDir . '/pagefind/pagefind-entry.json';
+        self::verifyIndexRootComplete($outputDir . '/pagefind');
+    }
+
+    /**
+     * The same check, against a directory that is itself an index.
+     *
+     * Split out so a build can verify its staged output before the swap
+     * publishes it, while the public entry point keeps taking the base output
+     * directory framework adapters pass.
+     *
+     * @throws \RuntimeException If the index is missing or malformed.
+     */
+    private static function verifyIndexRootComplete(string $indexRoot): void
+    {
+        $entryPath = $indexRoot . '/pagefind-entry.json';
         if (!file_exists($entryPath)) {
             throw new \RuntimeException(
                 "Index verification failed: pagefind-entry.json not found at {$entryPath}. "
