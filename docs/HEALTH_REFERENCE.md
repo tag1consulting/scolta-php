@@ -6,21 +6,56 @@ the adapter. This document is the reference for the AI fields, and in particular
 for the auth-failure marker, which is the one field in the payload that reports
 a cached observation rather than something measured at request time.
 
+## `status` and `status_reasons`
+
+`status` is `ok` or `degraded`. **Do not add a third value yet.** No adapter
+branches on the string today, and each health controller overwrites it with a
+flat `$result['status'] = 'degraded'` after its own integrity check — an
+assignment that would silently clobber a more severe value. A third value is
+safe only once every adapter turns that assignment into a max-severity merge.
+
+`status_reasons` is a list of machine-readable fault keys, empty exactly when
+`status` is `ok`. It exists because the payload an unauthorized caller sees is
+trimmed to `{"status": ...}` alone, so an operator who *can* see detail should
+not have to re-derive the rule from the other fields:
+
+| Reason | Meaning |
+| --- | --- |
+| `index_missing` | Neither `{outputDir}/pagefind/pagefind.js` nor `{outputDir}/pagefind.js` exists. Search cannot run. |
+| `index_stale_artifact_urls` | Sampled fragments carry `/{id}.html` URLs from a pre-1.1.0 binary build. Results 404. Run a full rebuild. |
+| `ai_provider_unselected` | A key is set but no provider was chosen, so the key is inert. |
+| `ai_key_missing` | A provider was chosen but no key resolved. |
+| `ai_auth_failing` | The stored credentials were rejected. See the marker section below. |
+| `ai_awaiting_amazee_model_resolution` | An Amazee install is half-provisioned; its key is deliberately withheld until model resolution completes. |
+
+At most one `ai_*` reason is reported — the next thing to fix — because a key
+cannot be rejected by a provider that was never selected.
+
+### Running without AI is not degraded
+
+**No provider and no key is a supported configuration, not a fault.** Keyword
+search, facets, browse and search-as-you-type all work without a provider. Such
+a deployment reports `status: ok`, `status_reasons: []` and `ai_usable: false`,
+and it is the one case where `ai_usable: false` does not degrade the status.
+
+The line is between *AI is off* and *AI was asked for and does not work*: a
+provider configured but failing is degraded, a provider never configured is a
+choice. The two collapsed into one flag until 1.5.0, so an AI-less deployment
+reported `degraded` forever.
+
 ## AI fields
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `ai_provider` | string | The effective provider, from the key resolution when one was passed. |
+| `ai_provider` | string | The effective provider, from the key resolution when one was passed. `''` means none was selected; it is never coalesced to a default. |
+| `ai_provider_selected` | bool | A provider was selected at all. `false` with `ai_configured: true` is the inert-key case. |
 | `ai_configured` | bool | Credentials are present. An Amazee install still awaiting model resolution counts as configured. |
-| `ai_usable` | bool | Configured **and** not known to be auth-failing **and** not awaiting Amazee model resolution. |
+| `ai_usable` | bool | Configured **and** a provider is selected **and** not known to be auth-failing **and** not awaiting Amazee model resolution. |
 | `ai_auth_failing` | bool | The last recorded AI call failed authentication. A cached marker, not a live probe. |
 | `ai_auth_failing_since` | int\|null | Unix timestamp of the failed call that recorded the marker. `null` when the marker is not set. |
 | `ai_auth_failing_ttl` | int\|null | Seconds the marker survives without a further failing call (3600). `null` when the marker is not set. |
 | `ai_key_source` | string\|null | Backing value of the resolved `ApiKeySource`, or `null` when the adapter passed no resolution. See [API_KEY_PRECEDENCE.md](API_KEY_PRECEDENCE.md). |
 | `ai_amazee_overridden` | bool | Amazee.ai credentials are stored but lost to an explicit key. |
-
-`ai_usable: false` drives `status: degraded`, as does a missing index or a stale
-index artifact.
 
 ## The auth-failure marker
 
@@ -115,6 +150,9 @@ first and leaves the second standing, which is correct: the site is serving AI
 again, and the Amazee credentials it was provisioned with are still dead.
 
 ## History
+
+`status_reasons`, and the rule that an AI-less deployment is not degraded,
+arrived in 1.5.0.
 
 `ai_auth_failing`, `ai_usable` and the `degraded` status arrived with Amazee
 trial-key expiry detection: an expired key had kept `ai_configured: true` for

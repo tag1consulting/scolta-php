@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tag1\Scolta\Tests\Health;
 
 use PHPUnit\Framework\TestCase;
+use Tag1\Scolta\Config\ApiKeySource;
+use Tag1\Scolta\Config\ResolvedApiKey;
 use Tag1\Scolta\Config\ScoltaConfig;
 use Tag1\Scolta\Health\HealthChecker;
 
@@ -270,6 +272,177 @@ class HealthCheckerTest extends TestCase
 
         $this->assertTrue($result['ai_usable']);
         $this->assertEquals('ok', $result['status']);
+    }
+
+    // -------------------------------------------------------------------
+    // Running without AI is a supported configuration, not a fault
+    //
+    // Regression (Laravel demo, 2026-09): indexed, integrity valid, no
+    // provider configured — /health returned `degraded` forever.
+    // -------------------------------------------------------------------
+
+    public function testNoProviderAndNoKeyWithAGoodIndexIsNotDegraded(): void
+    {
+        file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
+
+        $config = ScoltaConfig::fromArray(['ai_provider' => '', 'ai_api_key' => '']);
+        $checker = new HealthChecker($config, $this->tempDir, null, null, new HealthTestCache());
+
+        $result = $checker->check();
+
+        $this->assertSame('ok', $result['status'], 'An AI-less deployment with a good index is healthy');
+        $this->assertSame([], $result['status_reasons']);
+        $this->assertFalse($result['ai_provider_selected']);
+        $this->assertFalse($result['ai_configured']);
+        $this->assertFalse($result['ai_usable'], 'AI is off, so it is not usable — that is not a fault');
+    }
+
+    public function testNoProviderStillDegradesWhenTheIndexIsMissing(): void
+    {
+        // AI being off must not mask a real fault.
+        $config = ScoltaConfig::fromArray(['ai_provider' => '', 'ai_api_key' => '']);
+        $checker = new HealthChecker($config, $this->tempDir, null, null);
+
+        $result = $checker->check();
+
+        $this->assertSame('degraded', $result['status']);
+        $this->assertSame(['index_missing'], $result['status_reasons']);
+    }
+
+    public function testAStaleAuthFailureMarkerCannotDegradeAnAiLessDeployment(): void
+    {
+        // Nothing can have authenticated without a provider or a key, so a
+        // lingering marker describes no condition this site is in.
+        file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
+
+        $cache = new HealthTestCache();
+        $cache->set(\Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery::CACHE_KEY_AUTH_FAILURE, time(), 3600);
+
+        $config = ScoltaConfig::fromArray(['ai_provider' => '', 'ai_api_key' => '']);
+        $checker = new HealthChecker($config, $this->tempDir, null, null, $cache);
+
+        $result = $checker->check();
+
+        $this->assertSame('ok', $result['status']);
+        $this->assertSame([], $result['status_reasons']);
+    }
+
+    // -------------------------------------------------------------------
+    // A provider that was asked for and does not work IS degraded
+    // -------------------------------------------------------------------
+
+    public function testConfiguredProviderWithFailingAuthIsDegraded(): void
+    {
+        file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
+
+        $cache = new HealthTestCache();
+        $cache->set(\Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery::CACHE_KEY_AUTH_FAILURE, time(), 3600);
+
+        $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => 'sk-was-good']);
+        $checker = new HealthChecker($config, $this->tempDir, null, null, $cache);
+
+        $result = $checker->check();
+
+        $this->assertSame('degraded', $result['status']);
+        $this->assertSame(['ai_auth_failing'], $result['status_reasons']);
+        $this->assertTrue($result['ai_configured']);
+        $this->assertFalse($result['ai_usable']);
+    }
+
+    public function testProviderSelectedWithoutAKeyIsDegraded(): void
+    {
+        // Half a configuration is not a decision to run without AI.
+        file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
+
+        $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => '']);
+        $checker = new HealthChecker($config, $this->tempDir, null, null);
+
+        $result = $checker->check();
+
+        $this->assertSame('degraded', $result['status']);
+        $this->assertSame(['ai_key_missing'], $result['status_reasons']);
+    }
+
+    public function testKeySetWithoutAProviderIsDegraded(): void
+    {
+        // The mirror image: a key nothing can send. Never read as "Anthropic".
+        file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
+
+        $config = ScoltaConfig::fromArray(['ai_provider' => '', 'ai_api_key' => 'sk-orphaned']);
+        $checker = new HealthChecker($config, $this->tempDir, null, null);
+
+        $result = $checker->check();
+
+        $this->assertSame('degraded', $result['status']);
+        $this->assertSame(['ai_provider_unselected'], $result['status_reasons']);
+        $this->assertSame('', $result['ai_provider']);
+    }
+
+    public function testHalfProvisionedAmazeeInstallIsDegraded(): void
+    {
+        file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
+
+        $resolved = new ResolvedApiKey(
+            key: '',
+            source: ApiKeySource::AmazeeDemo,
+            provider: 'openai',
+            baseUrl: 'https://llm.test.amazee.ai',
+            amazeeCredentialsStored: true,
+            awaitingAmazeeModelResolution: true,
+        );
+
+        $config = ScoltaConfig::fromArray(['ai_provider' => 'openai', 'ai_api_key' => '']);
+        $checker = new HealthChecker($config, $this->tempDir, null, null, new HealthTestCache(), $resolved);
+
+        $result = $checker->check();
+
+        $this->assertSame('degraded', $result['status']);
+        $this->assertSame(['ai_awaiting_amazee_model_resolution'], $result['status_reasons']);
+        $this->assertTrue($result['ai_configured'], 'Amazee credentials count as configured even when withheld');
+        $this->assertFalse($result['ai_usable']);
+    }
+
+    public function testAResolvedAmazeeKeyWithAGoodIndexIsOk(): void
+    {
+        file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
+
+        $resolved = new ResolvedApiKey(
+            key: 'sk-amazee-litellm-token',
+            source: ApiKeySource::AmazeeAccount,
+            provider: 'openai',
+            baseUrl: 'https://llm.test.amazee.ai',
+            amazeeCredentialsStored: true,
+        );
+
+        $config = ScoltaConfig::fromArray(['ai_provider' => 'openai', 'ai_api_key' => '']);
+        $checker = new HealthChecker($config, $this->tempDir, null, null, new HealthTestCache(), $resolved);
+
+        $result = $checker->check();
+
+        $this->assertSame('ok', $result['status']);
+        $this->assertSame([], $result['status_reasons']);
+        $this->assertTrue($result['ai_usable']);
+    }
+
+    // -------------------------------------------------------------------
+    // status_reasons is the explanation, and it agrees with status
+    // -------------------------------------------------------------------
+
+    public function testStatusReasonsListsEveryFaultAndIsEmptyExactlyWhenOk(): void
+    {
+        // Both faults are reported, not just the first one found.
+        $config = ScoltaConfig::fromArray(['ai_provider' => '', 'ai_api_key' => 'sk-orphaned']);
+        $result = (new HealthChecker($config, $this->tempDir, null, null))->check();
+
+        $this->assertSame('degraded', $result['status']);
+        $this->assertSame(['index_missing', 'ai_provider_unselected'], $result['status_reasons']);
+
+        file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
+        $healthy = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => 'sk-good']);
+        $okResult = (new HealthChecker($healthy, $this->tempDir, null, null))->check();
+
+        $this->assertSame('ok', $okResult['status']);
+        $this->assertSame([], $okResult['status_reasons']);
     }
 
     private function removeDir(string $dir): void
