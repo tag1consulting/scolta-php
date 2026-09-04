@@ -84,6 +84,8 @@ composer require tag1/scolta-php:^1.0
 
 **Requirements:** PHP 8.1+, `ext-mbstring`, `ext-openssl`. Recommended: `ext-intl` (improves Unicode diacritic normalization; falls back to a built-in mapping without it).
 
+The only package dependencies are `guzzlehttp/guzzle` (`^7.0|^8.0`) and `psr/log` (`^3.0`). Both Guzzle majors are supported and tested, so installing into an application that already has Guzzle 8 (Laravel 13 ships it) does not downgrade the host's HTTP client.
+
 Platform adapters install this package automatically. Install it directly only when building a custom adapter or a non-CMS integration.
 
 ## Configuration and Quickstart
