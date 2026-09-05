@@ -58,6 +58,23 @@ final class IndexBuildOrchestrator
      */
     private const MEM_CACHES_EVERY_CHUNKS = 20;
 
+    /**
+     * Wall-clock ceiling on the trash sweep a failed build runs on its way out.
+     *
+     * A ceiling under the CLI too, where an ordinary sweep is given none (see
+     * RetiredIndexTrash::defaultBudget()). No budget is the right answer after
+     * a publish — the new index is already live and the build may take as long
+     * as deletion takes — and the wrong one here, where the caller is waiting
+     * to be told the build failed and a serial NFS unlink loop can sit on that
+     * report for hours. Two seconds clears a lot on the parallel path and is
+     * not felt on the serial one; whatever is left still matches the trash
+     * pattern, so the next build or scheduled cleanup resumes it.
+     */
+    private const FAILED_BUILD_SWEEP_SECONDS = 2.0;
+
+    /** Warning for a report whose sweep left trash on disk. */
+    private const TRASH_LEFT_WARNING = 'Retired index cleanup left directories on disk; see the log for which. The next build or sweep will retry.';
+
     private readonly BuildCoordinator $coordinator;
     private readonly InvertedIndexBuilder $builder;
     private readonly IndexMerger $merger;
@@ -635,9 +652,14 @@ final class IndexBuildOrchestrator
                 pagesProcessed: $pagesForReport,
                 chunksWritten: $chunksWritten,
                 success: true,
-                warnings: $sweptClean ? null : 'Retired index cleanup left directories on disk; see the log for which. The next build or sweep will retry.',
+                warnings: $sweptClean ? null : self::TRASH_LEFT_WARNING,
             );
         } catch (\Throwable $e) {
+            // Sweep before the lock goes: the success path sweeps under it too,
+            // and a retry that starts the moment the lock is free would walk
+            // the same trash tree this sweep is deleting.
+            $warnings = $this->sweepAfterFailure($e, $logger);
+
             try {
                 $this->coordinator->releaseLockOnly();
             } catch (\Throwable) {
@@ -667,6 +689,7 @@ final class IndexBuildOrchestrator
                 chunksWritten: $committedChunks,
                 success: false,
                 error: $isMemoryAbort ? StatusReport::MEMORY_ABORT : $e->getMessage(),
+                warnings: $warnings,
             );
         }
     }
@@ -973,9 +996,12 @@ final class IndexBuildOrchestrator
                 pagesProcessed: $pagesProcessed,
                 chunksWritten: $chunksFinalized,
                 success: true,
-                warnings: $sweptClean ? null : 'Retired index cleanup left directories on disk; see the log for which. The next build or sweep will retry.',
+                warnings: $sweptClean ? null : self::TRASH_LEFT_WARNING,
             );
         } catch (\Throwable $e) {
+            // Under the lock, as in build().
+            $warnings = $this->sweepAfterFailure($e, $logger);
+
             try {
                 $this->coordinator->releaseLockOnly();
             } catch (\Throwable) {
@@ -989,6 +1015,7 @@ final class IndexBuildOrchestrator
                 chunksWritten: 0,
                 success: false,
                 error: $e->getMessage(),
+                warnings: $warnings,
             );
         }
     }
@@ -1052,6 +1079,72 @@ final class IndexBuildOrchestrator
     private function stagedIndexDir(): string
     {
         return $this->outputDir . '/.scolta-building';
+    }
+
+    /**
+     * Delete retired-index trash on the way out of a failed build.
+     *
+     * clearStagingDir() retires directories before the merge and again inside
+     * the swap, but the sweep that collects them used to run only after a
+     * successful publish. So every failed merge — OOM, a full disk, the
+     * duplicate-ordinal corruption --reset-ledger exists for — left an
+     * index-sized tree in trash with nothing to collect it, and each retry
+     * added another.
+     *
+     * Best-effort, in the strict sense: it is bounded
+     * (FAILED_BUILD_SWEEP_SECONDS), it never throws, and it never touches the
+     * error the caller is being handed. Returns a warning for the failure
+     * report when trash is still on disk when it returns, or null when there
+     * is nothing left to say.
+     */
+    private function sweepAfterFailure(\Throwable $failure, LoggerInterface $logger): ?string
+    {
+        try {
+            $pending = $this->trash->trashDirs();
+            if ($pending === []) {
+                // Nothing was retired — the common case for a failure before
+                // the merge, which is most of the try block both callers wrap.
+                return null;
+            }
+
+            // The one failure where doing more work on the way out is itself
+            // harmful. A memory abort is a deliberate yield, not a broken
+            // build: the caller answers it by starting a fresh --resume
+            // process, and that process sweeps after its own swap. Spending
+            // what headroom is left on deletion — sixteen forked children on
+            // the parallel path — delays the resume to do work the resume
+            // does anyway.
+            if ($failure instanceof MemoryThresholdExceededException) {
+                $logger->notice(
+                    '[scolta] Leaving {count} retired index director(ies) in place: this run stopped on memory pressure, so it is not spending its remaining headroom on deletion. The resumed build or the next scheduled cleanup deletes them: {dirs}.',
+                    ['count' => count($pending), 'dirs' => implode(', ', $pending)],
+                );
+
+                return 'Retired index cleanup was skipped because this run stopped on memory pressure. The resumed build or the next scheduled cleanup will delete the directories named in the log.';
+            }
+
+            if ($this->trash->sweep($logger, self::FAILED_BUILD_SWEEP_SECONDS)) {
+                return null;
+            }
+
+            $logger->notice(
+                '[scolta] Retired index cleanup did not finish before this failed build exited; the next build or scheduled cleanup deletes what is left.',
+            );
+
+            return self::TRASH_LEFT_WARNING;
+        } catch (\Throwable $sweepFailure) {
+            // sweep() is documented not to throw and trashDirs() only lists a
+            // directory, but this runs while a build failure is already on its
+            // way to the caller. That report is the one that matters, so
+            // anything from here is logged and swallowed rather than replacing
+            // it.
+            $logger->warning(
+                '[scolta] Retired index cleanup failed while handling a failed build: {message}. The build error is reported separately.',
+                ['message' => $sweepFailure->getMessage()],
+            );
+
+            return 'Retired index cleanup failed; see the log. The next build or sweep will retry.';
+        }
     }
 
     /**
