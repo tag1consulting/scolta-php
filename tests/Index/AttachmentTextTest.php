@@ -282,28 +282,35 @@ class AttachmentTextTest extends TestCase
     }
 
     /**
-     * A corpus with no attachment text must keep the fingerprint it already
-     * had, for the same reason contentHash() keeps its keys, and for a second
-     * reason that is stronger.
+     * The fingerprint formula, spelled out.
      *
-     * shouldBuild() compares this value against `.scolta-state`, so a changed
-     * formula reports every page as changed on the first build after an
-     * upgrade: a full reindex of a corpus nothing edited. It is also the value
-     * scolta-laravel's queued rebuild path reproduces item by item and asserts
-     * byte-identity against, and that adapter's floor still admits a
-     * scolta-php whose ContentItem has no attachmentText to read.
-     *
-     * The expected value is spelled out rather than taken from the method, so
-     * this fails if the formula moves instead of moving with it.
+     * shouldBuild() compares this value against `.scolta-state`, and
+     * scolta-laravel's queued rebuild path delegates to fingerprintEntry() /
+     * combineFingerprintEntries() to reproduce it while streaming. The
+     * expected value is spelled out rather than taken from the method, so
+     * this fails if the formula moves instead of moving with it — and a
+     * formula move is a fleet-wide full rebuild, so it must never happen by
+     * accident.
      */
-    public function testFingerprintIsUnchangedWhenNoAttachmentTextIsPresent(): void
+    public function testFingerprintFormulaIsPinned(): void
     {
-        $item = $this->item('<p>Leaves capture sunlight.</p>', '');
+        $item = $this->item('<p>Leaves capture sunlight.</p>', 'Chloroplasts absorb photons.');
+
+        $entry = $item->id . ':' . hash('sha256', implode("\0", [
+            $item->title,
+            $item->url,
+            $item->siteName,
+            $item->language,
+            $item->date,
+            json_encode($item->filters),
+            json_encode($item->metadata),
+            json_encode($item->sortable),
+            $item->bodyHtml,
+            $item->attachmentText,
+        ]));
 
         $this->assertSame(
-            hash('sha256', 'php-indexer-v1:' . json_encode([
-                $item->id . ':' . hash('sha256', $item->bodyHtml),
-            ])),
+            hash('sha256', 'php-indexer-v2:' . json_encode([$entry])),
             PhpIndexer::computeFingerprint([$item]),
         );
     }

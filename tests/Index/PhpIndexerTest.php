@@ -319,7 +319,7 @@ class PhpIndexerTest extends TestCase
     {
         // The PHP indexer fingerprint must differ from a hypothetical binary
         // indexer fingerprint for the same content. We verify by checking that
-        // the prefix 'php-indexer-v1:' is baked in, making the fingerprint
+        // the prefix 'php-indexer-v2:' is baked in, making the fingerprint
         // distinct from a raw hash of just the content IDs.
         $items = $this->makeItems(3);
 
