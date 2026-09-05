@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace Tag1\Scolta\Tests\Index;
 
 use PHPUnit\Framework\TestCase;
+use Tag1\Scolta\Exception\MemoryThresholdExceededException;
 use Tag1\Scolta\Export\ContentItem;
 use Tag1\Scolta\Index\BuildIntent;
 use Tag1\Scolta\Index\CachedContentReference;
 use Tag1\Scolta\Index\IndexBuildOrchestrator;
 use Tag1\Scolta\Index\MemoryBudget;
 use Tag1\Scolta\Index\PhpIndexer;
+use Tag1\Scolta\Index\RetiredIndexTrash;
 use Tag1\Scolta\Index\StatusReport;
 use Tag1\Scolta\Storage\FilesystemDriver;
 use Tag1\Scolta\Storage\StorageDriverInterface;
@@ -186,6 +188,199 @@ class IndexBuildOrchestratorTest extends TestCase
         $this->assertTrue($report->success, 'A stuck trash directory must not fail the build');
         $this->assertNotNull($report->warnings);
         $this->assertNotEmpty(glob($this->outputDir . '/.scolta-trash-*') ?: []);
+    }
+
+    public function testAFailedBuildSweepsTheTrashItRetiredOnItsWayOut(): void
+    {
+        // The trash sweep used to run only after a successful publish, so a
+        // merge that failed left the directory it had retired on disk with
+        // nothing to collect it — and every retry added another index-sized
+        // tree. Here the swap fails after the retire, which is the shape of
+        // an OOM-free failure (full disk, duplicate page ordinal).
+        $this->publishAnIndex();
+        $this->leaveStagingDirFromAnEarlierFailedMerge();
+
+        $logger  = $this->recordingLogger();
+        $report  = (new IndexBuildOrchestrator(
+            $this->stateDir,
+            $this->outputDir,
+            storage: $this->hookedStorage(onMove: static fn(string $from, string $to): bool => !str_ends_with($to, '/.scolta-new')),
+        ))->build(BuildIntent::fresh(2, MemoryBudget::conservative()), $this->makeItems(2), $logger);
+
+        // The error the caller needs is the build's own, unchanged.
+        $this->assertFalse($report->success);
+        $this->assertStringContainsString('Failed to stage build directory', (string) $report->error);
+
+        $this->assertSame([], glob($this->outputDir . '/.scolta-trash-*') ?: [], 'A failed build must not leave retired indexes behind');
+        $this->assertNull($report->warnings, 'Nothing is pending, so the report has nothing to warn about');
+        // Deletion is announced for the same reason the post-swap sweep is.
+        $this->assertNotEmpty(array_filter(
+            $logger->records[\Psr\Log\LogLevel::NOTICE] ?? [],
+            static fn(string $m) => str_contains($m, 'retired index'),
+        ));
+        // The index published before the failure is still the live one.
+        $this->assertFileExists($this->outputDir . '/pagefind/pagefind-entry.json');
+    }
+
+    public function testABuildStoppedByMemoryPressureLeavesTheTrashForTheResume(): void
+    {
+        // The one failure where deleting on the way out is the wrong trade: a
+        // memory abort is a deliberate yield whose caller immediately starts a
+        // fresh --resume process, and that process sweeps after its own swap.
+        $this->publishAnIndex();
+        $this->leaveStagingDirFromAnEarlierFailedMerge();
+
+        $logger = $this->recordingLogger();
+        $report = (new IndexBuildOrchestrator(
+            $this->stateDir,
+            $this->outputDir,
+            storage: $this->hookedStorage(onMove: static function (string $from, string $to): bool {
+                if (str_ends_with($to, '/.scolta-new')) {
+                    throw new MemoryThresholdExceededException('RSS crossed the abort threshold');
+                }
+
+                return true;
+            }),
+        ))->build(BuildIntent::fresh(2, MemoryBudget::conservative()), $this->makeItems(2), $logger);
+
+        $this->assertSame(StatusReport::MEMORY_ABORT, $report->error);
+        $this->assertCount(1, glob($this->outputDir . '/.scolta-trash-*') ?: [], 'A memory abort must not spend its remaining headroom deleting');
+        // Left on disk, but not left unsaid: report and log both name it.
+        $this->assertNotNull($report->warnings);
+        $this->assertNotEmpty(array_filter(
+            $logger->records[\Psr\Log\LogLevel::NOTICE] ?? [],
+            static fn(string $m) => str_contains($m, 'memory pressure'),
+        ));
+    }
+
+    public function testASweepThatThrowsDoesNotReplaceTheBuildError(): void
+    {
+        // Cleanup on the failure path is best-effort in the strict sense: the
+        // report the caller is owed is the one about the build, so nothing the
+        // sweep does may escape over it.
+        $this->publishAnIndex();
+        $this->leaveStagingDirFromAnEarlierFailedMerge();
+
+        $logger = $this->recordingLogger();
+        $report = (new IndexBuildOrchestrator(
+            $this->stateDir,
+            $this->outputDir,
+            storage: $this->hookedStorage(
+                onMove: static fn(string $from, string $to): bool => !str_ends_with($to, '/.scolta-new'),
+                onFiles: static function (string $dir, string $pattern): void {
+                    if (str_contains($pattern, RetiredIndexTrash::PREFIX)) {
+                        throw new \RuntimeException('listing the trash blew up');
+                    }
+                },
+            ),
+        ))->build(BuildIntent::fresh(2, MemoryBudget::conservative()), $this->makeItems(2), $logger);
+
+        $this->assertFalse($report->success);
+        $this->assertStringContainsString('Failed to stage build directory', (string) $report->error);
+        $this->assertStringNotContainsString('listing the trash blew up', (string) $report->error);
+        $this->assertNotEmpty(array_filter(
+            $logger->records[\Psr\Log\LogLevel::WARNING] ?? [],
+            static fn(string $m) => str_contains($m, 'cleanup failed'),
+        ));
+    }
+
+    /** Publish a live index, so a later failing build has one to fail against. */
+    private function publishAnIndex(): void
+    {
+        $report = (new IndexBuildOrchestrator($this->stateDir, $this->outputDir))
+            ->build(BuildIntent::fresh(2, MemoryBudget::conservative()), $this->makeItems(2));
+        $this->assertTrue($report->success, $report->error ?? 'No error');
+    }
+
+    /**
+     * What a merge that died before its swap leaves on disk. The next build's
+     * clearStagingDir() retires it into trash before starting its own merge —
+     * which is where the trash a failed build has to collect comes from.
+     */
+    private function leaveStagingDirFromAnEarlierFailedMerge(): void
+    {
+        mkdir($this->outputDir . '/.scolta-building/fragment', 0755, true);
+        file_put_contents($this->outputDir . '/.scolta-building/fragment/stale.pf_fragment', 'x');
+    }
+
+    /** A logger that records every entry by level. */
+    private function recordingLogger(): \Psr\Log\AbstractLogger
+    {
+        return new class extends \Psr\Log\AbstractLogger {
+            /** @var array<string, list<string>> */
+            public array $records = [];
+
+            public function log($level, string|\Stringable $message, array $context = []): void
+            {
+                $this->records[(string) $level][] = (string) $message;
+            }
+        };
+    }
+
+    /**
+     * A real filesystem driver with hooks on the two calls these tests bend.
+     *
+     * $onMove runs before every move(): returning false fails it the way a
+     * cross-device rename does, throwing propagates as the build's failure.
+     * $onFiles runs before every listing.
+     */
+    private function hookedStorage(?\Closure $onMove = null, ?\Closure $onFiles = null): StorageDriverInterface
+    {
+        return new class (new FilesystemDriver(), $onMove, $onFiles) implements StorageDriverInterface {
+            public function __construct(
+                private readonly FilesystemDriver $inner,
+                private readonly ?\Closure $onMove,
+                private readonly ?\Closure $onFiles,
+            ) {}
+
+            public function move(string $from, string $to): bool
+            {
+                if ($this->onMove !== null && ($this->onMove)($from, $to) === false) {
+                    return false;
+                }
+
+                return $this->inner->move($from, $to);
+            }
+
+            public function files(string $dir, string $pattern = '*'): array
+            {
+                if ($this->onFiles !== null) {
+                    ($this->onFiles)($dir, $pattern);
+                }
+
+                return $this->inner->files($dir, $pattern);
+            }
+
+            public function exists(string $path): bool
+            {
+                return $this->inner->exists($path);
+            }
+
+            public function get(string $path): string
+            {
+                return $this->inner->get($path);
+            }
+
+            public function put(string $path, string $contents): bool
+            {
+                return $this->inner->put($path, $contents);
+            }
+
+            public function delete(string $path): bool
+            {
+                return $this->inner->delete($path);
+            }
+
+            public function deleteDirectory(string $path): bool
+            {
+                return $this->inner->deleteDirectory($path);
+            }
+
+            public function makeDirectory(string $path): bool
+            {
+                return $this->inner->makeDirectory($path);
+            }
+        };
     }
 
     public function testBuildCreatesFragmentFiles(): void
