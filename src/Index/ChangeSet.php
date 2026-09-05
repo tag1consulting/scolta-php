@@ -7,9 +7,9 @@ namespace Tag1\Scolta\Index;
 /**
  * What an adapter has to do to bring an index up to date, and how.
  *
- * The output of {@see ChangeSetPlanner}. It is a plain value object on purpose:
- * an adapter decides whether to act on it, and a plan that performed I/O of its
- * own would be impossible to log, test or show an operator before it ran.
+ * A plain value object on purpose: an adapter decides whether to act on it,
+ * and a plan that performed I/O of its own would be impossible to log, test
+ * or show an operator before it ran.
  *
  * @since 1.4.0
  * @stability experimental

@@ -31,6 +31,9 @@ This project uses [Semantic Versioning](https://semver.org/). Each Scolta packag
 - **A browse header now reports the real match total (`assets/js/scolta.js`).** The "of N" figure was `allScoredResults.length` — the capped (`MAX_PAGEFIND_RESULTS`, default 50), title-deduped head of the match list — so a 109,293-document corpus showed "of 70", and toggling a facet moved the number by however much dedup happened to eat in each head. The browse path now captures Pagefind's raw match count (available up front, before any loading) and prints that. "Showing X" keeps its meaning (painted count), and since N is raw while the paged list is deduped, paging can exhaust before N — preferred over reporting a cap artifact as the total. Keyword searches are unchanged.
 - **A browse renders no query-expansion toggle in the results header (`assets/js/scolta.js`).** With no query to expand the control governs nothing. Keyword searches keep it unchanged.
 
+### Removed
+- **`ChangeSetPlanner` class removed.** Never called from production; replaced in intent by the data structures it worked with.
+
 ### Changed
 - **`guzzlehttp/guzzle` widened from `^7.0` to `^7.0|^8.0` (`composer.json`, `composer.lock`, `.github/workflows/ci.yml`).** Laravel 13 ships Guzzle 8, so `composer require tag1/scolta-laravel:@dev` on a fresh Laravel 13 skeleton failed outright — scolta-php's `^7.0` cannot coexist with the guzzle 8.1.0 already in the application's lock — and `-W` only appeared to work by *downgrading* the host application's HTTP client to 7.15.5. scolta-laravel advertises Laravel 13 support and carries a PHP 8.4 / Laravel 13 CI cell, so this was a supported combination that could not be installed the documented way; no adapter CI caught it because those cells resolve dependencies from scratch rather than against a real application's lock.
 
