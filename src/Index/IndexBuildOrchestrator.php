@@ -72,6 +72,9 @@ final class IndexBuildOrchestrator
      */
     private const FAILED_BUILD_SWEEP_SECONDS = 2.0;
 
+    /** Warning for a report whose sweep left trash on disk. */
+    private const TRASH_LEFT_WARNING = 'Retired index cleanup left directories on disk; see the log for which. The next build or sweep will retry.';
+
     private readonly BuildCoordinator $coordinator;
     private readonly InvertedIndexBuilder $builder;
     private readonly IndexMerger $merger;
@@ -649,9 +652,14 @@ final class IndexBuildOrchestrator
                 pagesProcessed: $pagesForReport,
                 chunksWritten: $chunksWritten,
                 success: true,
-                warnings: $sweptClean ? null : 'Retired index cleanup left directories on disk; see the log for which. The next build or sweep will retry.',
+                warnings: $sweptClean ? null : self::TRASH_LEFT_WARNING,
             );
         } catch (\Throwable $e) {
+            // Sweep before the lock goes: the success path sweeps under it too,
+            // and a retry that starts the moment the lock is free would walk
+            // the same trash tree this sweep is deleting.
+            $warnings = $this->sweepAfterFailure($e, $logger);
+
             try {
                 $this->coordinator->releaseLockOnly();
             } catch (\Throwable) {
@@ -681,7 +689,7 @@ final class IndexBuildOrchestrator
                 chunksWritten: $committedChunks,
                 success: false,
                 error: $isMemoryAbort ? StatusReport::MEMORY_ABORT : $e->getMessage(),
-                warnings: $this->sweepAfterFailure($e, $logger),
+                warnings: $warnings,
             );
         }
     }
@@ -988,9 +996,12 @@ final class IndexBuildOrchestrator
                 pagesProcessed: $pagesProcessed,
                 chunksWritten: $chunksFinalized,
                 success: true,
-                warnings: $sweptClean ? null : 'Retired index cleanup left directories on disk; see the log for which. The next build or sweep will retry.',
+                warnings: $sweptClean ? null : self::TRASH_LEFT_WARNING,
             );
         } catch (\Throwable $e) {
+            // Under the lock, as in build().
+            $warnings = $this->sweepAfterFailure($e, $logger);
+
             try {
                 $this->coordinator->releaseLockOnly();
             } catch (\Throwable) {
@@ -1004,7 +1015,7 @@ final class IndexBuildOrchestrator
                 chunksWritten: 0,
                 success: false,
                 error: $e->getMessage(),
-                warnings: $this->sweepAfterFailure($e, $logger),
+                warnings: $warnings,
             );
         }
     }
@@ -1120,7 +1131,7 @@ final class IndexBuildOrchestrator
                 '[scolta] Retired index cleanup did not finish before this failed build exited; the next build or scheduled cleanup deletes what is left.',
             );
 
-            return 'Retired index cleanup left directories on disk; see the log for which. The next build or sweep will retry.';
+            return self::TRASH_LEFT_WARNING;
         } catch (\Throwable $sweepFailure) {
             // sweep() is documented not to throw and trashDirs() only lists a
             // directory, but this runs while a build failure is already on its
