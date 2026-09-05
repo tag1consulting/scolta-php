@@ -288,6 +288,14 @@ class PhpIndexer
      * `.scolta-state`, so it must not depend on which hash algorithms a host
      * has compiled in.
      *
+     * JSON_THROW_ON_ERROR because json_encode() otherwise returns false on
+     * unencodable input (invalid UTF-8, NAN/INF), which implode() coerces to
+     * an empty string — every malformed value would hash alike and edits to
+     * such a field would be read as "unchanged". The scalar fields have no
+     * such failure mode: they go into hash() as raw bytes.
+     *
+     * @throws \JsonException When filters, metadata or sortable hold a value
+     *   JSON cannot represent.
      * @since 1.5.0
      * @stability experimental
      */
@@ -299,9 +307,9 @@ class PhpIndexer
             $item->siteName,
             $item->language,
             $item->date,
-            json_encode(self::canonicalizedArray($item->filters)),
-            json_encode(self::canonicalizedArray($item->metadata)),
-            json_encode(self::canonicalizedArray($item->sortable)),
+            json_encode(self::canonicalizedArray($item->filters), JSON_THROW_ON_ERROR),
+            json_encode(self::canonicalizedArray($item->metadata), JSON_THROW_ON_ERROR),
+            json_encode(self::canonicalizedArray($item->sortable), JSON_THROW_ON_ERROR),
             $item->bodyHtml,
             $item->attachmentText,
         ];
@@ -323,7 +331,7 @@ class PhpIndexer
     {
         sort($entries);
 
-        return hash('sha256', 'php-indexer-v2:' . json_encode($entries));
+        return hash('sha256', 'php-indexer-v2:' . json_encode($entries, JSON_THROW_ON_ERROR));
     }
 
     /**

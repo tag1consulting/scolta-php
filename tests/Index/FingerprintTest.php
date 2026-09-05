@@ -121,6 +121,21 @@ class FingerprintTest extends TestCase
     }
 
     /**
+     * Unencodable array values must fail loudly, not hash alike.
+     *
+     * json_encode() without JSON_THROW_ON_ERROR returns false on invalid
+     * UTF-8, which implode() coerces to '' — every malformed filter value
+     * would produce the same bytes in the hash input, so edits to such a
+     * field would be fingerprint-invisible.
+     */
+    public function testUnencodableFilterValueThrows(): void
+    {
+        $this->expectException(\JsonException::class);
+
+        PhpIndexer::fingerprintEntry($this->item(['filters' => ['broken' => "\xB1\x31"]]));
+    }
+
+    /**
      * The streaming composition scolta-laravel uses — fingerprintEntry() per
      * item, combineFingerprintEntries() at the end — is the same value as the
      * all-at-once method.
