@@ -40,7 +40,7 @@ final class IndexBuildOrchestrator
      * well under 0.5. At the previous 0.75 a 4 GB container held a 3 GB parent
      * and the child was OOM-killed (exit 137) while gathering.
      */
-    public const MEMORY_PRESSURE_RATIO = 0.4;
+    private const MEMORY_PRESSURE_RATIO = 0.4;
 
     /**
      * Fraction of the items in a run that may miss the token cache on a
