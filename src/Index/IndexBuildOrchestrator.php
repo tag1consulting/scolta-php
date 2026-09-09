@@ -28,8 +28,19 @@ final class IndexBuildOrchestrator
     /**
      * Fraction of the effective memory limit at which the build voluntarily
      * yields (defers the merge / pauses the chunk loop) to avoid OOM.
+     *
+     * The limit is the lower of PHP's memory_limit and the cgroup limit, and
+     * the cgroup limit is shared by every process in the container. A yield
+     * is answered by a fresh process (a --resume segment, or finalize()) that
+     * the yielding process spawns and waits on, so two PHP processes are
+     * resident at once: this one, parked at the ratio (PHP never returns freed
+     * heap to the OS), and the child, which grows to the same ratio before it
+     * yields in turn. The two must fit under the container limit together,
+     * with headroom for the child's bootstrap spike, so the ratio has to stay
+     * well under 0.5. At the previous 0.75 a 4 GB container held a 3 GB parent
+     * and the child was OOM-killed (exit 137) while gathering.
      */
-    private const MEMORY_PRESSURE_RATIO = 0.75;
+    public const MEMORY_PRESSURE_RATIO = 0.4;
 
     /**
      * Fraction of the items in a run that may miss the token cache on a
@@ -425,7 +436,7 @@ final class IndexBuildOrchestrator
 
             $progress->finish("{$pagesInRun} pages indexed");
 
-            // If RSS is at ≥75% of the effective memory limit after indexing, the
+            // If RSS is at ≥MEMORY_PRESSURE_RATIO of the effective memory limit after indexing, the
             // heap is too fragmented to run the merge in this process — even small
             // allocations may trigger OOM. Return early so the caller can restart
             // in a fresh process (e.g. via `drush scolta:finalize`).
@@ -1173,8 +1184,8 @@ final class IndexBuildOrchestrator
     /**
      * Return true when the process should yield to avoid OOM.
      *
-     * In production: checks whether current RSS has reached 75% of the effective
-     * memory limit (PHP limit or cgroup limit, whichever is lower).
+     * In production: checks whether current RSS has reached MEMORY_PRESSURE_RATIO
+     * of the effective memory limit (PHP limit or cgroup limit, whichever is lower).
      *
      * In tests: delegates to the injected $memoryPressureProbe closure so tests
      * can trigger the yield path without actual memory pressure.

@@ -55,6 +55,16 @@ class IndexBuildOrchestratorTest extends TestCase
         return $items;
     }
 
+    public function testMemoryPressureRatioLeavesRoomForTheSegmentItSpawns(): void
+    {
+        // A yielding process stays resident while the fresh process it spawns
+        // grows to the same ratio, and both share one cgroup limit. 2r plus
+        // the child's bootstrap must fit under 1.0; see the constant's docblock.
+        $ratio = IndexBuildOrchestrator::MEMORY_PRESSURE_RATIO;
+        $this->assertLessThanOrEqual(0.45, $ratio, 'Two segments at this ratio would exceed the container limit together.');
+        $this->assertGreaterThan(0.0, $ratio);
+    }
+
     public function testBuildHappyPath(): void
     {
         $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
