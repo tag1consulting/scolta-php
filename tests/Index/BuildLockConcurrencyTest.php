@@ -307,7 +307,7 @@ class BuildLockConcurrencyTest extends TestCase
         $this->assertGreaterThanOrEqual($before, $state->lockDiagnostics()['heartbeat_at']);
     }
 
-    /** A lock file written by a pre-1.5.0 build is still understood. */
+    /** A lock file written by a pre-2.0.0 build is still understood. */
     public function testALegacyPidTimestampLockIsHonoured(): void
     {
         file_put_contents($this->tmpDir . '/lock', '1:' . time());

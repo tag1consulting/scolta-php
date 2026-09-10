@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tag1\Scolta;
 
-use Tag1\Scolta\Binary\PagefindBinary;
 use Tag1\Scolta\Config\ResolvedApiKey;
 
 /**
@@ -24,12 +23,10 @@ final class SetupCheck
      *   UI and /health. $aiApiKey remains for adapters that have not been
      *   moved over; it answers "is there a key" and nothing more.
      * @return array<array{name: string, status: string, message: string, category: string}>
-     * @since 1.0.0
+     * @since 1.0.0 Signature changed in 2.0.0: the binary-resolution parameters were removed.
      * @stability stable
      */
     public static function run(
-        ?string $configuredBinaryPath = null,
-        ?string $projectDir = null,
         ?string $aiApiKey = null,
         ?string $browserWasmDir = null,
         ?ResolvedApiKey $resolvedKey = null,
@@ -73,15 +70,6 @@ final class SetupCheck
             'category' => 'runtime',
         ];
 
-        // ---- Build ----
-        $resolver = new PagefindBinary(configuredPath: $configuredBinaryPath, projectDir: $projectDir);
-        $binaryStatus = $resolver->status();
-        $results[] = [
-            'name' => 'Pagefind binary',
-            'status' => $binaryStatus['available'] ? 'pass' : 'warn',
-            'message' => $binaryStatus['available'] ? $binaryStatus['message'] : 'Pagefind not found — PHP indexer will be used',
-            'category' => 'build',
-        ];
 
         return $results;
     }

@@ -19,7 +19,7 @@ final class StatusReport
      * It is the only failure a caller may answer by running another segment;
      * every other error means the build is broken and the chain must stop.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public const MEMORY_ABORT = 'memory_abort';
@@ -65,7 +65,7 @@ final class StatusReport
     /**
      * Whether this run stopped to be resumed rather than because it failed.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function isMemoryAbort(): bool

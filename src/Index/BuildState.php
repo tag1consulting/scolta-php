@@ -166,7 +166,7 @@ class BuildState
      *
      * @param array<string, mixed> $manifest The manifest returned by shouldResume().
      * @return bool True if the lock was re-acquired, false if a build is running.
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function resumeBuild(array $manifest): bool
@@ -195,7 +195,7 @@ class BuildState
      *
      * 0 for the run that started the build, N for the Nth resume of it.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function segment(): int
@@ -206,7 +206,7 @@ class BuildState
     /**
      * Pages the manifest showed committed when the current segment began.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function pagesAtSegmentStart(): int
@@ -425,7 +425,7 @@ class BuildState
      * @return array{owner: ?string, host: ?string, pid: ?int, generation: ?string,
      *               state: string, acquired_at: ?int, heartbeat_at: ?int,
      *               age_seconds: ?int, stale: bool, liveness: string}|null
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function lockDiagnostics(): ?array
@@ -455,10 +455,10 @@ class BuildState
      * The directory this build's chunk files live in.
      *
      * A per-build generation directory under `builds/`, or the state directory
-     * root for chunks written before 1.5.0. Callers that need the chunk files
+     * root for chunks written before 2.0.0. Callers that need the chunk files
      * themselves should prefer getChunkFiles().
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function buildDirectory(): string
@@ -469,7 +469,7 @@ class BuildState
     /**
      * Path to the build manifest, at the state directory root.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function manifestFile(): string
@@ -566,7 +566,7 @@ class BuildState
      * @param string|null $error
      *   The terminating StatusReport's error, or null on success.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function recordOutcome(bool $success, ?string $error, int $pagesProcessed): void
@@ -610,7 +610,7 @@ class BuildState
      *
      * @return array{success: bool, error: string|null, pages_processed: int, pid: int|null, recorded_at: string|null}|null
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function readOutcome(): ?array
@@ -642,7 +642,7 @@ class BuildState
     /**
      * Delete any recorded outcome.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function clearOutcome(): void
@@ -881,7 +881,7 @@ class BuildState
     /**
      * Read the ownership record from the lock file.
      *
-     * Accepts the legacy `<pid>:<timestamp>` format written before 1.5.0, so
+     * Accepts the legacy `<pid>:<timestamp>` format written before 2.0.0, so
      * an upgrade that lands while a build is mid-flight still sees that build.
      *
      * @return array<string, mixed>|null Null when there is no lock file or no parsable content.
@@ -1074,7 +1074,7 @@ class BuildState
     /**
      * The directory holding this build's chunk files.
      *
-     * Falls back to the state directory root for chunks written before 1.5.0,
+     * Falls back to the state directory root for chunks written before 2.0.0,
      * so an in-flight build survives the upgrade.
      */
     private function buildDir(): string
@@ -1093,7 +1093,7 @@ class BuildState
      * The manifest is the pointer: it stays at the state directory root, one
      * per state directory, and the build it describes is the one whose chunk
      * files the next process should read. A manifest without the field was
-     * written before 1.5.0 and its chunks are at the root.
+     * written before 2.0.0 and its chunks are at the root.
      */
     private function resolveGeneration(): ?string
     {
@@ -1160,7 +1160,7 @@ class BuildState
     {
         $failures = [];
 
-        // The manifest of the previous build, and the chunk files a pre-1.5.0
+        // The manifest of the previous build, and the chunk files a pre-2.0.0
         // build wrote beside it at the root.
         $legacy = array_merge(
             [$this->stateDir . '/' . self::MANIFEST_FILE],
@@ -1269,7 +1269,7 @@ class BuildState
      * written before it existed did walk the whole corpus.
      *
      * @return string BuildIntent::SCOPE_FULL or BuildIntent::SCOPE_PARTIAL.
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function declaredScope(): string

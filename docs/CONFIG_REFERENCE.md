@@ -148,7 +148,7 @@ factor before being added to the final score; the title boost is unaffected.
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `indexer` | string | `'auto'` | Indexing backend used by CLI build commands. `auto` and `php` both use the pure-PHP indexer (no binary or Node.js required). `binary` explicitly uses the Pagefind CLI binary and fails if it is not found. |
+| `indexer` | string | `'auto'` | Accepted for backward compatibility. The pure-PHP indexer is the only pipeline since 2.0.0; every value selects it. |
 
 ### Content
 
@@ -160,7 +160,7 @@ factor before being added to the final score; the title boost is unaffected.
 | `filterFieldDescriptions` | array | `[]` | Human-readable descriptions keyed by filter name (e.g., `['topic' => 'Subject area or domain. Values: Science (physics, chemistry, biology), History (ancient, medieval)']`). Descriptions serve two purposes: (1) they help the LLM match user language to the correct filter value in the expansion prompt, and (2) they are passed to the JS frontend via `toBrowserConfig()` where `matchSubjectToFilters()` parses parenthetical subcategory hints to map terms like "physics" → "Science" even when "physics" isn't a direct filter value. |
 | `hideEmptyFacets` | bool | `true` | Hide facet values whose result count is zero for the current query, and drop a dimension's whole group when all its values are zero — the mainstream faceted-search default. An active (checked) value stays visible even at zero so it can be unchecked. Set to `false` to render every value and show a zero-count one as a disabled `(0)` row, keeping the value list positionally fixed. Counts describe the typed query **plus whatever AI expansion added to the result list**, computed once when the query is submitted and folded once more when expansion lands; a facet click, a sort and a load-more all reuse them, so no count moves on click and the visible value set stays stable. Emitted top-level into `window.scolta` by `toBrowserConfig()` and read by `scolta.js` `renderFilters()`. `@stability experimental`. |
 | `facetMode` | string | `'eager'` | When the browser loads the facet index, or whether it loads it at all. `'eager'` (default) loads it during init, so the filter panel is populated before the first search paints and every facet click is answerable immediately — the behaviour Scolta has always had. `'deferred'` skips the init load and takes it on the first search carrying a facet selection, for a site that renders its own facets and does not want the artifact (a megabyte or more on a large corpus) on the initial page load; Scolta's own panel stays empty until that first selection, since it is built from the artifact. `'disabled'` never loads it: no filter panel, no facet filtering, and the per-query facet count pass is skipped. Deferring is **not** "filter without the index" — the browser completes the load before applying a selection, so a deferred first click still takes the artifact path instead of falling back to Pagefind's own filter chunks, which would cost every subsequent search on the page. An unrecognized value clamps to `'eager'` (in PHP via `normalizedFacetMode()`, and again in the browser, since a direct `createInstance()` caller bypasses this class). Emitted top-level into `window.scolta` by `toBrowserConfig()` and read by `scolta.js` `facetMode()`. `@since 1.3.0`, `@stability experimental`. |
-| `labels` | array | `[]` | Per-site overrides for user-facing UI strings in the browser widget, as one `key => string` map — each string made overridable later joins this map instead of minting another top-level config key. Keys the browser currently reads: `expandedTerms` (default `'Also try:'`), the prefix before the AI-expanded query-term chips; `aiOverview` (default `'AI Overview'`), the heading on the AI summary box. Values are rendered as text (HTML-escaped). A missing, empty, or non-string value falls back to the browser default — filtered in PHP by `normalizedLabels()` and clamped again in the browser, since a direct `createInstance()` caller bypasses this class; unknown keys are ignored by the browser and deliberately not filtered in PHP, which would couple this class to the bundle's release cadence. Emitted top-level into `window.scolta` by `toBrowserConfig()` and read by `scolta.js` `getInstanceLabels()`. `@since 1.5.0`, `@stability experimental`. |
+| `labels` | array | `[]` | Per-site overrides for user-facing UI strings in the browser widget, as one `key => string` map — each string made overridable later joins this map instead of minting another top-level config key. Keys the browser currently reads: `expandedTerms` (default `'Also try:'`), the prefix before the AI-expanded query-term chips; `aiOverview` (default `'AI Overview'`), the heading on the AI summary box. Values are rendered as text (HTML-escaped). A missing, empty, or non-string value falls back to the browser default — filtered in PHP by `normalizedLabels()` and clamped again in the browser, since a direct `createInstance()` caller bypasses this class; unknown keys are ignored by the browser and deliberately not filtered in PHP, which would couple this class to the bundle's release cadence. Emitted top-level into `window.scolta` by `toBrowserConfig()` and read by `scolta.js` `getInstanceLabels()`. `@since 2.0.0`, `@stability experimental`. |
 
 ### Search As You Type (SAYT)
 
@@ -416,10 +416,9 @@ Returns an array suitable for constructing an `AiClient` instance, containing `p
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `$configuredBinaryPath` | `?string` | Pagefind binary path from platform config |
-| `$projectDir` | `?string` | Project root for binary resolution |
 | `$aiApiKey` | `?string` | AI API key value (not source) |
 | `$browserWasmDir` | `?string` | Custom browser WASM directory path, or null for default |
+| `$resolvedKey` | `?ResolvedApiKey` | The key resolution the client performs; when given, the AI-key row names the source |
 
 ### Return Structure
 
@@ -432,8 +431,7 @@ Returns `array<array{name: string, status: string, message: string}>` where `sta
 | 1 | PHP version | `fail` | Requires PHP 8.1+ |
 | 2 | AI API key | `warn` | Checks if an API key is provided |
 | 3 | Browser WASM | `warn` | Verifies `scolta_core_bg.wasm` and `scolta_core.js` exist in the assets directory |
-| 4 | Pagefind binary | `warn` | Resolves Pagefind binary via `PagefindBinary`; falls back to PHP indexer if absent |
 
 ### Exit Code
 
-`SetupCheck::exitCode(array $results): int` returns `0` if all checks pass or only have warnings, `1` if any check has `fail` status. Warnings (Pagefind, AI key) do not cause failure.
+`SetupCheck::exitCode(array $results): int` returns `0` if all checks pass or only have warnings, `1` if any check has `fail` status. Warnings (AI key, browser WASM) do not cause failure.

@@ -35,17 +35,15 @@ class HealthCheckerTest extends TestCase
     public function testCheckReturnsExpectedStructure(): void
     {
         $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => 'sk-test']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null);
+        $checker = new HealthChecker($config, $this->tempDir);
 
         $result = $checker->check();
 
         $this->assertArrayHasKey('status', $result);
         $this->assertArrayHasKey('ai_configured', $result);
         $this->assertArrayHasKey('ai_provider', $result);
-        $this->assertArrayHasKey('pagefind_available', $result);
         $this->assertArrayHasKey('wasm_available', $result);
         $this->assertArrayHasKey('index_exists', $result);
-        $this->assertArrayHasKey('pagefind', $result);
         $this->assertArrayHasKey('wasm', $result);
     }
 
@@ -59,7 +57,7 @@ class HealthCheckerTest extends TestCase
         file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
 
         $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => 'sk-test-key']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null);
+        $checker = new HealthChecker($config, $this->tempDir);
 
         $result = $checker->check();
 
@@ -76,7 +74,7 @@ class HealthCheckerTest extends TestCase
     {
         // Empty dir, no pagefind.js.
         $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => 'sk-test-key']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null);
+        $checker = new HealthChecker($config, $this->tempDir);
 
         $result = $checker->check();
 
@@ -94,7 +92,7 @@ class HealthCheckerTest extends TestCase
         file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
 
         $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => '']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null);
+        $checker = new HealthChecker($config, $this->tempDir);
 
         $result = $checker->check();
 
@@ -112,7 +110,7 @@ class HealthCheckerTest extends TestCase
 
         foreach (['   ', "\t", " \n ", "\t\n\r "] as $key) {
             $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => $key]);
-            $checker = new HealthChecker($config, $this->tempDir, null, null);
+            $checker = new HealthChecker($config, $this->tempDir);
             $result = $checker->check();
 
             $this->assertFalse($result['ai_configured'], 'Expected ai_configured false for key: ' . json_encode($key));
@@ -128,7 +126,7 @@ class HealthCheckerTest extends TestCase
     {
         // No index AND no AI key.
         $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => '']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null);
+        $checker = new HealthChecker($config, $this->tempDir);
 
         $result = $checker->check();
 
@@ -145,27 +143,27 @@ class HealthCheckerTest extends TestCase
     {
         // Dir exists but no pagefind.js — should fail.
         $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => 'sk-test']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null);
+        $checker = new HealthChecker($config, $this->tempDir);
 
         $result = $checker->check();
         $this->assertFalse($result['index_exists']);
 
         // Now add pagefind.js — should pass.
         file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
-        $checker2 = new HealthChecker($config, $this->tempDir, null, null);
+        $checker2 = new HealthChecker($config, $this->tempDir);
 
         $result2 = $checker2->check();
         $this->assertTrue($result2['index_exists']);
     }
 
     // -------------------------------------------------------------------
-    // indexer_active reflects config, not binary availability
+    // indexer_active is always php
     // -------------------------------------------------------------------
 
     public function testIndexerActiveIsPhpWhenConfigIsAuto(): void
     {
         $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => 'sk-test', 'indexer' => 'auto']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null);
+        $checker = new HealthChecker($config, $this->tempDir);
 
         $result = $checker->check();
 
@@ -175,26 +173,11 @@ class HealthCheckerTest extends TestCase
     public function testIndexerActiveIsPhpWhenConfigIsPhp(): void
     {
         $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => 'sk-test', 'indexer' => 'php']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null);
+        $checker = new HealthChecker($config, $this->tempDir);
 
         $result = $checker->check();
 
         $this->assertSame('php', $result['indexer_active']);
-    }
-
-    public function testIndexerActiveIsBinaryWhenConfigIsBinaryAndBinaryAvailable(): void
-    {
-        // Create a fake binary so PagefindBinary reports available.
-        $tempBin = $this->tempDir . '/pagefind';
-        file_put_contents($tempBin, "#!/bin/sh\necho 'pagefind 1.5.0'");
-        chmod($tempBin, 0755);
-
-        $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => 'sk-test', 'indexer' => 'binary']);
-        $checker = new HealthChecker($config, $this->tempDir, $tempBin, null);
-
-        $result = $checker->check();
-
-        $this->assertSame('binary', $result['indexer_active']);
     }
 
     // -------------------------------------------------------------------
@@ -217,7 +200,7 @@ class HealthCheckerTest extends TestCase
         $cache->set(\Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery::CACHE_KEY_AUTH_FAILURE, time(), 3600);
 
         $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => 'sk-stored-but-expired']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null, $cache);
+        $checker = new HealthChecker($config, $this->tempDir, $cache);
 
         $result = $checker->check();
 
@@ -232,7 +215,7 @@ class HealthCheckerTest extends TestCase
         file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
 
         $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => 'sk-good']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null, new HealthTestCache());
+        $checker = new HealthChecker($config, $this->tempDir, new HealthTestCache());
 
         $result = $checker->check();
 
@@ -248,7 +231,7 @@ class HealthCheckerTest extends TestCase
         file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
 
         $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => 'sk-good']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null);
+        $checker = new HealthChecker($config, $this->tempDir);
 
         $result = $checker->check();
 
@@ -266,7 +249,7 @@ class HealthCheckerTest extends TestCase
         $cache->set(\Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery::CACHE_KEY_AUTH_FAILURE, false, 1);
 
         $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => 'sk-recovered']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null, $cache);
+        $checker = new HealthChecker($config, $this->tempDir, $cache);
 
         $result = $checker->check();
 
@@ -286,7 +269,7 @@ class HealthCheckerTest extends TestCase
         file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
 
         $config = ScoltaConfig::fromArray(['ai_provider' => '', 'ai_api_key' => '']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null, new HealthTestCache());
+        $checker = new HealthChecker($config, $this->tempDir, new HealthTestCache());
 
         $result = $checker->check();
 
@@ -301,7 +284,7 @@ class HealthCheckerTest extends TestCase
     {
         // AI being off must not mask a real fault.
         $config = ScoltaConfig::fromArray(['ai_provider' => '', 'ai_api_key' => '']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null);
+        $checker = new HealthChecker($config, $this->tempDir);
 
         $result = $checker->check();
 
@@ -319,7 +302,7 @@ class HealthCheckerTest extends TestCase
         $cache->set(\Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery::CACHE_KEY_AUTH_FAILURE, time(), 3600);
 
         $config = ScoltaConfig::fromArray(['ai_provider' => '', 'ai_api_key' => '']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null, $cache);
+        $checker = new HealthChecker($config, $this->tempDir, $cache);
 
         $result = $checker->check();
 
@@ -339,7 +322,7 @@ class HealthCheckerTest extends TestCase
         $cache->set(\Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery::CACHE_KEY_AUTH_FAILURE, time(), 3600);
 
         $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => 'sk-was-good']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null, $cache);
+        $checker = new HealthChecker($config, $this->tempDir, $cache);
 
         $result = $checker->check();
 
@@ -355,7 +338,7 @@ class HealthCheckerTest extends TestCase
         file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
 
         $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => '']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null);
+        $checker = new HealthChecker($config, $this->tempDir);
 
         $result = $checker->check();
 
@@ -369,7 +352,7 @@ class HealthCheckerTest extends TestCase
         file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
 
         $config = ScoltaConfig::fromArray(['ai_provider' => '', 'ai_api_key' => 'sk-orphaned']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null);
+        $checker = new HealthChecker($config, $this->tempDir);
 
         $result = $checker->check();
 
@@ -392,7 +375,7 @@ class HealthCheckerTest extends TestCase
         );
 
         $config = ScoltaConfig::fromArray(['ai_provider' => 'openai', 'ai_api_key' => '']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null, new HealthTestCache(), $resolved);
+        $checker = new HealthChecker($config, $this->tempDir, new HealthTestCache(), $resolved);
 
         $result = $checker->check();
 
@@ -415,7 +398,7 @@ class HealthCheckerTest extends TestCase
         );
 
         $config = ScoltaConfig::fromArray(['ai_provider' => 'openai', 'ai_api_key' => '']);
-        $checker = new HealthChecker($config, $this->tempDir, null, null, new HealthTestCache(), $resolved);
+        $checker = new HealthChecker($config, $this->tempDir, new HealthTestCache(), $resolved);
 
         $result = $checker->check();
 
@@ -432,14 +415,14 @@ class HealthCheckerTest extends TestCase
     {
         // Both faults are reported, not just the first one found.
         $config = ScoltaConfig::fromArray(['ai_provider' => '', 'ai_api_key' => 'sk-orphaned']);
-        $result = (new HealthChecker($config, $this->tempDir, null, null))->check();
+        $result = (new HealthChecker($config, $this->tempDir))->check();
 
         $this->assertSame('degraded', $result['status']);
         $this->assertSame(['index_missing', 'ai_provider_unselected'], $result['status_reasons']);
 
         file_put_contents($this->tempDir . '/pagefind.js', '// pagefind');
         $healthy = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => 'sk-good']);
-        $okResult = (new HealthChecker($healthy, $this->tempDir, null, null))->check();
+        $okResult = (new HealthChecker($healthy, $this->tempDir))->check();
 
         $this->assertSame('ok', $okResult['status']);
         $this->assertSame([], $okResult['status_reasons']);

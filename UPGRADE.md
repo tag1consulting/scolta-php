@@ -4,6 +4,18 @@ Breaking changes and migration steps between versions of scolta-php.
 
 ## Unreleased
 
+### 2.0.0: the Pagefind binary indexer is gone
+
+The PHP indexer is the only pipeline. `Tag1\Scolta\Binary\PagefindBinary` and `Tag1\Scolta\Index\IndexerResolver` no longer exist; an adapter that resolved, downloaded or probed the binary (`download-pagefind` commands, `indexer: binary` handling, binary rows in status output) removes that code. The `indexer` config key is still accepted so existing site config does not break, but every value selects the PHP indexer.
+
+Three signatures changed:
+
+- `SetupCheck::run()` no longer takes `$configuredBinaryPath` or `$projectDir` and no longer emits the "Pagefind binary" row. Call it with the remaining named arguments: `SetupCheck::run(aiApiKey: ..., browserWasmDir: ..., resolvedKey: ...)`. Every row is now `category: runtime`.
+- `HealthChecker::__construct()` no longer takes `$pagefindBinaryPath` or `$projectDir`: `new HealthChecker($config, $indexOutputDir, $cache, $resolvedKey)`. The payload no longer carries `pagefind`, `pagefind_available`, `indexer_upgrade_available` or `indexer_upgrade_message`; `indexer_active` is always `'php'`.
+- `ContentExporter::__construct()` takes only `$minContentLength`: `new ContentExporter()` or `new ContentExporter(minContentLength: 50)`. It keeps `filterItems()` and `hasIndexableText()`. `export()`, `exportToItems()`, `prepareOutputDir()`, `writeManifest()`, `readManifest()`, `getStats()`, `urlToExportPath()`, `countHtmlFiles()`, `deleteByUrl()` and `deleteById()` are removed; an adapter that filtered with `exportToItems($items)` uses `iterator_to_array($exporter->filterItems($items))`, and one that counted or deleted exported HTML files has nothing left to count or delete.
+
+The concordance fixture scripts under `scripts/` and `UPGRADING-PAGEFIND.md` are unchanged: they still download the reference Pagefind binary to produce the fixtures the PHP indexer is tested against.
+
 ### The corpus fingerprint formula changed (v2) — one full rebuild per site
 
 No code changes are needed. The fingerprint `shouldBuild()` compares against `.scolta-state` now covers every ContentItem field that reaches the built index (previously only the body and attachment text, so title-only, URL-only, filter-only and similar edits were never indexed). Every stored fingerprint is invalidated by the formula change, so the first build after upgrading reports the corpus as changed and runs in full. The token cache is unaffected — that rebuild refills from it rather than re-tokenizing.

@@ -111,7 +111,7 @@ final class BuildIntent
      * different reason — see {@see self::SCOPED_RESET_REFUSAL}.
      *
      * @throws \LogicException When called on a resume or partial-scope intent.
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function withPageTableReset(): self
@@ -209,7 +209,7 @@ final class BuildIntent
      * an explicit id list, by anything — must set it.
      *
      * @throws \LogicException When the intent already resets the page table.
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function withPartialScope(): self
@@ -231,7 +231,7 @@ final class BuildIntent
     /**
      * "full" | "partial"
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function scope(): string
@@ -242,7 +242,7 @@ final class BuildIntent
     /**
      * True when the caller declared the pages a subset of the corpus.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function isPartial(): bool
@@ -256,7 +256,7 @@ final class BuildIntent
      * Always true for restart; true for fresh only when an operator asked for
      * it via {@see self::withPageTableReset()}.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function resetsPageTable(): bool

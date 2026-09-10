@@ -193,33 +193,13 @@ The base search tier — Pagefind index lookup and Scolta WASM scoring — runs 
 
 ## Optional Upgrades
 
-### Indexer options
+### The indexer
 
-Both indexers produce the same Pagefind-compatible index. The search experience is identical either way. Choose based on your hosting constraints.
+The pure-PHP indexer runs everywhere PHP runs, including managed hosts where `exec()` is disabled (WP Engine, Kinsta, Flywheel, Pantheon). Around 3–4 seconds per 1,000 pages. Supports 14 languages via Snowball stemming (Catalan, Danish, Dutch, English, Finnish, French, German, Italian, Norwegian, Portuguese, Romanian, Russian, Spanish, Swedish). It produces a Pagefind-compatible index; the reference Pagefind binary is used only in this repo's test suite, to generate fixtures the PHP output is compared against.
 
-**PHP indexer** (the default): runs everywhere, no binary required. Around 3–4 seconds per 1,000 pages. Supports 14 languages via Snowball stemming (Catalan, Danish, Dutch, English, Finnish, French, German, Italian, Norwegian, Portuguese, Romanian, Russian, Spanish, Swedish).
+### Language support
 
-**Pagefind binary indexer**: 5–10× faster. Requires Node.js ≥ 18 or a direct binary download. Supports 33+ languages. Better for large sites or environments where the binary is installable.
-
-On managed hosting (WP Engine, Kinsta, Flywheel, Pantheon), `exec()` is disabled. The PHP indexer runs there automatically with no configuration change.
-
-To install the binary:
-
-```bash
-# Download via the CLI command (no Node.js required):
-wp scolta download-pagefind          # WordPress
-drush scolta:download-pagefind       # Drupal
-php artisan scolta:download-pagefind # Laravel
-
-# Or install via npm (Node.js ≥ 18 required):
-npm install -g pagefind
-```
-
-`indexer: auto` (the default) uses the binary when available and falls back to PHP automatically.
-
-### Language support for the PHP indexer
-
-For languages outside the 14 supported by Snowball, search works but inflected forms ("running", "ran") will not match a stemmed base ("run"). CJK languages (Chinese, Japanese, Korean) use character-level tokenization and do not require stemming. For full 33+ language stemming coverage, use the Pagefind binary indexer.
+For languages outside the 14 supported by Snowball, search works but inflected forms ("running", "ran") will not match a stemmed base ("run"). CJK languages (Chinese, Japanese, Korean) use character-level tokenization and do not require stemming.
 
 ## Debugging
 
@@ -274,13 +254,12 @@ Platform Adapters             scolta-php (this package)    scolta-core (browser 
 - `ScoltaConfig` — platform-agnostic configuration with scoring defaults
 - `AiClient` — provider-agnostic HTTP client for Anthropic and OpenAI APIs
 - `AiEndpointHandler` — shared expand / summarize / follow-up logic
-- `ContentExporter` — exports content items to Pagefind-compatible HTML files
+- `ContentExporter` — filters content items down to the ones with enough text to index
 - `IndexBuildOrchestrator` — single authoritative chunk-loop entry point for all adapters
 - `MemoryBudget` / `MemoryBudgetSuggestion` — memory profile management
 - `PhpIndexer` — pure PHP indexer producing Pagefind-compatible index files
 - `HtmlCleaner` — HTML cleaning for content extraction
 - `DefaultPrompts` — prompt templates with variable resolution (pure PHP, no WASM)
-- `PagefindBinary` — binary resolver and downloader
 - Shared assets — `scolta.js`, `scolta.css`, browser WASM
 
 Scoring runs entirely in the browser via the WASM module loaded by `scolta.js`. The PHP server handles content indexing, AI API proxying, and configuration only.

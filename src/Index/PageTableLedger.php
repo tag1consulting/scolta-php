@@ -285,7 +285,7 @@ final class PageTableLedger
      * calls.
      *
      * @return list<string> Ids the current build has not committed.
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function staleRowIds(): array

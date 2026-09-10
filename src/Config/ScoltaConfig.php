@@ -280,7 +280,7 @@ class ScoltaConfig
     public string $promptFollowUp = '';
 
     // -- Indexer --
-    /** @var string 'auto' (PHP indexer) | 'php' | 'binary' */
+    /** @var string Accepted for backward compatibility; the pure-PHP indexer is the only pipeline since 2.0.0 and every value selects it. */
     public string $indexer = 'auto';
 
     // -- Content --
@@ -330,7 +330,7 @@ class ScoltaConfig
      * normalizedLabels() is the guard.
      *
      * @var array<array-key, mixed>
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public array $labels = [];
@@ -845,7 +845,7 @@ class ScoltaConfig
      *
      * @return array<string, string>
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function normalizedLabels(): array

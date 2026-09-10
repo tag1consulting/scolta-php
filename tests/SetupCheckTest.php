@@ -10,7 +10,7 @@ use Tag1\Scolta\SetupCheck;
 /**
  * Tests the SetupCheck pre-flight dependency chain.
  *
- * Checks are: PHP version, AI API key, Browser WASM, Pagefind binary.
+ * Checks are: PHP version, AI API key, Browser WASM.
  * Status values are 'pass', 'fail', 'warn'.
  */
 class SetupCheckTest extends TestCase
@@ -35,11 +35,7 @@ class SetupCheckTest extends TestCase
                 ['pass', 'fail', 'warn'],
                 "Status must be pass, fail, or warn, got: {$result['status']}",
             );
-            $this->assertContains(
-                $result['category'],
-                ['runtime', 'build'],
-                "Category must be runtime or build, got: {$result['category']}",
-            );
+            $this->assertSame('runtime', $result['category']);
         }
     }
 
@@ -91,7 +87,6 @@ class SetupCheckTest extends TestCase
         $fakeResults = [
             ['name' => 'PHP version', 'status' => 'pass', 'message' => 'OK', 'category' => 'runtime'],
             ['name' => 'AI API key', 'status' => 'warn', 'message' => 'Not set', 'category' => 'runtime'],
-            ['name' => 'Pagefind binary', 'status' => 'warn', 'message' => 'Not found', 'category' => 'build'],
         ];
         $this->assertEquals(0, SetupCheck::exitCode($fakeResults));
     }
@@ -111,7 +106,6 @@ class SetupCheckTest extends TestCase
         $this->assertContains('PHP version', $names);
         $this->assertContains('AI API key', $names);
         $this->assertContains('Browser WASM', $names);
-        $this->assertContains('Pagefind binary', $names);
     }
 
     public function testNoFfiOrExtismChecks(): void

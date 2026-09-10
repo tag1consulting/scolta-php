@@ -189,7 +189,7 @@ class ManualProviderAndOptInTest extends TestCase
      */
     public function testHealthReportsAiOffRatherThanAssumingAnthropic(): void
     {
-        $checker = new HealthChecker(ScoltaConfig::fromArray([]), sys_get_temp_dir(), null, null);
+        $checker = new HealthChecker(ScoltaConfig::fromArray([]), sys_get_temp_dir());
         $result = $checker->check();
 
         $this->assertSame('', $result['ai_provider']);
@@ -211,8 +211,6 @@ class ManualProviderAndOptInTest extends TestCase
         $checker = new HealthChecker(
             ScoltaConfig::fromArray(['ai_api_key' => 'sk-env']),
             sys_get_temp_dir(),
-            null,
-            null,
             resolvedKey: $resolved,
         );
         $result = $checker->check();
