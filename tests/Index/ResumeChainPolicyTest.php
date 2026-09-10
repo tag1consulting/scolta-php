@@ -82,6 +82,17 @@ class ResumeChainPolicyTest extends TestCase
         $this->assertNotNull($policy->failureReason(null, 100, 100, 1));
     }
 
+    public function testASegmentThatRecordedSuccessAndStillFailedIsNotResumed(): void
+    {
+        // Its build returned, then publishing or verification failed in the same
+        // process. Nothing is left for a resume to carry forward, and the error
+        // field is empty, so the reason has to say what happened on its own.
+        $policy = new ResumeChainPolicy();
+        $reason = $policy->failureReason(['success' => true, 'error' => null], 200, 100, 1);
+        $this->assertStringContainsString('failed in segment 1', (string) $reason);
+        $this->assertStringContainsString('exited non-zero', (string) $reason);
+    }
+
     public function testTheSegmentCapStopsARunawayChain(): void
     {
         $policy = new ResumeChainPolicy(null, 3);
