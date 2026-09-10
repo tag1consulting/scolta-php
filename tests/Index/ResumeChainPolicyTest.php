@@ -30,8 +30,23 @@ class ResumeChainPolicyTest extends TestCase
     protected function tearDown(): void
     {
         foreach ([$this->stateDir, $this->outputDir] as $dir) {
-            exec('rm -rf ' . escapeshellarg($dir));
+            $this->removeDir($dir);
         }
+    }
+
+    private function removeDir(string $dir): void
+    {
+        if (!is_dir($dir)) {
+            return;
+        }
+        $files = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST,
+        );
+        foreach ($files as $file) {
+            $file->isDir() ? rmdir($file->getRealPath()) : unlink($file->getRealPath());
+        }
+        rmdir($dir);
     }
 
     // -------------------------------------------------------------------
