@@ -24,10 +24,13 @@ use Tag1\Scolta\Storage\StorageDriverInterface;
  * makes that minutes rather than hours under a CLI process (a build, `drush
  * cron`, `drush scolta:cleanup`), and the notice it logs keeps the wait from
  * reading as a hang. A caller running under a request-serving SAPI — a
- * hook_cron() triggered by the web cron endpoint rather than drush — gets
- * the serial fallback instead; see canFastDelete(). The orchestrator sweeps
- * right after each swap; adapters also run it from scheduled maintenance as
- * the backstop for builds that die before their sweep (scolta-drupal: a
+ * hook_cron() triggered by the web cron endpoint rather than drush, or a
+ * queue worker running inline in the request that queued it — gets the
+ * serial fallback instead; see canFastDelete(). A sweep that names no budget
+ * of its own is given one off the CLI and none on it; see defaultBudget().
+ * The orchestrator sweeps right after each swap; adapters also run it from
+ * scheduled maintenance as the backstop for builds that die before their
+ * sweep and for whatever a budgeted sweep did not finish (scolta-drupal: a
  * time-boxed sweep from hook_cron() and `drush scolta:cleanup` for on-demand
  * runs).
  * $outputDir is the directory that holds the published `pagefind/` directory
@@ -48,9 +51,31 @@ final class RetiredIndexTrash
      */
     private const PARALLEL_WORKERS = 16;
 
+    /**
+     * Wall-clock ceiling a sweep gets off the CLI when its caller named none.
+     *
+     * Off the CLI every deletion is serial (canFastDelete() explains why), so
+     * an unbudgeted sweep there is an unbounded unlink loop inside whichever
+     * request triggered the build. Two seconds is a judgement call, not a
+     * measurement: small enough that no request stalls on it, and whatever it
+     * leaves behind the next sweep picks up.
+     */
+    private const NON_CLI_SWEEP_SECONDS = 2.0;
+
+    /**
+     * Bind the trash helper to a storage driver and published output directory.
+     *
+     * @param string $sapi The SAPI whose deletion strategy applies, defaulting
+     *                     to the running one. A seam for tests; adapters never
+     *                     pass it.
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
     public function __construct(
         private readonly StorageDriverInterface $storage,
         private readonly string $outputDir,
+        private readonly string $sapi = \PHP_SAPI,
     ) {}
 
     /**
@@ -84,12 +109,16 @@ final class RetiredIndexTrash
      * Delete trash directories in the output directory.
      *
      * Where the storage is the local filesystem and the platform allows it,
-     * files are unlinked by parallel worker processes; otherwise the storage
-     * driver deletes serially. $maxSeconds bounds the wall-clock spent —
-     * cron callers pass a budget so a sweep never monopolises a cron run —
-     * and a sweep that runs out of time simply stops: whatever it deleted
-     * stays deleted, whatever remains still matches the trash pattern and is
-     * picked up by the next sweep. Returns true when no trash remains.
+     * files are unlinked by parallel worker processes; otherwise deletion is
+     * serial. $maxSeconds bounds the wall-clock spent — cron callers pass a
+     * budget so a sweep never monopolises a cron run — and a sweep that runs
+     * out of time simply stops: whatever it deleted stays deleted, whatever
+     * remains still matches the trash pattern and is picked up by the next
+     * sweep. Returns true when no trash remains.
+     *
+     * Omitting $maxSeconds means "you decide", not "unbounded": defaultBudget()
+     * gives no ceiling under the CLI and a short one anywhere else. The opening
+     * notice says which it got.
      *
      * Best-effort by design: a directory that cannot be deleted is logged
      * and left for the next sweep. Nothing here throws, because failing to
@@ -105,16 +134,32 @@ final class RetiredIndexTrash
             return true;
         }
 
-        $deadline = $maxSeconds !== null ? microtime(true) + $maxSeconds : null;
+        $budget   = $maxSeconds ?? $this->defaultBudget();
+        $deadline = $budget !== null ? microtime(true) + $budget : null;
 
         // notice, not info: drush hides info-level lines at default
         // verbosity, and this deletion is exactly the long silent pause an
-        // operator would otherwise read as a hang.
-        $logger->notice(
-            '[scolta] Deleting {count} retired index director(ies): {dirs}.'
-            . ' On network filesystems this can take a long time; the live index is not affected.',
-            ['count' => count($trashDirs), 'dirs' => implode(', ', $trashDirs)],
-        );
+        // operator would otherwise read as a hang. A budget the caller did not
+        // ask for is named for the same reason.
+        if ($maxSeconds === null && $budget !== null) {
+            $logger->notice(
+                '[scolta] Deleting {count} retired index director(ies): {dirs}.'
+                . ' Deletion is limited to {budget}s because this is running under the "{sapi}" SAPI rather than on the command line;'
+                . ' anything left over is deleted by the next command-line build or scheduled cleanup.',
+                [
+                    'count'  => count($trashDirs),
+                    'dirs'   => implode(', ', $trashDirs),
+                    'budget' => $budget,
+                    'sapi'   => $this->sapi,
+                ],
+            );
+        } else {
+            $logger->notice(
+                '[scolta] Deleting {count} retired index director(ies): {dirs}.'
+                . ' On network filesystems this can take a long time; the live index is not affected.',
+                ['count' => count($trashDirs), 'dirs' => implode(', ', $trashDirs)],
+            );
+        }
 
         $complete = true;
         foreach ($trashDirs as $i => $dir) {
@@ -153,6 +198,18 @@ final class RetiredIndexTrash
     }
 
     /**
+     * The budget a caller that named none gets.
+     *
+     * None under the CLI, where deletion is parallel and a build may take the
+     * time it takes. A ceiling anywhere else, where the same work is serial and
+     * is being charged to somebody's page load.
+     */
+    private function defaultBudget(): ?float
+    {
+        return $this->sapi === 'cli' ? null : self::NON_CLI_SWEEP_SECONDS;
+    }
+
+    /**
      * Delete one trash directory, preferring the parallel fast path.
      */
     private function deleteTrashDir(string $dir, ?float $deadline): bool
@@ -169,7 +226,51 @@ final class RetiredIndexTrash
             return false;
         }
 
+        // Do not simplify this back to deleteDirectory(): it takes no deadline
+        // and returns only when the whole tree is gone, so one directory can
+        // run hours past the budget. Non-local drivers have no paths to walk.
+        if ($deadline !== null && $this->storage instanceof FilesystemDriver) {
+            return $this->serialDeleteByDeadline($dir, $deadline);
+        }
+
         return $this->storage->deleteDirectory($dir);
+    }
+
+    /**
+     * Unlink a tree serially, stopping as soon as the deadline passes.
+     *
+     * Mirrors FilesystemDriver::deleteDirectory()'s symlink handling:
+     * getPathname(), never getRealPath(), so a link is removed and its target
+     * is not. What is left still matches the trash pattern, so the next sweep
+     * picks it up.
+     */
+    private function serialDeleteByDeadline(string $dir, float $deadline): bool
+    {
+        if (!is_dir($dir)) {
+            return true;
+        }
+
+        $items = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST,
+        );
+
+        foreach ($items as $item) {
+            if (microtime(true) >= $deadline) {
+                return false;
+            }
+            // CHILD_FIRST empties a directory before reaching it; @ covers the
+            // case where the deadline stopped us mid-directory.
+            if ($item->isDir() && !$item->isLink()) {
+                @rmdir($item->getPathname());
+            } else {
+                // Bare unlink(), as FilesystemDriver does and HygieneTest
+                // requires: a file this cannot remove should surface.
+                unlink($item->getPathname());
+            }
+        }
+
+        return @rmdir($dir);
     }
 
     /**
@@ -186,15 +287,16 @@ final class RetiredIndexTrash
      * spawned from inside such a worker is new, uncommon ground; a CLI
      * script — a build, `drush cron`, `drush scolta:cleanup` — owns its own
      * process and is exactly the context every other caller of sweep()
-     * already runs in. A request-triggered `hook_cron()` (the one caller
-     * that is not CLI) falls back to serial deletion instead.
+     * already runs in. A caller that is not CLI — a request-triggered
+     * `hook_cron()`, an inline queue worker — falls back to serial deletion
+     * instead, which is why an unbudgeted sweep is budgeted there.
      */
     private function canFastDelete(): bool
     {
         return $this->storage instanceof FilesystemDriver
             && \PHP_OS_FAMILY !== 'Windows'
             && \function_exists('proc_open')
-            && \PHP_SAPI === 'cli';
+            && $this->sapi === 'cli';
     }
 
     /**

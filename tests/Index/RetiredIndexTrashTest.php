@@ -171,4 +171,107 @@ class RetiredIndexTrashTest extends TestCase
         // The directory is still there, waiting for the next sweep.
         $this->assertCount(1, glob($this->outputDir . '/' . RetiredIndexTrash::PREFIX . '*') ?: []);
     }
+
+    public function testAnUnbudgetedSweepOffTheCliIsBudgetedAndSaysSo(): void
+    {
+        // The orchestrator sweeps after every swap and passes no budget. Off
+        // the CLI there is no fast path, so that used to be an unbounded
+        // serial unlink inside a web request (scolta-laravel's FinalizeIndex
+        // job under QUEUE_CONNECTION=sync).
+        $retired = $this->outputDir . '/.scolta-old';
+        mkdir($retired . '/fragment/nested', 0755, true);
+        for ($i = 0; $i < 20; $i++) {
+            file_put_contents(sprintf('%s/fragment/%03d.pf_fragment', $retired, $i), 'x');
+        }
+        file_put_contents($retired . '/fragment/nested/deep.pf_fragment', 'x');
+
+        $storage = new RecordingFilesystemDriver();
+        $trash   = new RetiredIndexTrash($storage, $this->outputDir, 'fpm-fcgi');
+        $this->assertTrue($trash->retire($retired));
+
+        $logger = $this->recordingLogger();
+        $this->assertTrue($trash->sweep($logger));
+
+        // A generous enough budget still finishes the job.
+        $this->assertSame([], glob($this->outputDir . '/' . RetiredIndexTrash::PREFIX . '*') ?: []);
+
+        // Deleted by the deadline-aware walk, not by a driver call that cannot
+        // stop: deleteDirectory() takes no deadline, so one call can run hours
+        // past a deadline the caller believed it had set.
+        $this->assertSame([], $storage->deletedDirectories);
+
+        // An operator who set no budget must be able to learn one was set.
+        $sapiNotices = array_filter(
+            $logger->records[LogLevel::NOTICE] ?? [],
+            fn(string $m) => str_contains($m, 'limited to') && str_contains($m, 'SAPI'),
+        );
+        $this->assertNotEmpty($sapiNotices);
+        $this->assertArrayNotHasKey(LogLevel::WARNING, $logger->records);
+    }
+
+    public function testAnUnbudgetedSweepOnTheCliStaysUnbudgeted(): void
+    {
+        // The CLI half of the same default: deletion is parallel there, so
+        // capping it would leave trash behind for no gain.
+        $retired = $this->outputDir . '/.scolta-old';
+        mkdir($retired . '/fragment', 0755, true);
+        file_put_contents($retired . '/fragment/a.pf_fragment', 'x');
+
+        $trash = new RetiredIndexTrash(new FilesystemDriver(), $this->outputDir, 'cli');
+        $this->assertTrue($trash->retire($retired));
+
+        $logger = $this->recordingLogger();
+        $this->assertTrue($trash->sweep($logger));
+
+        $this->assertSame([], glob($this->outputDir . '/' . RetiredIndexTrash::PREFIX . '*') ?: []);
+        $budgeted = array_filter(
+            $logger->records[LogLevel::NOTICE] ?? [],
+            fn(string $m) => str_contains($m, 'limited to'),
+        );
+        $this->assertSame([], $budgeted);
+    }
+
+    public function testABudgetedSweepStopsInsideADirectoryRatherThanBetweenDirectories(): void
+    {
+        // Enough files that no filesystem empties the directory inside the
+        // budget: finishing would need ~400k unlinks/second.
+        $retired = $this->outputDir . '/.scolta-old';
+        mkdir($retired . '/fragment', 0755, true);
+        for ($i = 0; $i < 4000; $i++) {
+            file_put_contents(sprintf('%s/fragment/%04d.pf_fragment', $retired, $i), 'x');
+        }
+
+        $storage = new RecordingFilesystemDriver();
+        $trash   = new RetiredIndexTrash($storage, $this->outputDir, 'fpm-fcgi');
+        $this->assertTrue($trash->retire($retired));
+
+        $logger = $this->recordingLogger();
+        $this->assertFalse($trash->sweep($logger, 0.01));
+
+        // The budget bounds work inside one directory, not merely the choice
+        // to start another one.
+        $this->assertSame([], $storage->deletedDirectories);
+        $this->assertCount(1, glob($this->outputDir . '/' . RetiredIndexTrash::PREFIX . '*') ?: []);
+        $budgetNotices = array_filter(
+            $logger->records[LogLevel::NOTICE] ?? [],
+            fn(string $m) => str_contains($m, 'budget'),
+        );
+        $this->assertNotEmpty($budgetNotices);
+        // Running out of time is not a failure to delete.
+        $this->assertArrayNotHasKey(LogLevel::WARNING, $logger->records);
+    }
+}
+
+/** A FilesystemDriver that records the whole-directory deletions asked of it. */
+class RecordingFilesystemDriver extends FilesystemDriver
+{
+    /** @var list<string> */
+    public array $deletedDirectories = [];
+
+    public function deleteDirectory(string $path): bool
+    {
+        $this->deletedDirectories[] = $path;
+
+        return parent::deleteDirectory($path);
+    }
 }

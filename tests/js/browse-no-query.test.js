@@ -157,7 +157,7 @@ async function boot(mockPagefind, calls, scoringExtra, configExtra) {
                 }),
             });
         }
-        if (/scolta\.facets/.test(url)) {
+        if (/scolta\.[^/]+\.facets/.test(url)) {
             const b = FIXTURE_GZ;
             return Promise.resolve({
                 ok: true,
@@ -453,7 +453,7 @@ describe("a browse under facetMode 'deferred'", () => {
         const env = await boot(mock, calls, null, { facetMode: 'deferred' });
         await search(env, '');
 
-        expect(env.requested.filter(u => /scolta\.facets/.test(u)).length).toBe(1);
+        expect(env.requested.filter(u => /scolta\.[^/]+\.facets/.test(u)).length).toBe(1);
         expect(calls.queries).toEqual([]);
         expect(cards(env.window).length).toBeGreaterThan(0);
     });
@@ -464,7 +464,7 @@ describe("a browse under facetMode 'deferred'", () => {
         await search(env, '');
         await clickFacet(env, 'topic', 'Fruit');
 
-        expect(env.requested.filter(u => /scolta\.facets/.test(u)).length).toBe(1);
+        expect(env.requested.filter(u => /scolta\.[^/]+\.facets/.test(u)).length).toBe(1);
         expect(calls.queries).toEqual([]);
         expect(calls.searchOpts.every(o => !o.filters)).toBe(true);
         const urls = shownUrls(env.window);

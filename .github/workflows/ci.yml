@@ -29,18 +29,28 @@ jobs:
           # 8.1 must resolve platform-compatible dev deps (PHPUnit ^10 —
           # PHPUnit 11 requires PHP 8.2+), so it cannot ignore the php
           # platform requirement like the newer rows do.
+          #
+          # `guzzle` pins the Guzzle major for the row. The constraint is
+          # `^7.0|^8.0`, so an unpinned row resolves the newest (8.x) and only
+          # that major would ever be exercised; the two pinned rows keep both
+          # covered. Laravel 12 apps carry Guzzle 7 and Laravel 13 apps carry
+          # Guzzle 8, so a break in either is a break for a supported adapter.
           - php: '8.1'
             lint: false
             composer-args: ''
+            guzzle: '^7.0'
           - php: '8.2'
             lint: false
             composer-args: '--ignore-platform-req=php'
+            guzzle: ''
           - php: '8.3'
             lint: false
             composer-args: '--ignore-platform-req=php'
+            guzzle: ''
           - php: '8.4'
             lint: true
             composer-args: '--ignore-platform-req=php'
+            guzzle: '^8.0'
     steps:
       - uses: actions/checkout@v4
 
@@ -59,6 +69,13 @@ jobs:
 
       - name: Install dependencies
         run: composer update --no-interaction --prefer-dist ${{ matrix.composer-args }}
+
+      - name: Pin Guzzle major
+        if: matrix.guzzle != ''
+        run: |
+          composer update "guzzlehttp/guzzle:${{ matrix.guzzle }}" \
+            --with-all-dependencies --no-interaction --prefer-dist ${{ matrix.composer-args }}
+          composer show guzzlehttp/guzzle | head -2
 
       - name: Lint (php-cs-fixer)
         if: matrix.lint

@@ -132,9 +132,15 @@ final class IndexMetadataWriter
      * is restamped from its own bytes. The caller decides when this is legal;
      * see `IncrementalIndexUpdater::commit()`.
      *
-     * @param array<int, array{fragmentHash: string, wordCount: int}> $pageMeta        Ordinal => page row.
-     * @param list<mixed>                                             $previousFilters Decoded `pf_meta[3]`.
-     * @param list<mixed>                                             $previousSorts   Decoded `pf_meta[4]`.
+     * @param array<int, array{fragmentHash: string, wordCount: int}> $pageMeta          Ordinal => page row.
+     * @param list<mixed>                                             $previousFilters   Decoded `pf_meta[3]`.
+     * @param list<mixed>                                             $previousSorts     Decoded `pf_meta[4]`.
+     * @param string                                                  $previousIndexHash The pf_meta hash the
+     *                                                                                    on-disk facet index is
+     *                                                                                    named for — needed to
+     *                                                                                    find it, since its
+     *                                                                                    filename follows that
+     *                                                                                    hash.
      * @param list<array{from: string, to: string, hash: string}>     $indexChunkMeta
      * @param list<string>                                            $metaFields
      * @return string The new pf_meta hash.
@@ -147,6 +153,7 @@ final class IndexMetadataWriter
         array $pageMeta,
         array $previousFilters,
         array $previousSorts,
+        string $previousIndexHash,
         array $indexChunkMeta,
         array $metaFields,
         string $version,
@@ -189,7 +196,12 @@ final class IndexMetadataWriter
         $metaHash = 'en_' . substr(hash('sha256', $metaCbor), 0, 10);
 
         $pageHashes = array_map(static fn(array $meta): string => $meta['fragmentHash'], $pageMeta);
-        if (!(new FacetIndexWriter($this->compressionLevel))->rewriteWithNewPageTable($buildDir, $pageHashes, $metaHash)) {
+        if (!(new FacetIndexWriter($this->compressionLevel))->rewriteWithNewPageTable(
+            $buildDir,
+            $pageHashes,
+            $previousIndexHash,
+            $metaHash,
+        )) {
             throw new \RuntimeException(
                 'The existing facet index cannot be restamped for this update. '
                 . 'The caller must fall back to a full corpus-table rebuild.',

@@ -51,8 +51,19 @@ namespace Tag1\Scolta\Index;
  */
 class FacetIndexWriter
 {
-    /** Artifact filename, written alongside pagefind-entry.json. */
-    public const FILENAME = 'scolta.facets';
+    /**
+     * Artifact filename prefix/suffix, written alongside pagefind-entry.json.
+     *
+     * The filename carries the pf_meta hash it was built against — the same
+     * convention `pagefind.{$metaHash}.pf_meta` already uses — so the name
+     * itself changes on every rebuild. That makes the artifact eligible for
+     * an immutable, far-future Cache-Control the way a fixed name never could:
+     * a browser or CDN that cached last build's bytes at last build's URL
+     * cannot serve them for this build, because this build asks for a
+     * different URL. See {@see filename()}.
+     */
+    private const FILENAME_PREFIX = 'scolta.';
+    private const FILENAME_SUFFIX = '.facets';
 
     /** Format identifier, checked by the browser before trusting the payload. */
     public const FORMAT = 'scolta-facets';
@@ -141,7 +152,24 @@ class FacetIndexWriter
     }
 
     /**
+     * The artifact's filename for a given pf_meta hash.
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public static function filename(string $indexHash): string
+    {
+        return self::FILENAME_PREFIX . $indexHash . self::FILENAME_SUFFIX;
+    }
+
+    /**
      * Write the artifact into a built index directory.
+     *
+     * Named after $indexHash, not a fixed name: the browser fetches this
+     * artifact by that same hash (read from the cache-busted
+     * pagefind-entry.json before it ever asks for this file), so an old
+     * cached response at an old build's URL is never handed to a client
+     * asking for this build's.
      *
      * @param array<string, array<string, int[]>> $filterData Dimension => value => page numbers.
      * @param array<int, string>                  $pageHashes Page number => fragment hash, in page order.
@@ -151,7 +179,7 @@ class FacetIndexWriter
      */
     public function write(string $buildDir, array $filterData, array $pageHashes, string $indexHash = ''): void
     {
-        $path       = rtrim($buildDir, '/') . '/' . self::FILENAME;
+        $path       = rtrim($buildDir, '/') . '/' . self::filename($indexHash);
         $compressed = gzencode($this->build($filterData, $pageHashes, $indexHash), $this->compressionLevel);
         if ($compressed === false) {
             throw new \RuntimeException('Failed to gzip the facet index.');
@@ -179,15 +207,26 @@ class FacetIndexWriter
      * to the wrong pages. That case returns false and the caller does the full
      * rebuild.
      *
-     * @param array<int, string> $pageHashes Page number => fragment hash, in page order.
-     * @param string             $indexHash  The new pf_meta hash to stamp.
+     * Reads the previous artifact from its own hash-named path and writes the
+     * restamped one to a NEW hash-named path — the filename follows the
+     * contents here exactly as it does for a fragment or an index chunk, so
+     * the previous file is left on disk for the caller to remove once the new
+     * one is confirmed written (see IncrementalIndexUpdater::commit()).
+     *
+     * @param array<int, string> $pageHashes        Page number => fragment hash, in page order.
+     * @param string             $previousIndexHash The pf_meta hash the on-disk artifact is named for.
+     * @param string             $newIndexHash      The new pf_meta hash to stamp and name the artifact for.
      * @return bool False when the previous artifact cannot be reused; nothing is written.
      * @since 1.4.0
      * @stability experimental
      */
-    public function rewriteWithNewPageTable(string $buildDir, array $pageHashes, string $indexHash): bool
-    {
-        $path = rtrim($buildDir, '/') . '/' . self::FILENAME;
+    public function rewriteWithNewPageTable(
+        string $buildDir,
+        array $pageHashes,
+        string $previousIndexHash,
+        string $newIndexHash,
+    ): bool {
+        $path = rtrim($buildDir, '/') . '/' . self::filename($previousIndexHash);
         if (!is_file($path)) {
             return false;
         }
@@ -239,7 +278,7 @@ class FacetIndexWriter
         // json_decode to an assoc array keeps insertion order, so re-encoding
         // with the same flags reproduces build()'s header byte for byte apart
         // from the stamp being replaced.
-        $header['indexHash'] = $indexHash;
+        $header['indexHash'] = $newIndexHash;
         $newHeader           = json_encode($header, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         if ($newHeader === false) {
             return false;
@@ -250,8 +289,9 @@ class FacetIndexWriter
         if ($compressed === false) {
             throw new \RuntimeException('Failed to gzip the facet index.');
         }
-        if (file_put_contents($path, $compressed) === false) {
-            throw new \RuntimeException("Failed to write file: {$path}");
+        $newPath = rtrim($buildDir, '/') . '/' . self::filename($newIndexHash);
+        if (file_put_contents($newPath, $compressed) === false) {
+            throw new \RuntimeException("Failed to write file: {$newPath}");
         }
 
         return true;

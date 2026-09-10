@@ -28,7 +28,7 @@ final class IndexDirectoryComparer
         $list = static function (string $d): array {
             $files = array_merge(
                 glob("$d/*.pf_meta") ?: [],
-                glob("$d/scolta.facets") ?: [],
+                glob("$d/scolta.*.facets") ?: [],
                 glob("$d/index/*") ?: [],
                 glob("$d/fragment/*") ?: [],
                 glob("$d/filter/*") ?: [],

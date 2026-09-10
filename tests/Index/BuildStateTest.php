@@ -27,7 +27,31 @@ class BuildStateTest extends TestCase
         $state = new BuildState($this->tmpDir);
         $this->assertTrue($state->initiateBuild(['total_pages' => 100]));
         $this->assertFileExists($this->tmpDir . '/lock');
-        $this->assertFileExists($this->tmpDir . '/manifest.json');
+        $this->assertFileExists($state->manifestFile());
+        $this->assertNotSame(
+            $this->tmpDir,
+            $state->buildDirectory(),
+            'Each build writes into its own generation directory, so two builds cannot share chunk filenames.',
+        );
+    }
+
+    public function testResumeBuildCountsSegmentsAndMarksWhereEachStarted(): void
+    {
+        $state = new BuildState($this->tmpDir);
+        $state->initiateBuild(['total_pages' => 100]);
+        $this->assertSame(0, $state->segment());
+        $state->recordChunk(0, ['pages' => [['id' => 'a']], 'terms' => []]);
+        $state->releaseLockOnly();
+
+        $this->assertTrue($state->resumeBuild($state->shouldResume()));
+        $this->assertSame(1, $state->segment());
+        $this->assertSame(1, $state->pagesAtSegmentStart());
+        $state->recordChunk(1, ['pages' => [['id' => 'b'], ['id' => 'c']], 'terms' => []]);
+        $state->releaseLockOnly();
+
+        $this->assertTrue($state->resumeBuild($state->shouldResume()));
+        $this->assertSame(2, $state->segment());
+        $this->assertSame(3, $state->pagesAtSegmentStart());
     }
 
     public function testInitiateBuildFailsIfLocked(): void
@@ -102,13 +126,26 @@ class BuildStateTest extends TestCase
         $state2->readChunk(0);
     }
 
-    public function testReleaseLock(): void
+    /**
+     * A release marks the lock record released; it does not unlink the file.
+     *
+     * Unlinking is what broke mutual exclusion: the next process created a new
+     * inode at the same path and flock()ed that, while the previous holder
+     * still had its flock on the unlinked one.
+     */
+    public function testReleaseLockMarksTheRecordReleasedWithoutUnlinkingTheFile(): void
     {
         $state = new BuildState($this->tmpDir);
         $state->initiateBuild(['total_pages' => 10]);
         $state->releaseLock();
 
-        $this->assertFileDoesNotExist($this->tmpDir . '/lock');
+        $this->assertFileExists($this->tmpDir . '/lock');
+        $this->assertFalse($state->isRunning());
+        $this->assertSame('released', $state->lockDiagnostics()['state']);
+
+        // And the lock is free for the next build.
+        $next = new BuildState($this->tmpDir);
+        $this->assertTrue($next->initiateBuild(['total_pages' => 5]));
     }
 
     public function testShouldResumeReturnsManifest(): void
@@ -147,11 +184,16 @@ class BuildStateTest extends TestCase
     {
         $state = new BuildState($this->tmpDir);
         $state->initiateBuild(['total_pages' => 10]);
+        $buildDir = $state->buildDirectory();
         $state->recordChunk(0, ['test' => true]);
         $state->cleanup();
 
-        $remaining = glob($this->tmpDir . '/*');
-        $this->assertEmpty($remaining);
+        $this->assertEmpty(glob($buildDir . '/*') ?: [], 'The build generation is emptied.');
+        $this->assertDirectoryDoesNotExist($buildDir);
+
+        // The lock is not this method's to delete: it is the only record of
+        // whether the build that owns it is still running.
+        $this->assertFileExists($this->tmpDir . '/lock');
     }
 
     private function removeDir(string $dir): void

@@ -28,8 +28,19 @@ final class IndexBuildOrchestrator
     /**
      * Fraction of the effective memory limit at which the build voluntarily
      * yields (defers the merge / pauses the chunk loop) to avoid OOM.
+     *
+     * The limit is the lower of PHP's memory_limit and the cgroup limit, and
+     * the cgroup limit is shared by every process in the container. A yield
+     * is answered by a fresh process (a --resume segment, or finalize()) that
+     * the yielding process spawns and waits on, so two PHP processes are
+     * resident at once: this one, parked at the ratio (PHP never returns freed
+     * heap to the OS), and the child, which grows to the same ratio before it
+     * yields in turn. The two must fit under the container limit together,
+     * with headroom for the child's bootstrap spike, so the ratio has to stay
+     * well under 0.5. At the previous 0.75 a 4 GB container held a 3 GB parent
+     * and the child was OOM-killed (exit 137) while gathering.
      */
-    private const MEMORY_PRESSURE_RATIO = 0.75;
+    private const MEMORY_PRESSURE_RATIO = 0.4;
 
     /**
      * Fraction of the items in a run that may miss the token cache on a
@@ -57,6 +68,23 @@ final class IndexBuildOrchestrator
      * returning blocks that the next chunk immediately asked for again.
      */
     private const MEM_CACHES_EVERY_CHUNKS = 20;
+
+    /**
+     * Wall-clock ceiling on the trash sweep a failed build runs on its way out.
+     *
+     * A ceiling under the CLI too, where an ordinary sweep is given none (see
+     * RetiredIndexTrash::defaultBudget()). No budget is the right answer after
+     * a publish — the new index is already live and the build may take as long
+     * as deletion takes — and the wrong one here, where the caller is waiting
+     * to be told the build failed and a serial NFS unlink loop can sit on that
+     * report for hours. Two seconds clears a lot on the parallel path and is
+     * not felt on the serial one; whatever is left still matches the trash
+     * pattern, so the next build or scheduled cleanup resumes it.
+     */
+    private const FAILED_BUILD_SWEEP_SECONDS = 2.0;
+
+    /** Warning for a report whose sweep left trash on disk. */
+    private const TRASH_LEFT_WARNING = 'Retired index cleanup left directories on disk; see the log for which. The next build or sweep will retry.';
 
     private readonly BuildCoordinator $coordinator;
     private readonly InvertedIndexBuilder $builder;
@@ -121,6 +149,7 @@ final class IndexBuildOrchestrator
         // The binary/Pagefind path handles this correctly via <html lang="...">.
         $this->builder     = new InvertedIndexBuilder(new Tokenizer(), new Stemmer($language));
         $this->merger      = new IndexMerger();
+        $this->merger->setStateDir($stateDir);
         $this->storage     = $storage ?? new FilesystemDriver();
         $this->tsManifest  = new TimestampManifest($stateDir, $this->storage);
         $this->ledger      = new PageTableLedger($stateDir, $this->storage);
@@ -223,6 +252,24 @@ final class IndexBuildOrchestrator
             $manifest = $this->coordinator->prepare($intent);
             $telemetry->emit('build_start', ['mode' => $intent->mode()]);
 
+            // A restart means "rebuild from scratch", and the page table is
+            // the one piece of state a fresh build deliberately carries
+            // forward. Carrying it into a restart made the advice printed by
+            // the merge's duplicate-ordinal check unfollowable: the duplicate
+            // lives in the ledger's journal, so the restart inherited it,
+            // re-indexed the whole corpus, and refused to merge again — the
+            // only way out was deleting the journal by hand. Reset before
+            // beginBuild(), so the new generation is stamped on an empty
+            // table.
+            if ($intent->resetsPageTable()) {
+                $logger->notice(sprintf(
+                    '[scolta] %s: discarding the page-table ledger (%d ordinals) and renumbering from zero.',
+                    $intent->mode() === 'restart' ? 'Restart' : 'Ledger reset requested',
+                    $this->ledger->pageTableSize(),
+                ));
+                $this->ledger->reset();
+            }
+
             // A fresh build takes a new generation; a resumed one inherits the
             // generation its earlier segments stamped, so coverage is tracked
             // across the whole build rather than per process.
@@ -235,6 +282,12 @@ final class IndexBuildOrchestrator
             $startChunk    = 0;
             $currentOffset = 0;
             $isResume      = $intent->mode() === 'resume';
+
+            // A resumed segment carries no scope of its own — BuildIntent::resume()
+            // is handed nothing but a memory budget — so it inherits the scope
+            // the manifest recorded when the build was started.
+            $isPartial = $intent->isPartial()
+                || ($manifest['scope'] ?? BuildIntent::SCOPE_FULL) === BuildIntent::SCOPE_PARTIAL;
             if ($isResume) {
                 $startChunk    = (int) ($manifest['chunks_written'] ?? 0);
                 $currentOffset = (int) ($manifest['pages_processed'] ?? 0);
@@ -369,7 +422,7 @@ final class IndexBuildOrchestrator
                             pagesProcessed: $committedPages,
                             chunksWritten: $committedChunks,
                             success: false,
-                            error: 'memory_abort',
+                            error: StatusReport::MEMORY_ABORT,
                         );
                     }
                 }
@@ -383,7 +436,7 @@ final class IndexBuildOrchestrator
 
             $progress->finish("{$pagesInRun} pages indexed");
 
-            // If RSS is at ≥75% of the effective memory limit after indexing, the
+            // If RSS is at ≥MEMORY_PRESSURE_RATIO of the effective memory limit after indexing, the
             // heap is too fragmented to run the merge in this process — even small
             // allocations may trigger OOM. Return early so the caller can restart
             // in a fresh process (e.g. via `drush scolta:finalize`).
@@ -459,7 +512,7 @@ final class IndexBuildOrchestrator
                 // resumed segment did not gather the whole corpus, so it is in
                 // no position to say whose promise is false.
                 $this->cache()->saveWithoutPruning();
-                if ($isResume) {
+                if ($isResume || $isPartial) {
                     $this->tsManifest->saveWithoutPruning();
                 } else {
                     $this->tsManifest->pruneAndSave();
@@ -487,14 +540,39 @@ final class IndexBuildOrchestrator
             }
 
             // Merge and write.
-            // Ids the ledger still holds but this build never yielded have been
-            // deleted at the source. Release them so their ordinals are
-            // reusable, and tombstone the rows so the page table stays dense.
-            $released = $this->ledger->releaseStaleRows();
-            if ($released !== []) {
-                $logger->info('[scolta] {count} pages removed since the last build; their ordinals are now tombstoned.', [
-                    'count' => count($released),
-                ]);
+            //
+            // For a full build, ids the ledger still holds but this build never
+            // yielded have been deleted at the source. Release them so their
+            // ordinals are reusable, and tombstone the rows so the page table
+            // stays dense.
+            //
+            // For a partial build that inference is false and its consequences
+            // are total, so the release is replaced by a refusal to publish.
+            // See partialScopeRefusal() for why there is no third option.
+            if ($isPartial) {
+                $refusal = $this->partialScopeRefusal($logger);
+                if ($refusal !== null) {
+                    $this->cache()->saveWithoutPruning();
+                    $this->tsManifest->saveWithoutPruning();
+                    $this->coordinator->release();
+
+                    return $this->makeStatusReport(
+                        $telemetry,
+                        $budget,
+                        $startTime,
+                        pagesProcessed: $pagesInRun,
+                        chunksWritten: $chunkNum,
+                        success: false,
+                        error: $refusal,
+                    );
+                }
+            } else {
+                $released = $this->ledger->releaseStaleRows();
+                if ($released !== []) {
+                    $logger->info('[scolta] {count} pages removed since the last build; their ordinals are now tombstoned.', [
+                        'count' => count($released),
+                    ]);
+                }
             }
 
             $this->assertLedgerHasLivePages();
@@ -506,21 +584,28 @@ final class IndexBuildOrchestrator
             $streamWriter->setFragmentReuse($this->reuseFragments);
             $this->merger->setTelemetry($telemetry);
             $telemetry->emit('writer_start');
+            $this->clearStagingDir($this->stagedIndexDir());
             $streamWriter->beginWrite($this->outputDir);
             $this->merger->mergeStreaming($chunkFiles, $streamWriter, $budget);
             $streamWriter->fillTombstones($this->ledger->pageTableSize());
             $streamWriter->endWrite();
             $telemetry->emit('writer_complete');
 
-            $this->atomicSwap($logger);
-            $telemetry->emit('swap_complete');
-            $sweptClean = $this->trash->sweep($logger);
-
             $totalPagesProcessed = $this->coordinator->pagesProcessed();
             $pagesForReport      = $totalPagesProcessed > 0 ? $totalPagesProcessed : $pagesInRun;
             $chunksWritten       = count($chunkFiles);
 
-            $this->verifyOutputHasFragments($pagesForReport);
+            // Checked against the staged directory, before the swap. This used
+            // to run after atomicSwap(), so a build that failed the check had
+            // already replaced a working index with the one it was declaring
+            // unservable — the state observed on production, where a 16166
+            // fragment index with 1518 live pages went live and then failed.
+            // Refusing here leaves the previously published index serving.
+            $this->verifyOutputHasFragments($pagesForReport, $this->stagedIndexDir());
+
+            $this->atomicSwap($logger);
+            $telemetry->emit('swap_complete');
+            $sweptClean = $this->trash->sweep($logger);
 
             $this->coordinator->release();
 
@@ -535,7 +620,12 @@ final class IndexBuildOrchestrator
             // have looked the page up. So "not looked up" there covers almost
             // the whole corpus, and pruning dropped it: a build that succeeded
             // across three segments kept only the third one's pages.
-            if ($isResume) {
+            //
+            // A partial build is not that path either, for the same reason and
+            // more plainly: it was handed a subset and told so. Pruning there
+            // deletes the token data and the timestamps of every page outside
+            // the scope, which makes the next full build a cold one.
+            if ($isResume || $isPartial) {
                 $this->cache()->saveWithoutPruning();
                 $this->tsManifest->saveWithoutPruning();
             } else {
@@ -573,9 +663,14 @@ final class IndexBuildOrchestrator
                 pagesProcessed: $pagesForReport,
                 chunksWritten: $chunksWritten,
                 success: true,
-                warnings: $sweptClean ? null : 'Retired index cleanup left directories on disk; see the log for which. The next build or sweep will retry.',
+                warnings: $sweptClean ? null : self::TRASH_LEFT_WARNING,
             );
         } catch (\Throwable $e) {
+            // Sweep before the lock goes: the success path sweeps under it too,
+            // and a retry that starts the moment the lock is free would walk
+            // the same trash tree this sweep is deleting.
+            $warnings = $this->sweepAfterFailure($e, $logger);
+
             try {
                 $this->coordinator->releaseLockOnly();
             } catch (\Throwable) {
@@ -604,7 +699,8 @@ final class IndexBuildOrchestrator
                 pagesProcessed: $committedPages,
                 chunksWritten: $committedChunks,
                 success: false,
-                error: $isMemoryAbort ? 'memory_abort' : $e->getMessage(),
+                error: $isMemoryAbort ? StatusReport::MEMORY_ABORT : $e->getMessage(),
+                warnings: $warnings,
             );
         }
     }
@@ -770,6 +866,15 @@ final class IndexBuildOrchestrator
         ?float $durationSeconds = null,
         ?string $warnings = null,
     ): StatusReport {
+        // Every terminal report goes through here, so this is where the run
+        // leaves a note for whoever is driving it from another process. See
+        // BuildState::recordOutcome(): an exit status cannot tell a voluntary
+        // memory yield apart from a merge that found the index corrupt.
+        try {
+            $this->coordinator->buildState()->recordOutcome($success, $error, $pagesProcessed);
+        } catch (\Throwable) {
+        }
+
         return new StatusReport(
             version: self::VERSION,
             pagefindVersion: SupportedVersions::getVersionForMetadata(),
@@ -824,11 +929,31 @@ final class IndexBuildOrchestrator
             // deferred merge published an index with an unfilled page table and
             // left the ledger unsaved — the next build then renumbered from
             // whatever survived.
-            $released = $this->ledger->releaseStaleRows();
-            if ($released !== []) {
-                $logger->info('[scolta] {count} pages removed since the last build; their ordinals are now tombstoned.', [
-                    'count' => count($released),
-                ]);
+            // Scope read back off the manifest, because this process never saw
+            // the BuildIntent. Without it the deferred merge is a way to get
+            // the release build() just refused.
+            if ($this->coordinator->declaredScope() === BuildIntent::SCOPE_PARTIAL) {
+                $refusal = $this->partialScopeRefusal($logger);
+                if ($refusal !== null) {
+                    $this->coordinator->release();
+
+                    return $this->makeStatusReport(
+                        $telemetry,
+                        $budget,
+                        $startTime,
+                        pagesProcessed: 0,
+                        chunksWritten: count($chunkFiles),
+                        success: false,
+                        error: $refusal,
+                    );
+                }
+            } else {
+                $released = $this->ledger->releaseStaleRows();
+                if ($released !== []) {
+                    $logger->info('[scolta] {count} pages removed since the last build; their ordinals are now tombstoned.', [
+                        'count' => count($released),
+                    ]);
+                }
             }
 
             $this->assertLedgerHasLivePages();
@@ -838,20 +963,22 @@ final class IndexBuildOrchestrator
             $streamWriter->setTelemetry($telemetry);
             $streamWriter->setFragmentReuse($this->reuseFragments);
             $this->merger->setTelemetry($telemetry);
+            $this->clearStagingDir($this->stagedIndexDir());
             $streamWriter->beginWrite($this->outputDir);
             $this->merger->mergeStreaming($chunkFiles, $streamWriter, $budget);
             $streamWriter->fillTombstones($this->ledger->pageTableSize());
             $streamWriter->endWrite();
             $telemetry->emit('writer_complete');
 
-            $this->atomicSwap($logger);
-            $telemetry->emit('swap_complete');
-            $sweptClean = $this->trash->sweep($logger);
-
             $pagesProcessed = $this->coordinator->pagesProcessed();
             $chunksFinalized = count($chunkFiles);
 
-            $this->verifyOutputHasFragments($pagesProcessed);
+            // Pre-swap, for the reason build() states.
+            $this->verifyOutputHasFragments($pagesProcessed, $this->stagedIndexDir());
+
+            $this->atomicSwap($logger);
+            $telemetry->emit('swap_complete');
+            $sweptClean = $this->trash->sweep($logger);
 
             $this->coordinator->release();
 
@@ -880,9 +1007,12 @@ final class IndexBuildOrchestrator
                 pagesProcessed: $pagesProcessed,
                 chunksWritten: $chunksFinalized,
                 success: true,
-                warnings: $sweptClean ? null : 'Retired index cleanup left directories on disk; see the log for which. The next build or sweep will retry.',
+                warnings: $sweptClean ? null : self::TRASH_LEFT_WARNING,
             );
         } catch (\Throwable $e) {
+            // Under the lock, as in build().
+            $warnings = $this->sweepAfterFailure($e, $logger);
+
             try {
                 $this->coordinator->releaseLockOnly();
             } catch (\Throwable) {
@@ -896,13 +1026,14 @@ final class IndexBuildOrchestrator
                 chunksWritten: 0,
                 success: false,
                 error: $e->getMessage(),
+                warnings: $warnings,
             );
         }
     }
 
     private function atomicSwap(LoggerInterface $logger): void
     {
-        $buildDir = $this->outputDir . '/.scolta-building';
+        $buildDir = $this->stagedIndexDir();
         $finalDir = $this->outputDir . '/pagefind';
         $oldDir   = $this->outputDir . '/.scolta-old';
         $newDir   = $this->outputDir . '/.scolta-new';
@@ -950,6 +1081,84 @@ final class IndexBuildOrchestrator
     }
 
     /**
+     * The directory StreamingFormatWriter writes into, before the swap.
+     *
+     * atomicSwap() renames it to pagefind/, so it holds the same layout the
+     * live index does — which is what lets the integrity checks run against it
+     * while the previous index is still the one being served.
+     */
+    private function stagedIndexDir(): string
+    {
+        return $this->outputDir . '/.scolta-building';
+    }
+
+    /**
+     * Delete retired-index trash on the way out of a failed build.
+     *
+     * clearStagingDir() retires directories before the merge and again inside
+     * the swap, but the sweep that collects them used to run only after a
+     * successful publish. So every failed merge — OOM, a full disk, the
+     * duplicate-ordinal corruption --reset-ledger exists for — left an
+     * index-sized tree in trash with nothing to collect it, and each retry
+     * added another.
+     *
+     * Best-effort, in the strict sense: it is bounded
+     * (FAILED_BUILD_SWEEP_SECONDS), it never throws, and it never touches the
+     * error the caller is being handed. Returns a warning for the failure
+     * report when trash is still on disk when it returns, or null when there
+     * is nothing left to say.
+     */
+    private function sweepAfterFailure(\Throwable $failure, LoggerInterface $logger): ?string
+    {
+        try {
+            $pending = $this->trash->trashDirs();
+            if ($pending === []) {
+                // Nothing was retired — the common case for a failure before
+                // the merge, which is most of the try block both callers wrap.
+                return null;
+            }
+
+            // The one failure where doing more work on the way out is itself
+            // harmful. A memory abort is a deliberate yield, not a broken
+            // build: the caller answers it by starting a fresh --resume
+            // process, and that process sweeps after its own swap. Spending
+            // what headroom is left on deletion — sixteen forked children on
+            // the parallel path — delays the resume to do work the resume
+            // does anyway.
+            if ($failure instanceof MemoryThresholdExceededException) {
+                $logger->notice(
+                    '[scolta] Leaving {count} retired index director(ies) in place: this run stopped on memory pressure, so it is not spending its remaining headroom on deletion. The resumed build or the next scheduled cleanup deletes them: {dirs}.',
+                    ['count' => count($pending), 'dirs' => implode(', ', $pending)],
+                );
+
+                return 'Retired index cleanup was skipped because this run stopped on memory pressure. The resumed build or the next scheduled cleanup will delete the directories named in the log.';
+            }
+
+            if ($this->trash->sweep($logger, self::FAILED_BUILD_SWEEP_SECONDS)) {
+                return null;
+            }
+
+            $logger->notice(
+                '[scolta] Retired index cleanup did not finish before this failed build exited; the next build or scheduled cleanup deletes what is left.',
+            );
+
+            return self::TRASH_LEFT_WARNING;
+        } catch (\Throwable $sweepFailure) {
+            // sweep() is documented not to throw and trashDirs() only lists a
+            // directory, but this runs while a build failure is already on its
+            // way to the caller. That report is the one that matters, so
+            // anything from here is logged and swallowed rather than replacing
+            // it.
+            $logger->warning(
+                '[scolta] Retired index cleanup failed while handling a failed build: {message}. The build error is reported separately.',
+                ['message' => $sweepFailure->getMessage()],
+            );
+
+            return 'Retired index cleanup failed; see the log. The next build or sweep will retry.';
+        }
+    }
+
+    /**
      * Clear a staging directory left behind by an interrupted swap.
      *
      * Retiring by rename keeps this O(1) on NFS; inline deletion is only the
@@ -975,8 +1184,8 @@ final class IndexBuildOrchestrator
     /**
      * Return true when the process should yield to avoid OOM.
      *
-     * In production: checks whether current RSS has reached 75% of the effective
-     * memory limit (PHP limit or cgroup limit, whichever is lower).
+     * In production: checks whether current RSS has reached MEMORY_PRESSURE_RATIO
+     * of the effective memory limit (PHP limit or cgroup limit, whichever is lower).
      *
      * In tests: delegates to the injected $memoryPressureProbe closure so tests
      * can trigger the yield path without actual memory pressure.
@@ -1030,6 +1239,59 @@ final class IndexBuildOrchestrator
     }
 
     /**
+     * Decide whether a partial build may publish, and say why not if it may not.
+     *
+     * A scoped build is safe only when its scope happens to cover everything
+     * the index already holds. Otherwise there is no correct index for it to
+     * publish, and that is a property of the format rather than a gap here:
+     *
+     *  - The postings come from this run's chunk files alone. mergeStreaming()
+     *    reads nothing from the live index, so a page the run did not yield has
+     *    no term entries in the output at all.
+     *  - Its fragment is not carried over either. Fragment reuse is decided per
+     *    writePage() call, and no such call is made for a page the run never
+     *    gathered, so fillTombstones() pads the ordinal with an empty row.
+     *
+     * So the three ways out of a scoped build are: delete the rest of the site
+     * (what used to happen — releaseStaleRows() freed 14,648 ordinals and the
+     * merge published 1,518 live pages inside a 16,166-row page table); keep the
+     * rows live and publish empty fragments under them, which is the same data
+     * loss with the ledger now lying about it; or refuse. The refusal leaves the
+     * previously published index serving, untouched.
+     *
+     * The scope-aware path for a small change is IncrementalIndexUpdater, which
+     * edits the published index in place instead of rebuilding it.
+     *
+     * @return string|null Error for the StatusReport, or null when publishing is safe.
+     */
+    private function partialScopeRefusal(LoggerInterface $logger): ?string
+    {
+        $stale = $this->ledger->staleRowIds();
+        if ($stale === []) {
+            // The scope covered every id the ledger holds — a site that only
+            // ever indexes one bundle, say. Nothing is out of scope, so there
+            // is nothing to protect and nothing to release.
+            $logger->info('[scolta] Scoped build covered every page the index holds; publishing normally.');
+
+            return null;
+        }
+
+        $error = sprintf(
+            'scoped build refused: it gathered %d pages, but the index holds %d more that were outside its '
+            . 'scope and it cannot republish them — a merge only carries the pages this run yielded. '
+            . 'Publishing would have removed those %d pages from the index. The existing index has been left '
+            . 'in place. Re-run without --bundle/--entity-ids for a full rebuild, or let the queue apply the '
+            . 'change incrementally.',
+            $this->ledger->liveCount() - count($stale),
+            count($stale),
+            count($stale),
+        );
+        $logger->error('[scolta] ' . $error);
+
+        return $error;
+    }
+
+    /**
      * Verify the finished index accounts for every page the build indexed.
      *
      * The count that matters is the ledger's live rows: one row per id this
@@ -1038,9 +1300,13 @@ final class IndexBuildOrchestrator
      * build. An index that is short here has almost always lost pages to
      * colliding ordinals, so the message says so.
      *
+     * $indexRoot is the directory that IS the index — the staging directory
+     * pre-swap, or the published pagefind/ directory. Callers pass the staged
+     * one: a check that runs after publication cannot protect anything.
+     *
      * @throws \RuntimeException If the index does not match the ledger.
      */
-    private function verifyOutputHasFragments(int $pagesProcessed): void
+    private function verifyOutputHasFragments(int $pagesProcessed, string $indexRoot): void
     {
         // Before the zero-page exit, not after it: zero is the symptom here,
         // not the exemption. Held back until after the exit, a build that lost
@@ -1051,7 +1317,7 @@ final class IndexBuildOrchestrator
             return;
         }
 
-        $fragmentDir   = $this->outputDir . '/pagefind/fragment';
+        $fragmentDir   = $indexRoot . '/fragment';
         $fragmentCount = is_dir($fragmentDir)
             ? count(glob($fragmentDir . '/*.pf_fragment') ?: [])
             : 0;
@@ -1094,7 +1360,7 @@ final class IndexBuildOrchestrator
             ));
         }
 
-        self::verifyIndexComplete($this->outputDir);
+        self::verifyIndexRootComplete($indexRoot);
     }
 
     /**
@@ -1165,7 +1431,21 @@ final class IndexBuildOrchestrator
      */
     public static function verifyIndexComplete(string $outputDir): void
     {
-        $entryPath = $outputDir . '/pagefind/pagefind-entry.json';
+        self::verifyIndexRootComplete($outputDir . '/pagefind');
+    }
+
+    /**
+     * The same check, against a directory that is itself an index.
+     *
+     * Split out so a build can verify its staged output before the swap
+     * publishes it, while the public entry point keeps taking the base output
+     * directory framework adapters pass.
+     *
+     * @throws \RuntimeException If the index is missing or malformed.
+     */
+    private static function verifyIndexRootComplete(string $indexRoot): void
+    {
+        $entryPath = $indexRoot . '/pagefind-entry.json';
         if (!file_exists($entryPath)) {
             throw new \RuntimeException(
                 "Index verification failed: pagefind-entry.json not found at {$entryPath}. "
