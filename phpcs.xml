@@ -1,0 +1,83 @@
+<?xml version="1.0"?>
+<ruleset xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" name="scolta-php" xsi:noNamespaceSchemaLocation="phpcs.xsd">
+  <description>tag1/scolta-php coding standards.</description>
+
+  <!--
+    Files to analyze. Kept in step with .php-cs-fixer.dist.php: php-cs-fixer is
+    the formatter of record (@PER-CS) and phpcs is the reporter — the two must
+    cover the same tree or a file passes one gate and not the other.
+  -->
+  <file>src</file>
+  <file>tests</file>
+
+  <!-- Files to be excluded -->
+  <exclude-pattern>*/vendor/*</exclude-pattern>
+  <exclude-pattern>*/node_modules/*</exclude-pattern>
+
+  <!--
+    Vendored generated code (see src/Index/Snowball/PROVENANCE.md) must stay
+    byte-identical to its sha256 manifest — never reformat it. Mirrors the
+    ->exclude('Index/Snowball') in .php-cs-fixer.dist.php and the excludePaths
+    in phpstan.neon.
+  -->
+  <exclude-pattern>src/Index/Snowball/*</exclude-pattern>
+
+  <arg name="extensions" value="php"/>
+
+  <!-- Use colors -->
+  <arg name="colors"/>
+
+  <!-- Show sniff codes in all reports -->
+  <arg value="s"/>
+  <!-- Show progress of the run -->
+  <arg value="p"/>
+
+  <!--
+    PSR-12 is the closest standard PHP_CodeSniffer ships to the @PER-CS ruleset
+    php-cs-fixer enforces (`phpcs -i` offers no PER standard). PER-CS 2.0 is
+    PSR-12 plus a few refinements, so the sniffs where the two genuinely
+    disagree are excluded below rather than fought — php-cs-fixer decides
+    formatting, and phpcs must not report code that `composer format` produces.
+  -->
+  <rule ref="PSR12">
+    <!--
+      @PER-CS collapses an empty body to `{}` on the declaration line, which is
+      what `composer format` writes for constructor-promotion-only constructors,
+      no-op null objects and marker exception subclasses. These three sniffs all
+      read that as a brace-placement error.
+    -->
+    <exclude name="Squiz.WhiteSpace.ScopeClosingBrace.ContentBefore"/>
+    <exclude name="Squiz.Functions.MultiLineFunctionDeclaration.BraceOnSameLine"/>
+    <exclude name="PSR2.Classes.ClassDeclaration.OpenBraceNewLine"/>
+
+    <!--
+      The `declare_strict_types` fixer puts declare(strict_types=1); directly
+      after the opening tag; PSR-12 wants a file-level docblock there first.
+      Affects the standalone scripts under tests/ that carry such a docblock.
+    -->
+    <exclude name="PSR12.Files.FileHeader.IncorrectOrder"/>
+
+    <!--
+      Multi-line conditions: PSR-12 requires the first expression on its own
+      line and the closing paren on its own line. @PER-CS takes no position and
+      php-cs-fixer will not produce that shape, so enforcing it here would put
+      the two tools in a loop.
+    -->
+    <exclude name="PSR12.ControlStructures.ControlStructureSpacing"/>
+
+    <!-- Line length is not enforced; @PER-CS has no line-length rule. -->
+    <exclude name="Generic.Files.LineLength.TooLong"/>
+  </rule>
+
+  <!--
+    Test-only conventions. Both are deliberate and neither appears in src/.
+  -->
+  <rule ref="PSR1.Methods.CamelCapsMethodName.NotCamelCaps">
+    <!-- snake_case test method names read better as sentences. -->
+    <exclude-pattern>tests/*</exclude-pattern>
+  </rule>
+  <rule ref="PSR1.Classes.ClassDeclaration.MultipleClasses">
+    <!-- Fakes, stubs and spies live beside the test case that uses them. -->
+    <exclude-pattern>tests/*</exclude-pattern>
+  </rule>
+</ruleset>

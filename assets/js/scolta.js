@@ -17,6 +17,14 @@
  *   container: '#scolta-search'            — CSS selector for the search container
  *   allowedLinkDomains: []                 — Domains allowed in summary links (empty = all)
  *   disclaimer: ''                         — Disclaimer text below AI summary (empty = none)
+ *   labels: {}                             — Optional: per-site overrides for user-facing UI strings.
+ *                                            Rendered as text (HTML-escaped). Keys and defaults:
+ *                                              expandedTerms: 'Also try:' — prefix before the
+ *                                                AI-expanded query-term chips.
+ *                                              aiOverview: 'AI Overview' — heading on the AI
+ *                                                summary box.
+ *                                            Missing, empty, or non-string values fall back to the
+ *                                            default; unknown keys are ignored.
  *   currentLanguage: null                  — Optional: 2-letter ISO language code (e.g. 'en', 'es').
  *                                            When set, search results are pre-filtered to this language.
  *                                            URL filter params (f_language=...) take precedence.
@@ -478,6 +486,10 @@
   // on-intent documents from a genuine content gap, so the "partial matches"
   // banner and the AI-summary absence hedge don't cry failure over a strong hit.
   let hadSpecificMatch = false;
+  // Raw Pagefind match count for the current browse; null on keyword searches.
+  // A browse loads only a capped, title-deduped head of the match list, so
+  // allScoredResults.length there is an artifact of cap + dedup, not a total.
+  let browseTotal = null;
   let pagefindBase = '';   // Set during initPagefind(); used by resolveUrl().
   let currentSortOverride = null;    // { field, direction } or null — active sort override
   let llmAppliedFilters = {};        // { dimension: value } — filters injected by LLM expansion
@@ -640,6 +652,26 @@
 
   function getInstancePriorityPages() {
     return (instanceConfig && instanceConfig.priority_pages) || [];
+  }
+
+  // User-facing UI strings a site may override — TOP-LEVEL instance config,
+  // the hideEmptyFacets pattern. One `labels` map rather than a flat key per
+  // string, so each string made overridable later joins this object instead
+  // of minting another top-level config key. A non-string or empty override
+  // falls back to the default: a broken settings form must degrade to the
+  // stock label, not blank it.
+  const LABEL_DEFAULTS = {
+    expandedTerms: 'Also try:',
+    aiOverview: 'AI Overview',
+  };
+
+  function getInstanceLabels() {
+    const l = (instanceConfig && instanceConfig.labels) || {};
+    const out = {};
+    for (const key of Object.keys(LABEL_DEFAULTS)) {
+      out[key] = (typeof l[key] === 'string' && l[key] !== '') ? l[key] : LABEL_DEFAULTS[key];
+    }
+    return out;
   }
 
   // SAYT settings are TOP-LEVEL instance config, not `scoring` keys — the
@@ -847,12 +879,18 @@
 
     // The id table: pageCount newline-separated fragment hashes. Page index is
     // the line number, and that is the numbering the posting lists refer to.
+    // Kept in both directions: pageOf (id -> page) for filtering and counting,
+    // idOf (page -> id) for the browse path, which enumerates pages and has no
+    // result list to take ids from.
     let off = newline + 1;
     const pageOf = new Map();
+    const idOf = new Array(header.pageCount);
     for (let i = 0; i < header.pageCount; i++) {
       const end = bytes.indexOf(10, off);
       if (end < 0) throw new Error('facet index id table truncated');
-      pageOf.set(decoder.decode(bytes.subarray(off, end)), i);
+      const id = decoder.decode(bytes.subarray(off, end));
+      pageOf.set(id, i);
+      idOf[i] = id;
       off = end + 1;
     }
 
@@ -892,14 +930,22 @@
       dimensions: header.dimensions,
       values: header.values,
       pageOf: pageOf,
+      idOf: idOf,
       postings: postings,
       mask: new Uint8Array(header.pageCount),
     };
   }
 
-  async function loadFacetIndex(basePath) {
+  async function loadFacetIndex(basePath, indexHash) {
     if (typeof fetch !== 'function') throw new Error('fetch unavailable');
-    const url = basePath + 'scolta.facets';
+    // Named after the index it was built against — the same convention
+    // pagefind.{hash}.pf_meta already uses — so the URL itself changes on
+    // every rebuild. A browser or CDN cache holding a previous build's
+    // response at a previous build's URL is never handed to a request for
+    // this one, which is what made the old fixed 'scolta.facets' name a
+    // caching hazard: identical URL across rebuilds, so a cached response
+    // from before the last rebuild would silently outlive it.
+    const url = basePath + 'scolta.' + indexHash + '.facets';
     const resp = await fetch(url);
     if (!resp || !resp.ok) throw new Error('HTTP ' + (resp && resp.status));
     return parseFacetIndex(await gunzipToBytes(await resp.arrayBuffer()));
@@ -978,19 +1024,7 @@
   // filter object and triggering a chunk load.
   function applyFacetFilters(index, results, filters) {
     if (!filters || typeof filters !== 'object') return results;
-    const active = [];
-    for (const [dim, vals] of Object.entries(filters)) {
-      const selected = vals instanceof Set ? [...vals]
-        : Array.isArray(vals) ? vals
-          : (vals === undefined || vals === null || vals === '') ? [] : [vals];
-      if (selected.length === 0) continue;
-      // An unknown dimension matches nothing, which is what Pagefind does with
-      // a filter it has no index for. A stale saved facet must not silently
-      // widen the result set.
-      const dimPostings = index.postings[dim] || [];
-      const chosen = dimPostings.filter(p => selected.indexOf(p.value) !== -1);
-      active.push(chosen);
-    }
+    const active = activePostings(index, filters);
     if (active.length === 0) return results;
     return (results || []).filter(r => {
       const page = index.pageOf.get(r.id);
@@ -1000,15 +1034,104 @@
       // have hidden is a smaller failure than silently dropping results the user
       // searched for.
       if (page === undefined) return true;
-      for (const chosen of active) {
-        let hit = false;
-        for (const posting of chosen) {
-          if (postingHasPage(posting, page)) { hit = true; break; }
-        }
-        if (!hit) return false;
-      }
-      return true;
+      return pageMatchesActive(active, page);
     });
+  }
+
+  // Resolve a filter selection to its posting lists: one array per dimension
+  // that carries a selection, each holding the postings of that dimension's
+  // selected values. An unknown dimension resolves to an empty array — it
+  // matches nothing, which is what Pagefind does with a filter it has no index
+  // for; a stale saved facet must not silently widen the result set.
+  function activePostings(index, filters) {
+    const active = [];
+    if (!filters || typeof filters !== 'object') return active;
+    for (const [dim, vals] of Object.entries(filters)) {
+      const selected = vals instanceof Set ? [...vals]
+        : Array.isArray(vals) ? vals
+          : (vals === undefined || vals === null || vals === '') ? [] : [vals];
+      if (selected.length === 0) continue;
+      const dimPostings = index.postings[dim] || [];
+      active.push(dimPostings.filter(p => selected.indexOf(p.value) !== -1));
+    }
+    return active;
+  }
+
+  // OR within a dimension, AND across dimensions — the semantics both
+  // applyFacetFilters() and the browse enumeration below apply.
+  function pageMatchesActive(active, page) {
+    for (const chosen of active) {
+      let hit = false;
+      for (const posting of chosen) {
+        if (postingHasPage(posting, page)) { hit = true; break; }
+      }
+      if (!hit) return false;
+    }
+    return true;
+  }
+
+  // A facet-only browse, served from the artifact alone. It used to be
+  // pagefind.search(null, ...), and Pagefind resolves that match-all by
+  // streaming the ENTIRE word index through its worker — 38-44 s measured on a
+  // 119k-page corpus, on every page load, HTTP cache or not. The artifact
+  // already states which pages every facet value covers, so the result set is
+  // a walk over the posting lists and the word index is never woken.
+  //
+  // The returned object carries the surface the pipeline reads off a search:
+  // {id, score: 0, words: [], data()} results (exactly what a match-all
+  // reports), `unfilteredResultCount`, and the lazy `filters` counts getter.
+  // Order is the id-table order — verified identical to Pagefind's own
+  // match-all order, since both number pages the same way. data() fetches the
+  // fragment by id, which is all a match-all's data() amounts to (no terms, so
+  // no locations and no excerpt context).
+  function browseFromFacetIndex(index, filters) {
+    const active = activePostings(index, filters);
+    // One shared method rather than a closure per result: an unfiltered browse
+    // enumerates the whole corpus, and MAX_PAGEFIND_RESULTS of these ever run.
+    function loadData() { return loadFragmentById(this.id); }
+    const results = [];
+    for (let page = 0; page < index.pageCount; page++) {
+      if (active.length === 0 || pageMatchesActive(active, page)) {
+        results.push({ id: index.idOf[page], score: 0, words: [], data: loadData });
+      }
+    }
+    const out = { results: results, unfilteredResultCount: results.length };
+    let counts = null;
+    // Lazy for the same reason pagefindSearch()'s wrapper is: the count runs
+    // over the full matched set, and only the count pass ever reads it.
+    Object.defineProperty(out, 'filters', {
+      enumerable: true,
+      configurable: true,
+      get() {
+        if (counts === null) counts = facetCountsFor(index, results);
+        return counts;
+      },
+    });
+    return out;
+  }
+
+  // Fetch one Pagefind fragment by result id, without a search to hang it off:
+  // the gzipped JSON Pagefind's own data() reads, behind its "pagefind_dcd"
+  // sentinel. Pagefind's excerpt is built from matched terms; a browse has
+  // none, so the leading content stands in (the card truncates it anyway).
+  async function loadFragmentById(id) {
+    const resp = await fetch(
+      facetIndexBase(facetIndexPagefindPath) + 'fragment/' + id + '.pf_fragment');
+    if (!resp || !resp.ok) {
+      throw new Error('fragment ' + id + ' failed: HTTP ' + (resp && resp.status));
+    }
+    let bytes = new Uint8Array(await resp.arrayBuffer());
+    if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+      const stream = new Response(bytes).body.pipeThrough(new DecompressionStream('gzip'));
+      bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+    let text = new TextDecoder().decode(bytes);
+    if (text.startsWith('pagefind_dcd')) text = text.slice('pagefind_dcd'.length);
+    const data = JSON.parse(text);
+    if (data.excerpt === undefined) {
+      data.excerpt = String(data.content || '').split(/\s+/).slice(0, 80).join(' ');
+    }
+    return data;
   }
 
   // Load the facet taxonomy. The artifact is the fast path; an index built
@@ -1023,11 +1146,23 @@
       if (facetIndexMergedLanguages) {
         throw new Error('a secondary language index was merged in');
       }
-      facetIndex = await loadFacetIndex(facetIndexBase(pagefindPath));
-      if (facetIndexExpectedHash && facetIndex.indexHash
-          && facetIndex.indexHash !== facetIndexExpectedHash) {
-        throw new Error('artifact was built against index ' + facetIndex.indexHash
-          + ' but the loaded index is ' + facetIndexExpectedHash + ' (stale cached artifact)');
+      // facetIndexExpectedHash comes from the cache-busted pagefind-entry.json
+      // fetched during initPagefind(), which always runs before this. Without
+      // it there is no trustworthy URL to ask for: the artifact is named
+      // after the index it was built for specifically so a stale cached
+      // response can never answer in its place, which means a request that
+      // cannot name that hash is not made at all.
+      if (!facetIndexExpectedHash) {
+        throw new Error('index hash unknown (pagefind-entry.json did not load)');
+      }
+      facetIndex = await loadFacetIndex(facetIndexBase(pagefindPath), facetIndexExpectedHash);
+      if (facetIndex.indexHash && facetIndex.indexHash !== facetIndexExpectedHash) {
+        // The URL itself is named after facetIndexExpectedHash, so landing
+        // here means the artifact's own header disagrees with the filename it
+        // was fetched under — a build inconsistency, not the stale-cache
+        // hazard the fixed 'scolta.facets' name used to risk.
+        throw new Error('artifact at hash ' + facetIndexExpectedHash
+          + ' is stamped for a different index (' + facetIndex.indexHash + ')');
       }
       cachedPagefindFilters = facetIndexTotals(facetIndex);
       debugLog('[scolta] Scolta facet index loaded:', facetIndex.dimensions.join(', '),
@@ -1036,7 +1171,8 @@
     } catch (e) {
       facetIndex = null;
       console.warn(
-        '[scolta] No Scolta facet index at ' + facetIndexBase(pagefindPath) + 'scolta.facets ('
+        '[scolta] No Scolta facet index at ' + facetIndexBase(pagefindPath)
+        + 'scolta.' + (facetIndexExpectedHash || '<unknown>') + '.facets ('
         + (e && e.message ? e.message : e) + '). Falling back to pagefind.filters(), which loads '
         + 'every filter chunk and makes each subsequent search cost time proportional to matched '
         + 'results times filter postings. Rebuild the search index to emit the facet index.',
@@ -1378,7 +1514,7 @@
   function summaryLabelHtml(withDots) {
     return `<div class="scolta-ai-summary-label">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2z"/></svg>
-        <span>AI Overview</span>${withDots ? '\n        <span class="scolta-ai-dots"><span>.</span><span>.</span><span>.</span></span>' : ''}
+        <span>${escapeHtml(getInstanceLabels().aiOverview)}</span>${withDots ? '\n        <span class="scolta-ai-dots"><span>.</span><span>.</span><span>.</span></span>' : ''}
       </div>`;
   }
 
@@ -1545,7 +1681,9 @@
   async function summarizeResults(query, results, expandedTerms = [], sortHint = null, filterHint = null, userFilters = {}) {
     const CONFIG = getInstanceConfig();
     const endpoints = getInstanceEndpoints();
-    if (!CONFIG.AI_SUMMARIZE || results.length === 0) return null;
+    // No query means nothing to summarize — a browse must not reach the
+    // endpoint, which rejects an empty query with a 400.
+    if (!CONFIG.AI_SUMMARIZE || !query || results.length === 0) return null;
     const summaryEl = els.aiSummary;
     // Normally a no-op: the slot was already reserved in the frame the results
     // painted. It still matters for a direct call, and for the case where the
@@ -2058,7 +2196,8 @@
       return;
     }
     container.style.display = "flex";
-    container.innerHTML = '<span style="font-size:0.8rem;color:#666;margin-right:0.2rem;">Also try:</span>' +
+    container.innerHTML = '<span class="scolta-expanded-terms-label" style="font-size:0.8rem;color:#666;margin-right:0.2rem;">' +
+      escapeHtml(getInstanceLabels().expandedTerms) + '</span>' +
       filtered
         .map(t => `<span class="scolta-expanded-term" data-scolta-search-term="${escapeAttr(t)}">${escapeHtml(t)}</span>`)
         .join("");
@@ -2240,6 +2379,24 @@
     // A search with no selection still loads nothing.
     if (facetsDeferred() && !facetIndex && hasFacetSelection(filters)) {
       await ensureFacetTaxonomy();
+    }
+    // A null query is a browse, and with the artifact in hand it never needs
+    // Pagefind: the pages come off the posting lists, and the match-all —
+    // which streams the whole word index through the worker, tens of seconds
+    // on a large corpus — never runs. Worth loading the artifact for even
+    // under 'deferred' with no selection, because the alternative IS the
+    // match-all; a deferred keyword search still fetches nothing. A sortHint
+    // stays with Pagefind (the artifact has no sort fields), and so does
+    // 'disabled', which never has the artifact. No artifact after the load
+    // attempt (none built, stale, a merged second language) falls through to
+    // the match-all: slow, but correct for exactly those corpora.
+    if (query === null && !sortHint && !facetsDisabled()) {
+      if (!facetIndex) {
+        await ensureFacetTaxonomy();
+      }
+      if (facetIndex) {
+        return browseFromFacetIndex(facetIndex, filters);
+      }
     }
     const searchOpts = {};
     // 'disabled' runs no facet filtering at all. Nothing upstream should put a
@@ -3145,7 +3302,10 @@
           date: data.meta?.date || '',
           pagefind_index: i,
           score: loaded.length > 1 ? 1 - (i / (loaded.length - 1)) : 1,
-          locations: contentLocations || data.locations || [],
+          // Never fall back to data.locations: Pagefind's values are not
+          // word positions, and the forced-phrase filter treats locations
+          // as adjacency evidence — an empty array fails open instead.
+          locations: contentLocations || [],
         };
       });
       // WASM config keys are snake_case; getInstanceConfig() returns
@@ -4583,6 +4743,7 @@
       displayedCount = 0;
       allScoredResults = [];
       hadSpecificMatch = false;
+      browseTotal = null;
       conversationMessages = [];
       followUpCount = 0;
       // Fresh cycle, fresh memo: identical searches are shared WITHIN a cycle
@@ -4674,12 +4835,21 @@
       // the last one would expand a search the user has left. Resolving null is
       // the shape the no-expansion path already takes when AI_EXPAND_QUERY is
       // off, so the phase-2 handler below needs no browse case of its own.
-      expandPromise = isBrowse
+      // A quoted forced-phrase query never expands, for the same reason it
+      // never takes the OR fallback below: the user asked for the exact
+      // phrase, and every document an expansion term seeds is one that
+      // matched something OTHER than that phrase. (The WASM scorer excludes
+      // non-adjacent primary matches for quoted queries; skipping expansion
+      // here closes the other door those documents came in through.)
+      expandPromise = (isBrowse || isForcedPhrase)
         ? Promise.resolve(null)
         : (preserveFilters ? Promise.resolve(lastExpandedTerms) : expandQuery(query));
-      expansionInFlight = !isBrowse && !preserveFilters && CONFIG.AI_EXPAND_QUERY;
+      expansionInFlight = !isBrowse && !isForcedPhrase && !preserveFilters && CONFIG.AI_EXPAND_QUERY;
 
       const primarySearch = await pagefindSearch(searchQuery, activeFilters);
+      // Pagefind returns every match id up front, so the true match total is
+      // free here — before the cap decides how few of them to load.
+      if (isBrowse) browseTotal = primarySearch.results.length;
       allScoredResults = isBrowse
         ? await loadBrowseResults(primarySearch)
         : await loadAndScoreSearch(primarySearch, scorerQuery, 1.0);
@@ -4886,12 +5056,17 @@
       // fetch failures, but the work before that fetch (candidate selection,
       // context assembly) is outside them, and on a malformed result set a
       // throw there used to strand the slot with no way back.
-      summarizeResults(query, allScoredResults, expandedLabel, sortHint, filterHint, activeFilters)
-        .catch(e => {
-          if (version !== searchVersion) return;
-          console.warn('[scolta:summarize] failed before the request:', e);
-          releaseSummarySlot();
-        });
+      // A browse skips summarization the way it skips expansion: there is no
+      // query to summarize, and the endpoint 400s an empty one. The result
+      // paint reserved no slot for a browse, so there is nothing to release.
+      if (!isBrowse) {
+        summarizeResults(query, allScoredResults, expandedLabel, sortHint, filterHint, activeFilters)
+          .catch(e => {
+            if (version !== searchVersion) return;
+            console.warn('[scolta:summarize] failed before the request:', e);
+            releaseSummarySlot();
+          });
+      }
     }).catch(e => {
       // The slot is reserved from the result paint, so anything that throws in
       // the expansion phase — between that paint and the summarize call — now
@@ -5357,7 +5532,8 @@
       // sits beside. Finding nothing is the moment a visitor who turned
       // expansion off is most likely to want it back, and clearing the header
       // here would strand them with no way to ask for it.
-      header.innerHTML = expansionToggleLink(CONFIG, false)
+      // No toggle on a browse: there is no query to expand.
+      header.innerHTML = currentQuery && expansionToggleLink(CONFIG, false)
         ? "<span>" + expansionToggleLink(CONFIG, false) + "</span>"
         : "";
       noResults.style.display = "block";
@@ -5372,16 +5548,20 @@
     // Waiting until the summarize call would put the box in later, on its own,
     // and push this list down — which is the shift. It is a sibling of
     // #scolta-results and touches nothing in the results write path below.
-    reserveSummarySlot();
+    // A browse gets no summary, so no slot: reserving one would leave the
+    // skeleton shimmering with nothing coming to resolve it.
+    if (currentQuery) reserveSummarySlot();
 
     const startIndex = displayedCount;
     const appended = startIndex > 0;
     const showing = Math.min(startIndex + CONFIG.RESULTS_PER_PAGE, filtered.length);
-    const expandLabel = expansionCountLabel(CONFIG, isExpanded);
+    // A browse has no query to expand, so the expansion toggle is meaningless
+    // there; keyword searches keep it.
+    const expandLabel = currentQuery ? expansionCountLabel(CONFIG, isExpanded) : '';
     const filterLabel = Object.keys(activeFilters).length > 0
       ? ' in ' + Object.entries(activeFilters)
           .filter(([, vals]) => vals instanceof Set && vals.size > 0)
-          .map(([dim, vals]) => [...vals].map(v => filterDisplayValue(dim, v)).join(', '))
+          .map(([dim, vals]) => [...vals].map(v => escapeHtml(filterDisplayValue(dim, v))).join(', '))
           .join('; ')
       : '';
     // The OR fallback is a retrieval mode, not a failure. Only call it out as
@@ -5391,16 +5571,27 @@
     const orFallbackLabel = usedOrFallback
       ? (hadSpecificMatch ? ' — showing best matches' : ' — no exact matches found, showing partial matches')
       : '';
-    const resultNoun = filtered.length === 1 ? 'result' : 'results';
+    // On a browse the "of N" figure is the raw Pagefind match count, not the
+    // loaded list's length: a browse loads only a capped head of the matches
+    // and then title-dedupes it, so the list length is an artifact of cap +
+    // dedup, not a corpus figure. The wrinkle is deliberate: N is the raw
+    // count while the paged list is deduped, so paging can exhaust before N —
+    // preferred over reporting a cap artifact as the total. "Showing X" keeps
+    // its meaning: how many are painted.
+    const totalCount = (!currentQuery && browseTotal !== null)
+      ? browseTotal
+      : filtered.length;
+    const resultNoun = totalCount === 1 ? 'result' : 'results';
     // A browse has no query to name, and `results for ""` is worse than saying
-    // nothing. The count itself keeps the same meaning it has on every other
-    // path: how many results were loaded and can be paged through, not how many
-    // documents the corpus holds.
+    // nothing.
     const forLabel = currentQuery
       ? ` for "${escapeHtml(displayQuery(currentQuery))}"`
       : '';
-    header.innerHTML = `<span>${filtered.length.toLocaleString()} ${resultNoun}${forLabel}${filterLabel}${expandLabel}${orFallbackLabel}</span>
-                        <span>Showing ${showing}</span>`;
+    // One sentence rather than a count on the left and a bare "Showing N" on
+    // the right: the two figures describe the same list, and reading them
+    // together ("Showing 12 of 276 results") is what makes the second one
+    // mean anything.
+    header.innerHTML = `<span>Showing ${showing.toLocaleString()} of ${totalCount.toLocaleString()} ${resultNoun}${forLabel}${filterLabel}${expandLabel}${orFallbackLabel}</span>`;
 
     const renderer = activeResultRenderer();
     // Cheap identity of the current highlight set. Expansion grows
@@ -5581,13 +5772,23 @@
           <div id="scolta-filter-indicator" style="display:none;"></div>
           <div class="scolta-results-header" id="scolta-results-header"></div>
           <div id="scolta-results"></div>
+          <!-- Inside the results column, right after #scolta-results, not a
+               sibling of .scolta-layout. As a sibling it stacked below BOTH
+               grid columns, so on a real site the facet aside's full height
+               (~3000px) pushed "No results found." thousands of pixels below
+               the fold: the empty branch of renderResults() empties
+               #scolta-results but leaves the layout displayed, so the aside
+               keeps its height and the message lands under it. Nested here it
+               renders next to the results header where the visitor is looking.
+               No data-scolta-scaffold: that attribute marks the top-level nodes
+               this instance owns for non-destructive init()/destroy(), and this
+               node is now carried by #scolta-layout, which has it. -->
+          <div class="scolta-no-results" id="scolta-no-results" style="display:none;">
+            <p style="font-size:1.2rem;">No results found.</p>
+            <p style="margin-top:0.5rem;">Try different keywords or clear your site filters.</p>
+          </div>
           <button class="scolta-load-more" id="scolta-load-more" style="display:none;">Show more results</button>
         </div>
-      </div>
-
-      <div class="scolta-no-results" id="scolta-no-results" style="display:none;" data-scolta-scaffold>
-        <p style="font-size:1.2rem;">No results found.</p>
-        <p style="margin-top:0.5rem;">Try different keywords or clear your site filters.</p>
       </div>
     `;
 

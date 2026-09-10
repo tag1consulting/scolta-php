@@ -27,6 +27,7 @@ class PhpIndexer
     private readonly StorageDriverInterface $storage;
     private readonly MemoryBudget $budget;
     private readonly PageWordCache $cache;
+    private readonly RetiredIndexTrash $trash;
 
     /** Global page offset for sequential page numbering across chunks. */
     private int $currentPageOffset = 0;
@@ -43,6 +44,7 @@ class PhpIndexer
         ?MemoryBudget $budget = null,
     ) {
         $this->storage     = $storage ?? new FilesystemDriver();
+        $this->trash       = new RetiredIndexTrash($this->storage, $outputDir);
         $this->coordinator = new BuildCoordinator($stateDir, $hmacSecret);
         $this->budget      = $budget ?? MemoryBudget::default();
 
@@ -50,6 +52,7 @@ class PhpIndexer
         $stemmer   = new Stemmer($language);
         $this->builder = new InvertedIndexBuilder($tokenizer, $stemmer);
         $this->merger  = new IndexMerger();
+        $this->merger->setStateDir($stateDir);
         $this->cache   = new PageWordCache(
             $stateDir,
             $this->storage,
@@ -242,28 +245,28 @@ class PhpIndexer
     /**
      * Compute a deterministic fingerprint for a set of content items.
      *
-     * Attachment text is appended only when there is something to append, the
-     * same rule and for the same reason as contentHash() below. Folding it in
-     * unconditionally buys nothing the conditional form does not already give:
-     * a page that gains attachment text still moves from hash(body) to
-     * hash(body, attachment), so the first build after a site starts
-     * populating the field still runs, which is the property this hash has to
-     * have. What it costs is paid by every corpus that has no attachment text
-     * at all. Two things break for those:
+     * This value answers one question — "would rebuilding produce a different
+     * index?" — so it must cover every ContentItem field that reaches the
+     * built output. The v1 formula hashed only the body (and, conditionally,
+     * attachment text); title, URL, language, date, siteName, filters,
+     * metadata and sortable values all reach the fragments or the token
+     * streams too, so an edit touching only those produced an identical
+     * fingerprint and `shouldBuild()` reported the corpus as unchanged. The
+     * edit never entered the index. v2 hashes the whole item.
      *
-     *  - **Every existing index rebuilds once, for no change in output.** This
-     *    hash is what `shouldBuild()` compares against `.scolta-state`, so a
-     *    changed formula reports the whole corpus as changed on the first
-     *    build after the upgrade. That is a full reindex, not a cache refill;
-     *    the fleet's largest demo is 12,541 fragments.
-     *  - **The streaming mirror in scolta-laravel stops agreeing.** Its queued
-     *    rebuild path cannot hold every item in memory, so it hashes items one
-     *    at a time and combines them, and asserts byte-identity with this
-     *    method in its own test suite. A site on the mirrored formula would
-     *    read every dispatch as changed and rebuild the corpus on every run.
-     *    That adapter's floor still admits a scolta-php whose ContentItem has
-     *    no attachmentText at all, so it cannot simply follow an unconditional
-     *    change here.
+     * Migration: the `php-indexer-v2:` prefix invalidates every stored
+     * `.scolta-state`, so the first build after upgrading is a full rebuild.
+     * It is a warm one — `contentHash()` below is a separate formula and its
+     * keys do not move, so the rebuild refills from the existing token cache
+     * rather than re-tokenizing. Because the prefix bump already changes
+     * every fingerprint once, all fields are folded in unconditionally; the
+     * conditional-append pattern contentHash() uses exists only to preserve
+     * old hashes, which a version bump discards anyway.
+     *
+     * Adapters that stream (scolta-laravel's queued rebuild cannot hold every
+     * item in memory) must not reimplement this formula: call
+     * fingerprintEntry() per item and combineFingerprintEntries() on the
+     * accumulated entries. This method is exactly that composition.
      *
      * @param \Tag1\Scolta\Export\ContentItem[] $items
      * @since 1.0.0
@@ -271,18 +274,84 @@ class PhpIndexer
      */
     public static function computeFingerprint(array $items): string
     {
-        $data = array_map(
-            fn($item) => $item->id . ':' . hash(
-                'sha256',
-                $item->attachmentText === ''
-                    ? $item->bodyHtml
-                    : $item->bodyHtml . "\0" . $item->attachmentText,
-            ),
-            $items,
+        return self::combineFingerprintEntries(
+            array_map(self::fingerprintEntry(...), $items),
         );
-        sort($data);
+    }
 
-        return hash('sha256', 'php-indexer-v1:' . json_encode($data));
+    /**
+     * One item's fingerprint entry, for streaming adapters.
+     *
+     * Covers every field that reaches the built output. Always sha256, never
+     * the fastest available algorithm the way contentHash() picks one: the
+     * combined fingerprint is compared across processes and hosts through
+     * `.scolta-state`, so it must not depend on which hash algorithms a host
+     * has compiled in.
+     *
+     * JSON_THROW_ON_ERROR because json_encode() otherwise returns false on
+     * unencodable input (invalid UTF-8, NAN/INF), which implode() coerces to
+     * an empty string — every malformed value would hash alike and edits to
+     * such a field would be read as "unchanged". The scalar fields have no
+     * such failure mode: they go into hash() as raw bytes.
+     *
+     * @throws \JsonException When filters, metadata or sortable hold a value
+     *   JSON cannot represent.
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public static function fingerprintEntry(\Tag1\Scolta\Export\ContentItem $item): string
+    {
+        $parts = [
+            $item->title,
+            $item->url,
+            $item->siteName,
+            $item->language,
+            $item->date,
+            json_encode(self::canonicalizedArray($item->filters), JSON_THROW_ON_ERROR),
+            json_encode(self::canonicalizedArray($item->metadata), JSON_THROW_ON_ERROR),
+            json_encode(self::canonicalizedArray($item->sortable), JSON_THROW_ON_ERROR),
+            $item->bodyHtml,
+            $item->attachmentText,
+        ];
+
+        return $item->id . ':' . hash('sha256', implode("\0", $parts));
+    }
+
+    /**
+     * Combine fingerprintEntry() values into the corpus fingerprint.
+     *
+     * Sorted before hashing, so the fingerprint is independent of the order
+     * the source yields items in.
+     *
+     * @param string[] $entries
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public static function combineFingerprintEntries(array $entries): string
+    {
+        sort($entries);
+
+        return hash('sha256', 'php-indexer-v2:' . json_encode($entries, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * Recursively sort array keys so key-order jitter from the source CMS is
+     * not read as a content change. A list's keys are already 0..n-1, so
+     * ksort() leaves it alone — multi-value filter order is preserved.
+     *
+     * @param array<array-key, mixed> $value
+     * @return array<array-key, mixed>
+     */
+    private static function canonicalizedArray(array $value): array
+    {
+        foreach ($value as $key => $element) {
+            if (is_array($element)) {
+                $value[$key] = self::canonicalizedArray($element);
+            }
+        }
+        ksort($value);
+
+        return $value;
     }
 
     /**
@@ -371,21 +440,34 @@ class PhpIndexer
 
         $this->storage->move($newDir, $finalDir);
 
-        if ($this->storage->exists($oldDir)) {
+        // Rename, never delete: the serial unlink loop that used to run here
+        // took hours on NFS after the new index was already live, and it
+        // read as a hang. This legacy indexer has no logger, so it does not
+        // sweep the trash itself — the adapter's scheduled sweep (hook_cron
+        // / drush scolta:cleanup on Drupal) deletes it. If the rename itself
+        // fails (e.g. cross-filesystem), fall back to the old inline
+        // deletion rather than leaving the directory behind with no logger
+        // to report it and no trash sweep that will ever find it.
+        if ($this->storage->exists($oldDir) && !$this->trash->retire($oldDir)) {
             $this->storage->deleteDirectory($oldDir);
         }
     }
 
     /**
-     * Remove a staging directory left behind by an interrupted swap.
+     * Clear a staging directory left behind by an interrupted swap.
      *
-     * Failing loudly rather than pressing on: a staging path that cannot be
-     * cleared is a rename() target that is about to fail anyway, and the
-     * message names the directory an operator has to remove by hand.
+     * Retiring by rename keeps this O(1) on NFS; inline deletion is only the
+     * fallback. Failing loudly rather than pressing on: a staging path that
+     * cannot be cleared is a rename() target that is about to fail anyway,
+     * and the message names the directory an operator has to remove by hand.
      */
     private function clearStagingDir(string $dir): void
     {
         if (!$this->storage->exists($dir)) {
+            return;
+        }
+
+        if ($this->trash->retire($dir)) {
             return;
         }
 
@@ -412,5 +494,4 @@ class PhpIndexer
 
         return $count;
     }
-
 }

@@ -161,5 +161,4 @@ enum TextChannel: string
             self::Url                                 => false,
         };
     }
-
 }

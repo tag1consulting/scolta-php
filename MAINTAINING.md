@@ -21,7 +21,10 @@ the life of the major and no longer tracks the development line.
 **Where it publishes.** Packagist, as `tag1/scolta-php`. To confirm:
 `composer clear-cache && composer show tag1/scolta-php -a | grep versions`.
 
-**CI checks.** phpunit (`test`, plus `coverage`), `wasm-validation`, `JS tests (Jest)`, `docs-check`
+**CI checks.** phpunit (`test`, plus `coverage`), two coding-standard steps in the `test` job's lint row
+(`Lint (php-cs-fixer)` running `composer lint-format`, and `Lint (phpcs)` running `composer phpcs` against
+`phpcs.xml`) — separate steps so a red check names the tool, and `composer lint` runs both at once locally,
+`wasm-validation`, `JS tests (Jest)`, `docs-check`
 (CHANGELOG when code changes, and CONFIG_REFERENCE.md when `ScoltaConfig` or `SetupCheck` changes),
 `analyse` (PHPStan, with a baseline that must not grow past its ratchet), `version-check` (format only),
 `antipatterns`, `Concordance fixture version check` (the fixture must name the same Pagefind version as

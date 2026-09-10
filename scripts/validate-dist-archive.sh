@@ -60,6 +60,7 @@ EXCLUDED_PATHS=(
   ".github"
   "phpunit.xml"
   ".php-cs-fixer.dist.php"
+  "phpcs.xml"
   "phpstan.neon"
   "phpstan-baseline.neon"
   "benchmarks"

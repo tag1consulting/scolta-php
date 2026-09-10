@@ -6,10 +6,12 @@
  * an empty state, nothing, with the previous paint left on screen.
  *
  * Browse and search are one code path that differs only in whether a filter is
- * applied. Pagefind returns the whole corpus for a null term and applies any
- * active filters, so what these pin is that the browse path reaches the same
- * search the query path reaches, that it costs no more than that path costs,
- * and that the transitions in and out of it are clean.
+ * applied. With the artifact in hand a browse never reaches Pagefind at all:
+ * pagefindSearch() enumerates the selection's pages off the posting lists and
+ * loads fragments by id, because Pagefind's match-all (search(null)) streams
+ * the entire word index through its worker — 38-44 s measured on a 119k-page
+ * corpus. These pin that the browse renders the list the match-all rendered,
+ * costs no Pagefind search and no filter chunk, and transitions cleanly.
  *
  * The cost assertions are load-bearing rather than decorative. Naming a
  * dimension in a search's filter object makes Pagefind lazily fetch that
@@ -73,6 +75,33 @@ function resultsForPages(pages) {
 const ALL_PAGES = Array.from({ length: 200 }, (_, i) => i);
 
 /**
+ * Serve a Pagefind fragment the way the published directory does: gzipped
+ * JSON behind the "pagefind_dcd" sentinel, addressed by result id. The
+ * artifact browse path fetches these directly instead of going through a
+ * Pagefind result's data(). Content mirrors resultsForPages(), minus the
+ * fields only a search computes (excerpt, locations).
+ */
+function fragmentResponse(url) {
+    const m = String(url).match(/fragment\/(en_[0-9a-f]+)\.pf_fragment$/);
+    if (!m) return null;
+    const p = PAGE_IDS.indexOf(m[1]);
+    if (p === -1) return Promise.resolve({ ok: false, status: 404 });
+    const gz = zlib.gzipSync(Buffer.from('pagefind_dcd' + JSON.stringify({
+        url: '/p' + p,
+        content: 'Entry ' + p + ' content about things.',
+        word_count: 20,
+        meta: { title: 'Alpha' + p + ' Bravo' + p + ' Charlie' + p, url: '/p' + p },
+        filters: {},
+    })));
+    return Promise.resolve({
+        ok: true,
+        status: 200,
+        arrayBuffer: () => Promise.resolve(
+            gz.buffer.slice(gz.byteOffset, gz.byteOffset + gz.byteLength)),
+    });
+}
+
+/**
  * A Pagefind mock that records every search it is asked to run.
  *
  * A null query matches the whole corpus, the way Pagefind does; a term matches
@@ -105,7 +134,7 @@ function createMockPagefind() {
     return { mock, calls };
 }
 
-async function boot(mockPagefind, calls) {
+async function boot(mockPagefind, calls, scoringExtra, configExtra) {
     const dom = new JSDOM(
         '<!DOCTYPE html><html lang="en"><body><div id="scolta-search"></div></body></html>',
         { url: 'http://localhost/search', runScripts: 'outside-only' },
@@ -128,7 +157,7 @@ async function boot(mockPagefind, calls) {
                 }),
             });
         }
-        if (/scolta\.facets/.test(url)) {
+        if (/scolta\.[^/]+\.facets/.test(url)) {
             const b = FIXTURE_GZ;
             return Promise.resolve({
                 ok: true,
@@ -137,6 +166,16 @@ async function boot(mockPagefind, calls) {
                     b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)),
             });
         }
+        if (/\/s$/.test(url)) {
+            return Promise.resolve({
+                ok: true,
+                status: 200,
+                json: () => Promise.resolve({ summary: 'A useful summary.' }),
+                text: () => Promise.resolve('{}'),
+            });
+        }
+        const frag = fragmentResponse(url);
+        if (frag) return frag;
         return Promise.resolve({ ok: false, status: 404 });
     };
 
@@ -158,14 +197,14 @@ async function boot(mockPagefind, calls) {
     window.TextDecoder = TextDecoder;
     window.scrollTo = () => {};
     window.mockPagefind = mockPagefind;
-    window.scolta = {
+    window.scolta = Object.assign({
         pagefindPath: '/pagefind/pagefind.js',
-        scoring: {
+        scoring: Object.assign({
             MAX_PAGEFIND_RESULTS: 75, RESULTS_PER_PAGE: 12,
             AI_EXPAND_QUERY: false, AI_SUMMARIZE: false,
-        },
+        }, scoringExtra),
         endpoints: { expand: '/e', summarize: '/s', followup: '/f' },
-    };
+    }, configExtra || {});
 
     window.eval(patchedSource);
     await new Promise(r => setTimeout(r, 0));
@@ -222,15 +261,18 @@ describe('an empty query browses the corpus (SML-2791)', () => {
             .toBe('none');
     });
 
-    test('the browse asks Pagefind for a null term, never an empty string', async () => {
+    test('the browse never asks Pagefind to search at all', async () => {
         const { mock, calls } = createMockPagefind();
         const env = await boot(mock, calls);
         await search(env, '');
 
-        expect(calls.queries.length).toBeGreaterThan(0);
-        // '' is a term like any other and would match nothing.
-        expect(calls.queries.every(q => q !== '')).toBe(true);
-        expect(calls.queries.some(q => q === null)).toBe(true);
+        // The old path was pagefind.search(null) — the match-all that streams
+        // the entire word index through the worker. With the artifact present
+        // the browse (and its count pass) enumerates the posting lists and
+        // fetches fragments directly by id instead.
+        expect(calls.queries).toEqual([]);
+        expect(env.requested.some(u => /fragment\/en_[0-9a-f]+\.pf_fragment/.test(u))).toBe(true);
+        expect(cards(env.window).length).toBeGreaterThan(0);
     });
 
     test('no text plus an active facet renders the filtered list', async () => {
@@ -329,15 +371,30 @@ describe('an empty query browses the corpus (SML-2791)', () => {
             .toBe('block');
     });
 
-    test('the cap bounds a browse of a large corpus the way it bounds a search', async () => {
+    test('a browse header reports the raw match total, not the loaded head', async () => {
         const { mock, calls } = createMockPagefind();
         const env = await boot(mock, calls);
         await search(env, '');
 
-        // MAX_PAGEFIND_RESULTS is 75: the corpus is 200 and nothing loads more
-        // than the cap, so the header can never claim the whole corpus.
-        const total = Number(headerText(env.window).match(/^(\d+)/)[1]);
-        expect(total).toBeLessThanOrEqual(75);
+        // MAX_PAGEFIND_RESULTS is 75 against a 200-page corpus. Only a capped,
+        // title-deduped head is loaded, but Pagefind returned all 200 match ids
+        // up front, and that is the "of N" figure — a number that used to be
+        // an artifact of cap + dedup (75 minus whatever dedup ate) and moved
+        // when a facet was toggled.
+        const total = Number(headerText(env.window).match(/Showing\s+[\d,]+\s+of\s+([\d,]+)/)[1].replace(/,/g, ''));
+        expect(total).toBe(200);
+        // The cap still bounds what is loaded: paging can exhaust before N.
+        expect(cards(env.window).length).toBeLessThanOrEqual(75);
+    });
+
+    test('a keyword search header still reports the loaded list length', async () => {
+        const { mock, calls } = createMockPagefind();
+        const env = await boot(mock, calls);
+        await search(env, 'things');
+
+        // The term matches 20 pages; the keyword path is unchanged.
+        const total = Number(headerText(env.window).match(/Showing\s+[\d,]+\s+of\s+([\d,]+)/)[1].replace(/,/g, ''));
+        expect(total).toBe(20);
     });
 
     test('a browse runs no query expansion', async () => {
@@ -346,5 +403,72 @@ describe('an empty query browses the corpus (SML-2791)', () => {
         await search(env, '');
 
         expect(env.requested.some(u => /\/e$/.test(u))).toBe(false);
+    });
+
+    /**
+     * There is nothing to summarize with no query, and the endpoint rejects an
+     * empty one with a 400 — every browse used to POST anyway. The keyword case
+     * proves this harness would see the request if one were made.
+     */
+    test('a browse requests no summary and reserves no summary slot', async () => {
+        const { mock, calls } = createMockPagefind();
+        const env = await boot(mock, calls, { AI_SUMMARIZE: true });
+        await search(env, '');
+
+        expect(env.requested.some(u => /\/s$/.test(u))).toBe(false);
+        // No stranded skeleton: the slot stays in the collapsed, disabled shape.
+        expect(env.window.document.querySelector('#scolta-ai-summary').style.display)
+            .toBe('none');
+    });
+
+    test('a keyword search still summarizes', async () => {
+        const { mock, calls } = createMockPagefind();
+        const env = await boot(mock, calls, { AI_SUMMARIZE: true });
+        await search(env, 'things');
+
+        expect(env.requested.some(u => /\/s$/.test(u))).toBe(true);
+    });
+
+    test('clearing the box after a search drops the summary with it', async () => {
+        const { mock, calls } = createMockPagefind();
+        const env = await boot(mock, calls, { AI_SUMMARIZE: true });
+        await search(env, 'things');
+        env.requested.length = 0;
+
+        await search(env, '');
+
+        expect(env.requested.some(u => /\/s$/.test(u))).toBe(false);
+        expect(env.window.document.querySelector('#scolta-ai-summary').style.display)
+            .toBe('none');
+    });
+});
+
+describe("a browse under facetMode 'deferred'", () => {
+
+    test('a browse with no selection still loads the artifact rather than the match-all', async () => {
+        // An empty-box browse carries no selection, so 'deferred' would not
+        // load the artifact — but the alternative IS the match-all, orders of
+        // magnitude more expensive than the download the mode defers.
+        const { mock, calls } = createMockPagefind();
+        const env = await boot(mock, calls, null, { facetMode: 'deferred' });
+        await search(env, '');
+
+        expect(env.requested.filter(u => /scolta\.[^/]+\.facets/.test(u)).length).toBe(1);
+        expect(calls.queries).toEqual([]);
+        expect(cards(env.window).length).toBeGreaterThan(0);
+    });
+
+    test('a filtered browse loads the artifact once and takes the artifact path', async () => {
+        const { mock, calls } = createMockPagefind();
+        const env = await boot(mock, calls, null, { facetMode: 'deferred' });
+        await search(env, '');
+        await clickFacet(env, 'topic', 'Fruit');
+
+        expect(env.requested.filter(u => /scolta\.[^/]+\.facets/.test(u)).length).toBe(1);
+        expect(calls.queries).toEqual([]);
+        expect(calls.searchOpts.every(o => !o.filters)).toBe(true);
+        const urls = shownUrls(env.window);
+        expect(urls.length).toBeGreaterThan(0);
+        expect(urls.every(u => isFruit(Number(u.replace('/p', ''))))).toBe(true);
     });
 });

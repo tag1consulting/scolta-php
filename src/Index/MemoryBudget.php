@@ -347,7 +347,7 @@ final class MemoryBudget
      * copied from a config file should degrade to something that runs.
      *
      * @param int $level 1 (fastest) to 9 (smallest).
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public function withCompressionLevel(int $level): self
@@ -373,7 +373,7 @@ final class MemoryBudget
      * gzip level for every index artifact this build writes.
      *
      * @see self::DEFAULT_COMPRESSION_LEVEL for the measurements behind the default.
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public function compressionLevel(): int

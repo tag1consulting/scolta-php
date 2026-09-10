@@ -256,7 +256,7 @@ final class PfIndexCodec
      *
      * @param int                  $delta Page number minus the previous item's.
      * @param array<string, mixed> $entry `['positions' => ..., 'meta_positions' => ...]`.
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public static function encodePageItem(CborEncoder $cbor, int $delta, array $entry): string
@@ -295,7 +295,7 @@ final class PfIndexCodec
      *
      * @param string $cborBody The chunk bytes with gzip and delimiter stripped.
      * @return array<string, string> Word => that entry's raw CBOR, in file order.
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public static function splitEntries(string $cborBody): array
@@ -342,7 +342,7 @@ final class PfIndexCodec
      * The byte-level counterpart of {@see self::decodeChunkFile()}.
      *
      * @return array<string, string> Word => that entry's raw CBOR, in file order.
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public static function splitEntriesFromFile(string $path): array
@@ -366,7 +366,7 @@ final class PfIndexCodec
      * Reassemble a chunk body from raw entries, in the order given.
      *
      * @param array<string, string> $rawEntries Word => raw CBOR entry.
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public static function assembleChunk(CborEncoder $cbor, array $rawEntries): string
@@ -392,7 +392,7 @@ final class PfIndexCodec
      * @param array<int, array<string, mixed>>        $addEntries     Ordinal => new page entry.
      * @param array<string, list<int>>                $variantAdds    Variant form => ordinals to add.
      * @return string|null The new entry bytes, or null when no page remains.
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public static function patchEntry(
