@@ -4,6 +4,12 @@ Breaking changes and migration steps between versions of scolta-php.
 
 ## Unreleased
 
+### The corpus fingerprint formula changed (v2) — one full rebuild per site
+
+No code changes are needed. The fingerprint `shouldBuild()` compares against `.scolta-state` now covers every ContentItem field that reaches the built index (previously only the body and attachment text, so title-only, URL-only, filter-only and similar edits were never indexed). Every stored fingerprint is invalidated by the formula change, so the first build after upgrading reports the corpus as changed and runs in full. The token cache is unaffected — that rebuild refills from it rather than re-tokenizing.
+
+Adapters that reimplemented the formula for streaming must switch to `PhpIndexer::fingerprintEntry()` / `combineFingerprintEntries()` in the same release that adopts this version (scolta-laravel does so in its next release); a mismatched pair rebuilds the corpus on every dispatch.
+
 ### The results header carries a visitor-facing expansion switch
 
 Nothing breaks and no code needs to change, but the control is on by default, so a site running query expansion will see a new link inside the result-count sentence after upgrading the bundle — `8 results for "search" (with expanded terms - disable)`, and `8 results for "search" - expand terms` once turned off. A visitor's choice lives in their own browser (`localStorage`, key `scolta:expansion-disabled`); nothing server-side reads it, so it starts no session and is invisible to page and edge caches.
