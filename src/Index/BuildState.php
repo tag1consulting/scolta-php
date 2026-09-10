@@ -518,6 +518,19 @@ class BuildState
     }
 
     /**
+     * Return the number of chunks the manifest counts as committed.
+     *
+     * Returns 0 when no manifest is present.
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function getChunksWritten(): int
+    {
+        return (int) ($this->readManifest()['chunks_written'] ?? 0);
+    }
+
+    /**
      * Return the number of pages processed so far in the current build.
      *
      * Returns 0 when no manifest is present.

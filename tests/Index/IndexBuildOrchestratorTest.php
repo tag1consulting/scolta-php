@@ -11,6 +11,7 @@ use Tag1\Scolta\Index\BuildIntent;
 use Tag1\Scolta\Index\CachedContentReference;
 use Tag1\Scolta\Index\IndexBuildOrchestrator;
 use Tag1\Scolta\Index\MemoryBudget;
+use Tag1\Scolta\Index\PageTableLedger;
 use Tag1\Scolta\Index\PhpIndexer;
 use Tag1\Scolta\Index\RetiredIndexTrash;
 use Tag1\Scolta\Index\StatusReport;
@@ -820,6 +821,47 @@ class IndexBuildOrchestratorTest extends TestCase
 
         $this->removeDir($refStateDir);
         $this->removeDir($refOutputDir);
+    }
+
+    /**
+     * flushChunk() journals a chunk's ledger rows, then writes the chunk file
+     * and advances the manifest. A SIGKILL between the two leaves rows stamped
+     * as seen by this build that no chunk on disk contains. The resume used to
+     * skip those pages as already indexed, so the page table ended up one chunk
+     * longer than the pages committed and the final integrity check rejected
+     * the whole build (sharemylesson.com, 2026-09-10: 119125 live rows against
+     * 119075 committed pages, seven hours of work lost).
+     */
+    public function testResumeReindexesAChunkJournalledButNeverCommitted(): void
+    {
+        $budget = MemoryBudget::conservative()->withChunkSize(3);
+        $items  = $this->makeItems(9);
+
+        // Segment 1: commit chunk 0, then yield.
+        $orch   = new IndexBuildOrchestrator($this->stateDir, $this->outputDir, memoryPressureProbe: static fn() => true);
+        $report = $orch->build(BuildIntent::fresh(9, $budget), $items);
+        $this->assertSame('memory_abort', $report->error);
+        $this->assertSame(1, $report->chunksWritten);
+
+        // The kill: chunk 1's rows reach the journal, the chunk file and the
+        // manifest never follow. This is exactly the write flushChunk() had
+        // completed when the process died.
+        $ledger = new PageTableLedger($this->stateDir, new FilesystemDriver());
+        foreach (array_slice($items, 3, 3) as $item) {
+            $ledger->allocate($item->id, $item->url);
+        }
+        $ledger->checkpoint(1);
+        $this->assertTrue($ledger->wasSeenThisBuild('page-3'));
+
+        // Segment 2 is handed the whole corpus again and must index page-3..5
+        // instead of trusting the stamp.
+        $orch = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
+        $this->assertFalse($orch->pageTableLedger()->wasSeenThisBuild('page-3'));
+        $this->assertTrue($orch->pageTableLedger()->wasSeenThisBuild('page-0'));
+
+        $report = $orch->build(BuildIntent::resume($budget), $items);
+        $this->assertTrue($report->success, 'Resume must complete: ' . ($report->error ?? ''));
+        $this->assertCount(9, glob($this->outputDir . '/pagefind/fragment/*.pf_fragment') ?: []);
     }
 
     // -------------------------------------------------------------------
