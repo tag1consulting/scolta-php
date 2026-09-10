@@ -317,7 +317,7 @@ final class PageWordCache
      * bounded by the manifest cap and swept by the next full build. That is
      * the trade — a little garbage rather than a wiped cache.
      *
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public function saveWithoutPruning(): void

@@ -68,7 +68,13 @@ final class HealthChecker
      * marker, so an operator who sees one with an old `since` and a working
      * site is looking at a site that has not made an AI call since the fix.
      *
-     * @return array{status: string, ai_configured: bool, ai_usable: bool, ai_auth_failing: bool, ai_auth_failing_since: int|null, ai_auth_failing_ttl: int|null, ai_key_source: string|null, ai_amazee_overridden: bool, ai_provider: string, pagefind_available: bool, wasm_available: bool, index_exists: bool, pagefind: array, wasm: array}
+     * `status` is `ok` or `degraded`; `status_reasons` names every fault behind
+     * a `degraded`, for the operator who can see past the trimmed anonymous
+     * payload. Selecting no provider at all is a supported configuration, not
+     * a fault, so `ai_usable: false` alone does not degrade the status. See
+     * docs/HEALTH_REFERENCE.md.
+     *
+     * @return array{status: 'ok'|'degraded', status_reasons: list<string>, ai_provider: string, ai_provider_selected: bool, ai_configured: bool, ai_usable: bool, ai_auth_failing: bool, ai_auth_failing_since: int|null, ai_auth_failing_ttl: int|null, ai_key_source: string|null, ai_amazee_overridden: bool, pagefind_available: bool, wasm_available: bool, index_exists: bool, indexer_active: string, indexer_upgrade_available: bool, indexer_upgrade_message: string|null, stale_artifact_urls: bool, stale_artifact_message: string|null, pagefind: array, wasm: array}
      * @since 1.0.0
      * @stability stable
      */
@@ -116,14 +122,37 @@ final class HealthChecker
             ? $this->resolvedKey->providerSelected()
             : trim($this->config->aiProvider) !== '';
 
+        $awaitingAmazeeModel = $this->resolvedKey !== null
+            && $this->resolvedKey->awaitingAmazeeModelResolution;
+
         $aiUsable = $aiConfigured
             && $providerSelected
             && !$aiAuthFailing
-            && !($this->resolvedKey !== null && $this->resolvedKey->awaitingAmazeeModelResolution);
+            && !$awaitingAmazeeModel;
 
-        $status = 'ok';
-        if (!$indexExists || !$aiUsable) {
-            $status = 'degraded';
+        // The fault is not "AI is off" but "AI was asked for and does not
+        // work". An install with no provider, no key and nothing in flight
+        // asked for nothing, and search works without one.
+        $aiIntended = $providerSelected || $aiConfigured || $awaitingAmazeeModel;
+
+        $reasons = [];
+
+        if (!$indexExists) {
+            $reasons[] = 'index_missing';
+        }
+
+        // At most one ai_* reason, the next thing to fix: a key cannot be
+        // auth-failing before a provider exists to reject it.
+        if ($aiIntended) {
+            if (!$providerSelected) {
+                $reasons[] = 'ai_provider_unselected';
+            } elseif (!$aiConfigured) {
+                $reasons[] = 'ai_key_missing';
+            } elseif ($aiAuthFailing) {
+                $reasons[] = 'ai_auth_failing';
+            } elseif ($awaitingAmazeeModel) {
+                $reasons[] = 'ai_awaiting_amazee_model_resolution';
+            }
         }
 
         $configuredIndexer = $this->config->indexer ?? 'auto';
@@ -135,11 +164,13 @@ final class HealthChecker
         $staleIndex = $this->detectStaleArtifactUrls();
 
         if ($staleIndex) {
-            $status = 'degraded';
+            $reasons[] = 'index_stale_artifact_urls';
         }
 
         return [
-            'status' => $status,
+            'status' => $reasons === [] ? 'ok' : 'degraded',
+            // Why the status is what it is, for the operator who sees detail.
+            'status_reasons' => $reasons,
             // '' means no provider has been selected, which is what a fresh
             // install reports. It is never coalesced to 'anthropic': claiming a
             // provider nobody chose is the failure this field exists to expose.

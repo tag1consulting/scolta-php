@@ -7,11 +7,11 @@ namespace Tag1\Scolta\Index;
 /**
  * What an adapter has to do to bring an index up to date, and how.
  *
- * The output of {@see ChangeSetPlanner}. It is a plain value object on purpose:
- * an adapter decides whether to act on it, and a plan that performed I/O of its
- * own would be impossible to log, test or show an operator before it ran.
+ * A plain value object on purpose: an adapter decides whether to act on it,
+ * and a plan that performed I/O of its own would be impossible to log, test
+ * or show an operator before it ran.
  *
- * @since 1.3.1
+ * @since 1.4.0
  * @stability experimental
  */
 final class ChangeSet
@@ -45,7 +45,7 @@ final class ChangeSet
      * actually ask, and `$plan->route()` reads as a decision where
      * `$plan->route` reads as a field.
      *
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public function route(): string
@@ -56,7 +56,7 @@ final class ChangeSet
     /**
      * Total pages this change set touches, upserts plus deletes.
      *
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public function changedCount(): int
@@ -67,7 +67,7 @@ final class ChangeSet
     /**
      * True when there is nothing to do.
      *
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public function isEmpty(): bool

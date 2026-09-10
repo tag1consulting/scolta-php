@@ -45,7 +45,7 @@
 #   AI_REVIEW_EXCLUDE_PATTERNS_MODE — 'append' (default) or 'replace' for exclude-patterns
 #   AI_REVIEW_ANALYZER_DIFF_SCOPE — how out-of-diff analyzer findings are handled (default: cap)
 #   AI_REVIEW_ANALYZERS          — allowlist of static analyzers to run (comma-separated; empty = all)
-#   AI_REVIEW_EXCLUDE_ANALYZERS  — denylist of analyzers to skip (e.g. 'phpstan,phpcs')
+#   AI_REVIEW_EXCLUDE_ANALYZERS  — denylist of analyzers to skip (default here: 'phpstan,phpcs', which ci.yml already runs)
 #   AI_REVIEW_AGENTS             — allowlist of review agents to run (comma-separated; empty = all)
 #   AI_REVIEW_EXCLUDE_AGENTS     — denylist of review agents to skip
 #
@@ -206,7 +206,11 @@ jobs:
           # These are forwarded to rescan and review-full via the slash-commands job below
           # so both paths honor the same filtering without manual duplication.
           analyzers: ${{ vars.AI_REVIEW_ANALYZERS || '' }}
-          exclude-analyzers: ${{ vars.AI_REVIEW_EXCLUDE_ANALYZERS || '' }}
+          # phpstan and phpcs are excluded by default: ci.yml already runs both
+          # (`composer phpcs` in the lint job, `composer analyse` in the analyse
+          # job) and gates the PR on them, so the reviewer repeating them only
+          # duplicated the findings.
+          exclude-analyzers: ${{ vars.AI_REVIEW_EXCLUDE_ANALYZERS || 'phpstan,phpcs' }}
           agents: ${{ vars.AI_REVIEW_AGENTS || '' }}
           exclude-agents: ${{ vars.AI_REVIEW_EXCLUDE_AGENTS || '' }}
 
@@ -262,7 +266,7 @@ jobs:
       # Forwarded to rescan and review-full to keep them in sync with the
       # main review above. Set the repo variables once, both paths stay aligned.
       analyzers: ${{ vars.AI_REVIEW_ANALYZERS || '' }}
-      exclude-analyzers: ${{ vars.AI_REVIEW_EXCLUDE_ANALYZERS || '' }}
+      exclude-analyzers: ${{ vars.AI_REVIEW_EXCLUDE_ANALYZERS || 'phpstan,phpcs' }}
       agents: ${{ vars.AI_REVIEW_AGENTS || '' }}
       exclude-agents: ${{ vars.AI_REVIEW_EXCLUDE_AGENTS || '' }}
     secrets:

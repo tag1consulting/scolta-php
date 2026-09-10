@@ -17,7 +17,7 @@ namespace Tag1\Scolta\Tests\Benchmark\Support;
  * clock produces different files carrying the same index, and comparing the
  * compressed bytes would report that as a regression.
  *
- * @since 1.3.1
+ * @since 1.4.0
  * @stability experimental
  */
 final class IndexDirectoryComparer
@@ -28,7 +28,7 @@ final class IndexDirectoryComparer
         $list = static function (string $d): array {
             $files = array_merge(
                 glob("$d/*.pf_meta") ?: [],
-                glob("$d/scolta.facets") ?: [],
+                glob("$d/scolta.*.facets") ?: [],
                 glob("$d/index/*") ?: [],
                 glob("$d/fragment/*") ?: [],
                 glob("$d/filter/*") ?: [],

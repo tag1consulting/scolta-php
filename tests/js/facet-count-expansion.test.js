@@ -203,7 +203,7 @@ async function createEnv({
                 text: () => Promise.resolve('{}'),
             });
         }
-        if (/scolta\.facets/.test(u)) {
+        if (/scolta\.[^/]+\.facets/.test(u)) {
             if (!artifact) return Promise.resolve({ ok: false, status: 404 });
             const b = FIXTURE_GZ;
             return Promise.resolve({
@@ -314,7 +314,7 @@ function panelGroups(window) {
 /** The number the results header claims, i.e. allScoredResults.length. */
 function headerCount(window) {
     const text = window.document.querySelector('#scolta-results-header').textContent || '';
-    const m = text.match(/^\s*([\d,]+)\s+results?\s+for/);
+    const m = text.match(/^\s*Showing\s+[\d,]+\s+of\s+([\d,]+)\s+results?\s+for/);
     return m ? Number(m[1].replace(/,/g, '')) : null;
 }
 

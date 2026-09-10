@@ -156,14 +156,14 @@ class FacetIndexWriterTest extends TestCase
 
         try {
             $this->writer->write($dir, $filterData, $pageHashes, 'en_1234567890');
-            $path = $dir . '/' . FacetIndexWriter::FILENAME;
+            $path = $dir . '/' . FacetIndexWriter::filename('en_1234567890');
             $this->assertFileExists($path);
 
             $raw = gzdecode((string) file_get_contents($path));
             $this->assertNotFalse($raw, 'the artifact must be gzipped');
             $this->assertStringStartsWith('{"format":"scolta-facets"', $raw);
         } finally {
-            @unlink($dir . '/' . FacetIndexWriter::FILENAME);
+            @unlink($dir . '/' . FacetIndexWriter::filename('en_1234567890'));
             @rmdir($dir);
         }
     }

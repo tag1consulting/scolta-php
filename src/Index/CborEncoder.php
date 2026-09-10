@@ -100,7 +100,7 @@ class CborEncoder
      * encodeArray() would write a count of one for a hundred items.
      *
      * @param int $count Number of items that will follow.
-     * @since 1.3.1
+     * @since 1.4.0
      * @stability experimental
      */
     public function encodeArrayHead(int $count): string
