@@ -103,6 +103,8 @@ final class IndexBuildOrchestrator
 
     /** Chunks committed since the last gc_mem_caches(). */
     private int $chunksSinceMemCaches = 0;
+    /** Ledger rows of a chunk the previous segment journalled but never committed. */
+    private readonly int $unstampedOnLoad;
     private readonly TimestampManifest $tsManifest;
     private readonly PageTableLedger $ledger;
     private readonly RetiredIndexTrash $trash;
@@ -154,6 +156,15 @@ final class IndexBuildOrchestrator
         $this->tsManifest  = new TimestampManifest($stateDir, $this->storage);
         $this->ledger      = new PageTableLedger($stateDir, $this->storage);
         $this->trash       = new RetiredIndexTrash($this->storage, $this->outputDir);
+
+        // Here rather than in build(): adapters derive their resume cursors
+        // from pageTableLedger()->seenIdsThisBuild() before build() runs, and a
+        // cursor that stepped over an uncommitted chunk would never yield those
+        // pages again. Memory only — the journal record lands at the next
+        // checkpoint, which only a lock-holding build performs.
+        $this->unstampedOnLoad = $this->ledger->unstampUncommittedChunk(
+            $this->coordinator->buildState()->getChunksWritten(),
+        );
     }
 
     /**
@@ -293,6 +304,14 @@ final class IndexBuildOrchestrator
                 $currentOffset = (int) ($manifest['pages_processed'] ?? 0);
                 $this->assertResumableLedger($startChunk, $currentOffset);
                 $logger->info("[scolta] Resuming from chunk {$startChunk}, page offset {$currentOffset}.");
+                if ($this->unstampedOnLoad > 0) {
+                    $logger->notice(sprintf(
+                        '[scolta] The previous segment died after journalling chunk %d but before committing it; '
+                        . 'its %d pages will be indexed again.',
+                        $startChunk,
+                        $this->unstampedOnLoad,
+                    ));
+                }
             }
 
             $totalChunks = $totalPages > 0 ? (int) ceil($totalPages / $chunkSize) : 1;
@@ -805,7 +824,7 @@ final class IndexBuildOrchestrator
         // reverse order is the corruption: a chunk whose ordinals no resumed
         // process can see gets those same numbers handed to different pages,
         // and the merge keeps one page per ordinal.
-        $this->ledger->checkpoint();
+        $this->ledger->checkpoint($chunkNum);
 
         $t0 = hrtime(true);
         $this->coordinator->commitChunk($chunkNum, $partial);

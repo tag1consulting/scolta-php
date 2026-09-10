@@ -144,6 +144,17 @@ final class PageTableLedger
 
     private bool $dirty = false;
 
+    /**
+     * The chunk number of the last chunk marker replayed from the journal, and
+     * the ids allocated after it. Together they name the one group of rows that
+     * may describe a chunk the build never committed; see
+     * {@see self::unstampUncommittedChunk()}.
+     */
+    private ?int $lastChunkMarker = null;
+
+    /** @var array<string, true> */
+    private array $lastChunkIds = [];
+
     public function __construct(
         private readonly string $stateDir,
         private readonly StorageDriverInterface $storage,
@@ -309,10 +320,16 @@ final class PageTableLedger
      * for the same id on resume and costs nothing, whereas a chunk on disk
      * without its ordinal is the collision that corrupts the index.
      *
+     * @param int|null $chunkNumber The chunk about to be written from these
+     *                              rows, or null for a checkpoint that commits
+     *                              no chunk. Recorded in the journal ahead of
+     *                              the rows so a resume can tell, from the
+     *                              manifest's chunk count, whether the chunk
+     *                              these rows describe ever landed.
      * @since 1.2.0
      * @stability experimental
      */
-    public function checkpoint(): void
+    public function checkpoint(?int $chunkNumber = null): void
     {
         if ($this->pendingJournal === []) {
             return;
@@ -324,7 +341,11 @@ final class PageTableLedger
         // and a raw serialize() payload with a newline in it would make the
         // journal unparseable exactly on the corpora that need it most.
         $payload = '';
-        foreach ($this->pendingJournal as $record) {
+        $records = $this->pendingJournal;
+        if ($chunkNumber !== null) {
+            array_unshift($records, ['t' => 'k', 'id' => '', 'chunk' => $chunkNumber]);
+        }
+        foreach ($records as $record) {
             $payload .= base64_encode(serialize($record)) . "\n";
         }
 
@@ -437,12 +458,60 @@ final class PageTableLedger
     }
 
     /**
+     * Mark the rows of a chunk the build never committed as unseen.
+     *
+     * {@see self::checkpoint()} writes a chunk's rows before the chunk itself,
+     * and the chunk file and manifest are written after. A process killed
+     * between the two leaves rows stamped with the current generation that no
+     * chunk on disk contains. A resume that trusted the stamp skipped those
+     * pages as already indexed, and the build failed its integrity check hours
+     * later with the page table one chunk longer than the pages committed.
+     *
+     * The journal names the chunk each group of rows was written for, so the
+     * group after the last marker is uncommitted exactly when the manifest's
+     * chunk count has not moved past it. Those rows lose their generation
+     * stamp — they keep their ordinal, so re-indexing them hands out the same
+     * numbers — and the demotion is journalled at the next checkpoint so a
+     * later segment does not resurrect the stamp once the chunk number has
+     * been reused.
+     *
+     * @param int $chunksWritten The manifest's count of committed chunks.
+     * @return int Rows demoted.
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function unstampUncommittedChunk(int $chunksWritten): int
+    {
+        if ($this->lastChunkMarker === null || $this->lastChunkMarker < $chunksWritten) {
+            return 0;
+        }
+
+        $demoted = 0;
+        foreach (array_keys($this->lastChunkIds) as $id) {
+            $id = (string) $id;
+            if (!isset($this->byId[$id]) || ($this->byId[$id]['gen'] ?? 0) !== $this->generation) {
+                continue;
+            }
+            $this->byId[$id]['gen'] = 0;
+            $this->pendingJournal[] = ['t' => 'a', 'id' => $id, 'row' => $this->byId[$id]];
+            $demoted++;
+        }
+
+        if ($demoted > 0) {
+            $this->dirty = true;
+        }
+
+        return $demoted;
+    }
+
+    /**
      * True when the current build already allocated and committed $id.
      *
      * A row only carries the current generation once its allocation reached
      * the journal, and the journal is written immediately before the chunk
-     * that uses it — so this answers "an earlier segment of this build already
-     * indexed that page" and nothing weaker.
+     * that uses it. Rows whose chunk never followed are demoted by
+     * {@see self::unstampUncommittedChunk()} — so this answers "an earlier
+     * segment of this build already indexed that page" and nothing weaker.
      *
      * @since 1.2.0
      * @stability experimental
@@ -854,6 +923,12 @@ final class PageTableLedger
                 continue;
             }
 
+            if (($record['t'] ?? '') === 'k') {
+                $this->lastChunkMarker = (int) ($record['chunk'] ?? 0);
+                $this->lastChunkIds    = [];
+                continue;
+            }
+
             if (($record['t'] ?? '') === 'r') {
                 // Mirror release(): drop the row, put the ordinal back on the
                 // free list, tombstone it. Read from the record rather than
@@ -884,6 +959,9 @@ final class PageTableLedger
             $row = $record['row'];
             if ($id === '' || !isset($row['ordinal'])) {
                 continue;
+            }
+            if ($this->lastChunkMarker !== null) {
+                $this->lastChunkIds[$id] = true;
             }
 
             // Rebuilt field by field rather than assigned wholesale: this data
