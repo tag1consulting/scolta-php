@@ -35,6 +35,25 @@ class BuildStateTest extends TestCase
         );
     }
 
+    public function testResumeBuildCountsSegmentsAndMarksWhereEachStarted(): void
+    {
+        $state = new BuildState($this->tmpDir);
+        $state->initiateBuild(['total_pages' => 100]);
+        $this->assertSame(0, $state->segment());
+        $state->recordChunk(0, ['pages' => [['id' => 'a']], 'terms' => []]);
+        $state->releaseLockOnly();
+
+        $this->assertTrue($state->resumeBuild($state->shouldResume()));
+        $this->assertSame(1, $state->segment());
+        $this->assertSame(1, $state->pagesAtSegmentStart());
+        $state->recordChunk(1, ['pages' => [['id' => 'b'], ['id' => 'c']], 'terms' => []]);
+        $state->releaseLockOnly();
+
+        $this->assertTrue($state->resumeBuild($state->shouldResume()));
+        $this->assertSame(2, $state->segment());
+        $this->assertSame(3, $state->pagesAtSegmentStart());
+    }
+
     public function testInitiateBuildFailsIfLocked(): void
     {
         $state = new BuildState($this->tmpDir);

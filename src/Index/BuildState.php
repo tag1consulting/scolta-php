@@ -180,9 +180,38 @@ class BuildState
         $this->writeLockRecord();
 
         $manifest['status'] = 'building';
+        // Segment bookkeeping for ResumeChainPolicy: which segment of the
+        // chain this is, and where the page count stood when it started, so a
+        // segment that commits nothing can be told apart from one that did.
+        $manifest['segment']                = (int) ($manifest['segment'] ?? 0) + 1;
+        $manifest['pages_at_segment_start'] = (int) ($manifest['pages_processed'] ?? 0);
         $this->commitManifest($manifest);
 
         return true;
+    }
+
+    /**
+     * Which segment of a chained build the current manifest belongs to.
+     *
+     * 0 for the run that started the build, N for the Nth resume of it.
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function segment(): int
+    {
+        return (int) ($this->readManifest()['segment'] ?? 0);
+    }
+
+    /**
+     * Pages the manifest showed committed when the current segment began.
+     *
+     * @since 1.5.0
+     * @stability experimental
+     */
+    public function pagesAtSegmentStart(): int
+    {
+        return (int) ($this->readManifest()['pages_at_segment_start'] ?? 0);
     }
 
     /**
