@@ -123,7 +123,6 @@ class StructuralIntegrityTest extends TestCase
             'ContentItem' => ['src/Export/ContentItem.php'],
             'DefaultPrompts' => ['src/Prompt/DefaultPrompts.php'],
             'HtmlCleaner' => ['src/Html/HtmlCleaner.php'],
-            'PagefindHtmlBuilder' => ['src/Html/PagefindHtmlBuilder.php'],
             'AiResponse' => ['src/Provider/AiResponse.php'],
             'ContentSourceInterface' => ['src/Content/ContentSourceInterface.php'],
             'TrackerRecord' => ['src/Content/TrackerRecord.php'],

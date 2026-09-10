@@ -242,7 +242,7 @@ Platform Adapters             scolta-php (this package)    scolta-core (browser 
 (Drupal / WP / Laravel)
 
   ContentGatherer ─────────> ContentExporter ──────────> HtmlCleaner
-  CLI build command ────────> IndexBuildOrchestrator       PagefindHtmlBuilder
+  CLI build command ────────> IndexBuildOrchestrator
   AiService ───────────────> AiClient
   SettingsForm ────────────> ScoltaConfig
   SearchPage ──────────────> DefaultPrompts               Scoring runs in browser

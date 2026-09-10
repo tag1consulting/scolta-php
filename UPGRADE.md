@@ -6,7 +6,7 @@ Breaking changes and migration steps between versions of scolta-php.
 
 ### 2.0.0: the Pagefind binary indexer is gone
 
-The PHP indexer is the only pipeline. `Tag1\Scolta\Binary\PagefindBinary` and `Tag1\Scolta\Index\IndexerResolver` no longer exist; an adapter that resolved, downloaded or probed the binary (`download-pagefind` commands, `indexer: binary` handling, binary rows in status output) removes that code. The `indexer` config key is still accepted so existing site config does not break, but every value selects the PHP indexer.
+The PHP indexer is the only pipeline. `Tag1\Scolta\Binary\PagefindBinary`, `Tag1\Scolta\Index\IndexerResolver` and `Tag1\Scolta\Html\PagefindHtmlBuilder` no longer exist; an adapter that resolved, downloaded or probed the binary (`download-pagefind` commands, `indexer: binary` handling, binary rows in status output) removes that code. The `indexer` config key is still accepted so existing site config does not break, but every value selects the PHP indexer.
 
 Three signatures changed:
 
