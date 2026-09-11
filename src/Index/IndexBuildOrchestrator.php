@@ -70,13 +70,25 @@ final class IndexBuildOrchestrator
     private const MEM_CACHES_EVERY_CHUNKS = 20;
 
     /**
+     * Wall-clock ceiling on the trash sweep a build runs before it starts.
+     *
+     * The swap retires the previous index by rename and returns; deleting it
+     * is the sweep's job, normally the host's scheduled one (hook_cron,
+     * `scolta:cleanup`). This bounded sweep at the start of the next build is
+     * the backstop for a site with no scheduled sweep, so trash does not
+     * accumulate forever there. It used to run unbounded right after the
+     * swap instead, which on NFS held `drush scolta:build` for 23 minutes
+     * (109,401 fragments, sharemylesson.com, 2026-09-11) with the new index
+     * already live. Whatever a budgeted sweep leaves still matches the trash
+     * pattern, so the next sweep resumes it.
+     */
+    private const PRE_BUILD_SWEEP_SECONDS = 60.0;
+
+    /**
      * Wall-clock ceiling on the trash sweep a failed build runs on its way out.
      *
-     * A ceiling under the CLI too, where an ordinary sweep is given none (see
-     * RetiredIndexTrash::defaultBudget()). No budget is the right answer after
-     * a publish — the new index is already live and the build may take as long
-     * as deletion takes — and the wrong one here, where the caller is waiting
-     * to be told the build failed and a serial NFS unlink loop can sit on that
+     * Shorter than PRE_BUILD_SWEEP_SECONDS because the caller is waiting to be
+     * told the build failed, and a serial NFS unlink loop can sit on that
      * report for hours. Two seconds clears a lot on the parallel path and is
      * not felt on the serial one; whatever is left still matches the trash
      * pattern, so the next build or scheduled cleanup resumes it.
@@ -262,6 +274,7 @@ final class IndexBuildOrchestrator
         try {
             $manifest = $this->coordinator->prepare($intent);
             $telemetry->emit('build_start', ['mode' => $intent->mode()]);
+            $trashLeft = $this->sweepBeforeBuild($logger);
 
             // A restart means "rebuild from scratch", and the page table is
             // the one piece of state a fresh build deliberately carries
@@ -629,7 +642,6 @@ final class IndexBuildOrchestrator
 
             $this->atomicSwap($logger);
             $telemetry->emit('swap_complete');
-            $sweptClean = $this->trash->sweep($logger);
 
             $this->coordinator->release();
 
@@ -687,7 +699,7 @@ final class IndexBuildOrchestrator
                 pagesProcessed: $pagesForReport,
                 chunksWritten: $chunksWritten,
                 success: true,
-                warnings: $sweptClean ? null : self::TRASH_LEFT_WARNING,
+                warnings: $trashLeft ? self::TRASH_LEFT_WARNING : null,
             );
         } catch (\Throwable $e) {
             // Sweep before the lock goes: the success path sweeps under it too,
@@ -948,6 +960,7 @@ final class IndexBuildOrchestrator
                     durationSeconds: 0.0,
                 );
             }
+            $trashLeft = $this->sweepBeforeBuild($logger);
 
             // The same tail work build() does. Finalize used to skip it, so a
             // deferred merge published an index with an unfilled page table and
@@ -1002,7 +1015,6 @@ final class IndexBuildOrchestrator
 
             $this->atomicSwap($logger);
             $telemetry->emit('swap_complete');
-            $sweptClean = $this->trash->sweep($logger);
 
             $this->coordinator->release();
 
@@ -1031,7 +1043,7 @@ final class IndexBuildOrchestrator
                 pagesProcessed: $pagesProcessed,
                 chunksWritten: $chunksFinalized,
                 success: true,
-                warnings: $sweptClean ? null : self::TRASH_LEFT_WARNING,
+                warnings: $trashLeft ? self::TRASH_LEFT_WARNING : null,
             );
         } catch (\Throwable $e) {
             // Under the lock, as in build().
@@ -1089,12 +1101,12 @@ final class IndexBuildOrchestrator
             throw new \RuntimeException("Failed to publish new index: {$newDir} → {$finalDir}");
         }
 
-        // Rename, never delete: the serial unlink loop that used to run here
-        // took hours on NFS after the new index was already live, and it
-        // read as a hang. The caller sweeps trash right after this swap —
-        // post-publish, announced at notice level, and parallelized where
-        // the platform allows — with cron/scolta:cleanup as the backstop
-        // for builds that die before their sweep.
+        // Rename, never delete, and return: the unlink loop that used to run
+        // here (first inline, then as an unbudgeted post-swap sweep) held the
+        // build for hours on NFS after the new index was already live, and it
+        // read as a hang. Deletion is RetiredIndexTrash::sweep()'s job — the
+        // host's scheduled sweep (hook_cron / scolta:cleanup), with the
+        // budgeted sweep at the start of the next build as the backstop.
         if ($this->storage->exists($oldDir) && !$this->trash->retire($oldDir)) {
             // Not fatal: the new index is published. clearStagingDir() will
             // move it aside (or delete it) before the next swap.
@@ -1114,6 +1126,26 @@ final class IndexBuildOrchestrator
     private function stagedIndexDir(): string
     {
         return $this->outputDir . '/.scolta-building';
+    }
+
+    /**
+     * Run the bounded pre-build sweep (PRE_BUILD_SWEEP_SECONDS).
+     *
+     * Returns true when trash is still on disk afterwards. Never throws:
+     * failing to remove trash must never fail the build it precedes.
+     */
+    private function sweepBeforeBuild(LoggerInterface $logger): bool
+    {
+        try {
+            return !$this->trash->sweep($logger, self::PRE_BUILD_SWEEP_SECONDS);
+        } catch (\Throwable $sweepFailure) {
+            $logger->warning(
+                '[scolta] Retired index cleanup failed before the build: {message}. The build continues; the next sweep will retry.',
+                ['message' => $sweepFailure->getMessage()],
+            );
+
+            return true;
+        }
     }
 
     /**
