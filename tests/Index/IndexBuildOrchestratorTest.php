@@ -96,40 +96,46 @@ class IndexBuildOrchestratorTest extends TestCase
         $this->assertDirectoryDoesNotExist($this->outputDir . '/.scolta-building');
     }
 
-    public function testBuildSweepsRetiredIndexTrashAfterPublishing(): void
+    public function testSwapRetiresThePreviousIndexToTrashAndLeavesDeletionToTheSweep(): void
     {
         // The swap retires the previous live index by renaming it to a
-        // `.scolta-trash-*` directory — the inline unlink loop that used to
-        // run there took hours on NFS (~8 unlinks/sec against ~100k fragment
-        // files) after the new index was already published, which read as a
-        // hang. The build then sweeps all trash after the swap: post-publish
-        // so it gates nothing, announced at notice level, parallelized where
-        // the platform allows. Trash from a build that died before its own
-        // sweep is picked up here too.
+        // `.scolta-trash-*` sibling and returns. It does not delete, inline
+        // or by sweeping afterwards: an unbudgeted post-swap sweep held
+        // `drush scolta:build` for 23 minutes on NFS (109k fragments) with
+        // the new index already live. Deletion belongs to the sweep the host
+        // schedules, with a budgeted sweep at the start of the next build as
+        // the backstop — which is what collects the crashed build's trash.
         mkdir($this->outputDir . '/.scolta-trash-crashed', 0755, true);
         file_put_contents($this->outputDir . '/.scolta-trash-crashed/stale.pf_fragment', 'x');
 
-        $logger = new class extends \Psr\Log\AbstractLogger {
-            public array $notices = [];
-            public function log($level, string|\Stringable $message, array $context = []): void
-            {
-                if ($level === \Psr\Log\LogLevel::NOTICE) {
-                    $this->notices[] = (string) $message;
-                }
-            }
-        };
+        $logger = $this->recordingLogger();
         $intent = fn() => BuildIntent::fresh(2, MemoryBudget::conservative());
-        for ($i = 0; $i < 2; $i++) {
-            $report = (new IndexBuildOrchestrator($this->stateDir, $this->outputDir))
-                ->build($intent(), $this->makeItems(2), $logger);
-            $this->assertTrue($report->success, $report->error ?? 'No error');
-        }
+        $report = (new IndexBuildOrchestrator($this->stateDir, $this->outputDir))
+            ->build($intent(), $this->makeItems(2), $logger);
+        $this->assertTrue($report->success, $report->error ?? 'No error');
+        $this->assertSame([], glob($this->outputDir . '/.scolta-trash-*') ?: [], 'The pre-build sweep collects trash left by an earlier build');
+        $this->assertNotEmpty(array_filter(
+            $logger->records[\Psr\Log\LogLevel::NOTICE] ?? [],
+            static fn(string $m) => str_contains($m, 'retired index'),
+        ), 'The sweep must announce itself so it is not mistaken for a hang');
+        $firstEntry = file_get_contents($this->outputDir . '/pagefind/pagefind-entry.json');
+
+        $report = (new IndexBuildOrchestrator($this->stateDir, $this->outputDir))
+            ->build($intent(), $this->makeItems(2), $logger);
+        $this->assertTrue($report->success, $report->error ?? 'No error');
+        $this->assertNull($report->warnings);
 
         $this->assertFileExists($this->outputDir . '/pagefind/pagefind-entry.json');
         $this->assertDirectoryDoesNotExist($this->outputDir . '/.scolta-old');
+        $trash = glob($this->outputDir . '/.scolta-trash-*') ?: [];
+        $this->assertCount(1, $trash, 'The swap leaves the previous index in one trash directory');
+        $this->assertSame($firstEntry, file_get_contents($trash[0] . '/pagefind-entry.json'), 'Retired by rename: the previous index is intact in trash');
+
+        // The sweep the host schedules (hook_cron / scolta:cleanup) is what
+        // deletes it, from the same output directory the orchestrator uses.
+        $this->assertTrue((new RetiredIndexTrash(new FilesystemDriver(), $this->outputDir))->sweep(new \Psr\Log\NullLogger()));
         $this->assertSame([], glob($this->outputDir . '/.scolta-trash-*') ?: []);
-        $sweepNotices = array_filter($logger->notices, fn($n) => str_contains($n, 'retired index'));
-        $this->assertNotEmpty($sweepNotices, 'The sweep must announce itself so it is not mistaken for a hang');
+        $this->assertFileExists($this->outputDir . '/pagefind/pagefind-entry.json');
     }
 
     public function testReportCarriesAWarningWhenTrashCannotBeFullyDeleted(): void
@@ -178,13 +184,12 @@ class IndexBuildOrchestratorTest extends TestCase
             }
         };
 
-        // First build publishes a live index; the second's swap retires it
-        // to trash, which this storage can never actually delete.
-        $intent = fn() => BuildIntent::fresh(2, MemoryBudget::conservative());
-        (new IndexBuildOrchestrator($this->stateDir, $this->outputDir, storage: $failDelete))
-            ->build($intent(), $this->makeItems(2));
+        // Trash an earlier build left, which the pre-build sweep on this
+        // storage can never actually delete.
+        mkdir($this->outputDir . '/.scolta-trash-stuck', 0755, true);
+        file_put_contents($this->outputDir . '/.scolta-trash-stuck/stale.pf_fragment', 'x');
         $report = (new IndexBuildOrchestrator($this->stateDir, $this->outputDir, storage: $failDelete))
-            ->build($intent(), $this->makeItems(2));
+            ->build(BuildIntent::fresh(2, MemoryBudget::conservative()), $this->makeItems(2));
 
         $this->assertTrue($report->success, 'A stuck trash directory must not fail the build');
         $this->assertNotNull($report->warnings);
@@ -227,7 +232,7 @@ class IndexBuildOrchestratorTest extends TestCase
     {
         // The one failure where deleting on the way out is the wrong trade: a
         // memory abort is a deliberate yield whose caller immediately starts a
-        // fresh --resume process, and that process sweeps after its own swap.
+        // fresh --resume process, and that process sweeps before it starts.
         $this->publishAnIndex();
         $this->leaveStagingDirFromAnEarlierFailedMerge();
 
