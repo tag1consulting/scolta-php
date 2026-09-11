@@ -98,7 +98,7 @@ final class ResumeChainRunner
             return $this->finish($yielded, false, $reason, $pagesBefore);
         }
 
-        for ($segment = 1; ; $segment++) {
+        for ($segment = 1;; $segment++) {
             $this->logger->notice(
                 'Memory limit reached at {pages} pages. Continuing in a fresh process (segment {n})...',
                 ['pages' => $pagesBefore, 'n' => $segment],
