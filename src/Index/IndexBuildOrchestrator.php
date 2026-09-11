@@ -359,7 +359,12 @@ final class IndexBuildOrchestrator
                 }
             })();
 
+            $buildState = $this->coordinator->buildState();
             foreach ($iter as $page) {
+                // Keep the lock visibly alive between chunk commits: on a slow
+                // site one chunk can outlast the stale window.
+                $buildState->heartbeat();
+
                 // A resumed build is handed the whole corpus again, because no
                 // adapter can reliably translate "pages committed" into a
                 // position in its own source query — the offset that used to
