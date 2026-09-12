@@ -51,6 +51,36 @@ class TimestampManifestTest extends TestCase
         $this->assertSame($items, $entry['items']);
     }
 
+    public function test_loads_a_manifest_written_in_the_nested_array_format(): void
+    {
+        $items = [['hash' => 'abc', 'id' => '42', 'url' => '/node/42', 'filters' => ['a' => ['x']]]];
+        file_put_contents(
+            $this->stateDir . '/timestamp-manifest.php',
+            serialize(['42' => ['ts' => 1_000_000, 'items' => $items]]),
+        );
+
+        $m = $this->make();
+        $this->assertSame(['ts' => 1_000_000, 'items' => $items], $m->get('42'));
+
+        // Rewritten in the string-per-entry shape on the next save.
+        $m->saveWithoutPruning();
+        $raw = unserialize(file_get_contents($this->stateDir . '/timestamp-manifest.php')); // nosemgrep: php.lang.security.unserialize-use.unserialize-use
+        $this->assertSame([1_000_000, serialize($items)], $raw['42']);
+        $this->assertSame(['ts' => 1_000_000, 'items' => $items], $this->make()->get('42'));
+    }
+
+    public function test_a_corrupt_entry_reads_as_a_miss(): void
+    {
+        file_put_contents(
+            $this->stateDir . '/timestamp-manifest.php',
+            serialize(['42' => [1_000_000, 'not serialized'], '43' => [1, serialize([['hash' => 'ok']])]]),
+        );
+
+        $m = $this->make();
+        $this->assertNull($m->get('42'));
+        $this->assertSame([['hash' => 'ok']], $m->get('43')['items']);
+    }
+
     public function test_put_overwrites_existing_entry(): void
     {
         $m = $this->make();
@@ -229,7 +259,7 @@ class TimestampManifestTest extends TestCase
 
         // Second build: entry unchanged, so nothing marks the manifest dirty.
         $second = $this->make();
-        unlink($this->stateDir . '/timestamp-manifest.php');
+        unlink($this->stateDir . '/timestamp-manifest.php'); // nosemgrep: php.lang.security.unlink-use.unlink-use
         $second->markSeen('42');
         $second->pruneAndSave();
 
@@ -243,7 +273,7 @@ class TimestampManifestTest extends TestCase
         $m->pruneAndSave();
 
         $second = $this->make();
-        unlink($this->stateDir . '/timestamp-manifest-empty.php');
+        unlink($this->stateDir . '/timestamp-manifest-empty.php'); // nosemgrep: php.lang.security.unlink-use.unlink-use
         $this->assertTrue($second->isKnownEmpty('abc'));
         $second->pruneAndSave();
 
@@ -408,7 +438,7 @@ class TimestampManifestTest extends TestCase
         $m1->pruneAndSave();
 
         $m2 = $this->make();
-        unlink($this->stateDir . '/timestamp-manifest.php');
+        unlink($this->stateDir . '/timestamp-manifest.php'); // nosemgrep: php.lang.security.unlink-use.unlink-use
         $m2->saveWithoutPruning();
 
         $this->assertNotNull($this->make()->get('entity'));
@@ -433,7 +463,7 @@ class TimestampManifestTest extends TestCase
                 continue;
             }
             $path = $dir . '/' . $entry;
-            is_dir($path) ? $this->removeDir($path) : unlink($path);
+            is_dir($path) ? $this->removeDir($path) : unlink($path); // nosemgrep: php.lang.security.unlink-use.unlink-use
         }
         rmdir($dir);
     }

@@ -20,19 +20,21 @@ use Tag1\Scolta\Storage\StorageDriverInterface;
  * size, so retire() moves the directory to a uniquely named
  * `.scolta-trash-*` sibling and returns immediately.
  *
- * sweep() deletes trash after the swap has published — parallel unlinking
- * makes that minutes rather than hours under a CLI process (a build, `drush
- * cron`, `drush scolta:cleanup`), and the notice it logs keeps the wait from
- * reading as a hang. A caller running under a request-serving SAPI — a
- * hook_cron() triggered by the web cron endpoint rather than drush, or a
- * queue worker running inline in the request that queued it — gets the
- * serial fallback instead; see canFastDelete(). A sweep that names no budget
- * of its own is given one off the CLI and none on it; see defaultBudget().
- * The orchestrator sweeps right after each swap; adapters also run it from
- * scheduled maintenance as the backstop for builds that die before their
- * sweep and for whatever a budgeted sweep did not finish (scolta-drupal: a
- * time-boxed sweep from hook_cron() and `drush scolta:cleanup` for on-demand
- * runs).
+ * sweep() deletes trash, separately from the swap — parallel unlinking makes
+ * that minutes rather than hours under a CLI process (`drush cron`, `drush
+ * scolta:cleanup`), and the notice it logs keeps the wait from reading as a
+ * hang. A caller running under a request-serving SAPI — a hook_cron()
+ * triggered by the web cron endpoint rather than drush, or a queue worker
+ * running inline in the request that queued it — gets the serial fallback
+ * instead; see canFastDelete(). A sweep that names no budget of its own is
+ * given one off the CLI and none on it; see defaultBudget(). The swap itself
+ * never sweeps: an unbudgeted sweep right after publishing held the build
+ * for as long as deletion took (23 minutes for 109k fragments on NFS) with
+ * the new index already live. Adapters sweep from scheduled maintenance
+ * (scolta-drupal: a time-boxed sweep from hook_cron(), `drush
+ * scolta:cleanup` for on-demand runs; scolta-laravel: `scolta:cleanup`),
+ * and the orchestrator runs a 60 s sweep at the start of each build as the
+ * backstop for a site with no scheduled sweep.
  * $outputDir is the directory that holds the published `pagefind/` directory
  * — the same value the orchestrator's constructor takes, after its
  * `/pagefind`-suffix normalization.

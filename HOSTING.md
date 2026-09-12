@@ -43,12 +43,13 @@ but every value selects the PHP indexer.
 | Host | exec() | Notes |
 | ------ | -------- | ------- |
 | Vapor (serverless) | No | Use S3 StorageDriver for state + index persistence |
+| Laravel Cloud | Yes | Filesystem resets on deploy; persist the index in a Laravel Cloud [object storage bucket](https://laravel.com/cloud/docs/resources/object-storage) (S3-compatible) via an S3 StorageDriver |
 | Forge | Yes | Standard VPS, no restrictions |
 | Ploi | Yes |  |
 
 ## Ephemeral Filesystems
 
-Hosts like WP Engine, Pantheon, and Vapor reset the filesystem on deploy.
+Hosts like WP Engine, Pantheon, Vapor, and Laravel Cloud reset the filesystem on deploy.
 The search index must be rebuilt after each deploy. Options:
 
 1. **Auto-rebuild on deploy** — trigger a build via deploy hook or post-deploy
@@ -64,13 +65,16 @@ The search index must be rebuilt after each deploy. Options:
 
 ## StorageDriver for Cloud Persistence
 
-For Vapor or other serverless environments, implement a custom `StorageDriver`
+For Vapor, Laravel Cloud, or other ephemeral environments, implement a custom `StorageDriver`
 that writes to S3 or GCS instead of the local filesystem. Scolta's
 `StorageDriverInterface` supports this pattern:
 
 - `FilesystemDriver` (default) — local disk, works everywhere.
 - Custom: implement `Tag1\Scolta\Storage\StorageDriverInterface` with
   your cloud SDK and bind it in the service container.
+  On Laravel Cloud, attach an [object storage bucket](https://laravel.com/cloud/docs/resources/object-storage)
+  to the environment; it is S3-compatible and injects the `AWS_*` credentials
+  that a Flysystem S3 disk picks up automatically.
 
 ```php
 // Example: bind a custom driver in AppServiceProvider::register()

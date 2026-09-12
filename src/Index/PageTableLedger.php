@@ -117,10 +117,20 @@ final class PageTableLedger
      * this array's keys directly; go through {@see self::assignedIds()}, which
      * is the one place the type is restored.
      *
-     * `gen` is optional because a snapshot written before it existed has rows
-     * without one; those read as generation 0, which is older than any build.
+     * A snapshot written before `gen` existed has rows without one; those read
+     * as generation 0, which is older than any build.
      *
-     * @var array<string, array{ordinal: int, url: string, filters: array<string, mixed>, sortable: array<string, mixed>, contentHash: string, gen?: int}>
+     * **Each row is held as `[ordinal, gen, serialize()d url/filters/sortable/contentHash]`,
+     * not as the nested array it decodes to.** The whole table is reloaded at
+     * the start of every resume segment, and unserialized rows cost 3.5 KB of
+     * heap each on a 124k-page corpus (423 MB); as strings they cost 0.6 KB.
+     * `ordinal` and `gen` stay ints beside the string because
+     * {@see self::wasSeenThisBuild()} reads them once per item on every
+     * resume; everything else is decoded on access through {@see self::row()}.
+     * The snapshot on disk has the same shape, so loading it creates strings,
+     * not arrays.
+     *
+     * @var array<string, array{0: int, 1: int, 2: string}>
      */
     private array $byId = [];
 
@@ -143,6 +153,17 @@ final class PageTableLedger
     private array $tombstones = [];
 
     private bool $dirty = false;
+
+    /**
+     * The chunk number of the last chunk marker replayed from the journal, and
+     * the ids allocated after it. Together they name the one group of rows that
+     * may describe a chunk the build never committed; see
+     * {@see self::unstampUncommittedChunk()}.
+     */
+    private ?int $lastChunkMarker = null;
+
+    /** @var array<string, true> */
+    private array $lastChunkIds = [];
 
     public function __construct(
         private readonly string $stateDir,
@@ -170,28 +191,22 @@ final class PageTableLedger
         array $sortable = [],
         string $contentHash = '',
     ): int {
-        if (isset($this->byId[$id])) {
-            $existing = $this->byId[$id];
-            $changed  = $existing['url'] !== $url
-                || $existing['filters'] !== $filters
-                || $existing['sortable'] !== $sortable
-                || $existing['contentHash'] !== $contentHash;
-            $unseen = ($existing['gen'] ?? 0) !== $this->generation;
+        $blob = self::encode($url, $filters, $sortable, $contentHash);
 
-            if ($changed || $unseen) {
-                $this->byId[$id]['url']         = $url;
-                $this->byId[$id]['filters']     = $filters;
-                $this->byId[$id]['sortable']    = $sortable;
-                $this->byId[$id]['contentHash'] = $contentHash;
-                $this->byId[$id]['gen']         = $this->generation;
-                $this->dirty                    = true;
+        if (isset($this->byId[$id])) {
+            [$ordinal, $gen, $existing] = $this->byId[$id];
+            // Two serialize() strings are identical exactly when the arrays
+            // compare identical with !==, so the unchanged case needs no decode.
+            if ($existing !== $blob || $gen !== $this->generation) {
+                $this->byId[$id] = [$ordinal, $this->generation, $blob];
+                $this->dirty     = true;
                 // Journalled even when only `gen` moved: that stamp is what
                 // tells a later segment of the same build that this page is
                 // still in the corpus and must not be tombstoned.
-                $this->pendingJournal[] = ['t' => 'a', 'id' => $id, 'row' => $this->byId[$id]];
+                $this->pendingJournal[] = ['t' => 'a', 'id' => $id, 'row' => $this->row($id)];
             }
 
-            return $existing['ordinal'];
+            return $ordinal;
         }
 
         if ($this->free !== []) {
@@ -202,16 +217,9 @@ final class PageTableLedger
         }
 
         unset($this->tombstones[$ordinal]);
-        $this->byId[$id] = [
-            'ordinal'     => $ordinal,
-            'url'         => $url,
-            'filters'     => $filters,
-            'sortable'    => $sortable,
-            'contentHash' => $contentHash,
-            'gen'         => $this->generation,
-        ];
+        $this->byId[$id]        = [$ordinal, $this->generation, $blob];
         $this->dirty            = true;
-        $this->pendingJournal[] = ['t' => 'a', 'id' => $id, 'row' => $this->byId[$id]];
+        $this->pendingJournal[] = ['t' => 'a', 'id' => $id, 'row' => $this->row($id)];
 
         return $ordinal;
     }
@@ -292,7 +300,7 @@ final class PageTableLedger
     {
         $stale = [];
         foreach ($this->assignedIds() as $id) {
-            if (($this->byId[$id]['gen'] ?? 0) === $this->generation) {
+            if ($this->byId[$id][1] === $this->generation) {
                 continue;
             }
             $stale[] = $id;
@@ -309,10 +317,16 @@ final class PageTableLedger
      * for the same id on resume and costs nothing, whereas a chunk on disk
      * without its ordinal is the collision that corrupts the index.
      *
+     * @param int|null $chunkNumber The chunk about to be written from these
+     *                              rows, or null for a checkpoint that commits
+     *                              no chunk. Recorded in the journal ahead of
+     *                              the rows so a resume can tell, from the
+     *                              manifest's chunk count, whether the chunk
+     *                              these rows describe ever landed.
      * @since 1.2.0
      * @stability experimental
      */
-    public function checkpoint(): void
+    public function checkpoint(?int $chunkNumber = null): void
     {
         if ($this->pendingJournal === []) {
             return;
@@ -324,7 +338,11 @@ final class PageTableLedger
         // and a raw serialize() payload with a newline in it would make the
         // journal unparseable exactly on the corpora that need it most.
         $payload = '';
-        foreach ($this->pendingJournal as $record) {
+        $records = $this->pendingJournal;
+        if ($chunkNumber !== null) {
+            array_unshift($records, ['t' => 'k', 'id' => '', 'chunk' => $chunkNumber]);
+        }
+        foreach ($records as $record) {
             $payload .= base64_encode(serialize($record)) . "\n";
         }
 
@@ -392,7 +410,7 @@ final class PageTableLedger
             return null;
         }
 
-        $ordinal = $this->byId[$id]['ordinal'];
+        $ordinal = $this->byId[$id][0];
         unset($this->byId[$id]);
         $this->free[]              = $ordinal;
         $this->tombstones[$ordinal] = true;
@@ -437,19 +455,67 @@ final class PageTableLedger
     }
 
     /**
+     * Mark the rows of a chunk the build never committed as unseen.
+     *
+     * {@see self::checkpoint()} writes a chunk's rows before the chunk itself,
+     * and the chunk file and manifest are written after. A process killed
+     * between the two leaves rows stamped with the current generation that no
+     * chunk on disk contains. A resume that trusted the stamp skipped those
+     * pages as already indexed, and the build failed its integrity check hours
+     * later with the page table one chunk longer than the pages committed.
+     *
+     * The journal names the chunk each group of rows was written for, so the
+     * group after the last marker is uncommitted exactly when the manifest's
+     * chunk count has not moved past it. Those rows lose their generation
+     * stamp — they keep their ordinal, so re-indexing them hands out the same
+     * numbers — and the demotion is journalled at the next checkpoint so a
+     * later segment does not resurrect the stamp once the chunk number has
+     * been reused.
+     *
+     * @param int $chunksWritten The manifest's count of committed chunks.
+     * @return int Rows demoted.
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function unstampUncommittedChunk(int $chunksWritten): int
+    {
+        if ($this->lastChunkMarker === null || $this->lastChunkMarker < $chunksWritten) {
+            return 0;
+        }
+
+        $demoted = 0;
+        foreach (array_keys($this->lastChunkIds) as $id) {
+            $id = (string) $id;
+            if (!isset($this->byId[$id]) || $this->byId[$id][1] !== $this->generation) {
+                continue;
+            }
+            $this->byId[$id][1]     = 0;
+            $this->pendingJournal[] = ['t' => 'a', 'id' => $id, 'row' => $this->row($id)];
+            $demoted++;
+        }
+
+        if ($demoted > 0) {
+            $this->dirty = true;
+        }
+
+        return $demoted;
+    }
+
+    /**
      * True when the current build already allocated and committed $id.
      *
      * A row only carries the current generation once its allocation reached
      * the journal, and the journal is written immediately before the chunk
-     * that uses it — so this answers "an earlier segment of this build already
-     * indexed that page" and nothing weaker.
+     * that uses it. Rows whose chunk never followed are demoted by
+     * {@see self::unstampUncommittedChunk()} — so this answers "an earlier
+     * segment of this build already indexed that page" and nothing weaker.
      *
      * @since 1.2.0
      * @stability experimental
      */
     public function wasSeenThisBuild(string $id): bool
     {
-        return isset($this->byId[$id]) && ($this->byId[$id]['gen'] ?? 0) === $this->generation;
+        return isset($this->byId[$id]) && $this->byId[$id][1] === $this->generation;
     }
 
     /**
@@ -466,8 +532,8 @@ final class PageTableLedger
      */
     public function seenIdsThisBuild(): \Generator
     {
-        foreach ($this->byId as $id => $row) {
-            if (($row['gen'] ?? 0) === $this->generation) {
+        foreach ($this->byId as $id => [, $gen]) {
+            if ($gen === $this->generation) {
                 yield (string) $id;
             }
         }
@@ -481,7 +547,7 @@ final class PageTableLedger
      */
     public function ordinalFor(string $id): ?int
     {
-        return $this->byId[$id]['ordinal'] ?? null;
+        return $this->byId[$id][0] ?? null;
     }
 
     /**
@@ -495,7 +561,7 @@ final class PageTableLedger
      */
     public function urlFor(string $id): ?string
     {
-        return $this->byId[$id]['url'] ?? null;
+        return isset($this->byId[$id]) ? $this->row($id)['url'] : null;
     }
 
     /**
@@ -507,7 +573,7 @@ final class PageTableLedger
      */
     public function filtersFor(string $id): array
     {
-        return $this->byId[$id]['filters'] ?? [];
+        return isset($this->byId[$id]) ? $this->row($id)['filters'] : [];
     }
 
     /**
@@ -519,7 +585,7 @@ final class PageTableLedger
      */
     public function sortableFor(string $id): array
     {
-        return $this->byId[$id]['sortable'] ?? [];
+        return isset($this->byId[$id]) ? $this->row($id)['sortable'] : [];
     }
 
     /**
@@ -536,7 +602,7 @@ final class PageTableLedger
      */
     public function contentHashFor(string $id): string
     {
-        return $this->byId[$id]['contentHash'] ?? '';
+        return isset($this->byId[$id]) ? $this->row($id)['contentHash'] : '';
     }
 
     /**
@@ -551,7 +617,7 @@ final class PageTableLedger
     {
         $rows = [];
         foreach ($this->assignedIds() as $id) {
-            $row                   = $this->byId[$id];
+            $row                   = $this->row($id);
             $rows[$row['ordinal']] = [
                 'id'          => $id,
                 'url'         => $row['url'],
@@ -791,20 +857,85 @@ final class PageTableLedger
         return array_map(strval(...), array_keys($this->byId));
     }
 
+    /**
+     * The serialized part of a row. Its byte-equality stands in for the
+     * field-by-field `!==` comparison {@see self::allocate()} used to make, so
+     * the key order here is part of the contract; a reordering forces one
+     * spurious "changed" journal record per row.
+     *
+     * @param array<string, mixed> $filters
+     * @param array<string, mixed> $sortable
+     */
+    private static function encode(string $url, array $filters, array $sortable, string $contentHash): string
+    {
+        return serialize(['url' => $url, 'filters' => $filters, 'sortable' => $sortable, 'contentHash' => $contentHash]);
+    }
+
+    /**
+     * Decode $id's row into the flat shape the journal and the accessors use.
+     *
+     * @return array{ordinal: int, url: string, filters: array<string, mixed>, sortable: array<string, mixed>, contentHash: string, gen: int}
+     */
+    private function row(string $id): array
+    {
+        [$ordinal, $gen, $blob] = $this->byId[$id];
+        $row                    = @unserialize($blob, ['allowed_classes' => false]); // nosemgrep: php.lang.security.unserialize-use.unserialize-use
+        if (!is_array($row)) {
+            // Not substituted with empty fields: a row that cannot be read is
+            // an ordinal table that cannot be trusted, and guessing here writes
+            // a wrong fragment name or filter set into the index.
+            throw new \RuntimeException(sprintf(
+                'Page-table ledger row for id "%s" in %s/%s is unreadable. Refusing to guess its url and '
+                . 'filters; rebuild with --reset-ledger.',
+                $id,
+                $this->stateDir,
+                self::FILENAME,
+            ));
+        }
+        $row['ordinal'] = $ordinal;
+        $row['gen']     = $gen;
+
+        /** @var array{ordinal: int, url: string, filters: array<string, mixed>, sortable: array<string, mixed>, contentHash: string, gen: int} $row */
+        return $row;
+    }
+
     private function loadFromDisk(): void
     {
         $path = $this->stateDir . '/' . self::FILENAME;
         if ($this->storage->exists($path)) {
             try {
                 $raw  = $this->storage->get($path);
-                $data = @unserialize($raw, ['allowed_classes' => false]);
+                $data = @unserialize($raw, ['allowed_classes' => false]); // nosemgrep: php.lang.security.unserialize-use.unserialize-use
             } catch (\Throwable) {
                 $data = null;
             }
 
             if (is_array($data)) {
                 $this->next       = (int) ($data['next'] ?? 0);
-                $this->byId       = is_array($data['byId'] ?? null) ? $data['byId'] : [];
+                foreach (is_array($data['byId'] ?? null) ? $data['byId'] : [] as $id => $row) {
+                    if (!is_array($row)) {
+                        continue;
+                    }
+                    if (is_string($row[2] ?? null)) {
+                        $this->byId[$id] = [(int) ($row[0] ?? 0), (int) ($row[1] ?? 0), $row[2]];
+                        continue;
+                    }
+                    // A snapshot written before rows were stored as strings:
+                    // ['ordinal' => …, 'url' => …, …]. Converted once here.
+                    if (isset($row['ordinal'])) {
+                        $this->byId[$id] = [
+                            (int) $row['ordinal'],
+                            (int) ($row['gen'] ?? 0),
+                            self::encode(
+                                (string) ($row['url'] ?? ''),
+                                is_array($row['filters'] ?? null) ? $row['filters'] : [],
+                                is_array($row['sortable'] ?? null) ? $row['sortable'] : [],
+                                (string) ($row['contentHash'] ?? ''),
+                            ),
+                        ];
+                        $this->dirty = true;
+                    }
+                }
                 $this->free       = is_array($data['free'] ?? null) ? array_values($data['free']) : [];
                 $this->tombstones = is_array($data['tombstones'] ?? null) ? $data['tombstones'] : [];
                 $this->generation = (int) ($data['generation'] ?? 0);
@@ -844,13 +975,19 @@ final class PageTableLedger
                 continue;
             }
 
-            $record = @unserialize($decoded, ['allowed_classes' => false]);
+            $record = @unserialize($decoded, ['allowed_classes' => false]); // nosemgrep: php.lang.security.unserialize-use.unserialize-use
             if (!is_array($record)) {
                 continue;
             }
 
             if (($record['t'] ?? '') === 'g') {
                 $this->generation = max($this->generation, (int) ($record['gen'] ?? 0));
+                continue;
+            }
+
+            if (($record['t'] ?? '') === 'k') {
+                $this->lastChunkMarker = (int) ($record['chunk'] ?? 0);
+                $this->lastChunkIds    = [];
                 continue;
             }
 
@@ -885,18 +1022,23 @@ final class PageTableLedger
             if ($id === '' || !isset($row['ordinal'])) {
                 continue;
             }
+            if ($this->lastChunkMarker !== null) {
+                $this->lastChunkIds[$id] = true;
+            }
 
             // Rebuilt field by field rather than assigned wholesale: this data
             // came off disk from a process that died, and a malformed row must
             // not be able to reshape the table every posting list indexes into.
             $ordinal         = (int) $row['ordinal'];
             $this->byId[$id] = [
-                'ordinal'     => $ordinal,
-                'url'         => (string) ($row['url'] ?? ''),
-                'filters'     => is_array($row['filters'] ?? null) ? $row['filters'] : [],
-                'sortable'    => is_array($row['sortable'] ?? null) ? $row['sortable'] : [],
-                'contentHash' => (string) ($row['contentHash'] ?? ''),
-                'gen'         => (int) ($row['gen'] ?? 0),
+                $ordinal,
+                (int) ($row['gen'] ?? 0),
+                self::encode(
+                    (string) ($row['url'] ?? ''),
+                    is_array($row['filters'] ?? null) ? $row['filters'] : [],
+                    is_array($row['sortable'] ?? null) ? $row['sortable'] : [],
+                    (string) ($row['contentHash'] ?? ''),
+                ),
             ];
             $this->generation = max($this->generation, (int) ($row['gen'] ?? 0));
 

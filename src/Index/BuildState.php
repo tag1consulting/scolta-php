@@ -52,8 +52,27 @@ class BuildState
     /** Directory holding one subdirectory per build generation. */
     private const BUILDS_DIR = 'builds';
 
-    /** Maximum heartbeat age before considering a lock stale (1 hour). */
-    private const STALE_LOCK_SECONDS = 3600;
+    /**
+     * How often a live build refreshes its heartbeat, at most (seconds).
+     *
+     * recordChunk() writes one per chunk, and heartbeat() — called from the
+     * chunk loop — writes one whenever this many seconds have passed since the
+     * last write, so a chunk that takes longer than this on a slow site still
+     * keeps the lock visibly alive.
+     */
+    public const HEARTBEAT_INTERVAL_SECONDS = 60;
+
+    /**
+     * A lock whose heartbeat is older than this many intervals is stale, on
+     * any host. Staleness has to be decidable from the record alone: a pid on
+     * another host cannot be probed, and on Kubernetes every replacement pod
+     * has a new hostname, so a build killed by an eviction, a rollout or the
+     * OOM killer used to hold the lock for the old fixed hour.
+     */
+    public const STALE_HEARTBEAT_MULTIPLIER = 5;
+
+    /** Maximum heartbeat age before a lock is stale (5 minutes). */
+    public const STALE_LOCK_SECONDS = self::HEARTBEAT_INTERVAL_SECONDS * self::STALE_HEARTBEAT_MULTIPLIER;
 
     /**
      * errno for "no such process", the one answer from kill(pid, 0) that
@@ -76,6 +95,9 @@ class BuildState
 
     /** Unix time this instance took the lock. */
     private ?int $acquiredAt = null;
+
+    /** Unix time this instance last wrote its lock record. */
+    private int $lastHeartbeatAt = 0;
 
     /** Memoised generation lookup for read-only instances. */
     private bool $generationResolved = false;
@@ -113,8 +135,8 @@ class BuildState
         } catch (\RuntimeException $e) {
             // Release rather than leave the lock held by a build that never
             // started: a failure here throws before the manifest is written,
-            // and a held-but-unstarted lock would refuse every build for up to
-            // an hour, until the heartbeat goes stale on its own. Guarded so a
+            // and a held-but-unstarted lock would refuse every build until
+            // the heartbeat goes stale on its own. Guarded so a
             // failure in the release itself cannot mask the purge failure that
             // is the actual problem here — dropLockFileOnly() cannot throw
             // today, but nothing pins that down, and losing $e to a secondary
@@ -244,6 +266,23 @@ class BuildState
 
         // Prove liveness for the next process that inspects the lock.
         $this->writeLockRecord();
+    }
+
+    /**
+     * Refresh the lock's heartbeat if HEARTBEAT_INTERVAL_SECONDS have passed.
+     *
+     * Cheap enough to call once per page from the chunk loop: it compares two
+     * integers and only touches the lock file when a write is due. A no-op
+     * when this instance does not hold the lock.
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function heartbeat(): void
+    {
+        if (time() - $this->lastHeartbeatAt >= self::HEARTBEAT_INTERVAL_SECONDS) {
+            $this->writeLockRecord();
+        }
     }
 
     /**
@@ -515,6 +554,19 @@ class BuildState
         $manifest = $this->readManifest();
 
         return $manifest['started_at'] ?? null;
+    }
+
+    /**
+     * Return the number of chunks the manifest counts as committed.
+     *
+     * Returns 0 when no manifest is present.
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function getChunksWritten(): int
+    {
+        return (int) ($this->readManifest()['chunks_written'] ?? 0);
     }
 
     /**
@@ -860,6 +912,7 @@ class BuildState
         }
 
         $now = time();
+        $this->lastHeartbeatAt = $now;
         $record = [
             'state'        => $state,
             'owner'        => $this->ownerToken,
@@ -951,8 +1004,10 @@ class BuildState
     /**
      * Decide whether a lock record still represents a running build.
      *
-     * Heartbeat age is the primary and cross-host-valid signal. A PID check is
-     * only allowed to *shorten* that window, only on the recording host, and
+     * Heartbeat age is the primary and cross-host-valid signal: a live build
+     * writes one at least every HEARTBEAT_INTERVAL_SECONDS, so a heartbeat
+     * older than STALE_LOCK_SECONDS means the owner is dead, whichever host it
+     * ran on. A PID check is only allowed to *shorten* that window, only on the recording host, and
      * only when the kernel says the process definitively does not exist
      * (ESRCH). EPERM means alive-but-not-ours, and no answer at all is
      * possible for a PID in another container's namespace.
@@ -1018,16 +1073,16 @@ class BuildState
 
         $host = $record['host'] ?? null;
         if ($host === null) {
-            return sprintf('heartbeat %ds old, owner host unknown — assumed live', $age);
+            return sprintf('heartbeat %ds old (limit %ds), owner host unknown — live', $age, self::STALE_LOCK_SECONDS);
         }
         if ($host !== self::hostname()) {
-            return sprintf('heartbeat %ds old, owned by host %s — assumed live', $age, $host);
+            return sprintf('heartbeat %ds old (limit %ds), owned by host %s — live', $age, self::STALE_LOCK_SECONDS, $host);
         }
         if ($this->isOwnerProvablyGone($record)) {
             return sprintf('pid %d gone on this host — stale', (int) ($record['pid'] ?? 0));
         }
 
-        return sprintf('heartbeat %ds old, pid %d on this host — live', $age, (int) ($record['pid'] ?? 0));
+        return sprintf('heartbeat %ds old (limit %ds), pid %d on this host — live', $age, self::STALE_LOCK_SECONDS, (int) ($record['pid'] ?? 0));
     }
 
     /**

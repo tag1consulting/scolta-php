@@ -78,6 +78,38 @@ class BuildLockConcurrencyTest extends TestCase
         $state = new BuildState($this->tmpDir);
         $this->assertTrue($state->isRunning());
         $this->assertFalse($state->initiateBuild(['total_pages' => 10]));
+        $this->assertStringContainsString(
+            sprintf('(limit %ds), owned by host some-other-container — live', BuildState::STALE_LOCK_SECONDS),
+            $state->lockDiagnostics()['liveness'],
+        );
+    }
+
+    /**
+     * An owner on another host whose heartbeat has aged past the window is
+     * dead, and the lock is free — without waiting the old fixed hour.
+     *
+     * On Kubernetes every replacement pod has a new hostname, so this is the
+     * record every evicted, rolled-out or OOM-killed build leaves behind
+     * (sharemylesson.com staging, 2026-09-10: "heartbeat 602s old, owned by
+     * host cli-5f7f8f457d-56wsl — assumed live" refused --resume).
+     */
+    public function testAnOwnerOnAnotherHostWithAnAgedHeartbeatIsStale(): void
+    {
+        $this->writeLockRecord([
+            'pid'          => 13824,
+            'host'         => 'cli-5f7f8f457d-56wsl',
+            'heartbeat_at' => time() - BuildState::STALE_LOCK_SECONDS - 1,
+        ]);
+        $this->writeBuildingManifest();
+
+        $state = new BuildState($this->tmpDir);
+        $this->assertTrue($state->lockDiagnostics()['stale']);
+        $this->assertStringContainsString(
+            sprintf('(limit %ds) — stale', BuildState::STALE_LOCK_SECONDS),
+            $state->lockDiagnostics()['liveness'],
+        );
+        $this->assertFalse($state->isRunning());
+        $this->assertTrue($state->initiateBuild(['total_pages' => 10]));
     }
 
     /** A heartbeat older than the stale window releases the lock to the next build. */
@@ -172,7 +204,7 @@ class BuildLockConcurrencyTest extends TestCase
      * The Drupal batch UI builds a fresh indexer per step, so the process that
      * finalizes never held the lock and the gathering process exited without
      * releasing it. Refusing here would leave the lock held until the
-     * heartbeat aged out and block the next build for an hour.
+     * heartbeat aged out and block the next build for several minutes.
      */
     public function testAFinalizeInALaterProcessMayCleanItsOwnGeneration(): void
     {
@@ -305,6 +337,39 @@ class BuildLockConcurrencyTest extends TestCase
 
         $this->assertFalse($state->lockDiagnostics()['stale']);
         $this->assertGreaterThanOrEqual($before, $state->lockDiagnostics()['heartbeat_at']);
+    }
+
+    /**
+     * heartbeat() writes only once per interval, so the chunk loop may call
+     * it per page without rewriting the lock file per page.
+     */
+    public function testHeartbeatIsRateLimitedToTheInterval(): void
+    {
+        $coord = new BuildCoordinator($this->tmpDir);
+        $coord->prepare(BuildIntent::fresh(20, MemoryBudget::conservative()));
+        $state = $coord->buildState();
+
+        // Backdate the record on disk; a due heartbeat would overwrite it.
+        $backdate = function (): void {
+            $record = json_decode((string) file_get_contents($this->tmpDir . '/lock'), true);
+            $record['heartbeat_at'] = time() - 7200;
+            file_put_contents($this->tmpDir . '/lock', json_encode($record));
+        };
+
+        $backdate();
+        $state->heartbeat();
+        $this->assertTrue($state->lockDiagnostics()['stale'], 'Not due yet: the record was written moments ago.');
+
+        // A chunk commit always writes, and resets the interval.
+        $coord->commitChunk(0, self::partial('a'));
+        $this->assertFalse($state->lockDiagnostics()['stale']);
+
+        // Once the interval has passed, heartbeat() writes.
+        $backdate();
+        $lastHeartbeat = new \ReflectionProperty(BuildState::class, 'lastHeartbeatAt');
+        $lastHeartbeat->setValue($state, time() - BuildState::HEARTBEAT_INTERVAL_SECONDS);
+        $state->heartbeat();
+        $this->assertFalse($state->lockDiagnostics()['stale']);
     }
 
     /** A lock file written by a pre-2.0.0 build is still understood. */
