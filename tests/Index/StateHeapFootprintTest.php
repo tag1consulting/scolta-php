@@ -36,7 +36,7 @@ class StateHeapFootprintTest extends TestCase
     protected function tearDown(): void
     {
         foreach (glob($this->stateDir . '/*') ?: [] as $f) {
-            unlink($f);
+            unlink($f); // nosemgrep: php.lang.security.unlink-use.unlink-use
         }
         rmdir($this->stateDir);
     }

@@ -23,7 +23,7 @@ final class PageTableLedgerTest extends TestCase
     protected function tearDown(): void
     {
         foreach (glob($this->stateDir . '/*') ?: [] as $f) {
-            unlink($f);
+            unlink($f); // nosemgrep: php.lang.security.unlink-use.unlink-use
         }
         if (is_dir($this->stateDir)) {
             rmdir($this->stateDir);

@@ -259,7 +259,7 @@ class TimestampManifestTest extends TestCase
 
         // Second build: entry unchanged, so nothing marks the manifest dirty.
         $second = $this->make();
-        unlink($this->stateDir . '/timestamp-manifest.php');
+        unlink($this->stateDir . '/timestamp-manifest.php'); // nosemgrep: php.lang.security.unlink-use.unlink-use
         $second->markSeen('42');
         $second->pruneAndSave();
 
@@ -273,7 +273,7 @@ class TimestampManifestTest extends TestCase
         $m->pruneAndSave();
 
         $second = $this->make();
-        unlink($this->stateDir . '/timestamp-manifest-empty.php');
+        unlink($this->stateDir . '/timestamp-manifest-empty.php'); // nosemgrep: php.lang.security.unlink-use.unlink-use
         $this->assertTrue($second->isKnownEmpty('abc'));
         $second->pruneAndSave();
 
@@ -438,7 +438,7 @@ class TimestampManifestTest extends TestCase
         $m1->pruneAndSave();
 
         $m2 = $this->make();
-        unlink($this->stateDir . '/timestamp-manifest.php');
+        unlink($this->stateDir . '/timestamp-manifest.php'); // nosemgrep: php.lang.security.unlink-use.unlink-use
         $m2->saveWithoutPruning();
 
         $this->assertNotNull($this->make()->get('entity'));
@@ -463,7 +463,7 @@ class TimestampManifestTest extends TestCase
                 continue;
             }
             $path = $dir . '/' . $entry;
-            is_dir($path) ? $this->removeDir($path) : unlink($path);
+            is_dir($path) ? $this->removeDir($path) : unlink($path); // nosemgrep: php.lang.security.unlink-use.unlink-use
         }
         rmdir($dir);
     }
