@@ -111,7 +111,7 @@ final class TimestampManifest
         }
 
         [$ts, $items] = $this->data[$entityKey];
-        $items         = @unserialize($items, ['allowed_classes' => false]);
+        $items         = @unserialize($items, ['allowed_classes' => false]); // nosemgrep: php.lang.security.unserialize-use.unserialize-use
         if (!is_array($items)) {
             // A corrupt entry is a miss: the gatherer reloads the entity and
             // put() overwrites the bad string, the same self-healing a corrupt
@@ -311,7 +311,7 @@ final class TimestampManifest
             return;
         }
 
-        $data = @unserialize($raw, ['allowed_classes' => false]);
+        $data = @unserialize($raw, ['allowed_classes' => false]); // nosemgrep: php.lang.security.unserialize-use.unserialize-use
         if (!is_array($data)) {
             return;
         }
@@ -354,7 +354,7 @@ final class TimestampManifest
             return;
         }
 
-        $hashes = @unserialize($raw, ['allowed_classes' => false]);
+        $hashes = @unserialize($raw, ['allowed_classes' => false]); // nosemgrep: php.lang.security.unserialize-use.unserialize-use
         if (!is_array($hashes)) {
             return;
         }

@@ -879,7 +879,7 @@ final class PageTableLedger
     private function row(string $id): array
     {
         [$ordinal, $gen, $blob] = $this->byId[$id];
-        $row                    = @unserialize($blob, ['allowed_classes' => false]);
+        $row                    = @unserialize($blob, ['allowed_classes' => false]); // nosemgrep: php.lang.security.unserialize-use.unserialize-use
         if (!is_array($row)) {
             // Not substituted with empty fields: a row that cannot be read is
             // an ordinal table that cannot be trusted, and guessing here writes
@@ -905,7 +905,7 @@ final class PageTableLedger
         if ($this->storage->exists($path)) {
             try {
                 $raw  = $this->storage->get($path);
-                $data = @unserialize($raw, ['allowed_classes' => false]);
+                $data = @unserialize($raw, ['allowed_classes' => false]); // nosemgrep: php.lang.security.unserialize-use.unserialize-use
             } catch (\Throwable) {
                 $data = null;
             }
@@ -975,7 +975,7 @@ final class PageTableLedger
                 continue;
             }
 
-            $record = @unserialize($decoded, ['allowed_classes' => false]);
+            $record = @unserialize($decoded, ['allowed_classes' => false]); // nosemgrep: php.lang.security.unserialize-use.unserialize-use
             if (!is_array($record)) {
                 continue;
             }

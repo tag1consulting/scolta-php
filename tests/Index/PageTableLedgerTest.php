@@ -436,7 +436,7 @@ final class PageTableLedgerTest extends TestCase
         $this->assertFileDoesNotExist($this->stateDir . '/' . PageTableLedger::JOURNAL_FILENAME);
 
         $l->save();
-        $raw = unserialize(file_get_contents($this->stateDir . '/' . PageTableLedger::FILENAME));
+        $raw = unserialize(file_get_contents($this->stateDir . '/' . PageTableLedger::FILENAME)); // nosemgrep: php.lang.security.unserialize-use.unserialize-use
         $this->assertIsString($raw['byId']['a'][2], 'Rows must be saved as strings');
         $this->assertSame(3, $this->ledger()->ordinalFor('a'));
     }

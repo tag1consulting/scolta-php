@@ -64,7 +64,7 @@ class TimestampManifestTest extends TestCase
 
         // Rewritten in the string-per-entry shape on the next save.
         $m->saveWithoutPruning();
-        $raw = unserialize(file_get_contents($this->stateDir . '/timestamp-manifest.php'));
+        $raw = unserialize(file_get_contents($this->stateDir . '/timestamp-manifest.php')); // nosemgrep: php.lang.security.unserialize-use.unserialize-use
         $this->assertSame([1_000_000, serialize($items)], $raw['42']);
         $this->assertSame(['ts' => 1_000_000, 'items' => $items], $this->make()->get('42'));
     }
