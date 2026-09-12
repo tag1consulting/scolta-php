@@ -416,6 +416,45 @@ final class PageTableLedgerTest extends TestCase
         $this->assertSame(0, $second->ordinalFor('kept'), 'A surviving page must keep its ordinal');
     }
 
+    public function testASnapshotInTheNestedArrayFormatIsLoadedAndConverted(): void
+    {
+        $row = ['ordinal' => 3, 'url' => '/a', 'filters' => ['x' => ['1']], 'sortable' => ['d' => 5], 'contentHash' => 'ha', 'gen' => 2];
+        file_put_contents($this->stateDir . '/' . PageTableLedger::FILENAME, serialize([
+            'next' => 4, 'byId' => ['a' => $row], 'free' => [0, 1, 2], 'tombstones' => [0 => true, 1 => true, 2 => true], 'generation' => 2,
+        ]));
+
+        $l = $this->ledger();
+        $this->assertSame(3, $l->ordinalFor('a'));
+        $this->assertSame('/a', $l->urlFor('a'));
+        $this->assertSame(['x' => ['1']], $l->filtersFor('a'));
+        $this->assertSame(['d' => 5], $l->sortableFor('a'));
+        $this->assertSame('ha', $l->contentHashFor('a'));
+        $this->assertTrue($l->wasSeenThisBuild('a'));
+        // Identical values are not a change, so nothing is journalled.
+        $this->assertSame(3, $l->allocate('a', '/a', ['x' => ['1']], ['d' => 5], 'ha'));
+        $l->checkpoint();
+        $this->assertFileDoesNotExist($this->stateDir . '/' . PageTableLedger::JOURNAL_FILENAME);
+
+        $l->save();
+        $raw = unserialize(file_get_contents($this->stateDir . '/' . PageTableLedger::FILENAME));
+        $this->assertIsString($raw['byId']['a'][2], 'Rows must be saved as strings');
+        $this->assertSame(3, $this->ledger()->ordinalFor('a'));
+    }
+
+    public function testAnUnreadableRowRefusesRatherThanGuesses(): void
+    {
+        file_put_contents($this->stateDir . '/' . PageTableLedger::FILENAME, serialize([
+            'next' => 1, 'byId' => ['a' => [0, 1, 'not serialized']], 'free' => [], 'tombstones' => [], 'generation' => 1,
+        ]));
+
+        $l = $this->ledger();
+        $this->assertSame(0, $l->ordinalFor('a'), 'The ints beside the row stay readable');
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('--reset-ledger');
+        $l->urlFor('a');
+    }
+
     public function testACorruptJournalLineIsSkippedRatherThanFatal(): void
     {
         $l = $this->ledger();

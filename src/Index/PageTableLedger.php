@@ -117,10 +117,20 @@ final class PageTableLedger
      * this array's keys directly; go through {@see self::assignedIds()}, which
      * is the one place the type is restored.
      *
-     * `gen` is optional because a snapshot written before it existed has rows
-     * without one; those read as generation 0, which is older than any build.
+     * A snapshot written before `gen` existed has rows without one; those read
+     * as generation 0, which is older than any build.
      *
-     * @var array<string, array{ordinal: int, url: string, filters: array<string, mixed>, sortable: array<string, mixed>, contentHash: string, gen?: int}>
+     * **Each row is held as `[ordinal, gen, serialize()d url/filters/sortable/contentHash]`,
+     * not as the nested array it decodes to.** The whole table is reloaded at
+     * the start of every resume segment, and unserialized rows cost 3.5 KB of
+     * heap each on a 124k-page corpus (423 MB); as strings they cost 0.6 KB.
+     * `ordinal` and `gen` stay ints beside the string because
+     * {@see self::wasSeenThisBuild()} reads them once per item on every
+     * resume; everything else is decoded on access through {@see self::row()}.
+     * The snapshot on disk has the same shape, so loading it creates strings,
+     * not arrays.
+     *
+     * @var array<string, array{0: int, 1: int, 2: string}>
      */
     private array $byId = [];
 
@@ -181,28 +191,22 @@ final class PageTableLedger
         array $sortable = [],
         string $contentHash = '',
     ): int {
-        if (isset($this->byId[$id])) {
-            $existing = $this->byId[$id];
-            $changed  = $existing['url'] !== $url
-                || $existing['filters'] !== $filters
-                || $existing['sortable'] !== $sortable
-                || $existing['contentHash'] !== $contentHash;
-            $unseen = ($existing['gen'] ?? 0) !== $this->generation;
+        $blob = self::encode($url, $filters, $sortable, $contentHash);
 
-            if ($changed || $unseen) {
-                $this->byId[$id]['url']         = $url;
-                $this->byId[$id]['filters']     = $filters;
-                $this->byId[$id]['sortable']    = $sortable;
-                $this->byId[$id]['contentHash'] = $contentHash;
-                $this->byId[$id]['gen']         = $this->generation;
-                $this->dirty                    = true;
+        if (isset($this->byId[$id])) {
+            [$ordinal, $gen, $existing] = $this->byId[$id];
+            // Two serialize() strings are identical exactly when the arrays
+            // compare identical with !==, so the unchanged case needs no decode.
+            if ($existing !== $blob || $gen !== $this->generation) {
+                $this->byId[$id] = [$ordinal, $this->generation, $blob];
+                $this->dirty     = true;
                 // Journalled even when only `gen` moved: that stamp is what
                 // tells a later segment of the same build that this page is
                 // still in the corpus and must not be tombstoned.
-                $this->pendingJournal[] = ['t' => 'a', 'id' => $id, 'row' => $this->byId[$id]];
+                $this->pendingJournal[] = ['t' => 'a', 'id' => $id, 'row' => $this->row($id)];
             }
 
-            return $existing['ordinal'];
+            return $ordinal;
         }
 
         if ($this->free !== []) {
@@ -213,16 +217,9 @@ final class PageTableLedger
         }
 
         unset($this->tombstones[$ordinal]);
-        $this->byId[$id] = [
-            'ordinal'     => $ordinal,
-            'url'         => $url,
-            'filters'     => $filters,
-            'sortable'    => $sortable,
-            'contentHash' => $contentHash,
-            'gen'         => $this->generation,
-        ];
+        $this->byId[$id]        = [$ordinal, $this->generation, $blob];
         $this->dirty            = true;
-        $this->pendingJournal[] = ['t' => 'a', 'id' => $id, 'row' => $this->byId[$id]];
+        $this->pendingJournal[] = ['t' => 'a', 'id' => $id, 'row' => $this->row($id)];
 
         return $ordinal;
     }
@@ -303,7 +300,7 @@ final class PageTableLedger
     {
         $stale = [];
         foreach ($this->assignedIds() as $id) {
-            if (($this->byId[$id]['gen'] ?? 0) === $this->generation) {
+            if ($this->byId[$id][1] === $this->generation) {
                 continue;
             }
             $stale[] = $id;
@@ -413,7 +410,7 @@ final class PageTableLedger
             return null;
         }
 
-        $ordinal = $this->byId[$id]['ordinal'];
+        $ordinal = $this->byId[$id][0];
         unset($this->byId[$id]);
         $this->free[]              = $ordinal;
         $this->tombstones[$ordinal] = true;
@@ -489,11 +486,11 @@ final class PageTableLedger
         $demoted = 0;
         foreach (array_keys($this->lastChunkIds) as $id) {
             $id = (string) $id;
-            if (!isset($this->byId[$id]) || ($this->byId[$id]['gen'] ?? 0) !== $this->generation) {
+            if (!isset($this->byId[$id]) || $this->byId[$id][1] !== $this->generation) {
                 continue;
             }
-            $this->byId[$id]['gen'] = 0;
-            $this->pendingJournal[] = ['t' => 'a', 'id' => $id, 'row' => $this->byId[$id]];
+            $this->byId[$id][1]     = 0;
+            $this->pendingJournal[] = ['t' => 'a', 'id' => $id, 'row' => $this->row($id)];
             $demoted++;
         }
 
@@ -518,7 +515,7 @@ final class PageTableLedger
      */
     public function wasSeenThisBuild(string $id): bool
     {
-        return isset($this->byId[$id]) && ($this->byId[$id]['gen'] ?? 0) === $this->generation;
+        return isset($this->byId[$id]) && $this->byId[$id][1] === $this->generation;
     }
 
     /**
@@ -535,8 +532,8 @@ final class PageTableLedger
      */
     public function seenIdsThisBuild(): \Generator
     {
-        foreach ($this->byId as $id => $row) {
-            if (($row['gen'] ?? 0) === $this->generation) {
+        foreach ($this->byId as $id => [, $gen]) {
+            if ($gen === $this->generation) {
                 yield (string) $id;
             }
         }
@@ -550,7 +547,7 @@ final class PageTableLedger
      */
     public function ordinalFor(string $id): ?int
     {
-        return $this->byId[$id]['ordinal'] ?? null;
+        return $this->byId[$id][0] ?? null;
     }
 
     /**
@@ -564,7 +561,7 @@ final class PageTableLedger
      */
     public function urlFor(string $id): ?string
     {
-        return $this->byId[$id]['url'] ?? null;
+        return isset($this->byId[$id]) ? $this->row($id)['url'] : null;
     }
 
     /**
@@ -576,7 +573,7 @@ final class PageTableLedger
      */
     public function filtersFor(string $id): array
     {
-        return $this->byId[$id]['filters'] ?? [];
+        return isset($this->byId[$id]) ? $this->row($id)['filters'] : [];
     }
 
     /**
@@ -588,7 +585,7 @@ final class PageTableLedger
      */
     public function sortableFor(string $id): array
     {
-        return $this->byId[$id]['sortable'] ?? [];
+        return isset($this->byId[$id]) ? $this->row($id)['sortable'] : [];
     }
 
     /**
@@ -605,7 +602,7 @@ final class PageTableLedger
      */
     public function contentHashFor(string $id): string
     {
-        return $this->byId[$id]['contentHash'] ?? '';
+        return isset($this->byId[$id]) ? $this->row($id)['contentHash'] : '';
     }
 
     /**
@@ -620,7 +617,7 @@ final class PageTableLedger
     {
         $rows = [];
         foreach ($this->assignedIds() as $id) {
-            $row                   = $this->byId[$id];
+            $row                   = $this->row($id);
             $rows[$row['ordinal']] = [
                 'id'          => $id,
                 'url'         => $row['url'],
@@ -860,6 +857,48 @@ final class PageTableLedger
         return array_map(strval(...), array_keys($this->byId));
     }
 
+    /**
+     * The serialized part of a row. Its byte-equality stands in for the
+     * field-by-field `!==` comparison {@see self::allocate()} used to make, so
+     * the key order here is part of the contract; a reordering forces one
+     * spurious "changed" journal record per row.
+     *
+     * @param array<string, mixed> $filters
+     * @param array<string, mixed> $sortable
+     */
+    private static function encode(string $url, array $filters, array $sortable, string $contentHash): string
+    {
+        return serialize(['url' => $url, 'filters' => $filters, 'sortable' => $sortable, 'contentHash' => $contentHash]);
+    }
+
+    /**
+     * Decode $id's row into the flat shape the journal and the accessors use.
+     *
+     * @return array{ordinal: int, url: string, filters: array<string, mixed>, sortable: array<string, mixed>, contentHash: string, gen: int}
+     */
+    private function row(string $id): array
+    {
+        [$ordinal, $gen, $blob] = $this->byId[$id];
+        $row                    = @unserialize($blob, ['allowed_classes' => false]);
+        if (!is_array($row)) {
+            // Not substituted with empty fields: a row that cannot be read is
+            // an ordinal table that cannot be trusted, and guessing here writes
+            // a wrong fragment name or filter set into the index.
+            throw new \RuntimeException(sprintf(
+                'Page-table ledger row for id "%s" in %s/%s is unreadable. Refusing to guess its url and '
+                . 'filters; rebuild with --reset-ledger.',
+                $id,
+                $this->stateDir,
+                self::FILENAME,
+            ));
+        }
+        $row['ordinal'] = $ordinal;
+        $row['gen']     = $gen;
+
+        /** @var array{ordinal: int, url: string, filters: array<string, mixed>, sortable: array<string, mixed>, contentHash: string, gen: int} $row */
+        return $row;
+    }
+
     private function loadFromDisk(): void
     {
         $path = $this->stateDir . '/' . self::FILENAME;
@@ -873,7 +912,30 @@ final class PageTableLedger
 
             if (is_array($data)) {
                 $this->next       = (int) ($data['next'] ?? 0);
-                $this->byId       = is_array($data['byId'] ?? null) ? $data['byId'] : [];
+                foreach (is_array($data['byId'] ?? null) ? $data['byId'] : [] as $id => $row) {
+                    if (!is_array($row)) {
+                        continue;
+                    }
+                    if (is_string($row[2] ?? null)) {
+                        $this->byId[$id] = [(int) ($row[0] ?? 0), (int) ($row[1] ?? 0), $row[2]];
+                        continue;
+                    }
+                    // A snapshot written before rows were stored as strings:
+                    // ['ordinal' => …, 'url' => …, …]. Converted once here.
+                    if (isset($row['ordinal'])) {
+                        $this->byId[$id] = [
+                            (int) $row['ordinal'],
+                            (int) ($row['gen'] ?? 0),
+                            self::encode(
+                                (string) ($row['url'] ?? ''),
+                                is_array($row['filters'] ?? null) ? $row['filters'] : [],
+                                is_array($row['sortable'] ?? null) ? $row['sortable'] : [],
+                                (string) ($row['contentHash'] ?? ''),
+                            ),
+                        ];
+                        $this->dirty = true;
+                    }
+                }
                 $this->free       = is_array($data['free'] ?? null) ? array_values($data['free']) : [];
                 $this->tombstones = is_array($data['tombstones'] ?? null) ? $data['tombstones'] : [];
                 $this->generation = (int) ($data['generation'] ?? 0);
@@ -969,12 +1031,14 @@ final class PageTableLedger
             // not be able to reshape the table every posting list indexes into.
             $ordinal         = (int) $row['ordinal'];
             $this->byId[$id] = [
-                'ordinal'     => $ordinal,
-                'url'         => (string) ($row['url'] ?? ''),
-                'filters'     => is_array($row['filters'] ?? null) ? $row['filters'] : [],
-                'sortable'    => is_array($row['sortable'] ?? null) ? $row['sortable'] : [],
-                'contentHash' => (string) ($row['contentHash'] ?? ''),
-                'gen'         => (int) ($row['gen'] ?? 0),
+                $ordinal,
+                (int) ($row['gen'] ?? 0),
+                self::encode(
+                    (string) ($row['url'] ?? ''),
+                    is_array($row['filters'] ?? null) ? $row['filters'] : [],
+                    is_array($row['sortable'] ?? null) ? $row['sortable'] : [],
+                    (string) ($row['contentHash'] ?? ''),
+                ),
             ];
             $this->generation = max($this->generation, (int) ($row['gen'] ?? 0));
 

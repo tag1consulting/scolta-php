@@ -446,6 +446,14 @@ final class IndexBuildOrchestrator
                         // state the segment this yield schedules needs.
                         $this->cache()->saveWithoutPruning();
                         $this->tsManifest->saveWithoutPruning();
+                        // Snapshot the ledger too, so the next segment loads a
+                        // snapshot instead of replaying a journal that grows by
+                        // every committed row across segments (70 MB over 13
+                        // segments on a 119k-page site). flushChunk() already
+                        // checkpointed this chunk's rows, so nothing is pending,
+                        // and the lock is still held, so the journal it deletes
+                        // after the rename has no other writer.
+                        $this->ledger->save();
                         $this->coordinator->releaseLockOnly();
                         $logger->info(sprintf(
                             '[scolta] Memory pressure detected after chunk %d — yielding for restart (%d pages committed).',

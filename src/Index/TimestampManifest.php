@@ -56,7 +56,20 @@ final class TimestampManifest
 
     private const EMPTY_FILENAME = 'timestamp-manifest-empty.php';
 
-    /** @var array<string, array{ts: int, items: list<array<string, mixed>>}> */
+    /**
+     * Entity key => [changed timestamp, serialize()d items].
+     *
+     * The items are held as one string, not as the nested array they decode
+     * to, because this whole map is reloaded at the start of every resume
+     * segment and its heap size is what decides how many pages a segment can
+     * commit before yielding again. Unserialized, an entry cost 6.2 KB of heap
+     * on a 124k-page corpus (751 MB in all); as a string it costs 1.4 KB. The
+     * gatherer's skip decision reads only `ts`, so that stays an int beside
+     * the string and the items are decoded only on a hit. The on-disk file has
+     * the same shape, so loading it creates strings, not arrays.
+     *
+     * @var array<string, array{0: int, 1: string}>
+     */
     private array $data = [];
 
     /** @var array<string, true> */
@@ -93,7 +106,24 @@ final class TimestampManifest
      */
     public function get(string $entityKey): ?array
     {
-        return $this->data[$entityKey] ?? null;
+        if (!isset($this->data[$entityKey])) {
+            return null;
+        }
+
+        [$ts, $items] = $this->data[$entityKey];
+        $items         = @unserialize($items, ['allowed_classes' => false]);
+        if (!is_array($items)) {
+            // A corrupt entry is a miss: the gatherer reloads the entity and
+            // put() overwrites the bad string, the same self-healing a corrupt
+            // whole file gets on load.
+            unset($this->data[$entityKey]);
+            $this->dirty = true;
+
+            return null;
+        }
+
+        /** @var list<array<string, mixed>> $items */
+        return ['ts' => $ts, 'items' => $items];
     }
 
     /**
@@ -109,7 +139,7 @@ final class TimestampManifest
      */
     public function put(string $entityKey, int $ts, array $items): void
     {
-        $this->data[$entityKey] = ['ts' => $ts, 'items' => $items];
+        $this->data[$entityKey] = [$ts, serialize($items)];
         $this->seen[$entityKey] = true;
         $this->dirty            = true;
     }
@@ -282,8 +312,25 @@ final class TimestampManifest
         }
 
         $data = @unserialize($raw, ['allowed_classes' => false]);
-        if (is_array($data)) {
-            $this->data = $data;
+        if (!is_array($data)) {
+            return;
+        }
+
+        foreach ($data as $key => $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            if (is_string($entry[1] ?? null)) {
+                $this->data[$key] = [(int) ($entry[0] ?? 0), $entry[1]];
+                continue;
+            }
+            // A manifest written before entries were stored as strings:
+            // ['ts' => int, 'items' => array]. Converted once here and
+            // written back in the new shape by the next save.
+            if (isset($entry['items'])) {
+                $this->data[$key] = [(int) ($entry['ts'] ?? 0), serialize($entry['items'])];
+                $this->dirty      = true;
+            }
         }
     }
 

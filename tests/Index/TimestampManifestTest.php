@@ -51,6 +51,36 @@ class TimestampManifestTest extends TestCase
         $this->assertSame($items, $entry['items']);
     }
 
+    public function test_loads_a_manifest_written_in_the_nested_array_format(): void
+    {
+        $items = [['hash' => 'abc', 'id' => '42', 'url' => '/node/42', 'filters' => ['a' => ['x']]]];
+        file_put_contents(
+            $this->stateDir . '/timestamp-manifest.php',
+            serialize(['42' => ['ts' => 1_000_000, 'items' => $items]]),
+        );
+
+        $m = $this->make();
+        $this->assertSame(['ts' => 1_000_000, 'items' => $items], $m->get('42'));
+
+        // Rewritten in the string-per-entry shape on the next save.
+        $m->saveWithoutPruning();
+        $raw = unserialize(file_get_contents($this->stateDir . '/timestamp-manifest.php'));
+        $this->assertSame([1_000_000, serialize($items)], $raw['42']);
+        $this->assertSame(['ts' => 1_000_000, 'items' => $items], $this->make()->get('42'));
+    }
+
+    public function test_a_corrupt_entry_reads_as_a_miss(): void
+    {
+        file_put_contents(
+            $this->stateDir . '/timestamp-manifest.php',
+            serialize(['42' => [1_000_000, 'not serialized'], '43' => [1, serialize([['hash' => 'ok']])]]),
+        );
+
+        $m = $this->make();
+        $this->assertNull($m->get('42'));
+        $this->assertSame([['hash' => 'ok']], $m->get('43')['items']);
+    }
+
     public function test_put_overwrites_existing_entry(): void
     {
         $m = $this->make();
