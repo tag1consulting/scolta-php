@@ -75,6 +75,20 @@ class BuildState
     public const STALE_LOCK_SECONDS = self::HEARTBEAT_INTERVAL_SECONDS * self::STALE_HEARTBEAT_MULTIPLIER;
 
     /**
+     * Build phases, recorded in the manifest by enterPhase().
+     *
+     * Gathering walks the corpus into chunks (pages_processed and
+     * chunks_written advance); merging streams every chunk into the staged
+     * output; publishing swaps the staged output live.
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public const PHASE_GATHERING = 'gathering';
+    public const PHASE_MERGING = 'merging';
+    public const PHASE_PUBLISHING = 'publishing';
+
+    /**
      * errno for "no such process", the one answer from kill(pid, 0) that
      * proves the owner is gone. EPERM (1) means alive and owned by another
      * uid, which is why posix_kill()'s plain false is not evidence of death.
@@ -177,6 +191,7 @@ class BuildState
             'started_at' => gmdate('c'),
             'fingerprint' => '',
             'status' => 'building',
+            'phase' => self::PHASE_GATHERING,
         ], $manifest, ['generation' => $this->generation]);
 
         $this->commitManifest($manifest);
@@ -271,6 +286,42 @@ class BuildState
 
         // Prove liveness for the next process that inspects the lock.
         $this->writeLockRecord();
+    }
+
+    /**
+     * Record which phase the running build is in and refresh the heartbeat.
+     *
+     * @param string $phase One of the PHASE_* constants.
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function enterPhase(string $phase): void
+    {
+        $manifest = $this->readManifest();
+        if ($manifest !== null) {
+            $manifest['phase'] = $phase;
+            $this->commitManifest($manifest);
+        }
+        $this->writeLockRecord();
+    }
+
+    /**
+     * The phase the in-flight build last recorded, or null with no manifest.
+     *
+     * A manifest from before phases were recorded reads as gathering, the
+     * only phase whose progress the manifest counters describe.
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function phase(): ?string
+    {
+        $manifest = $this->readManifest();
+        if ($manifest === null) {
+            return null;
+        }
+
+        return (string) ($manifest['phase'] ?? self::PHASE_GATHERING);
     }
 
     /**
