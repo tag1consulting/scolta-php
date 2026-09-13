@@ -129,7 +129,7 @@ class InvertedIndexBuilder
             }
         }
 
-        // Fragment content mirrors what PagefindHtmlBuilder puts in <body>:
+        // Fragment content mirrors what Pagefind reads from a page <body>:
         // "<h1>title</h1><p>body...</p>". Pagefind extracts that as
         // "Title. Body..." in the content field. We must do the same so
         // scolta-core's content_match_score sees title words in the excerpt,

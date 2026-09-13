@@ -1,6 +1,6 @@
 {
     "name": "tag1/scolta-php",
-    "version": "1.5.0-dev",
+    "version": "2.0.0-dev",
     "description": "AI-powered search with Pagefind \u2014 PHP language binding",
     "type": "library",
     "license": "MIT",
@@ -61,7 +61,7 @@
     },
     "extra": {
         "branch-alias": {
-            "dev-main": "1.x-dev"
+            "dev-main": "2.x-dev"
         }
     },
     "archive": {

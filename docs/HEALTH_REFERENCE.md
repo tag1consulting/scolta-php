@@ -40,7 +40,7 @@ and it is the one case where `ai_usable: false` does not degrade the status.
 
 The line is between *AI is off* and *AI was asked for and does not work*: a
 provider configured but failing is degraded, a provider never configured is a
-choice. The two collapsed into one flag until 1.5.0, so an AI-less deployment
+choice. The two collapsed into one flag until 2.0.0, so an AI-less deployment
 reported `degraded` forever.
 
 ## AI fields
@@ -149,10 +149,24 @@ have. A successful AI call after an operator supplies a working key clears the
 first and leaves the second standing, which is correct: the site is serving AI
 again, and the Amazee credentials it was provisioned with are still dead.
 
+## Index fields
+
+| Field | Type | Meaning |
+|---|---|---|
+| `index_exists` | bool | `{outputDir}/pagefind/pagefind.js` or `{outputDir}/pagefind.js` exists. |
+| `indexer_active` | string | Always `php`. Kept so adapters reading it keep working. |
+| `stale_artifact_urls` | bool | Sampled fragments carry `/{id}.html` URLs from a pre-1.1.0 binary build. |
+| `stale_artifact_message` | string\|null | Operator text for the above, or `null`. |
+
 ## History
 
+`pagefind`, `pagefind_available`, `indexer_upgrade_available` and
+`indexer_upgrade_message` were removed in 2.0.0 with the Pagefind binary
+pipeline. `HealthChecker::__construct()` lost its `pagefindBinaryPath` and
+`projectDir` parameters at the same time.
+
 `status_reasons`, and the rule that an AI-less deployment is not degraded,
-arrived in 1.5.0.
+arrived in 2.0.0.
 
 `ai_auth_failing`, `ai_usable` and the `degraded` status arrived with Amazee
 trial-key expiry detection: an expired key had kept `ai_configured: true` for

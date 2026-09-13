@@ -19,6 +19,12 @@ name: Release Validation
 #      adapter test it broke had been asserting that exact contract all along.
 #      They now resolve the checkout beside them, which on a pull request is the
 #      merge ref.
+#
+#      An adapter job runs only when the adapter's tag1/scolta-php constraint
+#      shares a major with the scolta-php under test; otherwise it skips the
+#      install and emits a notice, because forcing an adapter across a major
+#      boundary tests a combination no site can install.
+#
 #   4. Release script validation (version format, changelog presence)
 
 on:
@@ -187,7 +193,27 @@ jobs:
           extensions: intl
           coverage: none
 
+      - name: Does this adapter track the scolta-php major under test?
+        # The install steps below force the adapter onto the scolta-php checked
+        # out beside it with a path repository and "@dev", which deliberately
+        # overrides the adapter's own constraint. That is the right guard while
+        # the two share a major. Across majors it installs a combination no
+        # site can ever have, so the job would report a failure that is not a
+        # defect. Compare the majors and skip the rest of the job instead.
+        id: compat
+        run: |
+          adapter_major=$(php -r '$j = json_decode(file_get_contents("composer.json"), true); preg_match("/(\d+)/", $j["require"]["tag1/scolta-php"], $m); echo $m[1];')
+          lib_major=$(php -r '$j = json_decode(file_get_contents("../scolta-php/composer.json"), true); preg_match("/^(\d+)/", $j["version"], $m); echo $m[1];')
+          echo "adapter requires major $adapter_major; scolta-php under test is major $lib_major"
+          if [ "$adapter_major" = "$lib_major" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Adapter skipped::This adapter requires tag1/scolta-php major $adapter_major and stays on it; the branch under test is $lib_major.x. Its suite is not run against this scolta-php. The job re-arms when the adapter moves to ^$lib_major."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Point the adapter at the scolta-php checked out beside it
+        if: steps.compat.outputs.ok == 'true'
         run: |
           php -r '
             $j = json_decode(file_get_contents("composer.json"), true);
@@ -203,6 +229,7 @@ jobs:
           '
 
       - name: Install dependencies
+        if: steps.compat.outputs.ok == 'true'
         # Retry: a dist download can still draw on the shared REST budget, so
         # one throttled call should not fail the job.
         run: |
@@ -218,6 +245,7 @@ jobs:
           exit 1
 
       - name: Run WordPress adapter tests
+        if: steps.compat.outputs.ok == 'true'
         run: composer test
 
   # -------------------------------------------------------------------
@@ -251,7 +279,27 @@ jobs:
           extensions: intl
           coverage: none
 
+      - name: Does this adapter track the scolta-php major under test?
+        # The install steps below force the adapter onto the scolta-php checked
+        # out beside it with a path repository and "@dev", which deliberately
+        # overrides the adapter's own constraint. That is the right guard while
+        # the two share a major. Across majors it installs a combination no
+        # site can ever have, so the job would report a failure that is not a
+        # defect. Compare the majors and skip the rest of the job instead.
+        id: compat
+        run: |
+          adapter_major=$(php -r '$j = json_decode(file_get_contents("composer.json"), true); preg_match("/(\d+)/", $j["require"]["tag1/scolta-php"], $m); echo $m[1];')
+          lib_major=$(php -r '$j = json_decode(file_get_contents("../scolta-php/composer.json"), true); preg_match("/^(\d+)/", $j["version"], $m); echo $m[1];')
+          echo "adapter requires major $adapter_major; scolta-php under test is major $lib_major"
+          if [ "$adapter_major" = "$lib_major" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Adapter skipped::This adapter requires tag1/scolta-php major $adapter_major and stays on it; the branch under test is $lib_major.x. Its suite is not run against this scolta-php. The job re-arms when the adapter moves to ^$lib_major."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Point the adapter at the scolta-php checked out beside it
+        if: steps.compat.outputs.ok == 'true'
         run: |
           php -r '
             $j = json_decode(file_get_contents("composer.json"), true);
@@ -281,6 +329,7 @@ jobs:
           '
 
       - name: Install dependencies
+        if: steps.compat.outputs.ok == 'true'
         # Retry: a dist download can still draw on the shared REST budget, so
         # one throttled call should not fail the job.
         run: |
@@ -296,6 +345,7 @@ jobs:
           exit 1
 
       - name: Verify scolta-php installed correctly
+        if: steps.compat.outputs.ok == 'true'
         # The full adapter test suite is owned by scolta-drupal's own CI.
         # Here we only verify that scolta-php installs without dependency
         # conflicts in a Drupal context (the primary purpose of this job).
@@ -335,7 +385,27 @@ jobs:
           extensions: intl
           coverage: none
 
+      - name: Does this adapter track the scolta-php major under test?
+        # The install steps below force the adapter onto the scolta-php checked
+        # out beside it with a path repository and "@dev", which deliberately
+        # overrides the adapter's own constraint. That is the right guard while
+        # the two share a major. Across majors it installs a combination no
+        # site can ever have, so the job would report a failure that is not a
+        # defect. Compare the majors and skip the rest of the job instead.
+        id: compat
+        run: |
+          adapter_major=$(php -r '$j = json_decode(file_get_contents("composer.json"), true); preg_match("/(\d+)/", $j["require"]["tag1/scolta-php"], $m); echo $m[1];')
+          lib_major=$(php -r '$j = json_decode(file_get_contents("../scolta-php/composer.json"), true); preg_match("/^(\d+)/", $j["version"], $m); echo $m[1];')
+          echo "adapter requires major $adapter_major; scolta-php under test is major $lib_major"
+          if [ "$adapter_major" = "$lib_major" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Adapter skipped::This adapter requires tag1/scolta-php major $adapter_major and stays on it; the branch under test is $lib_major.x. Its suite is not run against this scolta-php. The job re-arms when the adapter moves to ^$lib_major."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Point the adapter at the scolta-php checked out beside it
+        if: steps.compat.outputs.ok == 'true'
         run: |
           php -r '
             $j = json_decode(file_get_contents("composer.json"), true);
@@ -351,6 +421,7 @@ jobs:
           '
 
       - name: Install dependencies
+        if: steps.compat.outputs.ok == 'true'
         # Retry: a dist download can still draw on the shared REST budget, so
         # one throttled call should not fail the job.
         run: |
@@ -366,6 +437,7 @@ jobs:
           exit 1
 
       - name: Run Laravel adapter tests
+        if: steps.compat.outputs.ok == 'true'
         run: composer test
 
   # -------------------------------------------------------------------

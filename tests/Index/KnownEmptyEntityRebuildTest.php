@@ -178,7 +178,7 @@ final class KnownEmptyEntityRebuildTest extends TestCase
     public function test_filter_items_records_the_hash_it_drops(): void
     {
         $manifest = new TimestampManifest($this->stateDir, new \Tag1\Scolta\Storage\FilesystemDriver());
-        $exporter = new ContentExporter($this->outputDir);
+        $exporter = new ContentExporter();
 
         $kept = iterator_to_array($exporter->filterItems([self::article(), self::short()], $manifest), false);
 
@@ -190,7 +190,7 @@ final class KnownEmptyEntityRebuildTest extends TestCase
 
     public function test_filter_items_records_nothing_without_a_manifest(): void
     {
-        $exporter = new ContentExporter($this->outputDir);
+        $exporter = new ContentExporter();
         $manifest = new TimestampManifest($this->stateDir, new \Tag1\Scolta\Storage\FilesystemDriver());
 
         $kept = iterator_to_array($exporter->filterItems([self::article(), self::short()]), false);
@@ -205,7 +205,7 @@ final class KnownEmptyEntityRebuildTest extends TestCase
      */
     public function test_the_drop_gate_and_the_predicate_agree(): void
     {
-        $exporter = new ContentExporter($this->outputDir);
+        $exporter = new ContentExporter();
 
         foreach ([self::article(), self::short()] as $item) {
             $kept = iterator_to_array($exporter->filterItems([$item]), false);
@@ -230,7 +230,7 @@ final class KnownEmptyEntityRebuildTest extends TestCase
     {
         $orchestrator = new IndexBuildOrchestrator($this->stateDir, $this->outputDir);
         $manifest     = $orchestrator->getTimestampManifest();
-        $exporter     = new ContentExporter($this->outputDir);
+        $exporter     = new ContentExporter();
 
         foreach ([self::article(), self::short()] as $item) {
             $manifest->put($item->id, 1_700_000_000, [[

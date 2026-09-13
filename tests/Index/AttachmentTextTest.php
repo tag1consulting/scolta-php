@@ -228,7 +228,7 @@ class AttachmentTextTest extends TestCase
 
         $this->assertNotNull($this->builder->tokenizeItem($item), 'Tokenizer dropped an attachment-only page.');
         $this->assertTrue(
-            (new ContentExporter(sys_get_temp_dir()))->hasIndexableText($item),
+            (new ContentExporter())->hasIndexableText($item),
             'Exporter dropped an attachment-only page.',
         );
     }

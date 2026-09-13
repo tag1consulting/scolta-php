@@ -48,7 +48,7 @@ class IndexMerger
      * as {@see self::setTelemetry()}: mergeStreaming() is `@stability stable`
      * and this class is not final.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function setStateDir(?string $stateDir): void

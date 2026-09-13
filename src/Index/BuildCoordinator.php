@@ -146,7 +146,7 @@ final class BuildCoordinator
     /**
      * Path to the manifest of the build currently in the state directory.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function manifestFile(): string
@@ -214,7 +214,7 @@ final class BuildCoordinator
      * merge from being the hole in the guard.
      *
      * @return string BuildIntent::SCOPE_FULL or BuildIntent::SCOPE_PARTIAL.
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function declaredScope(): string

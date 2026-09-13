@@ -293,7 +293,7 @@ final class PageTableLedger
      * calls.
      *
      * @return list<string> Ids the current build has not committed.
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function staleRowIds(): array
@@ -474,7 +474,7 @@ final class PageTableLedger
      *
      * @param int $chunksWritten The manifest's count of committed chunks.
      * @return int Rows demoted.
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function unstampUncommittedChunk(int $chunksWritten): int

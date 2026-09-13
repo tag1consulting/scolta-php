@@ -296,7 +296,7 @@ class PhpIndexer
      *
      * @throws \JsonException When filters, metadata or sortable hold a value
      *   JSON cannot represent.
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public static function fingerprintEntry(\Tag1\Scolta\Export\ContentItem $item): string
@@ -324,7 +324,7 @@ class PhpIndexer
      * the source yields items in.
      *
      * @param string[] $entries
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public static function combineFingerprintEntries(array $entries): string

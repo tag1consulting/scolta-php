@@ -75,7 +75,7 @@ class InvertedIndexBuilderTest extends TestCase
 
     public function testContentFieldStartsWithTitle(): void
     {
-        // The fragment content must mirror what PagefindHtmlBuilder puts in <body>
+        // The fragment content must mirror what Pagefind reads from a page <body>
         // ("<h1>Title</h1><p>body</p>" → "Title. body..."), so that
         // scolta-core's content_match_score sees title words in the excerpt and
         // applies the same content boost as body matches.

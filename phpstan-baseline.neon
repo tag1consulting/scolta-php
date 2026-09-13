@@ -109,18 +109,6 @@ parameters:
 			path: src/Environment/HostingDetector.php
 
 		-
-			message: '#^Parameter \#1 \$json of function json_decode expects string, string\|false given\.$#'
-			identifier: argument.type
-			count: 1
-			path: src/Export/ContentExporter.php
-
-		-
-			message: '#^Property Tag1\\Scolta\\Export\\ContentExporter\:\:\$exportedPaths type has no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Export/ContentExporter.php
-
-		-
 			message: '#^Method Tag1\\Scolta\\Export\\ContentItem\:\:__construct\(\) has parameter \$filters with no value type specified in iterable type array\.$#'
 			identifier: missingType.iterableValue
 			count: 1
@@ -141,32 +129,8 @@ parameters:
 		-
 			message: '#^Method Tag1\\Scolta\\Health\\HealthChecker\:\:check\(\) return type has no value type specified in iterable type array\.$#'
 			identifier: missingType.iterableValue
-			count: 2
-			path: src/Health/HealthChecker.php
-
-		-
-			message: '#^Property Tag1\\Scolta\\Health\\HealthChecker\:\:\$config on left side of \?\? is not nullable nor uninitialized\.$#'
-			identifier: nullCoalesce.initializedProperty
 			count: 1
 			path: src/Health/HealthChecker.php
-
-		-
-			message: '#^Method Tag1\\Scolta\\Html\\PagefindHtmlBuilder\:\:build\(\) has parameter \$filters with no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Html/PagefindHtmlBuilder.php
-
-		-
-			message: '#^Method Tag1\\Scolta\\Html\\PagefindHtmlBuilder\:\:build\(\) has parameter \$metadata with no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Html/PagefindHtmlBuilder.php
-
-		-
-			message: '#^Method Tag1\\Scolta\\Html\\PagefindHtmlBuilder\:\:build\(\) has parameter \$sortable with no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Html/PagefindHtmlBuilder.php
 
 		-
 			message: '#^Trait Tag1\\Scolta\\Http\\AiControllerTrait is used zero times and is not analysed\.$#'

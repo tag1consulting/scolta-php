@@ -154,7 +154,7 @@ class FacetIndexWriter
     /**
      * The artifact's filename for a given pf_meta hash.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public static function filename(string $indexHash): string

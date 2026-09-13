@@ -368,8 +368,6 @@ class ApiKeyResolverTest extends TestCase
         $health = (new HealthChecker(
             config: $this->configFor($resolved),
             indexOutputDir: $this->tempDir,
-            pagefindBinaryPath: null,
-            projectDir: null,
             cache: null,
             resolvedKey: $resolved,
         ))->check();
@@ -380,8 +378,6 @@ class ApiKeyResolverTest extends TestCase
 
         // 3. The CLI setup check.
         $setup = SetupCheck::run(
-            configuredBinaryPath: null,
-            projectDir: null,
             aiApiKey: null,
             browserWasmDir: null,
             resolvedKey: $resolved,
