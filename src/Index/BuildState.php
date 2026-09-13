@@ -160,6 +160,11 @@ class BuildState
             throw new \RuntimeException("Failed to create build directory: {$buildDir}");
         }
         $this->writeLockRecord();
+        // A build killed hard never records an outcome. Without this, the
+        // verdict of the previous build would survive and read as this
+        // build's, so ResumeChainPolicy::resumable() would start over rather
+        // than continue from the ledger.
+        $this->clearOutcome();
 
         $manifest = array_merge([
             'version' => '1.0.0',

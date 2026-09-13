@@ -6,6 +6,7 @@ namespace Tag1\Scolta\Tests\Index;
 
 use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\Index\BuildState;
+use Tag1\Scolta\Index\ResumeChainPolicy;
 
 class BuildStateTest extends TestCase
 {
@@ -33,6 +34,18 @@ class BuildStateTest extends TestCase
             $state->buildDirectory(),
             'Each build writes into its own generation directory, so two builds cannot share chunk filenames.',
         );
+    }
+
+    public function testInitiateBuildClearsThePreviousBuildsOutcome(): void
+    {
+        $state = new BuildState($this->tmpDir);
+        $state->recordOutcome(true, null, 1512);
+        $state->initiateBuild(['total_pages' => 100]);
+        $this->assertNull(
+            $state->readOutcome(),
+            'A build killed hard records nothing; the last build\'s success must not be read as this one\'s.',
+        );
+        $this->assertTrue(ResumeChainPolicy::resumable($state));
     }
 
     public function testResumeBuildCountsSegmentsAndMarksWhereEachStarted(): void
