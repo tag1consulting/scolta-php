@@ -72,6 +72,21 @@ class StreamingFormatWriterTest extends TestCase
 
     // ── Tests ──────────────────────────────────────────────────────────────────
 
+    public function testHeartbeatFiresOnEveryPageAndTerm(): void
+    {
+        $beats = 0;
+        $this->writer->setHeartbeat(function () use (&$beats): void {
+            $beats++;
+        });
+        $this->writeSingleChunkAndRun(
+            [0 => $this->makePage('/a', 'A'), 1 => $this->makePage('/b', 'B')],
+            ['alpha' => [0 => ['positions' => [25 => [1]]]]],
+        );
+        // Two pages and one term: the merge is what keeps the lock alive
+        // once the chunk loop is done, so every write has to count.
+        $this->assertSame(3, $beats);
+    }
+
     public function testWritePageAccumulatesSortableData(): void
     {
         $pages = [

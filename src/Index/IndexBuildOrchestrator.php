@@ -623,9 +623,12 @@ final class IndexBuildOrchestrator
             $this->assertLedgerHasLivePages();
 
             $telemetry->emit('merge_start');
+            $buildState = $this->coordinator->buildState();
+            $buildState->enterPhase(BuildState::PHASE_MERGING);
             $chunkFiles   = $this->coordinator->chunkFiles();
             $streamWriter = new StreamingFormatWriter(new CborEncoder(), budget: $budget);
             $streamWriter->setTelemetry($telemetry);
+            $streamWriter->setHeartbeat($buildState->heartbeat(...));
             $streamWriter->setFragmentReuse($this->reuseFragments);
             $this->merger->setTelemetry($telemetry);
             $telemetry->emit('writer_start');
@@ -648,6 +651,7 @@ final class IndexBuildOrchestrator
             // Refusing here leaves the previously published index serving.
             $this->verifyOutputHasFragments($pagesForReport, $this->stagedIndexDir());
 
+            $buildState->enterPhase(BuildState::PHASE_PUBLISHING);
             $this->atomicSwap($logger);
             $telemetry->emit('swap_complete');
 
@@ -1004,8 +1008,11 @@ final class IndexBuildOrchestrator
             $this->assertLedgerHasLivePages();
 
             $telemetry->emit('merge_start');
+            $buildState = $this->coordinator->buildState();
+            $buildState->enterPhase(BuildState::PHASE_MERGING);
             $streamWriter = new StreamingFormatWriter(new CborEncoder(), budget: $budget);
             $streamWriter->setTelemetry($telemetry);
+            $streamWriter->setHeartbeat($buildState->heartbeat(...));
             $streamWriter->setFragmentReuse($this->reuseFragments);
             $this->merger->setTelemetry($telemetry);
             $this->clearStagingDir($this->stagedIndexDir());
@@ -1021,6 +1028,7 @@ final class IndexBuildOrchestrator
             // Pre-swap, for the reason build() states.
             $this->verifyOutputHasFragments($pagesProcessed, $this->stagedIndexDir());
 
+            $buildState->enterPhase(BuildState::PHASE_PUBLISHING);
             $this->atomicSwap($logger);
             $telemetry->emit('swap_complete');
 

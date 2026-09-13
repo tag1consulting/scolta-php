@@ -71,6 +71,9 @@ class StreamingFormatWriter
     /** Completed index chunks: [{from, to, hash}]. */
     private array $indexChunkMeta = [];
 
+    /** Called once per page and per term written; see setHeartbeat(). */
+    private ?\Closure $heartbeat = null;
+
     /** Active flush threshold (bytes), derived from the MemoryBudget. */
     private int $flushBytes;
 
@@ -122,6 +125,25 @@ class StreamingFormatWriter
     public function setTelemetry(?MemoryTelemetry $telemetry): void
     {
         $this->telemetry = $telemetry;
+    }
+
+    /**
+     * Register a callback the writer invokes on every writePage() and writeTerm().
+     *
+     * The build lock is kept alive by a heartbeat that the chunk loop
+     * refreshes per page. The merge and publish that follow run through this
+     * writer for longer than the stale window on a large corpus over NFS, so
+     * without this the lock reads as stale while the build is still writing
+     * its output. Pass BuildState::heartbeat(...); it is time-gated and cheap.
+     *
+     * Setter for the reason given above setTelemetry().
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function setHeartbeat(?\Closure $heartbeat): void
+    {
+        $this->heartbeat = $heartbeat;
     }
 
     /**
@@ -224,6 +246,7 @@ class StreamingFormatWriter
      */
     public function writePage(int $pageNum, array $pageData): void
     {
+        ($this->heartbeat)?->__invoke();
         $fragment = json_encode([
             'url'        => $pageData['url'],
             'content'    => $pageData['content'] ?? '',
@@ -348,6 +371,7 @@ class StreamingFormatWriter
      */
     public function writeTerm(string $term, array $termData): void
     {
+        ($this->heartbeat)?->__invoke();
         $encoded      = $this->encodeWordEntry($term, $termData);
         $pageCount    = count($termData) - (isset($termData['_variants']) ? 1 : 0);
         $estimatedSize = strlen($term) * 2 + $pageCount * 20;

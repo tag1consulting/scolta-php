@@ -36,6 +36,24 @@ class BuildStateTest extends TestCase
         );
     }
 
+    public function testEnterPhaseIsRecordedAndRefreshesTheHeartbeat(): void
+    {
+        $state = new BuildState($this->tmpDir);
+        $state->initiateBuild(['total_pages' => 100]);
+        $this->assertSame(BuildState::PHASE_GATHERING, $state->phase());
+
+        // Age the heartbeat past the stale window, as a long merge used to.
+        $record = json_decode((string) file_get_contents($this->tmpDir . '/lock'), true);
+        $record['heartbeat_at'] = time() - BuildState::STALE_LOCK_SECONDS - 1;
+        file_put_contents($this->tmpDir . '/lock', json_encode($record));
+        $this->assertTrue($state->lockDiagnostics()['stale']);
+
+        $state->enterPhase(BuildState::PHASE_MERGING);
+        $this->assertSame(BuildState::PHASE_MERGING, $state->phase());
+        $this->assertFalse($state->lockDiagnostics()['stale']);
+        $this->assertTrue($state->isRunning());
+    }
+
     public function testInitiateBuildClearsThePreviousBuildsOutcome(): void
     {
         $state = new BuildState($this->tmpDir);
