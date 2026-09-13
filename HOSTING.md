@@ -10,50 +10,42 @@ plus a JavaScript loader. Total size scales with content: roughly 1 MB per
 Build state (progress tracking, chunk manifests) is stored in a non-public
 state directory and is safe to delete after a successful build.
 
-## Indexer Options
+## The Indexer
 
-Scolta supports two indexers:
-
-- **binary** (default): Runs the Pagefind binary. Fast, native performance.
-  Requires `exec()` — unavailable on some managed hosts.
-- **php**: Pure PHP indexer. No binary dependencies. Works everywhere PHP runs.
-  Set `indexer: php` in config (or `SCOLTA_INDEXER=php` in `.env`).
-
-**Auto-detection** (`indexer: auto`) tries the binary first, falls back to PHP.
-
-For faster indexing and 33+ language support, use the binary indexer when
-`exec()` is available. The PHP indexer supports 14 languages (Snowball stemming)
-and has no external dependencies.
+Scolta's indexer is pure PHP. It has no binary dependencies, does not call
+`exec()`, and runs everywhere PHP runs, including managed hosts. It supports
+14 languages (Snowball stemming). The `indexer` config key is still accepted
+but every value selects the PHP indexer.
 
 ## Platform-Specific Notes
 
 ### WordPress — Managed Hosts
 
-| Host | exec() | Recommended Indexer | Notes |
-|------|--------|---------------------|-------|
-| WP Engine | No | php | Ephemeral filesystem resets on deploy; rebuild via Action Scheduler |
-| Kinsta | No | php | |
-| Flywheel | No | php | |
-| Pressable | No | php | |
-| WordPress.com Business | No | php | Requires Business plan for plugin installation |
-| Self-hosted / VPS | Yes | binary | Best performance |
+| Host | exec() | Notes |
+| ------ | -------- | ------- |
+| WP Engine | No | Ephemeral filesystem resets on deploy; rebuild via Action Scheduler |
+| Kinsta | No |  |
+| Flywheel | No |  |
+| Pressable | No |  |
+| WordPress.com Business | No | Requires Business plan for plugin installation |
+| Self-hosted / VPS | Yes |  |
 
 ### Drupal — Managed Hosts
 
-| Host | exec() | Recommended Indexer | Notes |
-|------|--------|---------------------|-------|
-| Pantheon | Limited | php | Use PHP indexer; filesystem is ephemeral outside `/files` |
-| Acquia | Yes | binary | Configure `output_dir` under `/files` for persistence |
-| Platform.sh | Yes | binary | Mount output directory as a persistent disk |
+| Host | exec() | Notes |
+| ------ | -------- | ------- |
+| Pantheon | Limited | Filesystem is ephemeral outside `/files` |
+| Acquia | Yes | Configure `output_dir` under `/files` for persistence |
+| Platform.sh | Yes | Mount output directory as a persistent disk |
 
 ### Laravel — Cloud Hosts
 
-| Host | exec() | Recommended Indexer | Notes |
-|------|--------|---------------------|-------|
-| Vapor (serverless) | No | php | Use S3 StorageDriver for state + index persistence |
-| Laravel Cloud | Yes | binary | Filesystem resets on deploy; persist the index in a Laravel Cloud [object storage bucket](https://laravel.com/cloud/docs/resources/object-storage) (S3-compatible) via an S3 StorageDriver |
-| Forge | Yes | binary | Standard VPS, no restrictions |
-| Ploi | Yes | binary | |
+| Host | exec() | Notes |
+| ------ | -------- | ------- |
+| Vapor (serverless) | No | Use S3 StorageDriver for state + index persistence |
+| Laravel Cloud | Yes | Filesystem resets on deploy; persist the index in a Laravel Cloud [object storage bucket](https://laravel.com/cloud/docs/resources/object-storage) (S3-compatible) via an S3 StorageDriver |
+| Forge | Yes | Standard VPS, no restrictions |
+| Ploi | Yes |  |
 
 ## Ephemeral Filesystems
 
@@ -119,7 +111,6 @@ periodic full rebuild:
 | 10,000 pages | ~80 MB | ~90 s |
 | 50,000 pages | ~350 MB | ~7 min |
 
-The binary (Pagefind CLI) indexer is approximately 10× faster.
 
 Fragment files are individually small (< 50 KB each) and served on demand
 by the browser — visitors only download the fragments needed for their query.

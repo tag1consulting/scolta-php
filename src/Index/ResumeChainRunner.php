@@ -24,7 +24,7 @@ use Psr\Log\NullLogger;
  * and the callable; verifying the published index and reacting to the result
  * stay with the host.
  *
- * @since 1.5.0
+ * @since 2.0.0
  * @stability experimental
  */
 final class ResumeChainRunner
@@ -37,7 +37,7 @@ final class ResumeChainRunner
      * its yield and return instead of chaining on itself: nesting a chain in
      * every segment would keep one bootstrapped host alive per segment.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public const SEGMENT_ENV = 'SCOLTA_RESUME_SEGMENT';
@@ -50,7 +50,7 @@ final class ResumeChainRunner
      * @param ResumeChainPolicy                      $policy     Decides after each failed segment whether to run another.
      * @param callable(array<string, string>): int   $runSegment Runs one child segment with the given environment
      *                                                           variables added and returns its exit code.
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function __construct(
@@ -65,7 +65,7 @@ final class ResumeChainRunner
     /**
      * Whether this process is a segment spawned by a runner.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public static function isSegment(): bool
@@ -82,7 +82,7 @@ final class ResumeChainRunner
      *                      otherwise a failed report whose error is the policy's reason to stop.
      *
      * @throws \LogicException When the report is not a memory yield.
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function run(StatusReport $yielded): StatusReport

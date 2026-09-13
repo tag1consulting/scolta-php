@@ -71,7 +71,7 @@ final class RetiredIndexTrash
      *                     to the running one. A seam for tests; adapters never
      *                     pass it.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function __construct(
@@ -86,7 +86,7 @@ final class RetiredIndexTrash
      * O(1): no file inside the directory is touched. Returns false when the
      * rename fails; the directory is then still at its original path.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function retire(string $dir): bool
@@ -99,7 +99,7 @@ final class RetiredIndexTrash
      *
      * @return string[]
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function trashDirs(): array
@@ -126,7 +126,7 @@ final class RetiredIndexTrash
      * and left for the next sweep. Nothing here throws, because failing to
      * remove trash must never fail the caller.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function sweep(LoggerInterface $logger, ?float $maxSeconds = null): bool

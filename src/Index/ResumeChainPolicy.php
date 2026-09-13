@@ -21,7 +21,7 @@ namespace Tag1\Scolta\Index;
  * {@see self::stopReason()} are the in-process form for a worker that holds
  * the BuildState and the StatusReport directly.
  *
- * @since 1.5.0
+ * @since 2.0.0
  * @stability experimental
  */
 final class ResumeChainPolicy
@@ -37,7 +37,7 @@ final class ResumeChainPolicy
     /**
      * @param string|null $memoryLimit PHP memory_limit to quote in remediation, or null when unknown.
      * @param int         $maxSegments Segments allowed before the chain is stopped as runaway.
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function __construct(
@@ -55,7 +55,7 @@ final class ResumeChainPolicy
      * re-walk the corpus to reach the same error, so the caller should start
      * fresh, which wipes the broken state.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public static function resumable(BuildState $state): bool
@@ -82,7 +82,7 @@ final class ResumeChainPolicy
      * @param BuildState   $state  The state directory that build ran against.
      *
      * @throws \LogicException When handed a successful report.
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function stopReason(StatusReport $report, BuildState $state): ?string
@@ -120,7 +120,7 @@ final class ResumeChainPolicy
      *
      * @return string|null The failure to report, or null when the segment yielded for
      *                     memory and made progress, so another segment is worth running.
-     * @since 1.5.0
+     * @since 2.0.0
      * @stability experimental
      */
     public function failureReason(?array $outcome, int $pagesCommitted, int $pagesBefore, int $segment): ?string

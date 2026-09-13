@@ -398,7 +398,7 @@ class PagefindFormatWriter
      * array, and PHP 8 raises `TypeError: Cannot access offset of type array` the
      * moment an array is used as an array key, so the previous inline version
      * killed the build outright on any such field. Normalized the same way
-     * StreamingFormatWriter and PagefindHtmlBuilder already normalize it.
+     * StreamingFormatWriter already normalizes it.
      *
      * @param array<int, array<string, mixed>> $pages Page data.
      * @return array<string, array<string, int[]>>

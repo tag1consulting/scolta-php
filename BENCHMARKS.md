@@ -77,9 +77,6 @@ on disk to reduce peak usage.
 - Requires `memory_limit ≥ 2GB`
 - Estimated build time: 7–10 minutes
 - Not recommended for automated CI (skipped unless `memory_limit ≥ 1GB`)
-- For production sites this size, consider the pagefind binary indexer via
-  `PagefindBinary` which uses a Rust implementation with a memory-mapped
-  approach
 
 ---
 

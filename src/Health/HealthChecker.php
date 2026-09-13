@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Tag1\Scolta\Health;
 
 use Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery;
-use Tag1\Scolta\Binary\PagefindBinary;
 use Tag1\Scolta\Cache\CacheDriverInterface;
 use Tag1\Scolta\Config\ResolvedApiKey;
 use Tag1\Scolta\Config\ScoltaConfig;
@@ -39,8 +38,6 @@ final class HealthChecker
     public function __construct(
         private readonly ScoltaConfig $config,
         private readonly string $indexOutputDir,
-        private readonly ?string $pagefindBinaryPath,
-        private readonly ?string $projectDir,
         private readonly ?CacheDriverInterface $cache = null,
         private readonly ?ResolvedApiKey $resolvedKey = null,
     ) {}
@@ -74,22 +71,17 @@ final class HealthChecker
      * a fault, so `ai_usable: false` alone does not degrade the status. See
      * docs/HEALTH_REFERENCE.md.
      *
-     * @return array{status: 'ok'|'degraded', status_reasons: list<string>, ai_provider: string, ai_provider_selected: bool, ai_configured: bool, ai_usable: bool, ai_auth_failing: bool, ai_auth_failing_since: int|null, ai_auth_failing_ttl: int|null, ai_key_source: string|null, ai_amazee_overridden: bool, pagefind_available: bool, wasm_available: bool, index_exists: bool, indexer_active: string, indexer_upgrade_available: bool, indexer_upgrade_message: string|null, stale_artifact_urls: bool, stale_artifact_message: string|null, pagefind: array, wasm: array}
-     * @since 1.0.0
+     * @return array{status: 'ok'|'degraded', status_reasons: list<string>, ai_provider: string, ai_provider_selected: bool, ai_configured: bool, ai_usable: bool, ai_auth_failing: bool, ai_auth_failing_since: int|null, ai_auth_failing_ttl: int|null, ai_key_source: string|null, ai_amazee_overridden: bool, wasm_available: bool, index_exists: bool, indexer_active: string, stale_artifact_urls: bool, stale_artifact_message: string|null, wasm: array}
+     * @since 1.0.0 The `pagefind`, `pagefind_available`, `indexer_upgrade_available`
+     *   and `indexer_upgrade_message` keys were removed in 2.0.0; `indexer_active`
+     *   is always `php`.
      * @stability stable
      */
     public function check(): array
     {
-        $resolver = new PagefindBinary(
-            configuredPath: $this->pagefindBinaryPath,
-            projectDir: $this->projectDir,
-        );
-        $binaryStatus = $resolver->status();
-
         // PhpIndexer writes into a pagefind/ subdirectory of outputDir (atomic
-        // swap from .scolta-building → pagefind/). The binary pipeline also
-        // uses --output-path {outputDir}/pagefind. Check both locations so the
-        // health check works regardless of which pipeline last built the index.
+        // swap from .scolta-building → pagefind/). Indexes built before 2.0.0
+        // by the Pagefind binary may sit at the root, so check both.
         $indexExists = file_exists($this->indexOutputDir . '/pagefind/pagefind.js')
             || file_exists($this->indexOutputDir . '/pagefind.js');
 
@@ -155,12 +147,6 @@ final class HealthChecker
             }
         }
 
-        $configuredIndexer = $this->config->indexer ?? 'auto';
-        $indexerActive = ($configuredIndexer === 'binary' && $binaryStatus['available']) ? 'binary' : 'php';
-        $upgradeMessage = ($configuredIndexer === 'binary' && !$binaryStatus['available'])
-            ? 'Pagefind binary not found. Set indexer to "php" or install Pagefind: npm install -g pagefind'
-            : null;
-
         $staleIndex = $this->detectStaleArtifactUrls();
 
         if ($staleIndex) {
@@ -183,21 +169,13 @@ final class HealthChecker
             'ai_auth_failing_ttl' => $aiAuthFailing ? KeyExpiryRecovery::AUTH_FAILURE_TTL : null,
             'ai_key_source' => $this->resolvedKey?->source->value,
             'ai_amazee_overridden' => $this->resolvedKey?->amazeeOverridden() ?? false,
-            'pagefind_available' => $binaryStatus['available'],
             'wasm_available' => false,
             'index_exists' => $indexExists,
-            'indexer_active' => $indexerActive,
-            'indexer_upgrade_available' => ($configuredIndexer === 'binary' && !$binaryStatus['available']),
-            'indexer_upgrade_message' => $upgradeMessage,
+            'indexer_active' => 'php',
             'stale_artifact_urls' => $staleIndex,
             'stale_artifact_message' => $staleIndex
                 ? 'Index contains /{id}.html URLs from a pre-1.1.0 binary build. Run a full rebuild to fix.'
                 : null,
-            'pagefind' => [
-                'available' => $binaryStatus['available'],
-                'version' => $binaryStatus['version'],
-                'resolved_via' => $binaryStatus['via'],
-            ],
             'wasm' => [
                 'available' => false,
                 'message' => 'Server-side WASM removed — HTML processing is now pure PHP',

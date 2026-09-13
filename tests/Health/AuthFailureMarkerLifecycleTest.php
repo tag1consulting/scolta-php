@@ -346,7 +346,7 @@ class AuthFailureMarkerLifecycleTest extends TestCase
     {
         $config = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_api_key' => 'sk-configured']);
 
-        return (new HealthChecker($config, $this->tempDir, null, null, $this->cache))->check();
+        return (new HealthChecker($config, $this->tempDir, $this->cache))->check();
     }
 
     private function makeRecovery(): KeyExpiryRecovery
