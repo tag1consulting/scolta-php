@@ -5846,6 +5846,14 @@
       sayt: root.querySelector('#scolta-sayt'),
     };
 
+    // The input carries `autofocus`, but a browser honours that attribute only
+    // during the document's initial autofocus pass, which is over by the time
+    // this scaffold is inserted, so the visitor landed on a page they could not
+    // type into. Focus by hand, unless the page already moved focus somewhere.
+    if (document.activeElement === document.body || document.activeElement === null) {
+      els.queryInput.focus({ preventScroll: true });
+    }
+
     // Event listeners.
     els.queryInput.addEventListener("keydown", (e) => {
       // SAYT claims Arrow keys, Escape while the dropdown is open, and Enter
