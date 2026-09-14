@@ -25,6 +25,10 @@
  *                                                summary box.
  *                                            Missing, empty, or non-string values fall back to the
  *                                            default; unknown keys are ignored.
+ *   valueLabels: {}                        — Optional: indexed filter value => the text shown for it, in
+ *                                            the facet panel and the results header ("in Blog / TNTL").
+ *                                            One flat map across dimensions; a value with no entry
+ *                                            renders as indexed (language codes still get their names).
  *   currentLanguage: null                  — Optional: 2-letter ISO language code (e.g. 'en', 'es').
  *                                            When set, search results are pre-filtered to this language.
  *                                            URL filter params (f_language=...) take precedence.
@@ -672,6 +676,17 @@
       out[key] = (typeof l[key] === 'string' && l[key] !== '') ? l[key] : LABEL_DEFAULTS[key];
     }
     return out;
+  }
+
+  // Site-supplied display text for indexed filter values (TOP-LEVEL instance
+  // config, the hideEmptyFacets pattern). The facet panel and the results
+  // header both go through this, so a value renamed in one place is renamed
+  // in the other: "in node-blog_post" was the header printing the indexed
+  // key while the panel beside it said "Blog / TNTL".
+  function instanceDisplayValue(dimension, value) {
+    const labels = (instanceConfig && instanceConfig.valueLabels) || {};
+    const label = labels[value];
+    return (typeof label === 'string' && label !== '') ? label : filterDisplayValue(dimension, value);
   }
 
   // SAYT settings are TOP-LEVEL instance config, not `scoring` keys — the
@@ -5293,7 +5308,7 @@
       // never by count, which would reorder as counts change. The full value
       // list is fixed across searches and facet clicks.
       const vals = Object.keys(taxonomy[dim]).sort(
-        (a, b) => filterDisplayValue(dim, a).localeCompare(filterDisplayValue(dim, b))
+        (a, b) => instanceDisplayValue(dim, a).localeCompare(instanceDisplayValue(dim, b))
       );
       let itemsHtml = "";
       for (const val of vals) {
@@ -5309,7 +5324,7 @@
         itemsHtml += `<label class="scolta-filter-item${activeClass}">
           <input type="checkbox" value="${escapeAttr(val)}" ${checked}${disabled}
                  data-scolta-filter-dim="${escapeAttr(dim)}" data-scolta-filter-val="${escapeAttr(val)}">
-          ${escapeHtml(filterDisplayValue(dim, val))} <span class="scolta-filter-count">(${count})</span>
+          ${escapeHtml(instanceDisplayValue(dim, val))} <span class="scolta-filter-count">(${count})</span>
         </label>`;
       }
       // Skip a dimension whose values are all hidden for this query — an empty
@@ -5561,7 +5576,7 @@
     const filterLabel = Object.keys(activeFilters).length > 0
       ? ' in ' + Object.entries(activeFilters)
           .filter(([, vals]) => vals instanceof Set && vals.size > 0)
-          .map(([dim, vals]) => [...vals].map(v => escapeHtml(filterDisplayValue(dim, v))).join(', '))
+          .map(([dim, vals]) => [...vals].map(v => escapeHtml(instanceDisplayValue(dim, v))).join(', '))
           .join('; ')
       : '';
     // The OR fallback is a retrieval mode, not a failure. Only call it out as
