@@ -336,6 +336,7 @@ The full order, the source vocabulary and the rules adapters follow are in
 | `hideEmptyFacets` | `hide_empty_facets` | `hide_empty_facets` | `hide_empty_facets` |
 | `facetMode` | `facet_mode` | `facet_mode` | `facet_mode` |
 | `labels` | `labels` | `labels` | `labels` |
+| `valueLabels` | `value_labels` | `value_labels` | `value_labels` |
 
 ### Search-As-You-Type Keys
 
