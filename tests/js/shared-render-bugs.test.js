@@ -34,7 +34,7 @@ async function ticks(n) { for (let i = 0; i < n; i++) await tick(); }
 //   config          -> scoring config overrides
 //   holdExpand      -> if true, the /expand fetch stays pending until
 //                      controls.resolveExpand(body) is called (Bug 1 timing).
-function setup({ rowsFor, config = {}, holdExpand = false } = {}) {
+function setup({ rowsFor, config = {}, holdExpand = false, top = {} } = {}) {
     const dom = new JSDOM(
         `<!DOCTYPE html><html><body><div id="scolta-search"></div></body></html>`,
         { url: 'https://example.com', runScripts: 'dangerously' }
@@ -98,6 +98,7 @@ function setup({ rowsFor, config = {}, holdExpand = false } = {}) {
         endpoints: { expand: '/expand', summarize: '/summarize', followup: '/followup' },
         pagefindPath: '/pf.js', wasmPath: '/wasm.js',
         siteName: 'Test', container: '#scolta-search',
+        ...top,
     };
     window.Scolta.init('#scolta-search');
 
@@ -223,5 +224,30 @@ describe('Bug 4 — AI-summary context dedups duplicate URLs', () => {
         const absoluteUrl = 'https://example.com' + SHARED;
         const occurrences = context.split(absoluteUrl).length - 1;
         expect(occurrences).toBe(1);
+    });
+});
+
+describe('Results header — active filters use valueLabels', () => {
+    function headerText(h) { return h.$('#scolta-results-header').textContent; }
+    const rows = [{ url: '/a', title: 'School Lunch', content: 'food', meta: { content_type: 'node-blog_post' } }];
+
+    test('a labelled value prints its label, not the indexed key', async () => {
+        const h = setup({
+            rowsFor: () => rows,
+            top: { valueLabels: { 'node-blog_post': 'Blog / TNTL' } },
+        });
+        await h.search('food');
+        await h.window.Scolta.toggleFilter('content_type', 'node-blog_post');
+        await ticks(20);
+        expect(headerText(h)).toContain('in Blog / TNTL');
+        expect(headerText(h)).not.toContain('node-blog_post');
+    });
+
+    test('an unlabelled value still prints as indexed', async () => {
+        const h = setup({ rowsFor: () => rows, top: { valueLabels: { other: 'Other' } } });
+        await h.search('food');
+        await h.window.Scolta.toggleFilter('content_type', 'node-blog_post');
+        await ticks(20);
+        expect(headerText(h)).toContain('in node-blog_post');
     });
 });

@@ -336,6 +336,22 @@ class ScoltaConfig
     public array $labels = [];
 
     /**
+     * Indexed filter value => the text the browser widget shows for it.
+     *
+     * One flat map across dimensions, read wherever scolta.js prints a filter
+     * value: the facet panel and the results header ("... in Blog / TNTL"
+     * rather than "... in node-blog_post"). A value with no entry renders as
+     * indexed; a non-string key, or a non-string or empty value, is dropped
+     * by normalizedValueLabels() on the way out, as the browser would also
+     * ignore it.
+     *
+     * @var array<array-key, mixed>
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public array $valueLabels = [];
+
+    /**
      * Hide facet values whose result count is zero for the current query.
      *
      * When true (default), the browser widget omits a zero-count value from the
@@ -803,6 +819,7 @@ class ScoltaConfig
             'hideEmptyFacets' => $this->hideEmptyFacets,
             'facetMode' => $this->normalizedFacetMode(),
             'labels' => $this->normalizedLabels(),
+            'valueLabels' => $this->normalizedValueLabels(),
             // SAYT — top-level, not scoring keys. scolta.js reads each as
             // instanceConfig.<camelCase> with a fallback byte-equal to the
             // default here, and BrowserConfigParityTest diffs the two sets.
@@ -852,6 +869,26 @@ class ScoltaConfig
     {
         $normalized = [];
         foreach ($this->labels as $key => $value) {
+            if (is_string($key) && is_string($value) && $value !== '') {
+                $normalized[$key] = $value;
+            }
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * $valueLabels with non-string keys and non-string or empty values dropped.
+     *
+     * @return array<string, string>
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function normalizedValueLabels(): array
+    {
+        $normalized = [];
+        foreach ($this->valueLabels as $key => $value) {
             if (is_string($key) && is_string($value) && $value !== '') {
                 $normalized[$key] = $value;
             }

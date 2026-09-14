@@ -147,11 +147,11 @@ describe('faceting: source structure', () => {
     });
 
     test('renderFilters sorts values alphabetically by display value', () => {
-        expect(scoltaSource).toContain('(a, b) => filterDisplayValue(dim, a).localeCompare(filterDisplayValue(dim, b))');
+        expect(scoltaSource).toContain('(a, b) => instanceDisplayValue(dim, a).localeCompare(instanceDisplayValue(dim, b))');
     });
 
     test('renderFilters calls filterDisplayValue for display names', () => {
-        expect(scoltaSource).toContain('filterDisplayValue(dim, val)');
+        expect(scoltaSource).toContain('instanceDisplayValue(dim, val)');
     });
 
     test('renderFilters hides when no dimension has multiple values', () => {
