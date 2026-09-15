@@ -251,7 +251,6 @@ final class IndexBuildOrchestrator
         if ($this->outputDirNormalizationWarning !== null) {
             $logger->warning($this->outputDirNormalizationWarning);
         }
-        $logger->notice('[scolta] Using PHP indexer.');
         $startTime = microtime(true);
         $telemetry = new MemoryTelemetry($logger, $intent->memoryBudget());
 
