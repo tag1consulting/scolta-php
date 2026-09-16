@@ -1354,7 +1354,7 @@
     if (terms.length === 0) return 0;
     let matchCount = 0;
     for (const term of terms) {
-      const regex = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, "i");
+      const regex = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, "i"); // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- term is metachar-escaped, so the pattern is a literal
       if (regex.test(titleLower)) matchCount++;
     }
     if (matchCount === 0) return 0;
@@ -1373,7 +1373,7 @@
     const excerptLower = excerpt.toLowerCase();
     let matchCount = 0;
     for (const term of terms) {
-      const regex = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, "i");
+      const regex = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, "i"); // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- term is metachar-escaped, so the pattern is a literal
       if (regex.test(excerptLower)) matchCount++;
     }
     if (matchCount === 0) return 0;
