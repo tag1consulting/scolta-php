@@ -641,14 +641,14 @@ class ScoltaConfigTest extends TestCase
             'FILTER_HINT_MIN_RESULTS', 'FILTER_HINT_MIN_RATIO',
             'EXPANSION_COMBINE_MODE', 'EXPANSION_PER_TERM_TOP_K',
             'AI_MAX_FOLLOWUPS',
-            'AI_LANGUAGES', 'AUTO_LANGUAGE_FILTER', 'LANGUAGE', 'CUSTOM_STOP_WORDS', 'RECENCY_STRATEGY', 'RECENCY_CURVE',
+            'AI_LANGUAGES', 'AUTO_LANGUAGE_FILTER', 'LANGUAGE', 'CUSTOM_STOP_WORDS', 'RECENCY_STRATEGY', 'RECENCY_CURVE', 'METADATA_BOOSTS',
         ];
 
         foreach ($expected as $key) {
             $this->assertArrayHasKey($key, $js, "Missing key: {$key}");
         }
 
-        $this->assertCount(41, $js, 'Expected exactly 41 keys in toJsScoringConfig()');
+        $this->assertCount(42, $js, 'Expected exactly 42 keys in toJsScoringConfig()');
     }
 
     public function testToJsScoringConfigValuesMatchConfig(): void
@@ -1336,7 +1336,7 @@ class ScoltaConfigTest extends TestCase
     {
         // SAYT settings are UI behaviour, not ranking. The scoring contract
         // with the WASM scorer must be untouched by all ten of them.
-        $this->assertCount(41, (new ScoltaConfig())->toJsScoringConfig());
+        $this->assertCount(42, (new ScoltaConfig())->toJsScoringConfig());
     }
 
     /**

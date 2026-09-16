@@ -127,6 +127,7 @@
       CUSTOM_STOP_WORDS: s.CUSTOM_STOP_WORDS ?? [],
       RECENCY_STRATEGY: s.RECENCY_STRATEGY ?? 'exponential',
       RECENCY_CURVE: s.RECENCY_CURVE ?? [],
+      METADATA_BOOSTS: s.METADATA_BOOSTS ?? {},
     };
   }
 
@@ -630,6 +631,7 @@
       CUSTOM_STOP_WORDS: s.CUSTOM_STOP_WORDS ?? [],
       RECENCY_STRATEGY: s.RECENCY_STRATEGY ?? 'exponential',
       RECENCY_CURVE: s.RECENCY_CURVE ?? [],
+      METADATA_BOOSTS: s.METADATA_BOOSTS ?? {},
     };
   }
 
@@ -3359,6 +3361,17 @@
         const finalScore = (pagefindScore + recency + titleBoost + contentBoost) * sourceWeight;
         return { data, score: finalScore };
       });
+    }
+    // Metadata boosts: per meta key, per exact value multipliers read off the
+    // fragment meta the indexing host wrote, independent of any active facet.
+    const metadataBoosts = CONFIG.METADATA_BOOSTS || {};
+    for (const [key, valueBoosts] of Object.entries(metadataBoosts)) {
+      for (const r of scored) {
+        const value = r.data.meta?.[key];
+        if (value === undefined || value === null) continue;
+        const b = Number(valueBoosts[String(value)]);
+        if (b > 0) r.score *= b;
+      }
     }
     // Exact title match: when the result's title IS the query, apply a large
     // multiplicative boost so it always ranks #1 regardless of BM25 scores.
