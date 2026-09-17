@@ -63,9 +63,10 @@ class ScoltaConfig
     public float $contentMatchBoost = 0.4;
 
     /**
-     * Collapse results whose titles nearly match (Jaccard >= 0.6 on title words,
-     * or >= 3 shared words covering 60% of the shorter title), keeping the
-     * higher-scored one. Meant for corpora where one piece of content is
+     * Collapse results whose titles nearly match, keeping the higher-scored one.
+     *
+     * Near match is Jaccard >= 0.6 on title words, or >= 3 shared words covering
+     * 60% of the shorter title. Meant for corpora where one piece of content is
      * reachable at several URLs. Off by default: on most sites distinct pages
      * with similar titles (a webinar and its recap post, a lesson series on one
      * novel) are real results, and the collapse hid them.

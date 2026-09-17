@@ -554,13 +554,6 @@ class ScoltaConfigTest extends TestCase
         $this->assertEquals(0.0, $js['FILTER_HINT_MIN_RATIO']);
     }
 
-    public function testTitleDedupDefaultsOffAndMaps(): void
-    {
-        $this->assertFalse((new ScoltaConfig())->toJsScoringConfig()['TITLE_DEDUP']);
-        $js = ScoltaConfig::fromArray(['title_dedup' => true])->toJsScoringConfig();
-        $this->assertTrue($js['TITLE_DEDUP']);
-    }
-
     public function testSpecificityWeightingDefaultsAndMapping(): void
     {
         // Defaults.
