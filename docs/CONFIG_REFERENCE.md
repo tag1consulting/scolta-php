@@ -109,6 +109,12 @@ factor before being added to the final score; the title boost is unaffected.
 | `recencyStrategy` | string | `'exponential'` | Recency decay function: `exponential` (default), `linear`, `step`, `none`, or `custom` (piecewise-linear). |
 | `recencyCurve` | array | `[]` | Control points for the `custom` strategy: `[[days, boost], …]` sorted by days ascending. |
 
+### Scoring: Metadata Boosts
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `metadataBoosts` | array | `[]` | Score multipliers keyed by fragment meta key, then exact meta value: `['type' => ['node:tntl' => 1.4], 'rating' => ['5' => 1.3]]`. Applied to results whose meta carries a listed value, independent of any facet selection; different keys multiply, exact match only. Experimental. |
+
 ### Display
 
 | Property | Type | Default | Description |
@@ -284,6 +290,7 @@ The full order, the source vocabulary and the rules adapters follow are in
 | `customStopWords` | `scoring.custom_stop_words` | `scoring.custom_stop_words` | `custom_stop_words` |
 | `recencyStrategy` | `scoring.recency_strategy` | `scoring.recency_strategy` / `SCOLTA_RECENCY_STRATEGY` | `recency_strategy` |
 | `recencyCurve` | `scoring.recency_curve` | `scoring.recency_curve` | `recency_curve` |
+| `metadataBoosts` | `scoring.metadata_boosts` | `scoring.metadata_boosts` | `metadata_boosts` |
 
 ### Display Keys
 

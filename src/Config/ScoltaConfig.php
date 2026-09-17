@@ -233,6 +233,21 @@ class ScoltaConfig
      */
     public array $recencyCurve = [];
 
+    // -- Scoring: Metadata boosts --
+    /**
+     * Score multipliers keyed by fragment meta key, then by exact meta value:
+     * ['type' => ['node:tntl' => 1.4], 'rating' => ['5' => 1.3]].
+     *
+     * Applied to every result whose meta carries a listed value, independent
+     * of any facet selection. Values from different keys multiply; exact
+     * match only — a host that wants ranges buckets the value at index time.
+     *
+     * @var array<string, array<string, float>>
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public array $metadataBoosts = [];
+
     // -- Display --
     public int $excerptLength = 300;
     public int $resultsPerPage = 10;
@@ -406,7 +421,7 @@ class ScoltaConfig
     //
     // Ten top-level browser settings, NOT scoring keys: they govern the
     // suggestions dropdown's behaviour, not ranking, so toJsScoringConfig()
-    // stays at exactly 40 keys and these are emitted top-level by
+    // stays at exactly 42 keys and these are emitted top-level by
     // toBrowserConfig() (the hideEmptyFacets pattern). Every default below is
     // byte-equal to the fallback assets/js/scolta.js uses when the key is
     // absent; BrowserConfigParityTest pins the key sets together in both
@@ -791,6 +806,7 @@ class ScoltaConfig
             'CUSTOM_STOP_WORDS' => $this->customStopWords,
             'RECENCY_STRATEGY' => $this->recencyStrategy,
             'RECENCY_CURVE' => $this->recencyCurve,
+            'METADATA_BOOSTS' => $this->metadataBoosts,
         ];
     }
 
