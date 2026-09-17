@@ -56,6 +56,7 @@ Passing `null` for any preset-overridable field means **"use the Site Type prese
 | `titleAllTermsMultiplier` | float | `1.5` | Multiplier when all search terms appear in title |
 | `exactTitleMatchBoost` | float | `5.0` | Multiplicative boost when the result's title exactly matches the query (case-insensitive). Applied after all other scoring so an article titled "DNA" always ranks #1 for the search "DNA" regardless of BM25 scores. Set to 1.0 to disable. |
 | `contentMatchBoost` | float | `0.4` | Boost for content/excerpt keyword matches |
+| `titleDedup` | bool | `false` | Collapse results whose titles nearly match (Jaccard >= 0.6 on title words, or >= 3 shared words covering 60% of the shorter title), keeping the higher-scored one. For corpora where one piece of content is reachable at several URLs. Off by default: distinct pages with similar titles (a webinar and its recap post, a lesson series on one novel) are real results and the collapse hid them. Browser-side only. |
 
 ### Scoring: Phrase Proximity
 
@@ -269,6 +270,7 @@ The full order, the source vocabulary and the rules adapters follow are in
 | `titleMatchBoost` | `scoring.title_match_boost` | `scoring.title_match_boost` | `title_match_boost` |
 | `titleAllTermsMultiplier` | `scoring.title_all_terms_multiplier` | `scoring.title_all_terms_multiplier` | `title_all_terms_multiplier` |
 | `contentMatchBoost` | `scoring.content_match_boost` | `scoring.content_match_boost` | `content_match_boost` |
+| `titleDedup` | `scoring.title_dedup` | `scoring.title_dedup` | `title_dedup` |
 | `phraseAdjacentMultiplier` | `scoring.phrase_adjacent_multiplier` | `scoring.phrase_adjacent_multiplier` | `phrase_adjacent_multiplier` |
 | `phraseNearMultiplier` | `scoring.phrase_near_multiplier` | `scoring.phrase_near_multiplier` | `phrase_near_multiplier` |
 | `phraseNearWindow` | `scoring.phrase_near_window` | `scoring.phrase_near_window` | `phrase_near_window` |

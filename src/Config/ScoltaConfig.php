@@ -62,6 +62,17 @@ class ScoltaConfig
     public float $exactTitleMatchBoost = 5.0;
     public float $contentMatchBoost = 0.4;
 
+    /**
+     * Collapse results whose titles nearly match, keeping the higher-scored one.
+     *
+     * Near match is Jaccard >= 0.6 on title words, or >= 3 shared words covering
+     * 60% of the shorter title. Meant for corpora where one piece of content is
+     * reachable at several URLs. Off by default: on most sites distinct pages
+     * with similar titles (a webinar and its recap post, a lesson series on one
+     * novel) are real results, and the collapse hid them.
+     */
+    public bool $titleDedup = false;
+
     // -- Scoring: Phrase proximity --
     public float $phraseAdjacentMultiplier = 2.5;
     public float $phraseNearMultiplier = 1.5;
@@ -773,6 +784,7 @@ class ScoltaConfig
             'TITLE_ALL_TERMS_MULTIPLIER' => $this->titleAllTermsMultiplier,
             'EXACT_TITLE_MATCH_BOOST' => $this->exactTitleMatchBoost,
             'CONTENT_MATCH_BOOST' => $this->contentMatchBoost,
+            'TITLE_DEDUP' => $this->titleDedup,
             'PHRASE_ADJACENT_MULTIPLIER' => $this->phraseAdjacentMultiplier,
             'PHRASE_NEAR_MULTIPLIER' => $this->phraseNearMultiplier,
             'PHRASE_NEAR_WINDOW' => $this->phraseNearWindow,

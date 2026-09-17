@@ -631,7 +631,7 @@ class ScoltaConfigTest extends TestCase
             'RECENCY_BOOST_MAX', 'RECENCY_HALF_LIFE_DAYS', 'RECENCY_PENALTY_AFTER_DAYS',
             'RECENCY_MAX_PENALTY', 'TITLE_MATCH_BOOST', 'TITLE_ALL_TERMS_MULTIPLIER',
             'EXACT_TITLE_MATCH_BOOST',
-            'CONTENT_MATCH_BOOST', 'PHRASE_ADJACENT_MULTIPLIER', 'PHRASE_NEAR_MULTIPLIER',
+            'CONTENT_MATCH_BOOST', 'TITLE_DEDUP', 'PHRASE_ADJACENT_MULTIPLIER', 'PHRASE_NEAR_MULTIPLIER',
             'PHRASE_NEAR_WINDOW', 'PHRASE_WINDOW', 'EXCERPT_LENGTH', 'RESULTS_PER_PAGE',
             'MAX_PAGEFIND_RESULTS', 'AI_EXPAND_QUERY', 'EXPANSION_TOGGLE', 'AI_SUMMARIZE', 'AI_SUMMARY_TOP_N',
             'AI_SUMMARY_MAX_CHARS', 'EXPAND_PRIMARY_WEIGHT', 'CROSS_LIST_BONUS', 'EXPAND_SUBWORD_MAX_FREQ',
@@ -648,7 +648,7 @@ class ScoltaConfigTest extends TestCase
             $this->assertArrayHasKey($key, $js, "Missing key: {$key}");
         }
 
-        $this->assertCount(42, $js, 'Expected exactly 42 keys in toJsScoringConfig()');
+        $this->assertCount(43, $js, 'Expected exactly 43 keys in toJsScoringConfig()');
     }
 
     public function testToJsScoringConfigValuesMatchConfig(): void
@@ -1336,7 +1336,7 @@ class ScoltaConfigTest extends TestCase
     {
         // SAYT settings are UI behaviour, not ranking. The scoring contract
         // with the WASM scorer must be untouched by all ten of them.
-        $this->assertCount(42, (new ScoltaConfig())->toJsScoringConfig());
+        $this->assertCount(43, (new ScoltaConfig())->toJsScoringConfig());
     }
 
     /**

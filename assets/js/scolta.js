@@ -65,7 +65,7 @@
  *   - Title match boost: word-boundary matching, all-terms multiplier
  *   - Content match boost: word-boundary matching against excerpt
  *   - Expanded-term weight decay: 0.7 → 0.65 → 0.60 → ... min 0.4
- *   - Jaccard deduplication: 0.6 threshold on title word overlap
+ *   - Jaccard deduplication: 0.6 threshold on title word overlap (opt-in via TITLE_DEDUP)
  *   - OR fallback: if AND search returns <5 results, search each term individually
  *   - Parallel data loading: all .data() calls across all searches in one Promise.all()
  *   - Dual scoring: expanded results scored vs source term AND original query, higher wins
@@ -111,6 +111,7 @@
       CROSS_LIST_BONUS: s.CROSS_LIST_BONUS ?? 0.05,
       EXPAND_SUBWORD_MAX_FREQ: s.EXPAND_SUBWORD_MAX_FREQ ?? 0.05,
       EXPAND_SUBWORD_DENYLIST: s.EXPAND_SUBWORD_DENYLIST ?? [],
+      TITLE_DEDUP: s.TITLE_DEDUP ?? false,
       SPECIFICITY_WEIGHTING: s.SPECIFICITY_WEIGHTING ?? true,
       SPECIFICITY_FLOOR: s.SPECIFICITY_FLOOR ?? 0.15,
       SPECIFICITY_STRONG_MATCH: s.SPECIFICITY_STRONG_MATCH ?? 0.55,
@@ -614,6 +615,7 @@
       CROSS_LIST_BONUS: s.CROSS_LIST_BONUS ?? 0.05,
       EXPAND_SUBWORD_MAX_FREQ: s.EXPAND_SUBWORD_MAX_FREQ ?? 0.05,
       EXPAND_SUBWORD_DENYLIST: s.EXPAND_SUBWORD_DENYLIST ?? [],
+      TITLE_DEDUP: s.TITLE_DEDUP ?? false,
       SPECIFICITY_WEIGHTING: s.SPECIFICITY_WEIGHTING ?? true,
       SPECIFICITY_FLOOR: s.SPECIFICITY_FLOOR ?? 0.15,
       SPECIFICITY_STRONG_MATCH: s.SPECIFICITY_STRONG_MATCH ?? 0.55,
@@ -3751,7 +3753,10 @@
 
   // Deduplicate results with near-identical titles using Jaccard similarity.
   // Run AFTER sorting — keeps the higher-scored result for each cluster.
+  // Opt-in (CONFIG.TITLE_DEDUP): distinct pages with similar titles are real
+  // results on most corpora, so the default returns the list untouched.
   function deduplicateByTitle(results) {
+    if (!getInstanceConfig().TITLE_DEDUP) return results;
     const kept = [];
     const seenTitles = [];
 
