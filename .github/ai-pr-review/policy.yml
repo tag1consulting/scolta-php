@@ -1,0 +1,28 @@
+# AI PR Review policy for scolta-php.
+# Schema and precedence: https://tag1consulting.github.io/ai-pr-review/policy.html
+#
+# Loaded from the PR's BASE branch, never from the PR head: a change here
+# applies to later PRs once merged, not to the PR that makes it.
+
+version: 1
+
+policies:
+  # phpstan and phpcs are excluded because ci.yml already runs both as
+  # blocking jobs (`composer phpcs`, `composer analyse`) after a real composer
+  # install and against this repo's own config; the reviewer repeating them
+  # only duplicated the findings. Applies to every tier below.
+  standard:
+    extends: quick
+    exclude-analyzers: [phpstan, phpcs]
+
+  deep:
+    extends: full
+    exclude-analyzers: [phpstan, phpcs]
+
+routes:
+  # Releases are prepared on release/* branches; review them in full mode.
+  # The workflow skips fork PRs, so only a branch in this repo can match.
+  - when: {head-branch: 'release/*'}
+    policy: deep
+
+default: standard
