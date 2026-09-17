@@ -1,7 +1,8 @@
 # AI PR Review policy for scolta-php.
 # Schema and precedence: https://tag1consulting.github.io/ai-pr-review/policy.html
 #
-# Loaded from the PR's BASE branch, never from the PR head: a change here
+# The engine reads this file with `git show origin/<base>:...`, never from
+# the checkout, so a PR cannot edit its own review criteria. A change here
 # applies to later PRs once merged, not to the PR that makes it.
 
 version: 1
