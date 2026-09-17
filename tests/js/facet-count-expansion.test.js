@@ -718,6 +718,7 @@ describe('#265: the panel counts only documents the list actually shows', () => 
             },
             queries: { alpha: ['doc-a'], beta: ['doc-b', 'doc-c'] },
             expansion: { terms: ['beta'] },
+            scoring: { TITLE_DEDUP: true },
         });
         await runSearch(env, 'alpha');
 
@@ -752,6 +753,7 @@ describe('#265: the panel counts only documents the list actually shows', () => 
             },
             queries: { alpha: [PAGE_IDS[0]], beta: [PAGE_IDS[4], PAGE_IDS[6]] },
             expansion: { terms: ['beta'] },
+            scoring: { TITLE_DEDUP: true },
         });
         await runSearch(env, 'alpha');
 
