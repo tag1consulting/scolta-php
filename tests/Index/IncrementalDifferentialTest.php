@@ -14,6 +14,7 @@ use Tag1\Scolta\Index\IndexBuildOrchestrator;
 use Tag1\Scolta\Index\MemoryBudget;
 use Tag1\Scolta\Index\PageTableLedger;
 use Tag1\Scolta\Index\PfIndexCodec;
+use Tag1\Scolta\Index\TermOrder;
 use Tag1\Scolta\Storage\FilesystemDriver;
 use Tag1\Scolta\Tests\Support\SyntheticCorpus;
 
@@ -362,11 +363,10 @@ final class IncrementalDifferentialTest extends TestCase
 
     public function testANumericLookingTermIsRoutedAndStoredLikeTheMergeOrderedIt(): void
     {
-        // Term order inside a chunk is PHP's standard comparison, the one
-        // SplMinHeap used when the chunks were built, and it disagrees with
-        // strcmp on numeric-looking terms. A patch that re-sorted with the other
-        // one would produce a searchable index a rebuild would not reproduce,
-        // rather than an error.
+        // Term order inside a chunk is TermOrder, byte order on the string form,
+        // which PHP's standard comparison disagrees with on numeric-looking
+        // terms. A patch that re-sorted with the other one would produce an
+        // index a rebuild would not reproduce, rather than an error.
         $items   = SyntheticCorpus::generate(30, seed: 13);
         $items[] = SyntheticCorpus::item(31, seed: 13)
             ->cloneWith(['bodyHtml' => '<p>census 2024 and 9 and 10 and 100 counted.</p>']);
@@ -390,7 +390,7 @@ final class IncrementalDifferentialTest extends TestCase
         foreach (glob($this->incrementalOut . '/pagefind/index/*.pf_index') ?: [] as $path) {
             $words  = PfIndexCodec::wordList(PfIndexCodec::splitEntriesFromFile($path));
             $sorted = $words;
-            usort($sorted, static fn(string $a, string $b): int => $a <=> $b);
+            usort($sorted, TermOrder::compare(...));
             $this->assertSame($sorted, $words, 'Chunk ' . basename($path) . ' is not in merge order.');
         }
     }

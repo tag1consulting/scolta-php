@@ -94,7 +94,7 @@ class PagefindFormatWriter
 
         // Chunk and write index files.
         $wordList = array_map('strval', array_keys($mergedIndex));
-        sort($wordList);
+        usort($wordList, TermOrder::compare(...));
 
         $chunks = $this->chunkWords($wordList, $mergedIndex);
         $indexChunkMeta = [];
@@ -295,7 +295,7 @@ class PagefindFormatWriter
      * MetaIndex → [version, pages, index_chunks, filters, sorts, meta_fields]
      *
      * @param array            $pages        Page data.
-     * @param array            $indexChunks  Index chunk references.
+     * @param list<array{from: string, to: string, hash: string}> $indexChunks Index chunk references.
      * @param array<string,string> $filterHashes Map of filterName → file hash for each dimension.
      * @param string[]         $metaFields   Meta field names.
      */
@@ -305,6 +305,8 @@ class PagefindFormatWriter
         array $filterHashes,
         array $metaFields,
     ): string {
+        TermOrder::assertChunkListOrdered($indexChunks);
+
         // Pages array: [page_hash, word_count] for each page.
         // page_hash must match the fragment filename so pagefind.js can
         // load fragment/{hash}.pf_fragment for search result display.
