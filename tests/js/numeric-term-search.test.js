@@ -30,7 +30,7 @@ describe('digit-leading terms in a PHP-built index', () => {
         found = JSON.parse(execFileSync(
             process.execPath,
             [SEARCH, path.join(outDir, 'pagefind'), ...TERMS, 'war of 1812'],
-            { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+            { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
         ));
     }, 60000);
 
