@@ -53,6 +53,9 @@ use Tag1\Scolta\Storage\StorageDriverInterface;
  *  - no existing index, or no ledger (nothing to update against)
  *  - a changed page whose previous token data is no longer in the token cache,
  *    so its stale postings cannot be located and removed
+ *  - an index whose `pf_meta` chunk list is not ordered by {@see TermOrder},
+ *    which is every index built before terms were ordered that way and
+ *    contained a term starting with a digit
  *
  * @since 1.2.0
  * @stability experimental
@@ -192,6 +195,18 @@ final class IncrementalIndexUpdater
         $version        = (string) $meta[0];
         $pageMeta       = $this->readPageTable($meta[1]);
         $indexChunkMeta = $this->readChunkRanges($meta[2]);
+
+        // Terms are routed to chunks by TermOrder. An index built before terms
+        // were ordered that way can have scrambled ranges, and routing into
+        // them would put terms where Pagefind never looks.
+        $violation = TermOrder::chunkListViolation($indexChunkMeta);
+        if ($violation !== null) {
+            throw new IncrementalUpdateUnavailable(
+                'The existing index predates byte-order term chunks (' . $violation . '). '
+                . 'Run a full build; it replaces the index with one that can be updated incrementally.',
+            );
+        }
+
         /** @var list<string> $metaFields */
         $metaFields     = array_values(array_map(strval(...), $meta[5] ?? ['title']));
 
@@ -527,7 +542,7 @@ final class IncrementalIndexUpdater
             // Terms inside a chunk must stay in ascending order: the range
             // table is a sorted, non-overlapping cover and the writer emitted
             // each chunk's words in order.
-            uksort($rawEntries, self::compareTerms(...));
+            uksort($rawEntries, TermOrder::compare(...));
 
             $words   = PfIndexCodec::wordList($rawEntries);
             $body    = PfIndexCodec::assembleChunk($this->cbor, $rawEntries);
@@ -570,18 +585,18 @@ final class IncrementalIndexUpdater
         $lo = 0;
         $hi = count($ranges) - 1;
 
-        if (self::compareTerms($term, $ranges[0]['from']) <= 0) {
+        if (TermOrder::compare($term, $ranges[0]['from']) <= 0) {
             return 0;
         }
-        if (self::compareTerms($term, $ranges[$hi]['to']) >= 0) {
+        if (TermOrder::compare($term, $ranges[$hi]['to']) >= 0) {
             return $hi;
         }
 
         while ($lo <= $hi) {
             $mid = intdiv($lo + $hi, 2);
-            if (self::compareTerms($term, $ranges[$mid]['from']) < 0) {
+            if (TermOrder::compare($term, $ranges[$mid]['from']) < 0) {
                 $hi = $mid - 1;
-            } elseif (self::compareTerms($term, $ranges[$mid]['to']) > 0) {
+            } elseif (TermOrder::compare($term, $ranges[$mid]['to']) > 0) {
                 $lo = $mid + 1;
             } else {
                 return $mid;
@@ -592,25 +607,6 @@ final class IncrementalIndexUpdater
         // contiguous and no gap opens between $ranges[$hi]['to'] and the next
         // range's 'from'.
         return max(0, $hi);
-    }
-
-    /**
-     * Term ordering, defined once.
-     *
-     * The N-way merge that produced these chunks ordered terms with
-     * SplMinHeap's default comparison, which is PHP's standard comparison, not
-     * strcmp. The two disagree on numeric-looking terms ("10" sorts before "9"
-     * numerically and after it lexicographically), and a router that used the
-     * other one would put a term in the wrong chunk — producing a searchable
-     * index that a full rebuild would not reproduce, rather than an error.
-     */
-    private static function compareTerms(int|string $a, int|string $b): int
-    {
-        // Accepts int because PHP hands back numeric-looking array keys as
-        // ints, and uksort() passes the raw key. Comparing them as PHP's
-        // standard comparison does is the point: that is what SplMinHeap used
-        // when these chunks were ordered.
-        return $a <=> $b;
     }
 
     // ── Reading the existing index ─────────────────────────────────────────

@@ -160,7 +160,7 @@ class IndexMerger
      * needs fan-in reduction — only one file handle is open at a time.
      *
      * Phase 2 — N-way term merge: one ChunkReader::openIndex() generator per
-     * chunk is seeded into a SplMinHeap. When $budget->mergeOpenFileHandles()
+     * chunk is seeded into a heap ordered by TermOrder. When $budget->mergeOpenFileHandles()
      * is exceeded, a recursive pre-merge pass reduces fan-in by merging term
      * streams from batches of chunks into temporary term-only files before the
      * final pass. Pre-merged files contain no pages; phase 1 always reads from
@@ -339,7 +339,7 @@ class IndexMerger
     private function streamMergeTermsToFile(array $batch, string $outputPath): void
     {
         $iterators = [];
-        $heap      = new \SplMinHeap();
+        $heap      = self::termHeap();
 
         foreach ($batch as $idx => $path) {
             $reader = new ChunkReader($path);
@@ -367,7 +367,7 @@ class IndexMerger
                 [$minTerm] = $heap->top();
 
                 $allEntries = [];
-                while (!$heap->isEmpty() && $heap->top()[0] === $minTerm) {
+                while (!$heap->isEmpty() && (string) $heap->top()[0] === (string) $minTerm) {
                     [, $chunkIdx] = $heap->extract();
                     $allEntries[] = $iterators[$chunkIdx]->current()[1];
 
@@ -403,7 +403,7 @@ class IndexMerger
     {
         /** @var \Generator[] $iterators */
         $iterators = [];
-        $heap      = new \SplMinHeap();
+        $heap      = self::termHeap();
 
         foreach ($chunkPaths as $idx => $path) {
             $reader = new ChunkReader($path);
@@ -419,7 +419,7 @@ class IndexMerger
             [$minTerm] = $heap->top();
 
             $allEntries = [];
-            while (!$heap->isEmpty() && $heap->top()[0] === $minTerm) {
+            while (!$heap->isEmpty() && (string) $heap->top()[0] === (string) $minTerm) {
                 [, $chunkIdx] = $heap->extract();
                 $allEntries[] = $iterators[$chunkIdx]->current()[1];
 
@@ -435,6 +435,30 @@ class IndexMerger
         }
 
         return $termCount;
+    }
+
+    /**
+     * A min-heap of [term, stream index] pairs ordered by TermOrder, then by
+     * stream index so equal terms leave in a stable order.
+     *
+     * A plain SplMinHeap compares with PHP's `<=>`, which is not a total order
+     * on numeric-looking terms, so its heap property does not hold for them.
+     *
+     * @return \SplHeap<array{0: string, 1: int}>
+     */
+    private static function termHeap(): \SplHeap
+    {
+        return new class extends \SplHeap {
+            /**
+             * @param array{0: string, 1: int} $value1
+             * @param array{0: string, 1: int} $value2
+             */
+            protected function compare(mixed $value1, mixed $value2): int
+            {
+                // SplHeap puts the larger value on top; invert for a min-heap.
+                return TermOrder::compare($value2[0], $value1[0]) ?: $value2[1] <=> $value1[1];
+            }
+        };
     }
 
     /**

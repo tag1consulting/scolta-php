@@ -26,8 +26,10 @@ namespace Tag1\Scolta\Index;
  *   - $filterData: ~50 000 pages with one filter value ≈ 4 MB
  *   - index chunk buffer: ≤ 40 KB
  *
- * Terms must be passed in ascending alphabetical order (as produced by the
- * N-way streaming merge in IndexMerger::mergeStreaming()).
+ * Terms must be passed strictly ascending in TermOrder (as produced by the
+ * N-way streaming merge in IndexMerger::mergeStreaming()); writeTerm() throws
+ * otherwise, because an index with a term out of order or repeated is one
+ * Pagefind cannot search.
  */
 class StreamingFormatWriter
 {
@@ -70,6 +72,9 @@ class StreamingFormatWriter
 
     /** Completed index chunks: [{from, to, hash}]. */
     private array $indexChunkMeta = [];
+
+    /** The last term written, to refuse one that does not sort after it. */
+    private ?string $lastTerm = null;
 
     /** Called once per page and per term written; see setHeartbeat(). */
     private ?\Closure $heartbeat = null;
@@ -215,6 +220,7 @@ class StreamingFormatWriter
         $this->currentChunkWords    = [];
         $this->currentChunkSize     = 0;
         $this->indexChunkMeta       = [];
+        $this->lastTerm             = null;
         $this->fragmentsReused      = 0;
         $this->fragmentsWritten     = 0;
 
@@ -362,16 +368,26 @@ class StreamingFormatWriter
      *
      * Flushes the chunk to disk when it reaches ~40 KB.
      *
-     * Terms MUST be passed in ascending alphabetical order.
+     * Terms MUST be passed strictly ascending in TermOrder.
      *
      * @param string $term     Index term (stemmed).
      * @param array  $termData Merged page entries for this term.
+     * @throws \RuntimeException When $term does not sort after the previous term.
      * @since 1.0.0
      * @stability stable
      */
     public function writeTerm(string $term, array $termData): void
     {
         ($this->heartbeat)?->__invoke();
+        if ($this->lastTerm !== null && TermOrder::compare($this->lastTerm, $term) >= 0) {
+            throw new \RuntimeException(sprintf(
+                'Index terms reached the writer out of order: "%s" after "%s". The index must not be published.',
+                $term,
+                $this->lastTerm,
+            ));
+        }
+        $this->lastTerm = $term;
+
         $encoded      = $this->encodeWordEntry($term, $termData);
         $pageCount    = count($termData) - (isset($termData['_variants']) ? 1 : 0);
         $estimatedSize = strlen($term) * 2 + $pageCount * 20;
