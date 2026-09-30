@@ -229,6 +229,26 @@ Verify `ext-intl` is loaded and that the `ContentItem` objects passed to the ind
 
 The browser-side WASM scorer (`scolta-core`) runs via wasm-bindgen. If results appear unscored or identically ranked, confirm both `pagefind.js` and `scolta_core_bg.wasm` are loading without 404 errors in the browser console.
 
+## Chat
+
+The chat is a conversation grounded in the site's own pages, off until a site turns it on (`chat_enabled`). Each turn ranks pages in the browser with the search page's pipeline and sends them with the question; the server keeps the thread and streams the answer, citing the pages it used. Follow ups are rewritten with the thread's subject kept ("Any real examples of fines?" after questions about GDPR searches for GDPR fines), older messages fold into a short summary after each reply, and an opening question answers from the cache. The page the visitor is reading can go with each question (`chat_page_context`), so "what does this page say about deadlines?" works; that text goes to your AI provider. It is experimental in 2.0.0.
+
+The server side is `ChatEndpointHandler`; the browser side is `assets/js/scolta-chat.js` with its CSS and a vendored deep-chat 2.4.2. [docs/CHAT.md](docs/CHAT.md) is the contract an adapter implements: routes, owner cookie, headers, storage and streaming.
+
+## Headless retrieval
+
+`Scolta.createRetriever(config)` runs the search page's ranking without a widget and hands back the results as data, for an integration that needs pages rather than a results list (the chat is the first one). It is experimental in 2.0.0.
+
+```js
+const retriever = Scolta.createRetriever(window.scolta);
+await retriever.ready(); // loads Pagefind and the WASM module
+const { results, total } = await retriever.retrieve('breach notification');
+const pages = retriever.buildContext(results, { query: 'breach notification' });
+// [{ n: 1, tier: 1, title, url, excerpt }, ..., { n: 6, tier: 2, title, url, excerpt }]
+```
+
+`retrieve()` returns what the search page ranks for the query with no facet selected, calling expand-query beside the primary search unless you pass `expandedTerms`. It does not apply the sort or filter hints expansion can return. `buildContext()` gives up to 5 pages with excerpts inside a 6,000 character budget, then up to 25 with a title and one line inside 2,500, numbered across both, with URLs chosen as the search page links them. `extractContext(text, query, maxLength)` picks the parts of any text most relevant to a query, and `terms(text)` returns its meaningful words (none for a message made only of stop words, like "tell me more").
+
 ## Configuration Reference
 
 All Scolta configuration flows through `Tag1\Scolta\Config\ScoltaConfig`. Platform adapters map their native config systems into this object via `ScoltaConfig::fromArray()`, which accepts snake_case keys.

@@ -1383,4 +1383,81 @@ class ScoltaConfigTest extends TestCase
             );
         }
     }
+
+    // -------------------------------------------------------------------
+    // Chat
+    // -------------------------------------------------------------------
+
+    public function testChatIsOffAndDefaultedWithoutConfig(): void
+    {
+        $chat = (new ScoltaConfig())->normalizedChat();
+
+        $this->assertSame([
+            'enabled' => false, 'topResults' => 5, 'topChars' => 6000, 'broadResults' => 25, 'broadChars' => 2500,
+            'pageContext' => true, 'pageChars' => 3000, 'maxTokens' => 700, 'threadTtl' => 86400, 'handoff' => true,
+        ], $chat);
+        $this->assertSame('', (new ScoltaConfig())->promptChat);
+    }
+
+    public function testFromArrayMapsChatKeysFromCmsStrings(): void
+    {
+        $config = ScoltaConfig::fromArray([
+            'chat_enabled' => '1', 'chat_top_results' => '4', 'chat_top_chars' => '5000', 'chat_broad_results' => '10',
+            'chat_broad_chars' => '1000', 'chat_page_context' => '0', 'chat_page_chars' => '2000', 'chat_max_tokens' => '500',
+            'chat_thread_ttl' => '3600', 'chat_handoff' => '0',
+            'prompt_chat' => 'a', 'prompt_chat_plan' => 'b', 'prompt_chat_fold' => 'c',
+        ]);
+
+        $this->assertSame([
+            'enabled' => true, 'topResults' => 4, 'topChars' => 5000, 'broadResults' => 10, 'broadChars' => 1000,
+            'pageContext' => false, 'pageChars' => 2000, 'maxTokens' => 500, 'threadTtl' => 3600, 'handoff' => false,
+        ], $config->normalizedChat());
+        $this->assertSame(['a', 'b', 'c'], [$config->promptChat, $config->promptChatPlan, $config->promptChatFold]);
+    }
+
+    public function testChatNumbersAreClampedInOnePlace(): void
+    {
+        $low = ScoltaConfig::fromArray([
+            'chat_top_results' => 0, 'chat_top_chars' => 1, 'chat_broad_results' => -3, 'chat_broad_chars' => -1,
+            'chat_page_chars' => 5, 'chat_max_tokens' => 1, 'chat_thread_ttl' => 1,
+        ])->normalizedChat();
+        $high = ScoltaConfig::fromArray([
+            'chat_top_results' => 99, 'chat_top_chars' => 999999, 'chat_broad_results' => 999, 'chat_broad_chars' => 999999,
+            'chat_page_chars' => 999999, 'chat_max_tokens' => 999999, 'chat_thread_ttl' => 999999999,
+        ])->normalizedChat();
+
+        $this->assertSame([1, 500, 0, 0, 200, 100, 300], [$low['topResults'], $low['topChars'], $low['broadResults'], $low['broadChars'], $low['pageChars'], $low['maxTokens'], $low['threadTtl']]);
+        $this->assertSame([10, 30000, 50, 10000, 10000, 4000, 2592000], [$high['topResults'], $high['topChars'], $high['broadResults'], $high['broadChars'], $high['pageChars'], $high['maxTokens'], $high['threadTtl']]);
+    }
+
+    public function testBrowserConfigHasNoChatBlockWhileTheChatIsOff(): void
+    {
+        $browser = (new ScoltaConfig())->toBrowserConfig();
+
+        // The key set as it stood before the chat existed: turning it off
+        // must leave the page payload exactly as it was.
+        $this->assertSame([
+            'scoring', 'endpoints', 'wasmPath', 'siteName', 'pagefindPath', 'filterFieldDescriptions',
+            'hideEmptyFacets', 'facetMode', 'labels', 'valueLabels', 'saytEnabled', 'saytMinChars',
+            'saytDebounceMs', 'saytMaxSuggestions', 'saytRecentSearches', 'saytMaxRecent', 'saytExpand',
+            'saytExpandPerMinute', 'saytExpansionDelayMs', 'saytSuggestionAction',
+        ], array_keys($browser));
+    }
+
+    public function testBrowserConfigCarriesTheChatBlockWhenOn(): void
+    {
+        $chat = ScoltaConfig::fromArray(['chat_enabled' => true, 'chat_top_results' => 50])->toBrowserConfig()['chat'];
+
+        $this->assertSame([
+            'plan' => '/api/scolta/v1/chat/plan',
+            'turn' => '/api/scolta/v1/chat/turn',
+            'fold' => '/api/scolta/v1/chat/fold',
+            'thread' => '/api/scolta/v1/chat/thread',
+        ], $chat['endpoints']);
+        $this->assertTrue($chat['enabled']);
+        $this->assertSame(10, $chat['topResults']);
+        // Server-side limits stay on the server.
+        $this->assertArrayNotHasKey('maxTokens', $chat);
+        $this->assertArrayNotHasKey('threadTtl', $chat);
+    }
 }

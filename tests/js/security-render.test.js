@@ -562,3 +562,53 @@ describe('results count header — active facet values (escapeHtml)', () => {
         expect(header.textContent).toContain(' in English');
     });
 });
+
+describe('Scolta.formatAnswer(): the chat citation marker', () => {
+    function formatter() {
+        const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', { url: 'https://example.com', runScripts: 'dangerously' });
+        dom.window.eval(fs.readFileSync(path.resolve(__dirname, '../../assets/js/scolta.js'), 'utf-8'));
+        return dom.window;
+    }
+
+    test('renders [[n]](URL) as a small numbered link', () => {
+        const win = formatter();
+        const html = win.Scolta.formatAnswer('Notify within 72 hours [[2]](https://example.com/gdpr).', { allowedLinkDomains: ['example.com'] });
+        const holder = win.document.createElement('div');
+        holder.innerHTML = html;
+        const link = holder.querySelector('sup.scolta-cite a');
+        expect(link.getAttribute('href')).toBe('https://example.com/gdpr');
+        expect(link.textContent).toBe('2');
+        expect(holder.textContent).toBe('Notify within 72 hours 2.');
+    });
+
+    test('a marker to another host or an unsafe scheme stays plain text', () => {
+        const win = formatter();
+        const offSite = win.Scolta.formatAnswer('See [[1]](https://evil.example/x).', { allowedLinkDomains: ['example.com'] });
+        expect(offSite).not.toContain('<a');
+        expect(offSite).toContain('[1]');
+        const script = win.Scolta.formatAnswer('See [[1]](javascript:alert(1)).', {});
+        expect(script).not.toContain('<a');
+    });
+
+    test('markup in the answer is escaped and ordinary links follow the same rules', () => {
+        const win = formatter();
+        const html = win.Scolta.formatAnswer('<img src=x onerror=alert(1)> Read [the guide](https://example.com/g) or [this](https://evil.example/).', { allowedLinkDomains: ['example.com'] });
+        expect(html).not.toContain('<img');
+        expect(html).toContain('&lt;img');
+        expect(html).toContain('<a href="https://example.com/g"');
+        expect(html).not.toContain('evil.example');
+    });
+
+    test('the AI summary does not render the marker, so it renders as before', async () => {
+        const h = setup({
+            rowsFor: () => [{ url: '/a', title: 'Doc', content: 'branch words here', excerpt: 'branch' }],
+            config: { AI_SUMMARIZE: true },
+            summarizeResponse: { summary: 'Cited [[1]](https://example.com/a).' },
+        });
+        await h.search('branch');
+        await ticks(40);
+        const text = h.$('.scolta-ai-summary-text');
+        expect(text.querySelector('sup')).toBeNull();
+        expect(text.textContent).toContain('[[1]]');
+    });
+});

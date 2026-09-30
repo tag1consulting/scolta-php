@@ -8,6 +8,8 @@ use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Exception\GuzzleException;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\StreamInterface;
 use Tag1\Scolta\AiProvider\ModelIdentity;
 use Tag1\Scolta\Exception\ApiKeyInvalidException;
 use Tag1\Scolta\Exception\ApiKeyMissingException;
@@ -43,6 +45,14 @@ class AiClient
     private const ANTHROPIC_API_VERSION = '2023-06-01';
 
     private const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
+
+    /**
+     * Total time a streamed answer may take, in seconds.
+     *
+     * A 700 token answer streams in well under a minute; the configured
+     * timeout still bounds the wait for each read.
+     */
+    private const STREAM_TIMEOUT = 120;
 
     private ClientInterface $httpClient;
     private string $provider;
@@ -180,6 +190,40 @@ class AiClient
     }
 
     /**
+     * Stream a multi-turn conversation, yielding the answer as it arrives.
+     *
+     * The request is the one conversation() sends plus `stream: true`, and
+     * HTTP failures map to the same exceptions before the first piece is
+     * yielded. With $cacheSystem on Anthropic the system prompt is sent as one
+     * block marked for prompt caching; OpenAI caches long prefixes by itself,
+     * so the flag changes nothing there.
+     *
+     * @param string $systemPrompt System prompt providing context.
+     * @param array<int, array<string, mixed>> $messages Message objects with 'role' and 'content' keys.
+     * @param int $maxTokens Maximum response tokens.
+     * @param string|null $model Model override for this call.
+     * @param float|null $temperature Sampling temperature, or null for the provider default.
+     * @param bool $cacheSystem Mark the system prompt for provider prompt caching.
+     *
+     * @return \Generator<int, string> Text deltas, in order.
+     *
+     * @throws \RuntimeException If the API key is missing or the request fails.
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function conversationStream(
+        string $systemPrompt,
+        array $messages,
+        int $maxTokens = 1024,
+        ?string $model = null,
+        ?float $temperature = null,
+        bool $cacheSystem = false,
+    ): \Generator {
+        $response = $this->send($systemPrompt, $messages, $maxTokens, $model ?? $this->model, $temperature, true, $cacheSystem);
+        yield from $this->readStream($response->getBody());
+    }
+
+    /**
      * Send a request to the configured AI provider.
      */
     private function sendRequest(
@@ -189,20 +233,68 @@ class AiClient
         ?string $model,
         ?float $temperature = null,
     ): string {
+        $response = $this->send($systemPrompt, $messages, $maxTokens, $model ?? $this->model, $temperature, false, false);
+
+        try {
+            $data = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
+            throw new \RuntimeException('Scolta AI API returned malformed JSON: ' . $e->getMessage(), 0, $e);
+        }
+
+        if ($this->provider === 'openai') {
+            return $data['choices'][0]['message']['content'] ?? '';
+        }
+
+        return $data['content'][0]['text'] ?? '';
+    }
+
+    /**
+     * Whether the model just rejected could not have belonged to this provider.
+     *
+     * Scoped to requests aimed at the provider's own API: a configured
+     * `base_url` means a gateway with its own model namespace, where a
+     * non-vendor model name is expected rather than wrong.
+     */
+    private function modelIsForeignToProvider(string $model): bool
+    {
+        return $this->usesProviderEndpoint
+            && !ModelIdentity::looksNativeFor($this->provider, $model);
+    }
+
+    /**
+     * Send one request and map every failure to Scolta's exceptions.
+     *
+     * @param array<int, array<string, mixed>> $messages
+     */
+    private function send(
+        string $systemPrompt,
+        array $messages,
+        int $maxTokens,
+        string $model,
+        ?float $temperature,
+        bool $stream,
+        bool $cacheSystem,
+    ): ResponseInterface {
         if (empty($this->apiKey)) {
             throw new ApiKeyMissingException(
                 'Scolta AI API key not configured. Set the api_key in your platform\'s Scolta configuration.',
             );
         }
 
-        $useModel = $model ?? $this->model;
+        $options = [
+            'headers' => $this->requestHeaders(),
+            'json' => $this->requestBody($systemPrompt, $messages, $maxTokens, $model, $temperature, $cacheSystem),
+            'timeout' => $this->timeout,
+        ];
+        if ($stream) {
+            $options['json']['stream'] = true;
+            $options['stream'] = true;
+            $options['timeout'] = max(self::STREAM_TIMEOUT, $this->timeout);
+            $options['read_timeout'] = $this->timeout;
+        }
 
         try {
-            if ($this->provider === 'openai') {
-                return $this->sendOpenAiRequest($systemPrompt, $messages, $maxTokens, $useModel, $temperature);
-            }
-
-            return $this->sendAnthropicRequest($systemPrompt, $messages, $maxTokens, $useModel, $temperature);
+            return $this->httpClient->request('POST', $this->baseUrl, $options);
         } catch (ClientException $e) {
             $status = $e->getResponse()->getStatusCode();
             if ($status === 401) {
@@ -227,102 +319,156 @@ class AiClient
             // otherwise indistinguishable from any other 4xx, and the operator
             // gets nothing actionable. Classifying an already-failed request is
             // the only safe use of this check — see ModelIdentity.
-            if ($this->modelIsForeignToProvider($useModel)) {
+            if ($this->modelIsForeignToProvider($model)) {
                 throw new ModelProviderMismatchException(
-                    $useModel,
+                    $model,
                     $this->provider,
-                    ModelIdentity::describeMismatch($this->provider, $useModel),
+                    ModelIdentity::describeMismatch($this->provider, $model),
                     $e,
                 );
             }
             throw new \RuntimeException('Scolta AI API request failed: ' . $e->getMessage(), 0, $e);
         } catch (GuzzleException $e) {
             throw new \RuntimeException('Scolta AI API request failed: ' . $e->getMessage(), 0, $e);
-        } catch (\JsonException $e) {
-            throw new \RuntimeException('Scolta AI API returned malformed JSON: ' . $e->getMessage(), 0, $e);
         }
     }
 
     /**
-     * Whether the model just rejected could not have belonged to this provider.
-     *
-     * Scoped to requests aimed at the provider's own API: a configured
-     * `base_url` means a gateway with its own model namespace, where a
-     * non-vendor model name is expected rather than wrong.
+     * @return array<string, string>
      */
-    private function modelIsForeignToProvider(string $model): bool
+    private function requestHeaders(): array
     {
-        return $this->usesProviderEndpoint
-            && !ModelIdentity::looksNativeFor($this->provider, $model);
-    }
-
-    private function sendAnthropicRequest(
-        string $systemPrompt,
-        array $messages,
-        int $maxTokens,
-        string $model,
-        ?float $temperature = null,
-    ): string {
-        $body = [
-            'model' => $model,
-            'max_tokens' => $maxTokens,
-            'system' => $systemPrompt,
-            'messages' => $messages,
-        ];
-        // Omit temperature entirely when null so the provider default applies.
-        if ($temperature !== null) {
-            $body['temperature'] = $temperature;
+        if ($this->provider === 'openai') {
+            return [
+                'Authorization' => 'Bearer ' . $this->apiKey,
+                'Content-Type' => 'application/json',
+            ];
         }
 
-        $response = $this->httpClient->request('POST', $this->baseUrl, [
-            'headers' => [
-                'x-api-key' => $this->apiKey,
-                'anthropic-version' => $this->apiVersion,
-                'Content-Type' => 'application/json',
-            ],
-            'json' => $body,
-            'timeout' => $this->timeout,
-        ]);
-
-        $data = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
-        return $data['content'][0]['text'] ?? '';
+        return [
+            'x-api-key' => $this->apiKey,
+            'anthropic-version' => $this->apiVersion,
+            'Content-Type' => 'application/json',
+        ];
     }
 
-    private function sendOpenAiRequest(
+    /**
+     * @param array<int, array<string, mixed>> $messages
+     * @return array<string, mixed>
+     */
+    private function requestBody(
         string $systemPrompt,
         array $messages,
         int $maxTokens,
         string $model,
-        ?float $temperature = null,
-    ): string {
-        // Prepend system message in OpenAI format.
-        $allMessages = array_merge(
-            [['role' => 'system', 'content' => $systemPrompt]],
-            $messages,
-        );
-
-        $body = [
-            'model' => $model,
-            'max_tokens' => $maxTokens,
-            'messages' => $allMessages,
-        ];
+        ?float $temperature,
+        bool $cacheSystem,
+    ): array {
+        if ($this->provider === 'openai') {
+            // Prepend system message in OpenAI format.
+            $body = [
+                'model' => $model,
+                'max_tokens' => $maxTokens,
+                'messages' => array_merge([['role' => 'system', 'content' => $systemPrompt]], $messages),
+            ];
+        } else {
+            $body = [
+                'model' => $model,
+                'max_tokens' => $maxTokens,
+                'system' => $cacheSystem
+                    ? [['type' => 'text', 'text' => $systemPrompt, 'cache_control' => ['type' => 'ephemeral']]]
+                    : $systemPrompt,
+                'messages' => $messages,
+            ];
+        }
         // Omit temperature entirely when null so the provider default applies.
-        // The Amazee path proxies through this OpenAI-compatible endpoint and
+        // The Amazee path proxies through the OpenAI-compatible endpoint and
         // inherits the same body handling.
         if ($temperature !== null) {
             $body['temperature'] = $temperature;
         }
 
-        $response = $this->httpClient->request('POST', $this->baseUrl, [
-            'headers' => [
-                'Authorization' => 'Bearer ' . $this->apiKey,
-                'Content-Type' => 'application/json',
-            ],
-            'json' => $body,
-            'timeout' => $this->timeout,
-        ]);
+        return $body;
+    }
 
-        $data = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
-        return $data['choices'][0]['message']['content'] ?? '';
+    /**
+     * Read a server-sent event stream and yield its text deltas.
+     *
+     * Anthropic sends `content_block_delta` events carrying `text_delta`;
+     * OpenAI-compatible endpoints send `choices[0].delta.content` until
+     * `[DONE]`. Everything else (pings, message metadata) is skipped.
+     *
+     * Read a line at a time: a read of N bytes from a network stream waits
+     * until N bytes arrive, and reading 8 KB at once held the first words
+     * back by seconds. Single byte reads come from the stream's own buffer,
+     * so each event is passed on as soon as its line is complete.
+     *
+     * @return \Generator<int, string>
+     */
+    private function readStream(StreamInterface $body): \Generator
+    {
+        $finished = false;
+        while (!$finished) {
+            try {
+                $line = '';
+                while (!str_ends_with($line, "\n") && ($byte = $body->read(1)) !== '') {
+                    $line .= $byte;
+                }
+            } catch (\RuntimeException $e) {
+                throw new \RuntimeException('Scolta AI API stream failed: ' . $e->getMessage(), 0, $e);
+            }
+            if ($line === '') {
+                // A connection that closes before the provider's end event
+                // cut the answer off; it must not be kept as a whole one.
+                throw new \RuntimeException('Scolta AI API stream ended early');
+            }
+            $text = $this->streamLineText(rtrim($line, "\r\n"), $finished);
+            if ($text !== '') {
+                yield $text;
+            }
+        }
+    }
+
+    /**
+     * The text one stream line carries, if any.
+     *
+     * Sets $done when the line ends the answer.
+     */
+    private function streamLineText(string $line, bool &$done): string
+    {
+        if (!str_starts_with($line, 'data:')) {
+            return '';
+        }
+        $payload = trim(substr($line, 5));
+        if ($payload === '[DONE]') {
+            $done = true;
+            return '';
+        }
+        $event = json_decode($payload, true);
+        if (!is_array($event)) {
+            return '';
+        }
+        if (isset($event['error'])) {
+            $error = is_array($event['error']) ? ($event['error']['type'] ?? $event['error']['message'] ?? 'error') : $event['error'];
+            throw new \RuntimeException('Scolta AI API stream failed: ' . (is_string($error) ? $error : 'error'));
+        }
+        if ($this->provider === 'openai') {
+            // Some gateways end on a finish_reason and never send [DONE].
+            if (($event['choices'][0]['finish_reason'] ?? null) !== null) {
+                $done = true;
+            }
+            $text = $event['choices'][0]['delta']['content'] ?? '';
+            return is_string($text) ? $text : '';
+        }
+        if (($event['type'] ?? '') === 'message_stop') {
+            $done = true;
+            return '';
+        }
+        if (($event['type'] ?? '') === 'content_block_delta' && ($event['delta']['type'] ?? '') === 'text_delta') {
+            $text = $event['delta']['text'] ?? '';
+            return is_string($text) ? $text : '';
+        }
+
+        return '';
     }
 }

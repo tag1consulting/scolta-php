@@ -87,6 +87,10 @@ REQUIRED_PATHS=(
   "assets/css/scolta.css"
   "assets/wasm/scolta_core_bg.wasm"
   "assets/wasm/scolta_core.js"
+  "assets/js/scolta-chat.js"
+  "assets/css/scolta-chat.css"
+  "assets/vendor/deep-chat/deepChat.bundle.js"
+  "assets/vendor/deep-chat/LICENSE"
 )
 
 # Fail-closed top-level allowlist, derived from the current clean archive.

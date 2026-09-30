@@ -692,10 +692,10 @@ describe('sub-word expansion is frequency-guarded (issue #156)', () => {
         const jsSource = fs.readFileSync(
             path.join(__dirname, '../../assets/js/scolta.js'), 'utf-8'
         );
-        const relevancePath = jsSource.match(/Relevance path:[\s\S]*?searchAndLoadParallel/);
+        const relevancePath = jsSource.match(/async function rankExpansion\([\s\S]*?searchAndLoadParallel/);
         expect(relevancePath).not.toBeNull();
         // Sub-word decomposition is restored...
-        expect(relevancePath[0]).toContain('extractSearchTerms(term)');
+        expect(relevancePath[0]).toContain('extractSearchTerms(term, instanceStopwords())');
         // ...but only added when the frequency guard passes.
         expect(relevancePath[0]).toContain('await subwordAllowed(word)');
     });
@@ -706,7 +706,7 @@ describe('sub-word expansion is frequency-guarded (issue #156)', () => {
         );
         const sortPath = jsSource.match(/const termSet = new Set\(\[searchQuery\]\);[\s\S]*?\.map\(t => pagefindSearch/);
         expect(sortPath).not.toBeNull();
-        expect(sortPath[0]).toContain('extractSearchTerms(term)');
+        expect(sortPath[0]).toContain('extractSearchTerms(term, instanceStopwords())');
         expect(sortPath[0]).toContain('await subwordAllowed(word)');
     });
 
@@ -719,12 +719,14 @@ describe('sub-word expansion is frequency-guarded (issue #156)', () => {
         // 0 -> v1.0.0 (no sub-words); >= 1 -> all sub-words.
         expect(guard[0]).toContain('subwordMaxFreq <= 0');
         expect(guard[0]).toContain('subwordMaxFreq >= 1');
-        // Numerator and denominator both scope to the active search filters —
+        // Numerator and denominator both scope to the filters the pass searches
+        // under (the search page passes its active filters):
         // the denominator via cached totals, never a match-all search (which
         // downloads the entire word index; AI-Overview latency fix).
-        expect(guard[0]).toContain('subwordCorpusSize(activeFilters)');
+        expect(guard[0]).toContain('subwordCorpusSize(filters)');
         expect(guard[0]).not.toContain('pagefindSearch(null');
-        expect(guard[0]).toContain('pagefindSearch(word, activeFilters)');
+        expect(guard[0]).toContain('pagefindSearch(word, filters)');
+        expect(jsSource).toContain('subwordGuard(searchQuery, activeFilters)');
     });
 
     test('highlight term splitting is preserved for display purposes', () => {
@@ -947,5 +949,287 @@ describe('sort-drop guard: unmatched subject falls back to unscoped sort', () =>
         const state = win.__getSortState();
         expect(state.currentSortOverride).toBeNull();
         expect(win.document.querySelector('#scolta-sort-indicator').style.display).toBe('none');
+    });
+});
+
+// =============================================================================
+// Retrieval pinning table
+// =============================================================================
+
+// What doSearch() ranks for one query of each pipeline path, against a fixed
+// corpus (tests/js/retrieval-corpus.js), with the JS fallback scorer. These were
+// recorded on the pipeline as it stood before the ranking moved into shared
+// stages, so any change to what the search page returns fails here. Scores are
+// compared to ten places; the Pagefind searches are compared as a sorted list,
+// because the order two parallel searches start in is not part of the contract.
+const {
+    createCorpusWindow, searchPage, settle,
+} = require('./retrieval-corpus');
+
+const STATE_HOOK = '  window.__getState = function() { return { allScoredResults }; };';
+
+const RETRIEVAL_TABLE = [
+    {
+        name: 'single term',
+        query: 'retention',
+        expandCalls: 1,
+        searches: ['retention'],
+        results: [['/retention', 3.4], ['/retention-guide', 2.9], ['/glossary', 0.4]],
+    },
+    {
+        name: 'multi term AND hit',
+        query: 'breach notification',
+        expandCalls: 1,
+        searches: ['breach notification'],
+        results: [['/gdpr-breach', 4.2], ['/hipaa-breach', 3.95], ['/breach-response', 1.9], ['/encryption', 0.65], ['/glossary', 0.4]],
+    },
+    {
+        name: 'zero AND hits runs the OR fallback',
+        query: 'breach cookies',
+        expandCalls: 1,
+        searches: ['breach', 'breach cookies', 'cookies'],
+        results: [
+            ['/cookie', 0.8637866659042688], ['/gdpr-breach', 0.47029161224203325],
+            ['/hipaa-breach', 0.44612559999545875], ['/breach-response', 0.4219595877488842],
+            ['/fines', 0.1267139598668213], ['/encryption', 0.10254794762024677],
+            ['/contractors', 0.0783819353736722], ['/glossary', 0.05421592312709767],
+        ],
+    },
+    {
+        // "notification" is too common to admit as a sub-word, "duties" and
+        // "personal" are rare enough, and the typed "data" is exempt.
+        name: 'expansion with a rejected and an admitted sub-word',
+        query: 'data breach',
+        scoring: { EXPAND_SUBWORD_MAX_FREQ: 0.2 },
+        expansions: { 'data breach': ['personal data breach', 'notification duties'] },
+        expandCalls: 1,
+        searches: ['breach', 'data', 'data breach', 'duties', 'notification', 'notification duties', 'personal', 'personal data breach'],
+        results: [
+            ['/breach-response', 3.75], ['/gdpr-breach', 3.43017992427798],
+            ['/encryption', 2.4859772820483528], ['/retention', 0.3069905434294352],
+            ['/retention-guide', 0.2821286332221218], ['/hipaa-breach', 0.26023993333068424],
+            ['/fines', 0.07391647658897908], ['/pci', 0.0713428727688124],
+            ['/contractors', 0.04572279563464211], ['/glossary', 0.031625955157473636],
+        ],
+    },
+    {
+        name: 'typed terms lend agreement without seeding',
+        query: 'contractors breach',
+        scoring: { EXPAND_SUBWORD_MAX_FREQ: 0.2 },
+        expansions: { 'contractors breach': ['processors report', 'controller'] },
+        expandCalls: 1,
+        searches: ['breach', 'contractors', 'contractors breach', 'controller', 'processors', 'processors report', 'report'],
+        results: [['/contractors', 9.12211991921348], ['/glossary', 0.10513260206653652]],
+    },
+    {
+        name: 'metadata boosts',
+        query: 'breach',
+        scoring: { METADATA_BOOSTS: { type: { guide: 3 } } },
+        expandCalls: 1,
+        searches: ['breach'],
+        results: [
+            ['/gdpr-breach', 3.4], ['/hipaa-breach', 3.2333333333333334],
+            ['/breach-response', 3.066666666666667], ['/encryption', 2.2], ['/fines', 0.9],
+            ['/contractors', 0.5666666666666667], ['/glossary', 0.4],
+        ],
+    },
+    {
+        name: 'title dedup off',
+        query: 'retention policy',
+        scoring: { TITLE_DEDUP: false },
+        expandCalls: 1,
+        searches: ['retention policy'],
+        results: [['/retention-guide', 4.4], ['/retention', 3.2]],
+    },
+    {
+        name: 'title dedup on',
+        query: 'retention policy',
+        scoring: { TITLE_DEDUP: true },
+        expandCalls: 1,
+        searches: ['retention policy'],
+        results: [['/retention-guide', 4.4]],
+    },
+    {
+        // A quoted query never expands, even when the endpoint has terms for it.
+        name: 'forced phrase',
+        query: '"breach notification"',
+        expansions: { '"breach notification"': ['should not be used'] },
+        expandCalls: 0,
+        searches: ['breach notification'],
+        results: [['/gdpr-breach', 1], ['/hipaa-breach', 0.75], ['/breach-response', 0.5], ['/encryption', 0.25], ['/glossary', 0]],
+    },
+];
+
+function expectRanked(actual, expected) {
+    expect(actual.map(r => r[0])).toEqual(expected.map(r => r[0]));
+    actual.forEach((r, i) => expect(r[1]).toBeCloseTo(expected[i][1], 10));
+}
+
+describe('retrieval pinning table', () => {
+    for (const row of RETRIEVAL_TABLE) {
+        test(`doSearch: ${row.name}`, async () => {
+            const { win, pfCalls, fetchCalls } = createCorpusWindow({
+                scoring: row.scoring, expansions: row.expansions, inject: STATE_HOOK,
+            });
+            win.Scolta.init('#scolta-search');
+            await settle();
+            pfCalls.length = 0;
+            expectRanked(await searchPage(win, row.query), row.results);
+            const expands = fetchCalls.filter(c => c.url === '/e');
+            expect(expands).toHaveLength(row.expandCalls);
+            expands.forEach(c => expect(JSON.parse(c.body)).toEqual({ query: row.query }));
+            expect([...pfCalls].sort()).toEqual(row.searches);
+        });
+    }
+});
+
+// =============================================================================
+// Scolta.createRetriever(): parity with the search page, and buildContext()
+// =============================================================================
+
+async function retrieverFor(row, opts = {}) {
+    const made = createCorpusWindow({
+        scoring: row.scoring, expansions: row.expansions, container: false, wasm: opts.wasm,
+    });
+    const retriever = made.win.Scolta.createRetriever();
+    await retriever.ready();
+    return Object.assign(made, { retriever });
+}
+
+describe('Scolta.createRetriever() ranks exactly as the search page does', () => {
+    for (const row of RETRIEVAL_TABLE) {
+        test(`retrieve: ${row.name}`, async () => {
+            const { retriever, fetchCalls } = await retrieverFor(row);
+            const out = await retriever.retrieve(row.query);
+            expectRanked(out.results.map(r => [r.data.url, r.score]), row.results);
+            const expands = fetchCalls.filter(c => c.url === '/e');
+            expect(expands).toHaveLength(row.expandCalls);
+            expands.forEach(c => expect(JSON.parse(c.body)).toEqual({ query: row.query }));
+        });
+    }
+
+    test('a retriever made after the search widget on the same page ranks the same', async () => {
+        // The second instance on a page reuses Pagefind; it must still learn
+        // the corpus size from pagefind-entry.json, which the sub-word guard
+        // and specificity weighting rank with, and must not load the facet
+        // index a search page is configured to load eagerly.
+        const row = RETRIEVAL_TABLE.find(r => r.name.startsWith('expansion with'));
+        const { win, fetchCalls } = createCorpusWindow({ scoring: row.scoring, expansions: row.expansions });
+        win.scolta.facetMode = 'eager';
+        win.Scolta.init('#scolta-search');
+        await settle();
+        const retriever = win.Scolta.createRetriever();
+        await retriever.ready();
+        const facetFetches = () => fetchCalls.filter(c => c.url.includes('.facets')).length;
+        const before = facetFetches();
+
+        const out = await retriever.retrieve(row.query);
+
+        expectRanked(out.results.map(r => [r.data.url, r.score]), row.results);
+        expect(facetFetches()).toBe(before);
+    });
+
+    test('planned terms skip the expand-query call and rank the same', async () => {
+        const row = RETRIEVAL_TABLE.find(r => r.name.startsWith('expansion with'));
+        const { retriever, fetchCalls } = await retrieverFor(row);
+        const out = await retriever.retrieve(row.query, { expandedTerms: row.expansions[row.query] });
+        expectRanked(out.results.map(r => [r.data.url, r.score]), row.results);
+        expect(fetchCalls.filter(c => c.url === '/e')).toHaveLength(0);
+        expect(out.expandedTerms).toEqual(row.expansions[row.query]);
+    });
+
+    test('reports the match count before the cap and honours limit', async () => {
+        const row = RETRIEVAL_TABLE.find(r => r.name === 'multi term AND hit');
+        const { retriever } = await retrieverFor(row);
+        const out = await retriever.retrieve(row.query, { limit: 2 });
+        expect(out.results.map(r => r.data.url)).toEqual(['/gdpr-breach', '/hipaa-breach']);
+        expect(out.total).toBe(5);
+    });
+
+    test('an aborted signal rejects with an AbortError', async () => {
+        const row = RETRIEVAL_TABLE[0];
+        const { win, retriever } = await retrieverFor(row);
+        const ctl = new win.AbortController();
+        ctl.abort();
+        await expect(retriever.retrieve(row.query, { signal: ctl.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    });
+
+    test('keeps one memo across calls, so a repeated query searches once', async () => {
+        const row = RETRIEVAL_TABLE[0];
+        const { retriever, pfCalls } = await retrieverFor(row);
+        pfCalls.length = 0;
+        await retriever.retrieve(row.query);
+        await retriever.retrieve(row.query);
+        expect(pfCalls.filter(q => q === 'retention')).toHaveLength(1);
+    });
+
+    test('terms() drops stop words with the config it was made from', async () => {
+        const { retriever } = await retrieverFor({ scoring: { CUSTOM_STOP_WORDS: ['policy'] } });
+        expect(retriever.terms('What is the retention policy?')).toEqual(['retention']);
+        expect(retriever.terms('Is it in the?')).toEqual([]);
+    });
+});
+
+describe('retriever.buildContext()', () => {
+    const page = (url, title, text, meta) => ({
+        data: { url, meta: Object.assign({ title }, meta || {}), excerpt: text, content: text },
+        score: 1,
+    });
+    const words = (n, w = 'word') => Array.from({ length: n }, (_, i) => `${w}${i}`).join(' ');
+
+    async function build(results, options, wasm) {
+        const { retriever } = await retrieverFor({}, { wasm });
+        return retriever.buildContext(results, options);
+    }
+
+    test('splits the tiers and numbers pages across both', async () => {
+        const results = Array.from({ length: 9 }, (_, i) => page(`/p${i}`, `Page ${i}`, `Line about page ${i}.`));
+        const pages = await build(results, { topN: 3, broadN: 4 });
+        expect(pages.map(p => [p.n, p.tier])).toEqual([[1, 1], [2, 1], [3, 1], [4, 2], [5, 2], [6, 2], [7, 2]]);
+        expect(pages[0]).toEqual({ n: 1, tier: 1, title: 'Page 0', url: 'https://example.com/p0', excerpt: 'Line about page 0.' });
+    });
+
+    test('divides the tier one budget evenly and never below 100 characters', async () => {
+        const results = [page('/a', 'A', words(400)), page('/b', 'B', words(400))];
+        const even = await build(results, { topChars: 1000 });
+        even.forEach(p => expect(p.excerpt.length).toBeLessThanOrEqual(500));
+        expect(even[0].excerpt.length).toBeGreaterThan(400);
+        const floored = await build(results, { topChars: 50 });
+        floored.forEach(p => {
+            expect(p.excerpt.length).toBeLessThanOrEqual(100);
+            expect(p.excerpt.length).toBeGreaterThan(80);
+        });
+    });
+
+    test('keeps tier two inside its budget, one line per page cut at a word', async () => {
+        const results = [page('/top', 'Top', 'x')]
+            .concat(Array.from({ length: 10 }, (_, i) => page(`/b${i}`, `Broad ${i}`, words(80, 'term'))));
+        const pages = (await build(results, { topN: 1, broadChars: 600 })).filter(p => p.tier === 2);
+        const used = pages.reduce((n, p) => n + p.title.length + p.url.length + p.excerpt.length, 0);
+        expect(used).toBeLessThanOrEqual(600);
+        expect(pages.length).toBeGreaterThan(0);
+        pages.forEach(p => expect(p.excerpt).toMatch(/term\d+$/));
+    });
+
+    test('chooses URLs as search does and lists each URL once', async () => {
+        const pages = await build([
+            page('/one', 'One', 'a'),
+            page('/two', 'Two', 'b', { url: 'https://docs.example.org/two' }),
+            page('/one', 'One again', 'c'),
+            page('/three', 'Three', 'd', { url: '/elsewhere/three' }),
+        ]);
+        expect(pages.map(p => p.url)).toEqual([
+            'https://example.com/one', 'https://docs.example.org/two', 'https://example.com/elsewhere/three',
+        ]);
+        expect(pages.map(p => p.n)).toEqual([1, 2, 3]);
+    });
+
+    test('strips markup and uses the WASM extractor when it is loaded', async () => {
+        const { getWasm } = require('./wasm-helper');
+        const text = '<p>' + words(300) + ' breach notification within 72 hours ' + words(300, 'tail') + '</p>';
+        const pages = await build([page('/w', 'W', text)], { query: 'breach notification', topChars: 400 }, getWasm());
+        expect(pages[0].excerpt).not.toContain('<p>');
+        expect(pages[0].excerpt).toContain('breach notification');
+        expect(pages[0].excerpt.length).toBeLessThanOrEqual(400);
     });
 });

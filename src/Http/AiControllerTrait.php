@@ -4,9 +4,13 @@ declare(strict_types=1);
 
 namespace Tag1\Scolta\Http;
 
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Tag1\Scolta\Cache\CacheDriverInterface;
+use Tag1\Scolta\Chat\ThreadStoreInterface;
 use Tag1\Scolta\Config\ScoltaConfig;
 use Tag1\Scolta\Prompt\PromptEnricherInterface;
+use Tag1\Scolta\Service\AiServiceAdapter;
 
 /**
  * Centralises AiEndpointHandler construction for platform AI controllers.
@@ -111,6 +115,39 @@ trait AiControllerTrait
             sortableFieldDescriptions: $config->sortableFieldDescriptions,
             filterFields: $config->filterFields,
             filterFieldDescriptions: $config->filterFieldDescriptions,
+        );
+    }
+
+    /**
+     * Build a ChatEndpointHandler for a single request.
+     *
+     * Opening answers are cached through resolveCache() under
+     * getCacheGeneration(), so a reindex invalidates them.
+     *
+     * @param AiServiceAdapter     $aiService    The platform's AI service.
+     * @param ScoltaConfig         $config       Platform config object.
+     * @param ThreadStoreInterface $threads      The platform's thread storage.
+     * @param list<string>         $allowedHosts The site's own hosts.
+     *
+     * @since     2.0.0
+     * @stability experimental
+     */
+    final protected function createChatHandler(
+        AiServiceAdapter $aiService,
+        ScoltaConfig $config,
+        ThreadStoreInterface $threads,
+        array $allowedHosts,
+        LoggerInterface $logger = new NullLogger(),
+    ): ChatEndpointHandler {
+        return new ChatEndpointHandler(
+            aiService: $aiService,
+            cache: $this->resolveCache($config->cacheTtl),
+            generation: $this->getCacheGeneration(),
+            cacheTtl: $config->cacheTtl,
+            threads: $threads,
+            config: $config,
+            allowedHosts: $allowedHosts,
+            logger: $logger,
         );
     }
 }

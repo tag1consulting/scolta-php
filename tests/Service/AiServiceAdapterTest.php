@@ -646,6 +646,175 @@ class AiServiceAdapterTest extends TestCase
         $this->assertFalse($recovery->isUpgradeNeeded(), 'A budget error must not flag for re-authentication');
     }
 
+    // -------------------------------------------------------------------
+    // Chat: prompts, planning route, streaming
+    // -------------------------------------------------------------------
+
+    public function testChatPromptsDefaultToTheResolvedTemplates(): void
+    {
+        $adapter = new AiServiceAdapter(ScoltaConfig::fromArray(['site_name' => 'ComplianceIQ', 'site_description' => 'compliance guides']));
+
+        $this->assertSame(DefaultPrompts::resolve(DefaultPrompts::CHAT, 'ComplianceIQ', 'compliance guides'), $adapter->getChatPrompt());
+        $this->assertStringContainsString('You are the assistant for ComplianceIQ (compliance guides).', $adapter->getChatPrompt());
+        $this->assertStringEndsWith('EXPANSION INSTRUCTIONS:', $adapter->getChatPlanPrompt());
+        $this->assertStringContainsString('the assistant of ComplianceIQ', $adapter->getChatFoldPrompt());
+    }
+
+    public function testChatPromptOverridesAreReturnedRaw(): void
+    {
+        $adapter = new AiServiceAdapter(ScoltaConfig::fromArray([
+            'prompt_chat' => 'Custom answer prompt for {SITE_NAME}',
+            'prompt_chat_plan' => 'Custom plan',
+            'prompt_chat_fold' => 'Custom fold',
+        ]));
+
+        $this->assertSame('Custom answer prompt for {SITE_NAME}', $adapter->getChatPrompt());
+        $this->assertSame('Custom plan', $adapter->getChatPlanPrompt());
+        $this->assertSame('Custom fold', $adapter->getChatFoldPrompt());
+    }
+
+    public function testChatPlanTakesTheExpansionModelAtTemperatureZero(): void
+    {
+        $adapter = $this->makeRecordingAdapter(ScoltaConfig::fromArray([
+            'ai_provider' => 'anthropic',
+            'ai_expansion_model' => 'claude-haiku-4-5-20251001',
+        ]));
+
+        $adapter->messageForOperation('chat_plan', 'sys', 'user', 300);
+
+        $this->assertSame(['model' => 'claude-haiku-4-5-20251001', 'temperature' => 0.0], $adapter->recordingClient->calls[0]);
+    }
+
+    /**
+     * An adapter whose built-in client streams $pieces, then throws $after
+     * when given, and records what it was called with.
+     *
+     * @param list<string> $pieces
+     */
+    private function makeStreamingAdapter(array $pieces, ?\RuntimeException $after = null, ?string $frameworkWhole = null, ?array $frameworkPieces = null): AiServiceAdapter
+    {
+        $client = new class ($pieces, $after) extends AiClient {
+            /** @var list<array<string, mixed>> */
+            public array $calls = [];
+
+            /** @param list<string> $pieces */
+            public function __construct(private array $pieces, private ?\RuntimeException $after)
+            {
+                parent::__construct(['provider' => 'anthropic', 'api_key' => 'k']);
+            }
+
+            public function message(string $systemPrompt, string $userMessage, int $maxTokens = 1024, ?string $model = null, ?float $temperature = null): string
+            {
+                throw new \RuntimeException('Scolta AI API request failed: 400 code: expired_key');
+            }
+
+            public function conversationStream(string $systemPrompt, array $messages, int $maxTokens = 1024, ?string $model = null, ?float $temperature = null, bool $cacheSystem = false): \Generator
+            {
+                $this->calls[] = compact('maxTokens', 'model', 'temperature', 'cacheSystem');
+                foreach ($this->pieces as $piece) {
+                    yield $piece;
+                }
+                if ($this->after !== null) {
+                    throw $this->after;
+                }
+            }
+        };
+
+        return new class (ScoltaConfig::fromArray(['ai_provider' => 'anthropic']), $client, $frameworkWhole, $frameworkPieces) extends AiServiceAdapter {
+            public int $hookCalls = 0;
+
+            public function __construct(ScoltaConfig $config, public AiClient $streamingClient, private ?string $whole, private ?array $streamed)
+            {
+                parent::__construct($config);
+            }
+
+            protected function getClient(): AiClient
+            {
+                return $this->streamingClient;
+            }
+
+            protected function tryFrameworkConversationStream(string $systemPrompt, array $messages, int $maxTokens): ?iterable
+            {
+                return $this->streamed;
+            }
+
+            protected function tryFrameworkConversation(string $systemPrompt, array $messages, int $maxTokens): ?string
+            {
+                return $this->whole;
+            }
+
+            protected function handlePossibleBudgetException(\RuntimeException $e): void
+            {
+                $this->hookCalls++;
+            }
+        };
+    }
+
+    public function testStreamPrefersThePlatformStreamHook(): void
+    {
+        $adapter = $this->makeStreamingAdapter(['client'], null, 'whole answer', ['platform ', 'stream']);
+
+        $this->assertSame(['platform ', 'stream'], iterator_to_array($adapter->conversationStream('sys', [['role' => 'user', 'content' => 'hi']]), false));
+        $this->assertSame([], $adapter->streamingClient->calls);
+    }
+
+    public function testStreamFallsBackToThePlatformAnswerInOnePiece(): void
+    {
+        $adapter = $this->makeStreamingAdapter(['client'], null, 'whole answer');
+
+        $this->assertSame(['whole answer'], iterator_to_array($adapter->conversationStream('sys', [['role' => 'user', 'content' => 'hi']]), false));
+        $this->assertSame([], $adapter->streamingClient->calls);
+    }
+
+    public function testStreamFallsBackToTheBuiltInClientWithItsArguments(): void
+    {
+        $adapter = $this->makeStreamingAdapter(['a', 'b']);
+
+        $pieces = iterator_to_array($adapter->conversationStream('sys', [['role' => 'user', 'content' => 'hi']], 700, 'm', 0.2, true), false);
+
+        $this->assertSame(['a', 'b'], $pieces);
+        $this->assertSame([['maxTokens' => 700, 'model' => 'm', 'temperature' => 0.2, 'cacheSystem' => true]], $adapter->streamingClient->calls);
+    }
+
+    public function testAFailureMidStreamRunsTheBudgetHookAndPropagates(): void
+    {
+        $failure = new \RuntimeException('Budget has been exceeded!');
+        $adapter = $this->makeStreamingAdapter(['partial'], $failure);
+
+        $seen = [];
+        try {
+            foreach ($adapter->conversationStream('sys', [['role' => 'user', 'content' => 'hi']]) as $piece) {
+                $seen[] = $piece;
+            }
+            $this->fail('Expected the failure to propagate');
+        } catch (\RuntimeException $e) {
+            $this->assertSame($failure, $e);
+        }
+        $this->assertSame(['partial'], $seen);
+        $this->assertSame(1, $adapter->hookCalls);
+    }
+
+    public function testTheStreamPathRecordsAuthFailuresAndRecoveries(): void
+    {
+        $recovery = new \Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery(
+            storage: new InMemoryAmazeeStorage(['litellm_token' => 'sk-stored', 'litellm_api_url' => 'https://llm.test.amazee.ai', 'region' => 'r']),
+            cache: new InMemoryAdapterCache(),
+        );
+        $failing = $this->makeStreamingAdapter([], new \RuntimeException('Scolta AI API request failed: 401 invalid_api_key'));
+        $failing->setKeyExpiryRecovery($recovery);
+        try {
+            iterator_to_array($failing->conversationStream('sys', [['role' => 'user', 'content' => 'hi']]));
+            $this->fail('Expected the failure to propagate');
+        } catch (\RuntimeException) {
+        }
+        $this->assertTrue($recovery->isAuthFailing());
+
+        $working = $this->makeStreamingAdapter(['fine']);
+        $working->setKeyExpiryRecovery($recovery);
+        iterator_to_array($working->conversationStream('sys', [['role' => 'user', 'content' => 'hi']]));
+        $this->assertFalse($recovery->isAuthFailing(), 'A completed stream clears the recorded auth failure');
+    }
+
     public function testAuthFailureWithoutRecoveryWiredStillPropagates(): void
     {
         $adapter = $this->makeThrowingAdapter(new \RuntimeException('400 code: expired_key'));

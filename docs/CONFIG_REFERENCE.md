@@ -150,6 +150,26 @@ factor before being added to the final score; the title boost is unaffected.
 | `promptExpandQuery` | string | `''` | Custom prompt for query expansion (empty = use DefaultPrompts) |
 | `promptSummarize` | string | `''` | Custom prompt for summarization (empty = use DefaultPrompts) |
 | `promptFollowUp` | string | `''` | Custom prompt for follow-up conversations (empty = use DefaultPrompts) |
+| `promptChat` | string | `''` | Custom system prompt for chat answers (empty = use DefaultPrompts). It is the same for every turn on a site, so a provider can cache it; the pages and history go in the user turn. `@since 2.0.0`, `@stability experimental`. |
+| `promptChatPlan` | string | `''` | Custom prompt for the chat's planning call, which turns a follow up into a standalone query and expands it (empty = use DefaultPrompts). The site's expansion prompt is appended after it. `@since 2.0.0`, `@stability experimental`. |
+| `promptChatFold` | string | `''` | Custom prompt for folding older chat messages into a running summary (empty = use DefaultPrompts). `@since 2.0.0`, `@stability experimental`. |
+
+### Chat
+
+All `@since 2.0.0`, `@stability experimental`. Numbers are clamped by `normalizedChat()`; the range is in each description. With the chat off, `toBrowserConfig()` emits no `chat` block and every chat handler answers 404.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `chatEnabled` | bool | `false` | Turn the chat on. The adapter still has to place its chat block and grant the permission. |
+| `chatTopResults` | int | `5` | Pages sent with excerpts on each turn (1 to 10). |
+| `chatTopChars` | int | `6000` | Characters of excerpt across those pages, divided evenly between them (500 to 30000). |
+| `chatBroadResults` | int | `25` | Further pages sent with only a title and one line, for questions about what the site covers (0 to 50). |
+| `chatBroadChars` | int | `2500` | Characters for those pages together (0 to 10000). |
+| `chatPageContext` | bool | `true` | Send the parts of the page the visitor is reading most relevant to the question, so "what does this page say about fees?" works. This text goes to your AI provider with each question. |
+| `chatPageChars` | int | `3000` | Characters of that page to send (200 to 10000). |
+| `chatMaxTokens` | int | `700` | Longest answer, in tokens (100 to 4000). |
+| `chatThreadTtl` | int | `86400` | Seconds a conversation, and an anonymous visitor's chat cookie, lives without use (300 to 2592000); every chat response renews both. |
+| `chatHandoff` | bool | `true` | A follow up typed under the search page's AI overview opens the chat with that search instead. |
 
 ### Build
 
@@ -167,7 +187,7 @@ factor before being added to the final score; the title boost is unaffected.
 | `filterFieldDescriptions` | array | `[]` | Human-readable descriptions keyed by filter name (e.g., `['topic' => 'Subject area or domain. Values: Science (physics, chemistry, biology), History (ancient, medieval)']`). Descriptions serve two purposes: (1) they help the LLM match user language to the correct filter value in the expansion prompt, and (2) they are passed to the JS frontend via `toBrowserConfig()` where `matchSubjectToFilters()` parses parenthetical subcategory hints to map terms like "physics" → "Science" even when "physics" isn't a direct filter value. |
 | `hideEmptyFacets` | bool | `true` | Hide facet values whose result count is zero for the current query, and drop a dimension's whole group when all its values are zero — the mainstream faceted-search default. An active (checked) value stays visible even at zero so it can be unchecked. Set to `false` to render every value and show a zero-count one as a disabled `(0)` row, keeping the value list positionally fixed. Counts describe the typed query **plus whatever AI expansion added to the result list**, computed once when the query is submitted and folded once more when expansion lands; a facet click, a sort and a load-more all reuse them, so no count moves on click and the visible value set stays stable. Emitted top-level into `window.scolta` by `toBrowserConfig()` and read by `scolta.js` `renderFilters()`. `@stability experimental`. |
 | `facetMode` | string | `'eager'` | When the browser loads the facet index, or whether it loads it at all. `'eager'` (default) loads it during init, so the filter panel is populated before the first search paints and every facet click is answerable immediately — the behaviour Scolta has always had. `'deferred'` skips the init load and takes it on the first search carrying a facet selection, for a site that renders its own facets and does not want the artifact (a megabyte or more on a large corpus) on the initial page load; Scolta's own panel stays empty until that first selection, since it is built from the artifact. `'disabled'` never loads it: no filter panel, no facet filtering, and the per-query facet count pass is skipped. Deferring is **not** "filter without the index" — the browser completes the load before applying a selection, so a deferred first click still takes the artifact path instead of falling back to Pagefind's own filter chunks, which would cost every subsequent search on the page. An unrecognized value clamps to `'eager'` (in PHP via `normalizedFacetMode()`, and again in the browser, since a direct `createInstance()` caller bypasses this class). Emitted top-level into `window.scolta` by `toBrowserConfig()` and read by `scolta.js` `facetMode()`. `@since 1.3.0`, `@stability experimental`. |
-| `labels` | array | `[]` | Per-site overrides for user-facing UI strings in the browser widget, as one `key => string` map — each string made overridable later joins this map instead of minting another top-level config key. Keys the browser currently reads: `expandedTerms` (default `'Also try:'`), the prefix before the AI-expanded query-term chips; `aiOverview` (default `'AI Overview'`), the heading on the AI summary box. Values are rendered as text (HTML-escaped). A missing, empty, or non-string value falls back to the browser default — filtered in PHP by `normalizedLabels()` and clamped again in the browser, since a direct `createInstance()` caller bypasses this class; unknown keys are ignored by the browser and deliberately not filtered in PHP, which would couple this class to the bundle's release cadence. Emitted top-level into `window.scolta` by `toBrowserConfig()` and read by `scolta.js` `getInstanceLabels()`. `@since 2.0.0`, `@stability experimental`. |
+| `labels` | array | `[]` | Per-site overrides for user-facing UI strings in the browser widget, as one `key => string` map — each string made overridable later joins this map instead of minting another top-level config key. Keys the browser currently reads: `expandedTerms` (default `'Also try:'`), the prefix before the AI-expanded query-term chips; `aiOverview` (default `'AI Overview'`), the heading on the AI summary box. The chat widget reads `chatLauncher` (`'Ask a question'`), `chatTitle` (`'Ask about this site'`), `chatPlaceholder` (`'Ask a question'`), `chatNewChat` (`'New chat'`), `chatClose` (`'Close'`), `chatSources` (`'Sources'`), `chatWorking` (`'Working on it'`), `chatReading` (`'Reading the pages'`), `chatError`, `chatBusy` and `chatUnavailable` (the three failure lines), and `ChatEndpointHandler` reads `chatNothingFound` and `chatStartNew` for its two fixed replies. Values are rendered as text (HTML-escaped). A missing, empty, or non-string value falls back to the browser default — filtered in PHP by `normalizedLabels()` and clamped again in the browser, since a direct `createInstance()` caller bypasses this class; unknown keys are ignored by the browser and deliberately not filtered in PHP, which would couple this class to the bundle's release cadence. Emitted top-level into `window.scolta` by `toBrowserConfig()` and read by `scolta.js` `getInstanceLabels()`. `@since 2.0.0`, `@stability experimental`. |
 | `valueLabels` | array | `[]` | Indexed filter value => the text the browser widget shows for it, as one flat `value => string` map across dimensions. Read by `scolta.js` wherever a filter value is printed — the facet panel and the results header (`Showing 12 of 74 results for "food" in Blog / TNTL`) — so a host that indexes machine keys (`node-blog_post`) and paints its own labels no longer has the header print the key. A value with no entry, or a non-string or empty one, renders as before. Emitted top-level into `window.scolta`. `@stability experimental`. |
 
 ### Search As You Type (SAYT)
@@ -327,6 +347,24 @@ The full order, the source vocabulary and the rules adapters follow are in
 | `promptExpandQuery` | `prompt_expand_query` | `prompts.expand_query` | `prompt_expand_query` |
 | `promptSummarize` | `prompt_summarize` | `prompts.summarize` | `prompt_summarize` |
 | `promptFollowUp` | `prompt_follow_up` | `prompts.follow_up` | `prompt_follow_up` |
+| `promptChat` | `prompt_chat` | not yet supported | not yet supported |
+| `promptChatPlan` | `prompt_chat_plan` | not yet supported | not yet supported |
+| `promptChatFold` | `prompt_chat_fold` | not yet supported | not yet supported |
+
+### Chat Keys
+
+| ScoltaConfig Property | Drupal | Laravel | WordPress |
+|----------------------|--------|---------|-----------|
+| `chatEnabled` | `chat_enabled` | not yet supported | not yet supported |
+| `chatTopResults` | `chat_top_results` | not yet supported | not yet supported |
+| `chatTopChars` | `chat_top_chars` | not yet supported | not yet supported |
+| `chatBroadResults` | `chat_broad_results` | not yet supported | not yet supported |
+| `chatBroadChars` | `chat_broad_chars` | not yet supported | not yet supported |
+| `chatPageContext` | `chat_page_context` | not yet supported | not yet supported |
+| `chatPageChars` | `chat_page_chars` | not yet supported | not yet supported |
+| `chatMaxTokens` | `chat_max_tokens` | not yet supported | not yet supported |
+| `chatThreadTtl` | `chat_thread_ttl` | not yet supported | not yet supported |
+| `chatHandoff` | `chat_handoff` | not yet supported | not yet supported |
 
 ### Build Keys
 

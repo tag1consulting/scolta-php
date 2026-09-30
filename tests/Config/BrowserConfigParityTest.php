@@ -75,6 +75,39 @@ class BrowserConfigParityTest extends TestCase
      */
     private const REVERSE_ALLOWLIST = [];
 
+    /**
+     * Chat keys assets/js/scolta-chat.js reads that no ScoltaConfig emits:
+     * `csrf` is the adapter's to add, for signed in users only.
+     */
+    private const CHAT_FORWARD_ALLOWLIST = ['csrf'];
+
+    /**
+     * The `chat` block and the keys scolta-chat.js reads off it (`cfg.<key>`)
+     * must match both ways, endpoints included.
+     */
+    public function test_chat_block_matches_what_the_chat_widget_reads(): void
+    {
+        $source = file_get_contents(dirname(__DIR__, 2) . '/assets/js/scolta-chat.js');
+        self::assertNotFalse($source);
+        preg_match_all('/\bcfg\.([A-Za-z]+)\b/', $source, $m);
+        $read = array_values(array_unique($m[1]));
+        preg_match_all('/\bcfg\.endpoints\.([A-Za-z]+)\b/', $source, $e);
+        $readEndpoints = array_values(array_unique($e[1]));
+        // Tripwire: the extraction still finds the keys it must.
+        $this->assertContains('topResults', $read);
+        $this->assertContains('turn', $readEndpoints);
+
+        $chat = ScoltaConfig::fromArray(['chat_enabled' => true])->toBrowserConfig()['chat'];
+
+        foreach (array_diff($read, self::CHAT_FORWARD_ALLOWLIST) as $key) {
+            $this->assertArrayHasKey($key, $chat, "scolta-chat.js reads cfg.{$key} but the chat block does not emit it.");
+        }
+        foreach (array_keys($chat) as $key) {
+            $this->assertContains($key, $read, "The chat block emits {$key} but scolta-chat.js never reads it.");
+        }
+        $this->assertEqualsCanonicalizing($readEndpoints, array_keys($chat['endpoints']));
+    }
+
     private static function bundlePath(): string
     {
         return dirname(__DIR__, 2) . '/assets/js/scolta.js';
