@@ -385,33 +385,31 @@ class AiClient
      * OpenAI-compatible endpoints send `choices[0].delta.content` until
      * `[DONE]`. Everything else (pings, message metadata) is skipped.
      *
+     * Read a line at a time: a read of N bytes from a network stream waits
+     * until N bytes arrive, and reading 8 KB at once held the first words
+     * back by seconds. Single byte reads come from the stream's own buffer,
+     * so each event is passed on as soon as its line is complete.
+     *
      * @return \Generator<int, string>
      */
     private function readStream(StreamInterface $body): \Generator
     {
-        $buffer = '';
-        $eof = false;
         $finished = false;
-        while (!$eof) {
+        while (!$finished) {
             try {
-                $eof = $body->eof();
-                $chunk = $eof ? "\n" : $body->read(8192);
+                $line = '';
+                while (!str_ends_with($line, "\n") && ($byte = $body->read(1)) !== '') {
+                    $line .= $byte;
+                }
             } catch (\RuntimeException $e) {
                 throw new \RuntimeException('Scolta AI API stream failed: ' . $e->getMessage(), 0, $e);
             }
-            // At the end, the newline added above flushes a last line that
-            // came without one.
-            $buffer .= $chunk;
-            while (($pos = strpos($buffer, "\n")) !== false) {
-                $line = rtrim(substr($buffer, 0, $pos), "\r");
-                $buffer = substr($buffer, $pos + 1);
-                $text = $this->streamLineText($line, $finished);
-                if ($text !== '') {
-                    yield $text;
-                }
-                if ($finished) {
-                    return;
-                }
+            if ($line === '') {
+                return;
+            }
+            $text = $this->streamLineText(rtrim($line, "\r\n"), $finished);
+            if ($text !== '') {
+                yield $text;
             }
         }
     }

@@ -902,6 +902,24 @@ class AiClientTest extends TestCase
         }
     }
 
+    public function testTheFirstPieceIsYieldedBeforeTheRestOfTheStreamIsRead(): void
+    {
+        // A read of N bytes waits until N bytes arrive, so reading 8 KB at a
+        // time held the first words back until 8 KB of events had streamed:
+        // 4.7 s instead of 1.4 s on a real answer. At the first piece only
+        // the first event may have been consumed.
+        $events = self::anthropicStream(...array_fill(0, 200, 'word '));
+        $body = \GuzzleHttp\Psr7\Utils::streamFor($events);
+        $history = [];
+        $client = $this->streamingClient('anthropic', [new Response(200, [], $body)], $history);
+
+        $stream = $client->conversationStream('sys', [['role' => 'user', 'content' => 'hi']]);
+        $this->assertSame('word ', $stream->current());
+
+        $this->assertGreaterThan(8192, strlen($events));
+        $this->assertLessThan(400, $body->tell(), 'Only the events up to the first delta were read');
+    }
+
     public function testStreamWithoutAKeyThrowsApiKeyMissing(): void
     {
         $client = new AiClient(['provider' => 'anthropic', 'api_key' => '']);
