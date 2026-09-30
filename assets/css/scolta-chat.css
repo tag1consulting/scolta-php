@@ -1,10 +1,12 @@
 /* Scolta chat: launcher, panel and status. Colors follow scolta.css's custom
-   properties when a theme sets them. */
+   properties when a theme sets them. A theme moves the launcher and the panel
+   above it with --scolta-chat-right and --scolta-chat-bottom, for a page that
+   already has something in that corner. */
 
 .scolta-chat-launcher {
   position: fixed;
-  right: 1.25rem;
-  bottom: 1.25rem;
+  right: var(--scolta-chat-right, 1.25rem);
+  bottom: var(--scolta-chat-bottom, 1.25rem);
   z-index: 1000;
   padding: 0.7rem 1.1rem;
   border: none;
@@ -25,13 +27,13 @@
 
 .scolta-chat-panel {
   position: fixed;
-  right: 1.25rem;
-  bottom: 4.75rem;
+  right: var(--scolta-chat-right, 1.25rem);
+  bottom: calc(var(--scolta-chat-bottom, 1.25rem) + 3.5rem);
   z-index: 1000;
   display: flex;
   flex-direction: column;
   width: min(26rem, calc(100vw - 2rem));
-  height: min(38rem, calc(100vh - 7rem));
+  height: min(38rem, calc(100vh - var(--scolta-chat-bottom, 1.25rem) - 5.75rem));
   border: 1px solid rgba(0, 0, 0, 0.15);
   border-radius: 12px;
   background: #fff;

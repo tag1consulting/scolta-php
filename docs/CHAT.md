@@ -40,6 +40,6 @@ Read the first event before committing to a stream: a refused request (404, 403,
 - **Storage.** A `ThreadStoreInterface` over whatever expires on the platform (Drupal's `keyvalue.expirable`, a transient, a cache with TTL). Keys come from `ChatOwner` already hashed.
 - **Allowed hosts.** The site's own hosts; page URLs on any other host are dropped.
 - **Flushing.** Turn off output buffering and compression for the stream, and flush each event as it is yielded (`X-Accel-Buffering: no` for nginx).
-- **Assets.** `assets/js/scolta-chat.js`, `assets/css/scolta-chat.css` and `assets/vendor/deep-chat/deepChat.bundle.js` (deep-chat 2.4.2, MIT, `LICENSE` beside it), listed in `assets/ASSETS.sha256`. Load `scolta-chat.js` after `scolta.js`, and set `window.scolta.chat.deepChatPath` to the bundle's URL: the widget imports it when the browser is idle or the launcher is approached, never at page load.
+- **Assets.** `assets/js/scolta-chat.js`, `assets/css/scolta-chat.css` and `assets/vendor/deep-chat/deepChat.bundle.js` (deep-chat 2.4.2, MIT, `LICENSE` beside it), listed in `assets/ASSETS.sha256`. Load `scolta-chat.js` after `scolta.js`, and set `window.scolta.chat.deepChatPath` to the bundle's URL: the widget imports it when the browser is idle or the launcher is approached, never at page load. A theme can move the launcher with the CSS custom properties `--scolta-chat-right` and `--scolta-chat-bottom`.
 
 `AiControllerTrait::createChatHandler()` builds the handler with the controller's cache and generation, so a reindex invalidates cached opening answers.
