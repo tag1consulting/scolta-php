@@ -63,6 +63,8 @@ class ChatRequestTest extends TestCase
             ['url' => 'javascript:alert(1)//complianceiq.ddev.site', 'title' => 'script'],
             ['url' => "https://complianceiq.ddev.site/f\njunk", 'title' => 'newline'],
             ['url' => 'ftp://complianceiq.ddev.site/g', 'title' => 'ftp'],
+            ['url' => 'https://evil.example\\@complianceiq.ddev.site/h', 'title' => 'backslash trick'],
+            ['url' => 'https://evil.example@complianceiq.ddev.site/i', 'title' => 'user part'],
         ]]);
 
         $this->assertSame(
@@ -171,15 +173,13 @@ class ChatRequestTest extends TestCase
 
     public function testAnInvalidCookieIsReplacedWithAFreshToken(): void
     {
-        $kept = ChatOwner::fromCookie(str_repeat('b', 64));
-        $this->assertNull($kept->newToken());
-        $this->assertNull($kept->cookie(true, 86400));
+        $kept = str_repeat('b', 64);
+        $this->assertSame($kept, ChatOwner::fromCookie($kept)->cookie(true, 86400)['value'], 'A valid cookie is renewed as it is');
 
         foreach ([null, '', str_repeat('B', 64), str_repeat('b', 63), str_repeat('b', 64) . "\n", 'not-a-token'] as $bad) {
-            $owner = ChatOwner::fromCookie($bad);
-            $this->assertIsString($owner->newToken());
-            $this->assertTrue(ChatOwner::isToken($owner->newToken()));
-            $this->assertNotSame(ChatOwner::fromCookie($bad)->newToken(), $owner->newToken());
+            $token = ChatOwner::fromCookie($bad)->cookie(true, 86400)['value'];
+            $this->assertTrue(ChatOwner::isToken($token));
+            $this->assertNotSame(ChatOwner::fromCookie($bad)->cookie(true, 86400)['value'], $token);
         }
     }
 
@@ -195,5 +195,6 @@ class ChatRequestTest extends TestCase
         $this->assertSame('Lax', $cookie['sameSite']);
         $this->assertFalse(ChatOwner::fromCookie(null)->cookie(false, 3600)['secure']);
         $this->assertNull(ChatOwner::forUser(1)->cookie(true, 3600), 'A signed in user needs no cookie');
+        $this->assertSame('/drupal/it/api/scolta/v1/chat', ChatOwner::fromCookie(null)->cookie(true, 3600, '/drupal/it/api/scolta/v1/chat')['path']);
     }
 }

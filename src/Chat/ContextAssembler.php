@@ -47,7 +47,6 @@ final class ContextAssembler
         foreach ($seed['pages'] as $page) {
             $state->cited[$page['url']] = ['title' => $page['title'], 'url' => $page['url']];
         }
-        $state->seeded = true;
 
         return true;
     }

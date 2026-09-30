@@ -209,7 +209,7 @@ class ChatEndpointHandlerTest extends TestCase
         $events = $this->events(self::turn(['pages' => []]));
 
         $this->assertSame(['thread', 'delta', 'sources', 'done'], array_column($events, 0));
-        $this->assertStringContainsString("I couldn't find anything on this site about that.", $events[1][1]['text']);
+        $this->assertStringContainsString("I don't have a page that covers that.", $events[1][1]['text']);
         $this->assertSame([], $this->ai->streams);
 
         $custom = $this->events(self::turn(['pages' => []]), $this->handler(['labels' => ['chatNothingFound' => 'Nothing here on that.']]));
@@ -261,7 +261,6 @@ class ChatEndpointHandlerTest extends TestCase
 
         $state = $this->stored($events[0][1]['thread_id']);
         $this->assertSame(['data retention', 'Keep records six years [1].', 'For contractors?', 'The answer.'], array_column($state->messages, 'content'));
-        $this->assertTrue($state->seeded);
         $this->assertStringContainsString('Pages cited earlier:', $this->ai->streams[0]['messages'][2]['content']);
         $this->assertSame([], $this->cacheContents(), 'A seeded thread has history, so its answer is not cached');
     }
@@ -302,6 +301,21 @@ class ChatEndpointHandlerTest extends TestCase
         $this->ai->pieces = [];
         $this->ai->streamFailure = new ApiKeyMissingException('no key');
         $this->assertSame(['message' => 'Chat unavailable', 'status' => 503], $this->events(self::turn())[1][1]);
+    }
+
+    public function testAnOpeningAnswerCutOffMidStreamIsNeitherSavedNorCached(): void
+    {
+        $this->ai->pieces = ['The page says'];
+        $this->ai->streamFailure = new \RuntimeException('Scolta AI API stream ended early');
+        $handler = $this->handler();
+
+        $events = $this->events(self::turn(), $handler);
+        $this->assertSame(['thread', 'delta', 'error'], array_column($events, 0));
+        $this->assertSame([], $this->stored($events[0][1]['thread_id'])->messages);
+
+        $this->ai->streamFailure = null;
+        $this->events(self::turn(), $handler);
+        $this->assertCount(2, $this->ai->streams, 'The second ask goes to the model, not to a cached half answer');
     }
 
     public function testHandleTurnCollectsTheStream(): void

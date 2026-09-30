@@ -8,7 +8,7 @@ namespace Tag1\Scolta\Chat;
  * Which of a turn's pages an answer cited, in order of first citation.
  *
  * A page counts as cited when the answer carries its [n] marker or links its
- * URL (or its path on the same site). An answer that cites nothing, a
+ * URL (or its path, bare or on the page's own host). An answer that cites nothing, a
  * decline or small talk, therefore gets no source list at all.
  *
  * @since 2.0.0
@@ -36,9 +36,11 @@ final class CitedPages
             if ($link !== false) {
                 $offsets[] = $link;
             }
-            $path = (string) parse_url($page['url'], PHP_URL_PATH);
+            $parts = parse_url($page['url']);
+            $path = (string) ($parts['path'] ?? '');
+            $host = preg_quote(($parts['host'] ?? '') . (isset($parts['port']) ? ':' . $parts['port'] : ''), '#');
             if ($path !== '' && $path !== '/'
-                && preg_match('#\]\((?:https?://[^/)\s]+)?' . preg_quote($path, '#') . '\)#', $answer, $m, PREG_OFFSET_CAPTURE)) {
+                && preg_match('#\]\((?:https?://' . $host . ')?' . preg_quote($path, '#') . '\)#i', $answer, $m, PREG_OFFSET_CAPTURE)) {
                 $offsets[] = $m[0][1];
             }
             if ($offsets !== []) {

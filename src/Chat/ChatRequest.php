@@ -107,6 +107,11 @@ final class ChatRequest
         if ($parts === false || !in_array(strtolower($parts['scheme'] ?? ''), ['http', 'https'], true)) {
             return false;
         }
+        // A browser reads a backslash as a slash and a user part as not the
+        // host, so either one can point a link somewhere parse_url() did not.
+        if (str_contains($url, '\\') || isset($parts['user']) || isset($parts['pass'])) {
+            return false;
+        }
 
         return in_array(strtolower($parts['host'] ?? ''), $allowedHosts, true);
     }

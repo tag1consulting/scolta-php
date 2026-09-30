@@ -20,8 +20,10 @@ final class ChatOwner
 {
     /**
      * The anonymous owner cookie and its attributes. Path is the chat route
-     * prefix, so the cookie never rides along on page requests; Secure is set
-     * when the request is https; Max-Age is the thread lifetime.
+     * prefix (an adapter that mounts the routes elsewhere passes its own), so
+     * the cookie never rides along on page requests; Secure is set when the
+     * request is https; Max-Age is the thread lifetime, renewed on every chat
+     * response.
      *
      * @since 2.0.0
      * @stability experimental
@@ -33,7 +35,7 @@ final class ChatOwner
 
     private function __construct(
         private readonly string $owner,
-        private readonly ?string $newToken,
+        private readonly ?string $token,
     ) {}
 
     /**
@@ -50,8 +52,8 @@ final class ChatOwner
     /**
      * The owner for an anonymous visitor, from the cookie value if any.
      *
-     * A missing or malformed token is replaced by a fresh one, which
-     * newToken() then returns so the adapter can set the cookie.
+     * A missing or malformed token is replaced by a fresh one, which the
+     * cookie() the adapter sets then carries.
      *
      * @since 2.0.0
      * @stability experimental
@@ -59,7 +61,7 @@ final class ChatOwner
     public static function fromCookie(?string $token): self
     {
         if ($token !== null && self::isToken($token)) {
-            return new self('a:' . $token, null);
+            return new self('a:' . $token, $token);
         }
         $fresh = bin2hex(random_bytes(32));
 
@@ -78,34 +80,26 @@ final class ChatOwner
     }
 
     /**
-     * The token the adapter must set as the cookie, when one was generated.
+     * The cookie to set on a chat response, or null for a signed in user.
      *
-     * @since 2.0.0
-     * @stability experimental
-     */
-    public function newToken(): ?string
-    {
-        return $this->newToken;
-    }
-
-    /**
-     * The cookie to set on a chat response, or null when none is needed.
+     * An anonymous visitor gets it on every response, so a conversation in
+     * use keeps its cookie as long as the store keeps its thread.
      *
      * @return array{name: string, value: string, path: string, maxAge: int, secure: bool, httpOnly: bool, sameSite: string}|null
      *
      * @since 2.0.0
      * @stability experimental
      */
-    public function cookie(bool $https, int $maxAge): ?array
+    public function cookie(bool $https, int $maxAge, string $path = self::COOKIE_PATH): ?array
     {
-        if ($this->newToken === null) {
+        if ($this->token === null) {
             return null;
         }
 
         return [
             'name' => self::COOKIE_NAME,
-            'value' => $this->newToken,
-            'path' => self::COOKIE_PATH,
+            'value' => $this->token,
+            'path' => $path,
             'maxAge' => $maxAge,
             'secure' => $https,
             'httpOnly' => self::COOKIE_HTTP_ONLY,

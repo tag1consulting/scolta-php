@@ -151,7 +151,6 @@ class ContextAssemblerTest extends TestCase
 
         $this->assertTrue(ContextAssembler::applySeed($state, $seed));
         $this->assertSame(['breach notification', 'GDPR sets 72 hours.'], self::contents($state->messages));
-        $this->assertTrue($state->seeded);
         $this->assertSame(0, $state->turns, 'The seed exchange is not a visitor turn.');
         $this->assertSame('https://s.test/gdpr/33', ContextAssembler::priorSources($state)[0]['url']);
         $this->assertSame(['breach notification', 'GDPR sets 72 hours.', 'what about contractors?'], self::contents(ContextAssembler::assemble($state, 'what about contractors?')['messages']));
@@ -243,5 +242,6 @@ class ContextAssemblerTest extends TestCase
         $this->assertSame([3, 1, 4], array_column(CitedPages::find($answer, $pages), 'n'));
         $this->assertSame([], CitedPages::find("The pages I have here don't cover that.", $pages), 'A decline shows no sources.');
         $this->assertSame([2], array_column(CitedPages::find('Read [it](/two).', $pages), 'n'), 'A same site path link counts.');
+        $this->assertSame([], CitedPages::find('Read [it](https://other.example/two).', $pages), 'The same path on another host cites nothing.');
     }
 }

@@ -249,6 +249,19 @@ class AiClient
     }
 
     /**
+     * Whether the model just rejected could not have belonged to this provider.
+     *
+     * Scoped to requests aimed at the provider's own API: a configured
+     * `base_url` means a gateway with its own model namespace, where a
+     * non-vendor model name is expected rather than wrong.
+     */
+    private function modelIsForeignToProvider(string $model): bool
+    {
+        return $this->usesProviderEndpoint
+            && !ModelIdentity::looksNativeFor($this->provider, $model);
+    }
+
+    /**
      * Send one request and map every failure to Scolta's exceptions.
      *
      * @param array<int, array<string, mixed>> $messages
@@ -405,7 +418,9 @@ class AiClient
                 throw new \RuntimeException('Scolta AI API stream failed: ' . $e->getMessage(), 0, $e);
             }
             if ($line === '') {
-                return;
+                // A connection that closes before the provider's end event
+                // cut the answer off; it must not be kept as a whole one.
+                throw new \RuntimeException('Scolta AI API stream ended early');
             }
             $text = $this->streamLineText(rtrim($line, "\r\n"), $finished);
             if ($text !== '') {
@@ -438,6 +453,10 @@ class AiClient
             throw new \RuntimeException('Scolta AI API stream failed: ' . (is_string($error) ? $error : 'error'));
         }
         if ($this->provider === 'openai') {
+            // Some gateways end on a finish_reason and never send [DONE].
+            if (($event['choices'][0]['finish_reason'] ?? null) !== null) {
+                $done = true;
+            }
             $text = $event['choices'][0]['delta']['content'] ?? '';
             return is_string($text) ? $text : '';
         }
@@ -451,18 +470,5 @@ class AiClient
         }
 
         return '';
-    }
-
-    /**
-     * Whether the model just rejected could not have belonged to this provider.
-     *
-     * Scoped to requests aimed at the provider's own API: a configured
-     * `base_url` means a gateway with its own model namespace, where a
-     * non-vendor model name is expected rather than wrong.
-     */
-    private function modelIsForeignToProvider(string $model): bool
-    {
-        return $this->usesProviderEndpoint
-            && !ModelIdentity::looksNativeFor($this->provider, $model);
     }
 }

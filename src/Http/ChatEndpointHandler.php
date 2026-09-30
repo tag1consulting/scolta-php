@@ -51,7 +51,7 @@ class ChatEndpointHandler
     private const FOLD_MAX_TOKENS = 300;
     private const FOLD_ATTEMPTS = 3;
 
-    private const NOTHING_FOUND = "I couldn't find anything on this site about that. Could you ask it another way, or name the topic or page you have in mind?";
+    private const NOTHING_FOUND = "I don't have a page that covers that. Could you ask it another way, or name the topic or page you have in mind?";
     private const START_NEW = 'This conversation has grown long. Start a new chat to keep going.';
 
     /** @var list<string> */

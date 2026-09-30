@@ -51,8 +51,6 @@ final class ThreadState
     /** Visitor turns answered (a search hand off is not a turn). */
     public int $turns = 0;
 
-    public bool $seeded = false;
-
     /**
      * A state from its stored form; empty when there is none or its schema
      * is not this one.
@@ -74,7 +72,6 @@ final class ThreadState
         $state->cited = is_array($data['cited'] ?? null) ? $data['cited'] : [];
         $state->revision = (int) ($data['revision'] ?? 0);
         $state->turns = (int) ($data['turns'] ?? 0);
-        $state->seeded = (bool) ($data['seeded'] ?? false);
 
         return $state;
     }
@@ -97,7 +94,6 @@ final class ThreadState
             'cited' => $this->cited,
             'revision' => $this->revision,
             'turns' => $this->turns,
-            'seeded' => $this->seeded,
         ];
     }
 

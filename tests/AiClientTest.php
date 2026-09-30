@@ -830,10 +830,28 @@ class AiClientTest extends TestCase
     public function testStreamReadsALastLineWithoutANewline(): void
     {
         $history = [];
-        $body = 'data: ' . json_encode(['choices' => [['delta' => ['content' => 'only line']]]]);
+        $body = 'data: ' . json_encode(['choices' => [['delta' => ['content' => 'only line'], 'finish_reason' => 'stop']]]);
         $client = $this->streamingClient('openai', [new Response(200, [], $body)], $history);
 
         $this->assertSame(['only line'], iterator_to_array($client->conversationStream('sys', [['role' => 'user', 'content' => 'hi']]), false));
+    }
+
+    public function testAStreamThatClosesBeforeItsEndEventThrows(): void
+    {
+        $history = [];
+        $cut = substr(self::anthropicStream('The page ', 'says 72 hours.'), 0, -strlen("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"));
+        $client = $this->streamingClient('anthropic', [new Response(200, [], $cut)], $history);
+
+        $yielded = [];
+        try {
+            foreach ($client->conversationStream('sys', [['role' => 'user', 'content' => 'hi']]) as $piece) {
+                $yielded[] = $piece;
+            }
+            $this->fail('Expected the stream to fail');
+        } catch (\RuntimeException $e) {
+            $this->assertSame(['The page ', 'says 72 hours.'], $yielded);
+            $this->assertStringContainsString('ended early', $e->getMessage());
+        }
     }
 
     public function testStreamRequestIsTheConversationRequestPlusStream(): void
