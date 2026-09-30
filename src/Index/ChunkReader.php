@@ -47,7 +47,7 @@ class ChunkReader
     }
 
     /**
-     * Stream index term records in alphabetical order.
+     * Stream index term records in TermOrder, as ChunkWriter wrote them.
      *
      * Skips the page section and yields [term, termData] pairs until the
      * end-of-records sentinel is reached.

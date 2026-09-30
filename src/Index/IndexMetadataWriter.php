@@ -379,6 +379,10 @@ final class IndexMetadataWriter
         array $metaFields,
         string $version,
     ): string {
+        // Every path that publishes a pf_meta passes through here, so this is
+        // where an out-of-order chunk list is refused rather than served.
+        TermOrder::assertChunkListOrdered($indexChunkMeta);
+
         $pageItems = [];
         foreach ($pageMeta as $meta) {
             $pageItems[] = $this->cbor->encodeArray([

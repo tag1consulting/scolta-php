@@ -196,6 +196,18 @@ jobs:
         with:
           node-version: '20'
 
+      # numeric-term-search.test.js builds an index with the PHP indexer and
+      # searches it with Pagefind's runtime.
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: intl
+          coverage: none
+
+      - name: Install PHP dependencies
+        run: composer update --no-interaction --prefer-dist
+
       - name: Install JS dependencies
         working-directory: tests/js
         run: npm ci

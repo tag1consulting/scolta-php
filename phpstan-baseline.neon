@@ -595,12 +595,6 @@ parameters:
 			path: src/Index/PagefindFormatWriter.php
 
 		-
-			message: '#^Method Tag1\\Scolta\\Index\\PagefindFormatWriter\:\:buildMetadata\(\) has parameter \$indexChunks with no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Index/PagefindFormatWriter.php
-
-		-
 			message: '#^Method Tag1\\Scolta\\Index\\PagefindFormatWriter\:\:buildMetadata\(\) has parameter \$pages with no value type specified in iterable type array\.$#'
 			identifier: missingType.iterableValue
 			count: 1
