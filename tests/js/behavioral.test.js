@@ -949,3 +949,134 @@ describe('sort-drop guard: unmatched subject falls back to unscoped sort', () =>
         expect(win.document.querySelector('#scolta-sort-indicator').style.display).toBe('none');
     });
 });
+
+// =============================================================================
+// Retrieval pinning table
+// =============================================================================
+
+// What doSearch() ranks for one query of each pipeline path, against a fixed
+// corpus (tests/js/retrieval-corpus.js), with the JS fallback scorer. These were
+// recorded on the pipeline as it stood before the ranking moved into shared
+// stages, so any change to what the search page returns fails here. Scores are
+// compared to ten places; the Pagefind searches are compared as a sorted list,
+// because the order two parallel searches start in is not part of the contract.
+const {
+    createCorpusWindow, searchPage, settle,
+} = require('./retrieval-corpus');
+
+const STATE_HOOK = '  window.__getState = function() { return { allScoredResults }; };';
+
+const RETRIEVAL_TABLE = [
+    {
+        name: 'single term',
+        query: 'retention',
+        expandCalls: 1,
+        searches: ['retention'],
+        results: [['/retention', 3.4], ['/retention-guide', 2.9], ['/glossary', 0.4]],
+    },
+    {
+        name: 'multi term AND hit',
+        query: 'breach notification',
+        expandCalls: 1,
+        searches: ['breach notification'],
+        results: [['/gdpr-breach', 4.2], ['/hipaa-breach', 3.95], ['/breach-response', 1.9], ['/encryption', 0.65], ['/glossary', 0.4]],
+    },
+    {
+        name: 'zero AND hits runs the OR fallback',
+        query: 'breach cookies',
+        expandCalls: 1,
+        searches: ['breach', 'breach cookies', 'cookies'],
+        results: [
+            ['/cookie', 0.8637866659042688], ['/gdpr-breach', 0.47029161224203325],
+            ['/hipaa-breach', 0.44612559999545875], ['/breach-response', 0.4219595877488842],
+            ['/fines', 0.1267139598668213], ['/encryption', 0.10254794762024677],
+            ['/contractors', 0.0783819353736722], ['/glossary', 0.05421592312709767],
+        ],
+    },
+    {
+        // "notification" is too common to admit as a sub-word, "duties" and
+        // "personal" are rare enough, and the typed "data" is exempt.
+        name: 'expansion with a rejected and an admitted sub-word',
+        query: 'data breach',
+        scoring: { EXPAND_SUBWORD_MAX_FREQ: 0.2 },
+        expansions: { 'data breach': ['personal data breach', 'notification duties'] },
+        expandCalls: 1,
+        searches: ['breach', 'data', 'data breach', 'duties', 'notification', 'notification duties', 'personal', 'personal data breach'],
+        results: [
+            ['/breach-response', 3.75], ['/gdpr-breach', 3.43017992427798],
+            ['/encryption', 2.4859772820483528], ['/retention', 0.3069905434294352],
+            ['/retention-guide', 0.2821286332221218], ['/hipaa-breach', 0.26023993333068424],
+            ['/fines', 0.07391647658897908], ['/pci', 0.0713428727688124],
+            ['/contractors', 0.04572279563464211], ['/glossary', 0.031625955157473636],
+        ],
+    },
+    {
+        name: 'typed terms lend agreement without seeding',
+        query: 'contractors breach',
+        scoring: { EXPAND_SUBWORD_MAX_FREQ: 0.2 },
+        expansions: { 'contractors breach': ['processors report', 'controller'] },
+        expandCalls: 1,
+        searches: ['breach', 'contractors', 'contractors breach', 'controller', 'processors', 'processors report', 'report'],
+        results: [['/contractors', 9.12211991921348], ['/glossary', 0.10513260206653652]],
+    },
+    {
+        name: 'metadata boosts',
+        query: 'breach',
+        scoring: { METADATA_BOOSTS: { type: { guide: 3 } } },
+        expandCalls: 1,
+        searches: ['breach'],
+        results: [
+            ['/gdpr-breach', 3.4], ['/hipaa-breach', 3.2333333333333334],
+            ['/breach-response', 3.066666666666667], ['/encryption', 2.2], ['/fines', 0.9],
+            ['/contractors', 0.5666666666666667], ['/glossary', 0.4],
+        ],
+    },
+    {
+        name: 'title dedup off',
+        query: 'retention policy',
+        scoring: { TITLE_DEDUP: false },
+        expandCalls: 1,
+        searches: ['retention policy'],
+        results: [['/retention-guide', 4.4], ['/retention', 3.2]],
+    },
+    {
+        name: 'title dedup on',
+        query: 'retention policy',
+        scoring: { TITLE_DEDUP: true },
+        expandCalls: 1,
+        searches: ['retention policy'],
+        results: [['/retention-guide', 4.4]],
+    },
+    {
+        // A quoted query never expands, even when the endpoint has terms for it.
+        name: 'forced phrase',
+        query: '"breach notification"',
+        expansions: { '"breach notification"': ['should not be used'] },
+        expandCalls: 0,
+        searches: ['breach notification'],
+        results: [['/gdpr-breach', 1], ['/hipaa-breach', 0.75], ['/breach-response', 0.5], ['/encryption', 0.25], ['/glossary', 0]],
+    },
+];
+
+function expectRanked(actual, expected) {
+    expect(actual.map(r => r[0])).toEqual(expected.map(r => r[0]));
+    actual.forEach((r, i) => expect(r[1]).toBeCloseTo(expected[i][1], 10));
+}
+
+describe('retrieval pinning table', () => {
+    for (const row of RETRIEVAL_TABLE) {
+        test(`doSearch: ${row.name}`, async () => {
+            const { win, pfCalls, fetchCalls } = createCorpusWindow({
+                scoring: row.scoring, expansions: row.expansions, inject: STATE_HOOK,
+            });
+            win.Scolta.init('#scolta-search');
+            await settle();
+            pfCalls.length = 0;
+            expectRanked(await searchPage(win, row.query), row.results);
+            const expands = fetchCalls.filter(c => c.url === '/e');
+            expect(expands).toHaveLength(row.expandCalls);
+            expands.forEach(c => expect(JSON.parse(c.body)).toEqual({ query: row.query }));
+            expect([...pfCalls].sort()).toEqual(row.searches);
+        });
+    }
+});

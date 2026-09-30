@@ -114,3 +114,27 @@ describe('primary_query propagation', () => {
     expect(withEmpty[0].score).toBeCloseTo(withAbsent[0].score, 5);
   });
 });
+
+// The whole search pipeline on the real WASM module: primary search, expansion
+// merge, WASM scoring and merge, and a priority page configured for the query.
+// Recorded before the ranking moved into shared stages. The priority page does
+// not move /fines today: match_priority_pages returns `url_pattern` and
+// scolta.js keys its boost map on `url`, which the output never carries.
+describe('doSearch on the real WASM module', () => {
+  const { createCorpusWindow, searchPage, settle } = require('./retrieval-corpus');
+
+  test('ranks a query with expansion and a priority page the same way', async () => {
+    const { win } = createCorpusWindow({
+      wasm: getWasm(),
+      priorityPages: [{ url_pattern: '/fines', keywords: ['fines'], boost: 50 }],
+      expansions: { 'breach fines': ['supervisory authority', 'penalties'] },
+      inject: '  window.__getState = function() { return { allScoredResults }; };',
+    });
+    win.Scolta.init('#scolta-search');
+    await settle();
+    const ranked = await searchPage(win, 'breach fines');
+    expect(ranked.map(r => r[0])).toEqual(['/fines', '/gdpr-breach']);
+    expect(ranked[0][1]).toBeCloseTo(6.482122724883116, 10);
+    expect(ranked[1][1]).toBeCloseTo(5.442615422333741, 10);
+  });
+});
