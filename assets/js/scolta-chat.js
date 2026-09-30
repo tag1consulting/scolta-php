@@ -167,7 +167,8 @@
       restored: false,
       running: null,
       building: null,
-      // New chat bumps it; a turn that began under an older one is dropped.
+      // New chat and a hand off bump it; a turn that began under an older one
+      // is dropped.
       chat: 0,
     };
 
@@ -545,9 +546,9 @@
       return el;
     }
 
-    // The one deep-chat element, built once however many callers ask.
+    // The one deep-chat element, built once however many callers ask, and
+    // handed out only once it has rendered.
     function element() {
-      if (state.element) return Promise.resolve(state.element);
       if (!state.building) {
         state.building = build().catch(err => {
           state.building = null;
@@ -592,6 +593,7 @@
       // The server starts the next thread on the first turn.
       send('DELETE', cfg.endpoints.thread).catch(() => {});
       state.chat++;
+      setStatus('');
       state.threadId = null;
       state.seed = null;
       if (state.element) state.element.clearMessages(true);

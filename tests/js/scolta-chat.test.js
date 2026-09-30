@@ -51,7 +51,7 @@ function json(data, status = 200) {
 const windows = [];
 afterEach(() => { windows.splice(0).forEach(win => win.close()); });
 
-async function setup({ chat = {}, html = '', turnEvents, plan, idle = false, labels, chunkDelay = 0 } = {}) {
+async function setup({ chat = {}, html = '', turnEvents, plan, idle = false, labels, chunkDelay = 0, renderDelay = 0 } = {}) {
     const dom = new JSDOM(`<!DOCTYPE html><html><head><title>GDPR deadlines</title>
         <meta name="description" content="When to notify."></head><body>${html}</body></html>`,
     { url: 'https://complianceiq.test/guides/deadlines#top', runScripts: 'dangerously' });
@@ -99,7 +99,7 @@ async function setup({ chat = {}, html = '', turnEvents, plan, idle = false, lab
                 connectedCallback() {
                     // deep-chat reports its first render; until then it
                     // refuses submitUserMessage().
-                    setTimeout(() => { this.rendered = true; if (this.onComponentRender) this.onComponentRender(this); }, 0);
+                    setTimeout(() => { this.rendered = true; if (this.onComponentRender) this.onComponentRender(this); }, renderDelay);
                 }
                 focusInput() { this.focused++; this.shadowRoot.getElementById('text-input').focus(); }
                 clearMessages() { this.cleared = (this.cleared || 0) + 1; }
@@ -533,6 +533,24 @@ describe('scolta-chat.js', () => {
         expect(h.plans()).toHaveLength(1);
         expect(h.plans()[0].body.message).toBe('What about processors?');
         expect(h.plans()[0].body.thread_id).toBeNull();
+    });
+
+    test('a hand off waits for deep-chat to render even when the element already exists', async () => {
+        const h = await setup({ renderDelay: 50 });
+        h.$('.scolta-chat-launcher').click();
+        await settle(10);
+        expect(h.$('deep-chat')).not.toBeNull();
+        expect(h.$('deep-chat').rendered).toBeUndefined();
+
+        h.win.document.body.dispatchEvent(new h.win.CustomEvent('scolta:followup-submit', {
+            bubbles: true,
+            cancelable: true,
+            detail: { question: 'What about contractors?', query: 'data retention', summary: 'Keep records six years.', pages: [] },
+        }));
+        await h.win.eval('new Promise(r => setTimeout(r, 200))');
+
+        expect(h.$('.scolta-chat-status').textContent).not.toBe("The chat didn't load. Try again in a moment.");
+        expect(h.plans()).toHaveLength(1);
     });
 
     test('a failed CSRF token fetch is asked for again', async () => {
