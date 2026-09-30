@@ -36,6 +36,7 @@
     chatReading: 'Reading the pages',
     chatError: "That didn't go through. Your message is back in the box, so you can send it again.",
     chatBusy: 'Lots of questions at once. Wait a moment, then send your message again.',
+    chatUnavailable: "The chat didn't load. Try again in a moment.",
   };
 
   // Greetings and thanks name no subject, so on their own they never need a
@@ -217,14 +218,17 @@
       if (!state.loading) {
         state.retriever = global.Scolta.createRetriever(global.scolta);
         state.loading = Promise.all([
-          import(cfg.deepChatPath),
+          // A custom element can be defined once per page, and a page may
+          // already carry deep-chat (Drupal AI's chatbot ships a 2.x copy).
+          // Its API is the same, so that one is used.
+          global.customElements.get('deep-chat') ? null : import(cfg.deepChatPath),
           state.retriever.ready(),
         ]);
       }
       return state.loading;
     }
 
-    const warm = () => { load().catch(() => {}); };
+    const warm = () => { load().catch(err => console.warn('[scolta:chat] loading failed', err)); };
     if (typeof global.requestIdleCallback === 'function') {
       global.requestIdleCallback(warm, { timeout: 4000 });
     } else {
@@ -418,6 +422,7 @@
       const last = messages[messages.length - 1] || {};
       const message = String(last.text || '').trim();
       turn(message, signals).catch(err => {
+        console.warn('[scolta:chat] turn failed', err && err.status ? 'HTTP ' + err.status : err);
         setStatus('');
         const busy = err && (err.status === 429 || err instanceof TypeError);
         signals.onResponse({ error: busy ? L.chatBusy : L.chatError });
@@ -474,8 +479,14 @@
     }
 
     launcher.addEventListener('click', () => {
-      if (panel.hidden) open().catch(() => setStatus(L.chatError));
-      else hide();
+      if (panel.hidden) {
+        open().catch(err => {
+          console.warn('[scolta:chat] opening failed', err);
+          setStatus(L.chatUnavailable);
+        });
+      } else {
+        hide();
+      }
     });
     close.addEventListener('click', hide);
     panel.addEventListener('keydown', e => {
@@ -513,7 +524,10 @@
           panel.hidden = false;
           launcher.setAttribute('aria-expanded', 'true');
           el.submitUserMessage({ text: detail.question });
-        }).catch(() => setStatus(L.chatError));
+        }).catch(err => {
+          console.warn('[scolta:chat] hand off failed', err);
+          setStatus(L.chatUnavailable);
+        });
       });
     }
 

@@ -185,6 +185,29 @@ describe('scolta-chat.js', () => {
         expect(idle.calls.created).toBe(1);
     });
 
+    test('a deep-chat another module already defined is used, not imported again', async () => {
+        const h = await setup();
+        h.win.customElements.define('deep-chat', class extends h.win.HTMLElement {
+            focusInput() {}
+        });
+        h.$('.scolta-chat-launcher').click();
+        await settle();
+
+        expect(h.calls.imports).toBe(0);
+        expect(h.$('.scolta-chat-deep-chat')).not.toBeNull();
+        expect(h.$('.scolta-chat-status').hidden).toBe(true);
+    });
+
+    test('a chat that cannot load says so in its own words', async () => {
+        const h = await setup();
+        h.win.__importDeepChat = () => Promise.reject(new Error('404'));
+        h.$('.scolta-chat-launcher').click();
+        await settle();
+
+        expect(h.$('.scolta-chat-status').textContent).toBe("The chat didn't load. Try again in a moment.");
+        expect(h.win.console.warn).toHaveBeenCalledWith('[scolta:chat] opening failed', expect.any(Error));
+    });
+
     test('opening focuses the input, Escape closes and focus returns to the launcher', async () => {
         const h = await setup();
         const el = await h.openChat();
