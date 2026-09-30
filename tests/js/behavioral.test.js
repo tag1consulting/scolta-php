@@ -1108,6 +1108,27 @@ describe('Scolta.createRetriever() ranks exactly as the search page does', () =>
         });
     }
 
+    test('a retriever made after the search widget on the same page ranks the same', async () => {
+        // The second instance on a page reuses Pagefind; it must still learn
+        // the corpus size from pagefind-entry.json, which the sub-word guard
+        // and specificity weighting rank with, and must not load the facet
+        // index a search page is configured to load eagerly.
+        const row = RETRIEVAL_TABLE.find(r => r.name.startsWith('expansion with'));
+        const { win, fetchCalls } = createCorpusWindow({ scoring: row.scoring, expansions: row.expansions });
+        win.scolta.facetMode = 'eager';
+        win.Scolta.init('#scolta-search');
+        await settle();
+        const retriever = win.Scolta.createRetriever();
+        await retriever.ready();
+        const facetFetches = () => fetchCalls.filter(c => c.url.includes('.facets')).length;
+        const before = facetFetches();
+
+        const out = await retriever.retrieve(row.query);
+
+        expectRanked(out.results.map(r => [r.data.url, r.score]), row.results);
+        expect(facetFetches()).toBe(before);
+    });
+
     test('planned terms skip the expand-query call and rank the same', async () => {
         const row = RETRIEVAL_TABLE.find(r => r.name.startsWith('expansion with'));
         const { retriever, fetchCalls } = await retrieverFor(row);

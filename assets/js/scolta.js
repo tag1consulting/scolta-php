@@ -545,6 +545,12 @@
   // so every createInstance() call shares it without re-calling init().
   let pagefindInstance = null;
 
+  // What the first instance read from pagefind-entry.json (page count, index
+  // hash, merged languages). Every later instance reuses Pagefind without
+  // reading the file again, so it takes these from here; without them its
+  // sub-word guard and specificity weighting worked from another corpus size.
+  let pagefindEntryInfo = null;
+
   // Platform-supplied result renderer, registered through
   // Scolta.setResultRenderer(). Module-scoped rather than per-instance so
   // registration works before any instance exists — the common case, since a
@@ -1377,6 +1383,12 @@
       // Re-entry against an instance a previous init() already created (a second
       // container on the page, or a re-mount). The taxonomy is module state, so
       // it is only loaded when it is not already in hand.
+      const entryInfo = await pagefindEntryInfo;
+      if (entryInfo) {
+        cachedPagefindPageCount = entryInfo.pageCount;
+        facetIndexExpectedHash = entryInfo.expectedHash;
+        facetIndexMergedLanguages = entryInfo.mergedLanguages;
+      }
       facetIndexPagefindPath = pagefindPath;
       if (!cachedPagefindFilters && !facetIndex && facetMode() === 'eager') {
         await loadFacetTaxonomy(pagefindPath);
@@ -1387,6 +1399,8 @@
     pagefind = await import(pagefindPath);
     await pagefind.init();
     pagefindInstance = pagefind;
+    let shareEntryInfo;
+    pagefindEntryInfo = new Promise(resolve => { shareEntryInfo = resolve; });
 
     // Record the path-only base so resolveUrl() can strip it back off.
     // pagefind's fullUrl() prepends baseUrl to every stored root-relative URL.
@@ -1438,6 +1452,11 @@
     } catch (e) {
       console.warn('[scolta] Multilingual merge skipped:', e.message);
     }
+    shareEntryInfo({
+      pageCount: cachedPagefindPageCount,
+      expectedHash: facetIndexExpectedHash,
+      mergedLanguages: facetIndexMergedLanguages,
+    });
 
     // Warm the index: triggers WASM compilation + fragment download.
     await pagefind.search("");
@@ -6582,7 +6601,7 @@
    *
    * `config` is the same object Scolta.init() reads (window.scolta when
    * omitted). No container or DOM is needed. The facet index is not loaded
-   * up front (facetMode 'deferred') unless the config names another mode.
+   * up front (facetMode 'deferred'), whatever mode the config names.
    *
    *   retrieve(query, { expandedTerms, filters, signal, limit })
    *     -> Promise<{ query, expandedTerms, results: [{ data, score }], total }>
@@ -6600,8 +6619,9 @@
    * Experimental, added in 2.0.0.
    */
   global.Scolta.createRetriever = function(config) {
-    const base = config || global.scolta || {};
-    const cfg = Object.assign({}, base, { facetMode: base.facetMode || 'deferred' });
+    // Deferred whatever the page's widget uses: the retriever ranks with no
+    // facet selected, so it needs the facet index only for explicit filters.
+    const cfg = Object.assign({}, config || global.scolta || {}, { facetMode: 'deferred' });
     return createInstance(null, cfg, true);
   };
 
