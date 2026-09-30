@@ -47,8 +47,8 @@
     'hi', 'hello', 'hey', 'hiya', 'there', 'thanks', 'thank', 'thx', 'cheers',
     'bye', 'goodbye', 'great', 'cool', 'nice', 'awesome', 'morning',
     'afternoon', 'evening', 'good', 'welcome', 'sorry', 'lol', 'perfect',
-    'wonderful', 'appreciate', 'appreciated', 'you', 'much', 'very', 'a',
-    'lot', 'that', 's', 'it', 'all', 'for', 'the',
+    'wonderful', 'appreciate', 'appreciated', 'you', 'so', 'much', 'very',
+    'a', 'lot', 'that', 's', 'it', 'all', 'for', 'the', 'again',
   ]);
 
   // Page text that is never the page's content.
@@ -88,13 +88,18 @@
 
   // --- Server-sent events ---------------------------------------------------
 
-  // Parse a text/event-stream body, calling onEvent(name, data) per event.
-  async function readEvents(response, onEvent) {
+  // Parse a text/event-stream body, calling onEvent(name, data) per event,
+  // until the body ends or stop() says the rest is not wanted.
+  async function readEvents(response, onEvent, stop) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
     for (;;) {
       const { value, done } = await reader.read();
+      if (stop()) {
+        reader.cancel().catch(() => {});
+        return;
+      }
       buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
       let cut;
       while ((cut = buffer.indexOf('\n\n')) !== -1) {
@@ -160,6 +165,8 @@
       element: null,
       csrf: null,
       restored: false,
+      // New chat bumps it; a turn that began under an older one is dropped.
+      chat: 0,
     };
 
     // Launcher, panel and a polite live region; all ignored by page context.
@@ -294,7 +301,6 @@
 
     // --- One turn -----------------------------------------------------------
 
-
     function answerHtml(text, sources) {
       let html = global.Scolta.formatAnswer(text, { allowedLinkDomains: ownHosts() });
       if (sources && sources.length > 0) {
@@ -333,6 +339,19 @@
     }
 
     async function turn(message, signals) {
+      const chat = state.chat;
+      const stale = () => chat !== state.chat;
+      // A turn New chat left behind ends quietly, and whatever it had
+      // already drawn leaves the cleared panel with it.
+      const drop = () => {
+        setStatus('');
+        signals.onClose();
+        state.element.clearMessages(true);
+      };
+      // deep-chat's stop button keeps the answer drawn so far and ends the
+      // bubble itself; reading the rest would only save it unseen.
+      let stopped = false;
+      if (signals.stopClicked) signals.stopClicked.listener = () => { stopped = true; };
       const seed = state.seed;
       let query = message;
       let needsSearch = true;
@@ -363,6 +382,7 @@
           page: cfg.pageContext && pageText() !== null ? pageRef() : undefined,
         });
         const plan = await planResp.json();
+        if (stale()) return drop();
         query = plan.query || message;
         expandedTerms = Array.isArray(plan.terms) ? plan.terms : [];
         // A message with content words always searches, whatever the plan said.
@@ -384,6 +404,7 @@
         page = pageContext(state.retriever, query, cfg);
       }
 
+      if (stale()) return drop();
       const resp = await send('POST', cfg.endpoints.turn, {
         thread_id: state.threadId,
         message: message,
@@ -396,6 +417,7 @@
       let text = '';
       let sources = [];
       let fold = false;
+      let done = false;
       let failed = null;
       let opened = false;
       let frame = 0;
@@ -418,17 +440,25 @@
         } else if (name === 'sources') {
           sources = Array.isArray(data.pages) ? data.pages : [];
         } else if (name === 'done') {
+          done = true;
           fold = !!data.fold;
         } else if (name === 'error') {
           failed = data;
         }
-      });
+      }, () => stale() || stopped);
 
       if (frame) global.cancelAnimationFrame(frame);
+      if (stale()) return drop();
       setStatus('');
-      if (failed) {
-        const err = new Error(failed.message);
-        err.status = failed.status;
+      if (stopped) {
+        live.textContent = plainText(answerHtml(text, sources));
+        return;
+      }
+      if (failed || !done) {
+        // No done event means the connection closed part way, and the server
+        // kept nothing of this answer.
+        const err = new Error(failed ? failed.message : 'stream ended early');
+        err.status = failed ? failed.status : 0;
         throw err;
       }
       state.seed = null;
@@ -448,9 +478,15 @@
       const messages = (requestBody && requestBody.messages) || [];
       const last = messages[messages.length - 1] || {};
       const message = String(last.text || '').trim();
+      const chat = state.chat;
       turn(message, signals).catch(err => {
         console.warn('[scolta:chat] turn failed', err && err.status ? 'HTTP ' + err.status : err);
         setStatus('');
+        if (chat !== state.chat) {
+          signals.onClose();
+          state.element.clearMessages(true);
+          return;
+        }
         const busy = err && (err.status === 429 || err instanceof TypeError);
         signals.onResponse({ error: busy ? L.chatBusy : L.chatError });
         restoreInput(message);
@@ -534,6 +570,7 @@
     newChat.addEventListener('click', () => {
       // The server starts the next thread on the first turn.
       send('DELETE', cfg.endpoints.thread).catch(() => {});
+      state.chat++;
       state.threadId = null;
       state.seed = null;
       if (state.element) state.element.clearMessages(true);

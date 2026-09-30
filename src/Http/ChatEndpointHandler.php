@@ -424,7 +424,12 @@ class ChatEndpointHandler
      */
     private function record(ChatOwner $owner, string $threadId, ThreadState $started, string $question, string $answer, array $sources): bool
     {
-        $state = $this->load($owner, $threadId) ?? $started;
+        // A thread that existed when the turn began and is gone now was reset
+        // while the answer streamed: saving would bring it back.
+        $state = $this->load($owner, $threadId) ?? ($started->revision === 0 ? $started : null);
+        if ($state === null) {
+            return false;
+        }
         $state->addExchange($question, $answer, $sources);
         $state->revision++;
         $this->threads->save($owner->threadKey($threadId), $state->toArray(), $this->chat['threadTtl']);

@@ -23,18 +23,21 @@ function sse(events) {
     return events.map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`).join('');
 }
 
-// A response whose body arrives in chunks of `size` bytes.
-function streamed(text, size = 7) {
+// A response whose body arrives in chunks of `size` bytes, each after
+// `delay` ms when a delay is given.
+function streamed(text, size = 7, delay = 0, onCancel = () => {}) {
     const bytes = new TextEncoder().encode(text);
     let at = 0;
+    const next = () => (at >= bytes.length
+        ? { done: true, value: undefined }
+        : { done: false, value: bytes.slice(at, at += size) });
     return {
         ok: true,
         status: 200,
         body: {
             getReader: () => ({
-                read: () => Promise.resolve(at >= bytes.length
-                    ? { done: true, value: undefined }
-                    : { done: false, value: bytes.slice(at, at += size) }),
+                read: () => (delay ? new Promise(r => setTimeout(() => r(next()), delay)) : Promise.resolve(next())),
+                cancel: () => { onCancel(); return Promise.resolve(); },
             }),
         },
     };
@@ -48,7 +51,7 @@ function json(data, status = 200) {
 const windows = [];
 afterEach(() => { windows.splice(0).forEach(win => win.close()); });
 
-async function setup({ chat = {}, html = '', turnEvents, plan, idle = false, labels } = {}) {
+async function setup({ chat = {}, html = '', turnEvents, plan, idle = false, labels, chunkDelay = 0 } = {}) {
     const dom = new JSDOM(`<!DOCTYPE html><html><head><title>GDPR deadlines</title>
         <meta name="description" content="When to notify."></head><body>${html}</body></html>`,
     { url: 'https://complianceiq.test/guides/deadlines#top', runScripts: 'dangerously' });
@@ -61,7 +64,7 @@ async function setup({ chat = {}, html = '', turnEvents, plan, idle = false, lab
     const idleCallbacks = [];
     win.requestIdleCallback = cb => { idleCallbacks.push(cb); return 1; };
 
-    const calls = { retrieve: [], build: [], extract: [], fetch: [], imports: 0, created: 0, signals: [] };
+    const calls = { retrieve: [], build: [], extract: [], fetch: [], imports: 0, created: 0, signals: [], cancelled: 0 };
 
     win.fetch = jest.fn((url, init = {}) => {
         const body = init.body ? JSON.parse(init.body) : null;
@@ -76,7 +79,7 @@ async function setup({ chat = {}, html = '', turnEvents, plan, idle = false, lab
                 ['done', { fold: true }],
             ];
             if (typeof events === 'number') return Promise.resolve({ ok: false, status: events });
-            return Promise.resolve(streamed(sse(events)));
+            return Promise.resolve(streamed(sse(events), 7, chunkDelay, () => { calls.cancelled++; }));
         }
         if (url === '/chat/thread') return Promise.resolve(json(init.method === 'DELETE' ? { thread_id: 'b'.repeat(32) } : { thread_id: null, messages: [] }));
         if (url === '/chat/fold') return Promise.resolve(json({ folded: true }));
@@ -99,15 +102,18 @@ async function setup({ chat = {}, html = '', turnEvents, plan, idle = false, lab
                     setTimeout(() => { this.rendered = true; if (this.onComponentRender) this.onComponentRender(this); }, 0);
                 }
                 focusInput() { this.focused++; this.shadowRoot.getElementById('text-input').focus(); }
-                clearMessages() { this.cleared = true; }
+                clearMessages() { this.cleared = (this.cleared || 0) + 1; }
                 submitUserMessage({ text }) {
                     if (!this.rendered) throw new Error('submitUserMessage before render');
                     const record = { opened: 0, closed: 0, responses: [] };
                     calls.signals.push(record);
+                    const stopClicked = { listener: () => {} };
+                    record.stop = () => stopClicked.listener();
                     this.connect.handler({ messages: [{ role: 'user', text }] }, {
                         onOpen: () => { record.opened++; },
                         onClose: () => { record.closed++; },
                         onResponse: r => { record.responses.push(r); return Promise.resolve(); },
+                        stopClicked,
                     });
                     return record;
                 }
@@ -398,6 +404,60 @@ describe('scolta-chat.js', () => {
         const record = await h.ask('What about contractors?');
 
         expect(record.responses[record.responses.length - 1]).toEqual({ error: expect.stringContaining("didn't go through") });
+    });
+
+    test('a stream that stops before done is a failure, not an answer', async () => {
+        const h = await setup({ turnEvents: [['thread', { thread_id: 'a'.repeat(32) }], ['delta', { text: 'GDPR requires notice within' }]] });
+        const record = await h.ask('What does GDPR say about breach notification?');
+
+        expect(record.responses[record.responses.length - 1]).toEqual({ error: expect.stringContaining("didn't go through") });
+        expect(h.$('deep-chat').shadowRoot.getElementById('text-input').textContent).toBe('What does GDPR say about breach notification?');
+    });
+
+    test('New chat drops a turn still on its way', async () => {
+        const h = await setup();
+        const el = await h.openChat();
+        const record = el.submitUserMessage({ text: 'What does GDPR say about breach notification?' });
+        h.$('.scolta-chat-new').click();
+        await settle(40);
+
+        expect(h.turns()).toHaveLength(0);
+        expect(record.closed).toBe(1);
+        expect(record.responses).toEqual([]);
+
+        await h.ask('Something new about retention');
+        expect(h.turns()[0].body.thread_id).toBeNull();
+    });
+
+    test('the stop button stops reading and keeps what was drawn', async () => {
+        const h = await setup({ chunkDelay: 1 });
+        const el = await h.openChat();
+        const record = el.submitUserMessage({ text: 'What does GDPR say about breach notification?' });
+        await h.win.eval('new Promise(r => setTimeout(r, 30))');
+        record.stop();
+        await settle(40);
+
+        expect(h.calls.cancelled).toBe(1);
+        expect(record.responses.some(r => r.error)).toBe(false);
+        expect(el.cleared).toBeUndefined();
+        expect(h.calls.fetch.filter(f => f.url === '/chat/fold')).toHaveLength(0);
+        expect(h.$('.scolta-chat-live').textContent).toContain('GDPR requires');
+    });
+
+    test('New chat part way through a stream stops reading it and clears what it drew', async () => {
+        const h = await setup({ chunkDelay: 1 });
+        const el = await h.openChat();
+        const record = el.submitUserMessage({ text: 'What does GDPR say about breach notification?' });
+        await h.win.eval('new Promise(r => setTimeout(r, 30))');
+        expect(record.opened).toBe(1);
+
+        h.$('.scolta-chat-new').click();
+        await settle(40);
+
+        expect(h.calls.cancelled).toBe(1);
+        expect(record.closed).toBe(1);
+        expect(el.cleared).toBe(2);
+        expect(h.calls.fetch.filter(f => f.url === '/chat/fold')).toHaveLength(0);
     });
 
     test('a signed in visitor sends the CSRF header the config names', async () => {

@@ -387,6 +387,20 @@ class ChatEndpointHandlerTest extends TestCase
         $this->assertStringContainsString('Earlier the visitor asked: Q1', $this->stored($threadId)->summary);
     }
 
+    public function testNewChatDuringAStreamIsNotUndoneByTheTurnSaving(): void
+    {
+        $threadId = $this->fourTurns();
+        $handler = $this->handler();
+
+        foreach ($handler->streamTurn($this->owner, self::turn(['message' => 'Q5', 'thread_id' => $threadId]), true) as [$name]) {
+            if ($name === 'delta') {
+                $handler->handleReset($this->owner, true);
+            }
+        }
+
+        $this->assertArrayNotHasKey($this->owner->threadKey($threadId), $this->threads->data, 'The reset thread stays deleted');
+    }
+
     public function testATurnThatSavesDuringAFoldMakesTheFoldStartOver(): void
     {
         $threadId = $this->fourTurns();
