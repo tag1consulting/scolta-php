@@ -133,9 +133,9 @@ class ChatEndpointHandler
             );
             $plan = QueryPlan::parse($raw);
         } catch (\Exception $e) {
-            $this->logger->warning('Scolta chat plan failed; searching the message as typed', ['exception_class' => $e::class]);
+            $this->logger->warning('Scolta chat plan failed ({exception_class}); searching the message as typed', ['exception_class' => $e::class]);
         }
-        $this->logger->info('Scolta chat plan', ['ms' => self::ms($start), 'parsed' => $plan !== null]);
+        $this->logger->info('Scolta chat plan: {ms} ms, parsed {parsed}', ['ms' => self::ms($start), 'parsed' => $plan !== null ? 'yes' : 'no']);
 
         return ['ok' => true, 'data' => $plan ?? [
             'query' => mb_substr($request->message, 0, 200),
@@ -252,9 +252,9 @@ class ChatEndpointHandler
         if ($cacheKey !== null) {
             $this->cache->set($cacheKey, $answer, $this->cacheTtl);
         }
-        $this->logger->info('Scolta chat answer', [
+        $this->logger->info('Scolta chat answer: first text {first_ms} ms, {pages} pages, page context {page_context}, prompt {prompt_chars} chars, {dropped} dropped', [
             'pages' => count($request->pages),
-            'page_context' => $request->page !== null,
+            'page_context' => $request->page !== null ? 'yes' : 'no',
             'prompt_chars' => mb_strlen($system) + array_sum(array_map(static fn(array $m): int => mb_strlen($m['content']), $assembled['messages'])),
             'dropped' => $assembled['dropped'],
             'first_ms' => $firstMs,
@@ -326,7 +326,7 @@ class ChatEndpointHandler
                 $summary = $this->aiService->message($system, ContextAssembler::foldMessage($state, $evicted), self::FOLD_MAX_TOKENS);
                 ContextAssembler::applyFold($state, $summary);
             } catch (\Exception $e) {
-                $this->logger->warning('Scolta chat fold failed; kept the questions only', ['exception_class' => $e::class]);
+                $this->logger->warning('Scolta chat fold failed ({exception_class}); kept the questions only', ['exception_class' => $e::class]);
                 ContextAssembler::applyFallbackFold($state, $evicted);
             }
             $latest = $this->load($owner, $threadId);
@@ -335,7 +335,7 @@ class ChatEndpointHandler
             }
             $state->revision++;
             $this->threads->save($owner->threadKey($threadId), $state->toArray(), $this->chat['threadTtl']);
-            $this->logger->info('Scolta chat fold', ['ms' => self::ms($start), 'messages' => count($evicted)]);
+            $this->logger->info('Scolta chat fold: {ms} ms, {messages} messages', ['ms' => self::ms($start), 'messages' => count($evicted)]);
 
             return ['ok' => true, 'data' => ['folded' => true]];
         }
@@ -410,7 +410,7 @@ class ChatEndpointHandler
     {
         $sources = CitedPages::find($answer, $request->citablePages());
         $fold = $this->record($owner, $threadId, $state, $request->message, $answer, $sources);
-        $this->logger->info('Scolta chat turn', ['ms' => self::ms($start), 'cached' => $cached, 'cited' => count($sources)]);
+        $this->logger->info('Scolta chat turn: {ms} ms, cached {cached}, {cited} cited', ['ms' => self::ms($start), 'cached' => $cached ? 'yes' : 'no', 'cited' => count($sources)]);
         yield ['sources', ['pages' => $sources]];
         yield ['done', ['fold' => $fold]];
     }
