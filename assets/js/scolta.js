@@ -1261,20 +1261,29 @@
       if (totalPages > 0) {
         cachedPagefindPageCount = totalPages;
       }
-      const primaryLang = (document.querySelector('html')?.getAttribute('lang') || 'en')
-        .toLowerCase().split('-')[0];
+      const languages = entry.languages || {};
+      // The bucket pagefind.init() loaded for this page. When the entry file
+      // has none for the page language it falls back to the bucket with the
+      // most pages, so that bucket is already loaded and must not be merged
+      // again: merging it would load the same index twice and render every
+      // result twice (an index whose one `en` bucket holds every translation,
+      // viewed on an /es/ page).
+      const primaryEntry = pagefindLoadedLanguage(languages);
       // The facet index is stamped with the pf_meta hash it was built against.
       // This entry file is cache-busted, so it is the trustworthy statement of
       // which index the browser is actually using.
-      const primaryEntry = (entry.languages || {})[primaryLang]
-        || Object.values(entry.languages || {})[0];
       facetIndexExpectedHash = (primaryEntry && primaryEntry.hash) || null;
       const absoluteBase = new URL(basePath, window.location.href).href;
-      for (const lang of Object.keys(entry.languages || {})) {
-        if (lang !== primaryLang) {
-          await pagefind.mergeIndex(absoluteBase, { language: lang });
-          facetIndexMergedLanguages = true;
+      for (const [lang, langEntry] of Object.entries(languages)) {
+        if (langEntry === primaryEntry || (primaryEntry && langEntry.hash === primaryEntry.hash)) {
+          continue;
         }
+        // baseUrl pinned to the primary's. Pagefind searches in a web worker,
+        // where there is no window to strip the origin off absoluteBase, so a
+        // merged instance would derive an absolute baseUrl and its result URLs
+        // would come back absolute, which resolveUrl() does not strip.
+        await pagefind.mergeIndex(absoluteBase, { language: lang, baseUrl: pagefindBase + '/' });
+        facetIndexMergedLanguages = true;
       }
     } catch (e) {
       console.warn('[scolta] Multilingual merge skipped:', e.message);
@@ -1296,6 +1305,17 @@
     }
 
     debugLog("[scolta] Pagefind index preloaded");
+  }
+
+  // The entry of pagefind-entry.json's `languages` that pagefind.init() loads
+  // for this page: the <html lang> code, then its base subtag, then the bucket
+  // with the most pages. Mirrors PagefindInstance.findIndex().
+  function pagefindLoadedLanguage(languages) {
+    const lang = (document.querySelector('html')?.getAttribute('lang') || 'unknown').toLowerCase();
+    if (languages[lang]) return languages[lang];
+    if (languages[lang.split('-')[0]]) return languages[lang.split('-')[0]];
+    return Object.values(languages)
+      .sort((a, b) => (b.page_count || 0) - (a.page_count || 0))[0] || null;
   }
 
   // Strip the pagefind base path that fullUrl() prepends to root-relative paths.
