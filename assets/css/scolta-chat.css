@@ -62,6 +62,7 @@
 .scolta-chat-header button {
   border: none;
   background: transparent;
+  color: inherit;
   font: inherit;
   cursor: pointer;
 }

@@ -512,6 +512,29 @@ describe('scolta-chat.js', () => {
         expect(h.turns()[1].body.seed.query).toBe('data retention');
     });
 
+    test('a hand off while the chat is still being built uses the one element and a new thread', async () => {
+        const h = await setup();
+        // The visitor has an earlier thread the opening restores.
+        const fetch = h.win.fetch;
+        h.win.fetch = jest.fn((url, init = {}) => (url === '/chat/thread' && (init.method || 'GET') === 'GET'
+            ? Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ thread_id: 'c'.repeat(32), messages: [] }) })
+            : fetch(url, init)));
+        h.$('.scolta-chat-launcher').click();
+        const handoff = question => h.win.document.body.dispatchEvent(new h.win.CustomEvent('scolta:followup-submit', {
+            bubbles: true,
+            cancelable: true,
+            detail: { question, query: 'data retention', summary: 'Keep records six years.', pages: [] },
+        }));
+        handoff('What about contractors?');
+        handoff('What about processors?');
+        await settle(60);
+
+        expect(h.win.document.querySelectorAll('deep-chat')).toHaveLength(1);
+        expect(h.plans()).toHaveLength(1);
+        expect(h.plans()[0].body.message).toBe('What about processors?');
+        expect(h.plans()[0].body.thread_id).toBeNull();
+    });
+
     test('a failed CSRF token fetch is asked for again', async () => {
         const h = await setup({ chat: { csrf: { header: 'X-CSRF-Token', tokenUrl: '/session/token' } } });
         const fetch = h.win.fetch;

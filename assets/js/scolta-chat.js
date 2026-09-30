@@ -166,6 +166,7 @@
       csrf: null,
       restored: false,
       running: null,
+      building: null,
       // New chat bumps it; a turn that began under an older one is dropped.
       chat: 0,
     };
@@ -501,9 +502,12 @@
     // --- Opening, closing, history -------------------------------------------
 
     async function restoreHistory() {
+      const chat = state.chat;
       try {
         const resp = await send('GET', cfg.endpoints.thread);
         const data = await resp.json();
+        // A hand off or New chat while this was on its way has moved on.
+        if (chat !== state.chat) return [];
         state.threadId = data.thread_id || null;
         return (data.messages || []).map(m => m.role === 'user'
           ? { role: 'user', text: m.content }
@@ -541,10 +545,22 @@
       return el;
     }
 
+    // The one deep-chat element, built once however many callers ask.
+    function element() {
+      if (state.element) return Promise.resolve(state.element);
+      if (!state.building) {
+        state.building = build().catch(err => {
+          state.building = null;
+          throw err;
+        });
+      }
+      return state.building;
+    }
+
     async function open() {
       panel.hidden = false;
       launcher.setAttribute('aria-expanded', 'true');
-      const el = state.element || await build();
+      const el = await element();
       el.focusInput();
       return el;
     }
@@ -589,8 +605,9 @@
         const detail = e.detail || {};
         if (!detail.question || !detail.summary) return;
         e.preventDefault();
-        // Like New chat: a turn still running is left behind.
-        state.chat++;
+        // Like New chat: a turn still running is left behind, and so is an
+        // earlier hand off still waiting.
+        const chat = ++state.chat;
         state.threadId = null;
         state.seed = {
           query: detail.query || '',
@@ -603,9 +620,9 @@
         panel.hidden = false;
         launcher.setAttribute('aria-expanded', 'true');
         setStatus(L.chatWorking);
-        const start = state.element ? Promise.resolve(state.element) : build();
         // deep-chat takes a new message only once the running turn closed.
-        Promise.all([start, state.running]).then(([el]) => {
+        Promise.all([element(), state.running]).then(([el]) => {
+          if (chat !== state.chat) return;
           el.clearMessages(true);
           el.submitUserMessage({ text: detail.question });
         }).catch(err => {
