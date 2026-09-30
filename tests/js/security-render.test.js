@@ -563,7 +563,7 @@ describe('results count header — active facet values (escapeHtml)', () => {
     });
 });
 
-describe('Scolta.formatAnswer() — the chat citation marker', () => {
+describe('Scolta.formatAnswer(): the chat citation marker', () => {
     function formatter() {
         const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', { url: 'https://example.com', runScripts: 'dangerously' });
         dom.window.eval(fs.readFileSync(path.resolve(__dirname, '../../assets/js/scolta.js'), 'utf-8'));

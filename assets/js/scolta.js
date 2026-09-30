@@ -458,7 +458,6 @@
     return text;
   }
 
-  // Convert lightweight markdown from Claude's summary into safe HTML.
   // Render model Markdown as HTML: escaped first, links only to allowed
   // domains, and with `citations` the chat's numbered citation marker too.
   function formatSummary(text, allowedDomains, citations) {

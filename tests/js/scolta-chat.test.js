@@ -44,11 +44,16 @@ function json(data, status = 200) {
     return { ok: status < 400, status, json: () => Promise.resolve(data), text: () => Promise.resolve(JSON.stringify(data)) };
 }
 
+// Every window a test opened, closed after it so no timer outlives the run.
+const windows = [];
+afterEach(() => { windows.splice(0).forEach(win => win.close()); });
+
 async function setup({ chat = {}, html = '', turnEvents, plan, idle = false, labels } = {}) {
     const dom = new JSDOM(`<!DOCTYPE html><html><head><title>GDPR deadlines</title>
         <meta name="description" content="When to notify."></head><body>${html}</body></html>`,
     { url: 'https://complianceiq.test/guides/deadlines#top', runScripts: 'dangerously' });
     const win = dom.window;
+    windows.push(win);
     win.TextDecoder = TextDecoder;
     win.requestAnimationFrame = cb => setTimeout(cb, 0);
     win.cancelAnimationFrame = id => clearTimeout(id);
@@ -206,12 +211,20 @@ describe('scolta-chat.js', () => {
 
     test('a chat that cannot load says so in its own words', async () => {
         const h = await setup();
+        const importDeepChat = h.win.__importDeepChat;
         h.win.__importDeepChat = () => Promise.reject(new Error('404'));
         h.$('.scolta-chat-launcher').click();
         await settle();
 
         expect(h.$('.scolta-chat-status').textContent).toBe("The chat didn't load. Try again in a moment.");
         expect(h.win.console.warn).toHaveBeenCalledWith('[scolta:chat] opening failed', expect.any(Error));
+
+        // A failed load is not kept: the next open tries again.
+        h.win.__importDeepChat = importDeepChat;
+        h.$('.scolta-chat-launcher').click();
+        h.$('.scolta-chat-launcher').click();
+        await settle();
+        expect(h.$('.scolta-chat-deep-chat')).not.toBeNull();
     });
 
     test('opening focuses the input, Escape closes and focus returns to the launcher', async () => {

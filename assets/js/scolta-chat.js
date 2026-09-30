@@ -43,8 +43,8 @@
   // lookup, even though the stop word list keeps them.
   const SMALL_TALK = new Set([
     'hi', 'hello', 'hey', 'hiya', 'thanks', 'thank', 'thx', 'cheers', 'bye',
-    'goodbye', 'great', 'cool', 'nice', 'awesome', 'ok', 'okay', 'sure', 'yes',
-    'yep', 'nope', 'morning', 'afternoon', 'evening', 'good', 'welcome',
+    'goodbye', 'great', 'cool', 'nice', 'awesome', 'ok', 'okay', 'yes',
+    'morning', 'afternoon', 'evening', 'good', 'welcome',
     'please', 'sorry', 'lol', 'perfect', 'wonderful', 'appreciate', 'appreciated',
   ]);
 
@@ -155,7 +155,7 @@
       loading: null,
       retriever: null,
       element: null,
-      csrfToken: null,
+      csrf: null,
       restored: false,
     };
 
@@ -223,12 +223,33 @@
           // Its API is the same, so that one is used.
           global.customElements.get('deep-chat') ? null : import(cfg.deepChatPath),
           state.retriever.ready(),
-        ]);
+        ]).catch(err => {
+          // The next open tries again.
+          state.loading = null;
+          throw err;
+        });
       }
       return state.loading;
     }
 
-    const warm = () => { load().catch(err => console.warn('[scolta:chat] loading failed', err)); };
+    // The platform's CSRF token for a signed in visitor, fetched once.
+    function csrfToken() {
+      if (!state.csrf) {
+        state.csrf = fetch(cfg.csrf.tokenUrl, { credentials: 'same-origin' })
+          .then(resp => (resp.ok ? resp.text() : ''))
+          .then(text => text.trim())
+          .catch(() => {
+            state.csrf = null;
+            return '';
+          });
+      }
+      return state.csrf;
+    }
+
+    const warm = () => {
+      load().catch(err => console.warn('[scolta:chat] loading failed', err));
+      if (cfg.csrf && cfg.csrf.header && cfg.csrf.tokenUrl) csrfToken();
+    };
     if (typeof global.requestIdleCallback === 'function') {
       global.requestIdleCallback(warm, { timeout: 4000 });
     } else {
@@ -243,11 +264,8 @@
     async function headers(extra) {
       const out = Object.assign({ 'X-Scolta-Chat': '1' }, extra || {});
       if (cfg.csrf && cfg.csrf.header && cfg.csrf.tokenUrl) {
-        if (state.csrfToken === null) {
-          const resp = await fetch(cfg.csrf.tokenUrl, { credentials: 'same-origin' });
-          state.csrfToken = resp.ok ? (await resp.text()).trim() : '';
-        }
-        if (state.csrfToken) out[cfg.csrf.header] = state.csrfToken;
+        const token = await csrfToken();
+        if (token) out[cfg.csrf.header] = token;
       }
       return out;
     }
@@ -450,9 +468,8 @@
     }
 
     async function build() {
-      const history = state.restored ? [] : await restoreHistory();
+      const [history] = await Promise.all([state.restored ? [] : restoreHistory(), load()]);
       state.restored = true;
-      await load();
       const el = doc.createElement('deep-chat');
       el.className = 'scolta-chat-deep-chat';
       el.connect = { handler: handler, stream: true };
@@ -466,8 +483,11 @@
       // deep-chat refuses submitUserMessage() and friends until it has
       // rendered; the fallback covers a copy that never reports it.
       const rendered = new Promise(resolve => {
-        el.onComponentRender = () => resolve();
-        global.setTimeout(resolve, 3000);
+        const fallback = global.setTimeout(resolve, 3000);
+        el.onComponentRender = () => {
+          global.clearTimeout(fallback);
+          resolve();
+        };
       });
       body.replaceChildren(el);
       state.element = el;

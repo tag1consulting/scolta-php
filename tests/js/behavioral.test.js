@@ -720,7 +720,7 @@ describe('sub-word expansion is frequency-guarded (issue #156)', () => {
         expect(guard[0]).toContain('subwordMaxFreq <= 0');
         expect(guard[0]).toContain('subwordMaxFreq >= 1');
         // Numerator and denominator both scope to the filters the pass searches
-        // under (the search page passes its active filters) —
+        // under (the search page passes its active filters):
         // the denominator via cached totals, never a match-all search (which
         // downloads the entire word index; AI-Overview latency fix).
         expect(guard[0]).toContain('subwordCorpusSize(filters)');
