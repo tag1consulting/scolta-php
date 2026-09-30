@@ -223,8 +223,11 @@
   // Honor CUSTOM_STOP_WORDS in JS just as the WASM scorer does — previously
   // query tokenization used only the built-in STOPWORDS, so it disagreed with
   // WASM scoring (issue #156 follow-up).
-  function effectiveStopwords() {
-    const customStops = (getConfig().CUSTOM_STOP_WORDS || []).map(w => String(w).toLowerCase());
+  //
+  // An instance passes its own CUSTOM_STOP_WORDS; undefined falls back to the
+  // page's global list.
+  function effectiveStopwords(customStopWords) {
+    const customStops = (customStopWords ?? getConfig().CUSTOM_STOP_WORDS ?? []).map(w => String(w).toLowerCase());
     return customStops.length ? new Set([...STOPWORDS, ...customStops]) : STOPWORDS;
   }
 
@@ -246,14 +249,15 @@
 
   // Extract meaningful search terms from a query (filter stopwords).
   // "who is Loreen Babcock" → ["loreen", "babcock"]
-  // If everything is filtered, fall back to words longer than 2 chars.
-  function extractSearchTerms(query) {
-    const stops = effectiveStopwords();
+  // If everything is filtered, fall back to words longer than 2 chars, unless
+  // the caller asks for the meaningful words only.
+  function extractSearchTerms(query, stops, meaningfulOnly) {
+    stops = stops || effectiveStopwords();
     const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 0);
     const meaningful = words
       .map(w => w.replace(/[^\w]/g, ''))
       .filter(w => !stops.has(w) && w.length > 1);
-    if (meaningful.length === 0) {
+    if (meaningful.length === 0 && !meaningfulOnly) {
       return words.filter(w => w.length > 2);
     }
     return meaningful;
@@ -467,7 +471,7 @@
     }
   }
 
-  function createInstance(containerSelector, instanceConfig) {
+  function createInstance(containerSelector, instanceConfig, headless) {
 
   // --- Instance state (local to this closure) ---
   let pagefind = null;
@@ -536,6 +540,9 @@
   // above pagefindSearch() for why identical searches within one cycle are both
   // safe to share and expensive to repeat.
   let searchMemo = new Map();
+  // 0 for the search page, whose memo is cleared every cycle. The headless
+  // retriever keeps one memo for the life of the page and caps it here.
+  let searchMemoCap = 0;
 
   // Detect default language filter from instanceConfig.currentLanguage or <html lang>.
   // Applied on every fresh search unless the URL already specifies f_language.
@@ -635,6 +642,13 @@
       RECENCY_CURVE: s.RECENCY_CURVE ?? [],
       METADATA_BOOSTS: s.METADATA_BOOSTS ?? {},
     };
+  }
+
+  // The stop words this instance tokenizes with: its own CUSTOM_STOP_WORDS,
+  // or the page's global list when it has none.
+  function instanceStopwords() {
+    const s = (instanceConfig && instanceConfig.scoring) || {};
+    return effectiveStopwords(s.CUSTOM_STOP_WORDS);
   }
 
   function getInstanceEndpoints() {
@@ -1384,7 +1398,7 @@
 
   // --- AI features ---
 
-  async function expandQuery(query) {
+  async function expandQuery(query, signal) {
     const CONFIG = getInstanceConfig();
     const endpoints = getInstanceEndpoints();
     if (!CONFIG.AI_EXPAND_QUERY) return null;
@@ -1393,7 +1407,7 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query }),
-        signal: abortController?.signal,
+        signal: signal || abortController?.signal,
       });
       debugLog("[scolta:expand] status:", resp.status);
       if (!resp.ok) {
@@ -1715,7 +1729,7 @@
       try {
         const contextItems = topN.map(r => ({
           content: stripHtml(r.data.content || r.data.excerpt || ''),
-          url: ((u) => u.startsWith('/') ? window.location.origin + u : u)(r.data.meta?.url || resolveUrl(r.data.url || '')),
+          url: resultUrl(r.data),
           title: r.data.meta?.title || '',
         }));
         const extractInput = JSON.stringify({
@@ -1945,6 +1959,13 @@
 
   // Build LLM context string from an array of scored results.
   // Top 2 results get full page content for depth; remaining get excerpts.
+  // The absolute URL a result links to: the indexed meta.url when the host set
+  // one, else the Pagefind URL, resolved against this page's origin.
+  function resultUrl(data) {
+    const u = data.meta?.url || resolveUrl(data.url || "");
+    return u.startsWith("/") ? window.location.origin + u : u;
+  }
+
   function buildLLMContext(results, sortHint = null, filterHint = null) {
     const CONFIG = getInstanceConfig();
     // Collapse results that resolve to the same destination URL before numbering.
@@ -1955,8 +1976,7 @@
     const seenUrls = new Set();
     const unique = [];
     for (const r of results) {
-      const _u = r.data.meta?.url || resolveUrl(r.data.url || "");
-      const url = _u.startsWith("/") ? window.location.origin + _u : _u;
+      const url = resultUrl(r.data);
       if (url && seenUrls.has(url)) continue;
       if (url) seenUrls.add(url);
       unique.push({ r, url });
@@ -2066,7 +2086,7 @@
 
   async function searchForFollowUpContext(question) {
     if (!pagefind) return '';
-    const terms = extractSearchTerms(question);
+    const terms = extractSearchTerms(question, instanceStopwords());
     const searchQuery = terms.length > 0 ? terms.join(' ') : question;
     try {
       const search = await pagefindSearch(searchQuery, {});
@@ -2443,6 +2463,9 @@
     if (!search) {
       search = pagefind.search(query, searchOpts);
       searchMemo.set(key, search);
+      if (searchMemoCap > 0 && searchMemo.size > searchMemoCap) {
+        searchMemo.delete(searchMemo.keys().next().value);
+      }
     }
     if (!facetIndex) return search;
 
@@ -3311,7 +3334,7 @@
     let scored;
     if (scoltaWasm) {
       // WASM scoring — canonical Rust implementation
-      const queryTerms = extractSearchTerms(query);
+      const queryTerms = extractSearchTerms(query, instanceStopwords());
       const results = loaded.map((data, i) => {
         const contentLocations = computeContentWordLocations(data.content || '', queryTerms);
         return {
@@ -4296,39 +4319,10 @@
     return max; // 0 when no data — the caller fails closed
   }
 
-  async function mergeExpandedSearchResults(expandedTerms, originalQuery, searchQuery, preserveFilters, version, sortOverride, subjectTerms, countContext) {
+  // The sub-word admission guard for one expansion pass, bound to the typed
+  // query and the filters that pass searches under.
+  function subwordGuard(searchQuery, filters) {
     const CONFIG = getInstanceConfig();
-    // The seeding queries this pass ends up running — the ones that introduce
-    // documents into the result list, and therefore the ones the facet counts
-    // have to cover. Filled by whichever branch below builds the list, and
-    // deliberately taken from the list that was actually searched rather than
-    // rebuilt at the point of use.
-    let countTerms = [];
-    const validTerms = expandedTerms
-      ? expandedTerms.filter(t => t.toLowerCase() !== originalQuery.toLowerCase())
-      : [];
-
-    // For the relevance path we need expanded terms; for the sort path we proceed
-    // even with none (we still run the primary query with native sort).
-    if (validTerms.length === 0 && !sortOverride) return;
-
-    if (version !== searchVersion) {
-      debugLog('[scolta:expand] Discarding stale expansion (version', version, 'vs current', searchVersion, ')');
-      return;
-    }
-
-    // An expansion term is a phrase, and decomposing it into words is what
-    // puts a conjunction on the highlight list: "reading and writing" carries
-    // an "and" that the primary path already filtered out of the query.
-    const expansionStops = effectiveStopwords();
-    for (const term of validTerms) {
-      for (const word of term.toLowerCase().split(/\s+/)) {
-        if (isHighlightableWord(word, expansionStops) && !allHighlightTerms.includes(word)) {
-          allHighlightTerms.push(word);
-        }
-      }
-    }
-
     // Sub-word frequency guard (issue #156). Multi-word expansion terms are
     // decomposed into their constituent words so broad queries recover the
     // recall lost in v1.0.0 — but a word is only added as a search term when
@@ -4346,7 +4340,7 @@
     // the USER actually typed — frequency is a leaky proxy for "generic," and in a
     // topical corpus the on-topic words are also the high-frequency ones. Exempt
     // query tokens from the frequency check, EXCEPT words on the guard denylist.
-    const queryTokens = new Set(extractSearchTerms(searchQuery));
+    const queryTokens = new Set(extractSearchTerms(searchQuery, instanceStopwords()));
     const subwordDenylist = new Set(
       (CONFIG.EXPAND_SUBWORD_DENYLIST || []).map(w => String(w).toLowerCase())
     );
@@ -4368,10 +4362,10 @@
       let df = null;
       try {
         if (subwordCorpusTotal === null) {
-          subwordCorpusTotal = subwordCorpusSize(activeFilters);
+          subwordCorpusTotal = subwordCorpusSize(filters);
         }
         if (subwordCorpusTotal > 0) {
-          const hit = await pagefindSearch(word, activeFilters);
+          const hit = await pagefindSearch(word, filters);
           df = hit.results.length;
           allowed = (df / subwordCorpusTotal) < subwordMaxFreq;
         }
@@ -4417,6 +4411,156 @@
       const gate = CONFIG.SPECIFICITY_AGREEMENT_GATE ?? CONFIG.SPECIFICITY_FLOOR ?? 0.15;
       return cached.df > 0 && spec != null && spec > gate;
     }
+
+    return { allowed: subwordAllowed, agreementOnly: subwordAgreementOnly, denylist: subwordDenylist };
+  }
+
+  // The relevance stage of an expansion: search the expansion terms and their
+  // admitted sub-words, merge them into the primary list and re-rank. Shared by
+  // the search page and the headless retriever, so it returns data and sets no
+  // instance state. Returns null when isStale() says the caller moved on while
+  // the searches ran.
+  async function rankExpansion(primaryResults, validTerms, searchQuery, filters, guard, isStale) {
+    const CONFIG = getInstanceConfig();
+    const subwordAllowed = guard.allowed;
+    const subwordAgreementOnly = guard.agreementOnly;
+    const queries = [];
+    let weightIndex = 0;
+    const expandBase = CONFIG.EXPAND_PRIMARY_WEIGHT;
+
+    for (const term of validTerms) {
+      const weight = Math.max(expandBase - (weightIndex * 0.05), 0.1);
+      queries.push({ term, weight });
+      weightIndex++;
+
+      const words = extractSearchTerms(term, instanceStopwords());
+      if (words.length > 1) {
+        for (const word of words) {
+          if (!queries.some(q => q.term === word) && await subwordAllowed(word)) {
+            const wordWeight = Math.max(expandBase - (weightIndex * 0.05), 0.1);
+            queries.push({ term: word, weight: wordWeight });
+            weightIndex++;
+          }
+        }
+      }
+    }
+
+    // Second pass: the discriminating phrase sub-words the admission guard
+    // rejected, added as agreement-only terms (see subwordAgreementOnly).
+    // Deliberately a SEPARATE pass after every seeding term is queued, so a
+    // word that seeds for one phrase is never demoted to agreement-only just
+    // because another phrase mentioned it first.
+    for (const term of validTerms) {
+      const words = extractSearchTerms(term, instanceStopwords());
+      if (words.length <= 1) continue;
+      for (const word of words) {
+        if (queries.some(q => q.term === word)) continue;
+        if (!(await subwordAgreementOnly(word))) continue;
+        const wordWeight = Math.max(expandBase - (weightIndex * 0.05), 0.1);
+        queries.push({ term: word, weight: wordWeight, agreementOnly: true });
+        weightIndex++;
+      }
+    }
+
+    // The user's own typed terms join the SAME per-term co-occurrence
+    // accumulator as the expansion terms (searchAndLoadParallel), so a document
+    // matching the typed intent AND several expansion terms outranks one that
+    // matches only expansion terms. This is the anchor that separates a real
+    // "apollo 1 fire" post (matches typed "fire" plus the crew-name expansions)
+    // from an off-topic post that matches the crew names but not "fire", and
+    // that keeps a common typed word from being the sole ranking signal.
+    // Full weight (the primary-path 1.0), then specificity-damped like every
+    // other term, so a ubiquitous typed word ("moment") is still down-weighted.
+    // The typed terms already drive the primary AND / OR search that seeds
+    // allScoredResults; adding them here only lets their match COUNT toward
+    // agreement, and typed-only documents are dropped from this path.
+    //
+    // Appended AFTER the expansion terms deliberately: a word that is both
+    // typed AND an expansion sub-word ("cernan" and "last" in "Cernan last
+    // words") must stay expansion-derived, or the typed-only drop below would
+    // delete every document it retrieved. Adding typed terms last means the
+    // dedup leaves such a word owned by the expansion that already claimed it.
+    for (const term of extractSearchTerms(searchQuery, instanceStopwords())) {
+      // The denylist vetoes even a typed word: a word configured out of
+      // sub-word admission must not be searched here for co-occurrence credit
+      // either (mirrors the guard's exemption veto and subwordAgreementOnly).
+      if (guard.denylist.has(term)) continue;
+      if (!queries.some(q => q.term === term)) {
+        queries.push({ term, weight: 1.0, isTyped: true });
+      }
+    }
+
+    // Specificity weighting so a common word leaked from an expansion phrase
+    // ("dinner" out of "meat-free dinner recipes") is scored by its rarity,
+    // not counted equal to the rare words that carry the intent. The phrase
+    // itself and its rare sub-words keep near-full weight; ubiquitous
+    // sub-words are damped toward the floor.
+    const expandSpecificity = {
+      enabled: CONFIG.SPECIFICITY_WEIGHTING,
+      corpusTotal: subwordCorpusSize(filters),
+      strongMatched: false,
+    };
+    // The same seeding test searchAndLoadParallel() applies, over the same
+    // array: a typed term or an agreement-only sub-word lends co-occurrence
+    // score to documents another query already found and never emits a URL of
+    // its own, so counting it would put documents in the panel that are not in
+    // the list.
+    const countTerms = queries.filter(q => !q.isTyped && !q.agreementOnly).map(q => q.term);
+
+    const expandedResults = await searchAndLoadParallel(queries, filters, searchQuery, expandSpecificity);
+
+    if (isStale()) {
+      debugLog('[scolta:expand] Discarding stale expansion after load');
+      return null;
+    }
+
+    let results = mergeResults(
+      primaryResults,
+      expandedResults,
+      1.0,
+      1.0
+    );
+    applyAgreementBonus(results, expandedResults);
+    results.sort((a, b) => b.score - a.score);
+    results = deduplicateByTitle(results);
+    return { results, countTerms, strongMatched: expandSpecificity.strongMatched };
+  }
+
+  async function mergeExpandedSearchResults(expandedTerms, originalQuery, searchQuery, preserveFilters, version, sortOverride, subjectTerms, countContext) {
+    const CONFIG = getInstanceConfig();
+    // The seeding queries this pass ends up running — the ones that introduce
+    // documents into the result list, and therefore the ones the facet counts
+    // have to cover. Filled by whichever branch below builds the list, and
+    // deliberately taken from the list that was actually searched rather than
+    // rebuilt at the point of use.
+    let countTerms = [];
+    const validTerms = expandedTerms
+      ? expandedTerms.filter(t => t.toLowerCase() !== originalQuery.toLowerCase())
+      : [];
+
+    // For the relevance path we need expanded terms; for the sort path we proceed
+    // even with none (we still run the primary query with native sort).
+    if (validTerms.length === 0 && !sortOverride) return;
+
+    if (version !== searchVersion) {
+      debugLog('[scolta:expand] Discarding stale expansion (version', version, 'vs current', searchVersion, ')');
+      return;
+    }
+
+    // An expansion term is a phrase, and decomposing it into words is what
+    // puts a conjunction on the highlight list: "reading and writing" carries
+    // an "and" that the primary path already filtered out of the query.
+    const expansionStops = instanceStopwords();
+    for (const term of validTerms) {
+      for (const word of term.toLowerCase().split(/\s+/)) {
+        if (isHighlightableWord(word, expansionStops) && !allHighlightTerms.includes(word)) {
+          allHighlightTerms.push(word);
+        }
+      }
+    }
+
+    const guard = subwordGuard(searchQuery, activeFilters);
+    const subwordAllowed = guard.allowed;
 
     let useSortPath = !!(sortOverride && sortOverride.field && sortOverride.direction);
     let subjectFilters = {};
@@ -4467,7 +4611,7 @@
       const termSet = new Set([searchQuery]);
       for (const term of validTerms) {
         termSet.add(term);
-        const words = extractSearchTerms(term);
+        const words = extractSearchTerms(term, instanceStopwords());
         if (words.length > 1) {
           for (const word of words) {
             if (!termSet.has(word) && await subwordAllowed(word)) {
@@ -4558,109 +4702,15 @@
 
     } else {
       // Relevance path: existing multi-term expand-and-merge behavior.
-      const queries = [];
-      let weightIndex = 0;
-      const expandBase = CONFIG.EXPAND_PRIMARY_WEIGHT;
-
-      for (const term of validTerms) {
-        const weight = Math.max(expandBase - (weightIndex * 0.05), 0.1);
-        queries.push({ term, weight });
-        weightIndex++;
-
-        const words = extractSearchTerms(term);
-        if (words.length > 1) {
-          for (const word of words) {
-            if (!queries.some(q => q.term === word) && await subwordAllowed(word)) {
-              const wordWeight = Math.max(expandBase - (weightIndex * 0.05), 0.1);
-              queries.push({ term: word, weight: wordWeight });
-              weightIndex++;
-            }
-          }
-        }
-      }
-
-      // Second pass: the discriminating phrase sub-words the admission guard
-      // rejected, added as agreement-only terms (see subwordAgreementOnly).
-      // Deliberately a SEPARATE pass after every seeding term is queued, so a
-      // word that seeds for one phrase is never demoted to agreement-only just
-      // because another phrase mentioned it first.
-      for (const term of validTerms) {
-        const words = extractSearchTerms(term);
-        if (words.length <= 1) continue;
-        for (const word of words) {
-          if (queries.some(q => q.term === word)) continue;
-          if (!(await subwordAgreementOnly(word))) continue;
-          const wordWeight = Math.max(expandBase - (weightIndex * 0.05), 0.1);
-          queries.push({ term: word, weight: wordWeight, agreementOnly: true });
-          weightIndex++;
-        }
-      }
-
-      // The user's own typed terms join the SAME per-term co-occurrence
-      // accumulator as the expansion terms (searchAndLoadParallel), so a document
-      // matching the typed intent AND several expansion terms outranks one that
-      // matches only expansion terms. This is the anchor that separates a real
-      // "apollo 1 fire" post (matches typed "fire" plus the crew-name expansions)
-      // from an off-topic post that matches the crew names but not "fire", and
-      // that keeps a common typed word from being the sole ranking signal.
-      // Full weight (the primary-path 1.0), then specificity-damped like every
-      // other term, so a ubiquitous typed word ("moment") is still down-weighted.
-      // The typed terms already drive the primary AND / OR search that seeds
-      // allScoredResults; adding them here only lets their match COUNT toward
-      // agreement, and typed-only documents are dropped from this path.
-      //
-      // Appended AFTER the expansion terms deliberately: a word that is both
-      // typed AND an expansion sub-word ("cernan" and "last" in "Cernan last
-      // words") must stay expansion-derived, or the typed-only drop below would
-      // delete every document it retrieved. Adding typed terms last means the
-      // dedup leaves such a word owned by the expansion that already claimed it.
-      for (const term of extractSearchTerms(searchQuery)) {
-        // The denylist vetoes even a typed word: a word configured out of
-        // sub-word admission must not be searched here for co-occurrence credit
-        // either (mirrors the guard's exemption veto and subwordAgreementOnly).
-        if (subwordDenylist.has(term)) continue;
-        if (!queries.some(q => q.term === term)) {
-          queries.push({ term, weight: 1.0, isTyped: true });
-        }
-      }
-
-      // Specificity weighting so a common word leaked from an expansion phrase
-      // ("dinner" out of "meat-free dinner recipes") is scored by its rarity,
-      // not counted equal to the rare words that carry the intent. The phrase
-      // itself and its rare sub-words keep near-full weight; ubiquitous
-      // sub-words are damped toward the floor.
-      const expandSpecificity = {
-        enabled: CONFIG.SPECIFICITY_WEIGHTING,
-        corpusTotal: subwordCorpusSize(activeFilters),
-        strongMatched: false,
-      };
-      // The same seeding test searchAndLoadParallel() applies, over the same
-      // array: a typed term or an agreement-only sub-word lends co-occurrence
-      // score to documents another query already found and never emits a URL of
-      // its own, so counting it would put documents in the panel that are not in
-      // the list.
-      countTerms = queries.filter(q => !q.isTyped && !q.agreementOnly).map(q => q.term);
-
-      const expandedResults = await searchAndLoadParallel(queries, activeFilters, searchQuery, expandSpecificity);
-
-      if (version !== searchVersion) {
-        debugLog('[scolta:expand] Discarding stale expansion after load (version', version, 'vs current', searchVersion, ')');
-        return;
-      }
-
+      const expanded = await rankExpansion(
+        allScoredResults, validTerms, searchQuery, activeFilters, guard,
+        () => version !== searchVersion);
+      if (!expanded) return;
+      countTerms = expanded.countTerms;
       // Adopt the specificity signal only now that the staleness check has
       // passed, so a discarded expansion cannot flip the current search's flag.
-      if (expandSpecificity.strongMatched) hadSpecificMatch = true;
-
-      allScoredResults = mergeResults(
-        allScoredResults,
-        expandedResults,
-        1.0,
-        1.0
-      );
-      applyAgreementBonus(allScoredResults, expandedResults);
-      allScoredResults.sort((a, b) => b.score - a.score);
-      allScoredResults = deduplicateByTitle(allScoredResults);
+      if (expanded.strongMatched) hadSpecificMatch = true;
+      allScoredResults = expanded.results;
     }
 
     displayedCount = 0;
@@ -4715,6 +4765,282 @@
     }
     renderFilters();
     debugLog(`[scolta:expand] ${sortOverride ? 'Native sort' : 'Merged'}: ${allScoredResults.length} results`);
+  }
+
+  // The filters a fresh search starts from: the caller's, plus the page
+  // language when AUTO_LANGUAGE_FILTER is on.
+  function seedFilters(initialFilters) {
+    const CONFIG = getInstanceConfig();
+    var effectiveFilters = initialFilters ? Object.assign({}, initialFilters) : {};
+    if (!effectiveFilters.language && defaultLangCode && CONFIG.AUTO_LANGUAGE_FILTER) {
+      var langs = CONFIG.AI_LANGUAGES || [];
+      if (langs.length > 1 && langs.includes(defaultLangCode)) {
+        effectiveFilters.language = new Set([defaultLangCode]);
+      }
+    }
+    // 'disabled' starts every search unfiltered. A URL f_ param and the
+    // language auto-filter are both facet selections, and applying either
+    // would need the taxonomy this mode never loads — the fallback would
+    // reach for the .pf_filter chunks the mode exists to avoid. Dropped here,
+    // at the one place filters are seeded, so the URL sync writes no f_
+    // params and the result header claims no filter either.
+    return facetsDisabled() ? {} : effectiveFilters;
+  }
+
+  // How a typed query is searched: its meaningful terms, the Pagefind query,
+  // whether it is a quoted phrase, and the form the scorer receives.
+  function planQuery(query) {
+    const isBrowse = query === '';
+    const meaningfulTerms = isBrowse ? [] : extractSearchTerms(query, instanceStopwords());
+    // null, not '': Pagefind returns the whole corpus for a null term and
+    // applies any active filters. An empty string is a term like any other.
+    const searchQuery = isBrowse
+      ? null
+      : (meaningfulTerms.length > 0 ? meaningfulTerms.join(' ') : query);
+    // Detect quoted phrase: user typed "hello world" with surrounding double-quotes.
+    // Pagefind receives the unquoted terms; the Rust scorer receives the quoted form
+    // so extract_query() can set forced_phrase = true and apply phrase multipliers.
+    const trimmedQuery = query.trim();
+    const isForcedPhrase =
+      trimmedQuery.startsWith('"') && trimmedQuery.endsWith('"') && trimmedQuery.length > 2;
+    const scorerQuery = isForcedPhrase ? trimmedQuery : searchQuery;
+    return { query, isBrowse, meaningfulTerms, searchQuery, isForcedPhrase, scorerQuery };
+  }
+
+  // The primary stage: the typed query's own search, the OR fallback when the
+  // AND search matched nothing, title dedup and priority pages. Shared by the
+  // search page and the headless retriever, so it returns data and sets no
+  // instance state.
+  async function rankPrimary(plan, filters) {
+    const CONFIG = getInstanceConfig();
+    const { isBrowse, meaningfulTerms, searchQuery, isForcedPhrase, scorerQuery } = plan;
+    const primarySearch = await pagefindSearch(searchQuery, filters);
+    // Pagefind returns every match id up front, so the true match total is
+    // free here — before the cap decides how few of them to load.
+    const total = primarySearch.results.length;
+    let results = isBrowse
+      ? await loadBrowseResults(primarySearch)
+      : await loadAndScoreSearch(primarySearch, scorerQuery, 1.0);
+
+    // OR fallback: only activate when AND search returns ZERO results.
+    // This prevents diluting precision when the user provides many terms
+    // to find a specific piece of content. Forced-phrase queries (quoted)
+    // never fall back to OR — the user explicitly asked for phrase results.
+    let usedOrFallback = false;
+    let strongMatched = false;
+    if (!isForcedPhrase && meaningfulTerms.length > 1 && primarySearch.results.length === 0) {
+      debugLog('[scolta:search] AND returned 0 results — running OR fallback');
+      const orQueries = meaningfulTerms.map(term => ({ term, weight: 0.6 }));
+      // Specificity weighting so the OR fallback leads with the rare on-intent
+      // term, not the ubiquitous typed word. Closes the typed-word exemption:
+      // a common word the user typed is still searched (recall) but no longer
+      // floods the head of the list.
+      const orSpecificity = {
+        enabled: CONFIG.SPECIFICITY_WEIGHTING,
+        corpusTotal: subwordCorpusSize(filters),
+        strongMatched: false,
+      };
+      const orResults = await searchAndLoadParallel(orQueries, filters, searchQuery, orSpecificity);
+      strongMatched = orSpecificity.strongMatched;
+      results = mergeResults(results, orResults);
+      applyAgreementBonus(results, orResults);
+      usedOrFallback = results.length > 0;
+    }
+
+    results.sort((a, b) => b.score - a.score);
+    results = deduplicateByTitle(results);
+
+    // Priority pages are matched against the query, so a browse has nothing
+    // to match them against.
+    const priorityPages = isBrowse ? [] : getInstancePriorityPages();
+    if (priorityPages.length > 0 && scoltaWasm && scoltaWasm.match_priority_pages) {
+      try {
+        const priorityInput = JSON.stringify({ query: plan.query, priority_pages: priorityPages });
+        const priorityMatches = JSON.parse(scoltaWasm.match_priority_pages(priorityInput));
+        if (priorityMatches && priorityMatches.length > 0) {
+          const priorityMap = {};
+          priorityMatches.forEach(pm => {
+            priorityMap[(pm.url || '').replace(/\/$/, '').toLowerCase()] = pm;
+          });
+          results.forEach(result => {
+            const url = resolveUrl(result.data.url || '').replace(/\/$/, '').toLowerCase();
+            if (priorityMap[url]) {
+              result.score = (result.score || 0) + (priorityMap[url].boost || 100);
+            }
+          });
+          results.sort((a, b) => b.score - a.score);
+        }
+      } catch (e) {
+        console.warn('[scolta] Priority page matching failed', e);
+      }
+    }
+    return { results, total, usedOrFallback, strongMatched };
+  }
+
+  // --- Headless retriever (Scolta.createRetriever) ---
+  //
+  // The same ranking the search page runs, returned as data for a caller with
+  // no widget, such as a chat. It calls the stages doSearch() calls and nothing
+  // else, so a query ranks the same in both.
+
+  let retrieverReady = null;
+
+  function positiveInt(value, fallback) {
+    const n = Math.floor(Number(value));
+    return n > 0 ? n : fallback;
+  }
+
+  // Cut text to at most max characters, at the last word boundary inside it.
+  function cutAtWord(text, max) {
+    const t = String(text || '').replace(/\s+/g, ' ').trim();
+    if (t.length <= max) return t;
+    const cut = t.slice(0, max);
+    const space = cut.lastIndexOf(' ');
+    return (space > max * 0.5 ? cut.slice(0, space) : cut).trim();
+  }
+
+  // Filters from a caller: { dimension: value | [values] | Set }.
+  function retrieverFilters(filters) {
+    if (!filters || typeof filters !== 'object') return null;
+    const out = {};
+    for (const [dim, vals] of Object.entries(filters)) {
+      const list = vals instanceof Set ? [...vals] : (Array.isArray(vals) ? vals : [vals]);
+      const clean = list.filter(v => typeof v === 'string' && v !== '');
+      if (clean.length > 0) out[dim] = new Set(clean);
+    }
+    return out;
+  }
+
+  async function retrieve(query, options) {
+    options = options || {};
+    await retrieverReady;
+    const signal = options.signal;
+    const aborted = () => !!(signal && signal.aborted);
+    const plan = planQuery(String(query == null ? '' : query).trim());
+    if (plan.isBrowse) return { query: '', expandedTerms: [], results: [], total: 0 };
+    const filters = seedFilters(retrieverFilters(options.filters));
+
+    // Started before the primary search and run beside it, as doSearch() does.
+    // A caller that planned the query already passes its terms instead.
+    let expandPromise;
+    if (plan.isForcedPhrase) {
+      expandPromise = Promise.resolve(null);
+    } else if (Array.isArray(options.expandedTerms)) {
+      expandPromise = Promise.resolve(options.expandedTerms);
+    } else {
+      expandPromise = expandQuery(plan.query, signal)
+        .then(e => (Array.isArray(e) ? e : (e && e.terms) || null));
+    }
+
+    const primary = await rankPrimary(plan, filters);
+    const terms = await expandPromise;
+    const lowerQuery = plan.query.toLowerCase();
+    const expandedTerms = (terms || [])
+      .filter(t => typeof t === 'string' && t !== '' && t.toLowerCase() !== lowerQuery);
+
+    let results = primary.results;
+    if (expandedTerms.length > 0 && !aborted()) {
+      const expanded = await rankExpansion(
+        results, expandedTerms, plan.searchQuery, filters,
+        subwordGuard(plan.searchQuery, filters), aborted);
+      if (expanded) results = expanded.results;
+    }
+    if (aborted()) {
+      throw signal.reason || new DOMException('The retrieval was aborted.', 'AbortError');
+    }
+    const limit = positiveInt(options.limit, 0);
+    if (limit > 0) results = results.slice(0, limit);
+    return { query: plan.query, expandedTerms, results, total: primary.total };
+  }
+
+  // The pages a model should see for a ranked list, as data. Tier one carries
+  // excerpts chosen for the query; tier two carries a title and one line, for
+  // questions about what the site covers. Numbered 1..N across both tiers, one
+  // entry per URL, URLs chosen exactly as the search page links them.
+  function buildContext(results, options) {
+    options = options || {};
+    const topN = positiveInt(options.topN, 5);
+    const broadN = positiveInt(options.broadN, 25);
+    const topChars = positiveInt(options.topChars, 6000);
+    const broadChars = positiveInt(options.broadChars, 2500);
+    const query = String(options.query || '');
+
+    const seen = new Set();
+    const picked = [];
+    for (const r of results || []) {
+      if (!r || !r.data) continue;
+      const url = resultUrl(r.data);
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      picked.push({ data: r.data, url });
+      if (picked.length >= topN + broadN) break;
+    }
+    const top = picked.slice(0, topN);
+    const broad = picked.slice(topN);
+
+    const perItem = Math.max(100, Math.floor(topChars / Math.max(top.length, 1)));
+    const texts = top.map(p => stripHtml(p.data.content || p.data.excerpt || ''));
+    let excerpts = null;
+    if (scoltaWasm && scoltaWasm.batch_extract_context && top.length > 0) {
+      try {
+        const out = JSON.parse(scoltaWasm.batch_extract_context(JSON.stringify({
+          query: query,
+          items: top.map((p, i) => ({ content: texts[i], url: p.url, title: p.data.meta?.title || '' })),
+          config: {
+            max_length: perItem,
+            intro_length: Math.min(200, Math.floor(perItem / 2)),
+            snippet_radius: 80,
+            separator: '\n\n',
+          },
+        })));
+        excerpts = out.map(item => item.context || '');
+      } catch (e) {
+        console.warn('[scolta] WASM context extraction failed, using fallback', e);
+      }
+    }
+    if (!excerpts) excerpts = texts.map(t => cutAtWord(t, perItem));
+
+    const pages = top.map((p, i) => ({
+      n: i + 1,
+      tier: 1,
+      title: p.data.meta?.title || '',
+      url: p.url,
+      excerpt: excerpts[i].slice(0, perItem),
+    }));
+
+    // Tier two shares one budget: each page gets an even share for its title,
+    // URL and line, and the list stops when the budget is spent.
+    const share = Math.floor(broadChars / Math.max(broad.length, 1));
+    let used = 0;
+    for (const p of broad) {
+      const title = p.data.meta?.title || '';
+      const room = share - title.length - p.url.length;
+      const line = room > 0 ? cutAtWord(stripHtml(p.data.excerpt || ''), room) : '';
+      const cost = title.length + p.url.length + line.length;
+      if (used + cost > broadChars) break;
+      used += cost;
+      pages.push({ n: pages.length + 1, tier: 2, title, url: p.url, excerpt: line });
+    }
+    return pages;
+  }
+
+  // The most relevant parts of a text for a query, for a caller with text of
+  // its own (the chat uses it for the page the visitor is reading).
+  function extractContext(text, query, maxLength) {
+    const content = stripHtml(String(text || ''));
+    const max = positiveInt(maxLength, 3000);
+    if (scoltaWasm && scoltaWasm.extract_context) {
+      try {
+        return JSON.parse(scoltaWasm.extract_context(JSON.stringify({
+          content: content,
+          query: String(query || ''),
+          config: { max_length: max, intro_length: Math.min(200, Math.floor(max / 2)), snippet_radius: 80, separator: '\n\n' },
+        }))).slice(0, max);
+      } catch (e) {
+        console.warn('[scolta] WASM context extraction failed, using fallback', e);
+      }
+    }
+    return cutAtWord(content, max);
   }
 
   // --- Main search ---
@@ -4783,20 +5109,7 @@
       // only, so a count from an earlier query can never leak into this one.
       searchMemo = new Map();
       if (!preserveFilters) {
-        var effectiveFilters = initialFilters ? Object.assign({}, initialFilters) : {};
-        if (!effectiveFilters.language && defaultLangCode && CONFIG.AUTO_LANGUAGE_FILTER) {
-          var langs = CONFIG.AI_LANGUAGES || [];
-          if (langs.length > 1 && langs.includes(defaultLangCode)) {
-            effectiveFilters.language = new Set([defaultLangCode]);
-          }
-        }
-        // 'disabled' starts every search unfiltered. A URL f_ param and the
-        // language auto-filter are both facet selections, and applying either
-        // would need the taxonomy this mode never loads — the fallback would
-        // reach for the .pf_filter chunks the mode exists to avoid. Dropped here,
-        // at the one place activeFilters is seeded, so the URL sync below writes
-        // no f_ params and the result header claims no filter either.
-        activeFilters = facetsDisabled() ? {} : effectiveFilters;
+        activeFilters = seedFilters(initialFilters);
       }
 
       // Update URL with search query and active filter state.
@@ -4839,25 +5152,14 @@
         els.expandedTerms.style.display = "none";
       }
 
-      meaningfulTerms = isBrowse ? [] : extractSearchTerms(query);
-      // null, not '': Pagefind returns the whole corpus for a null term and
-      // applies any active filters. An empty string is a term like any other.
-      searchQuery = isBrowse
-        ? null
-        : (meaningfulTerms.length > 0 ? meaningfulTerms.join(' ') : query);
-      // Detect quoted phrase: user typed "hello world" with surrounding double-quotes.
-      // Pagefind receives the unquoted terms; the Rust scorer receives the quoted form
-      // so extract_query() can set forced_phrase = true and apply phrase multipliers.
-      const trimmedQuery = query.trim();
-      isForcedPhrase =
-        trimmedQuery.startsWith('"') && trimmedQuery.endsWith('"') && trimmedQuery.length > 2;
-      const scorerQuery = isForcedPhrase ? trimmedQuery : searchQuery;
+      const plan = planQuery(query);
+      ({ meaningfulTerms, searchQuery, isForcedPhrase } = plan);
       debugLog('[scolta:search] Filtered query:', JSON.stringify(sanitizeQueryForLogging(searchQuery)), '(original:', JSON.stringify(sanitizeQueryForLogging(query)), ')');
 
       // Both branches go through the same gate. The fallback is the one that
       // used to leak: it applied only a length guard to the raw query, so a
       // query of nothing but stopwords marked every one of them.
-      const highlightStops = effectiveStopwords();
+      const highlightStops = instanceStopwords();
       allHighlightTerms = (meaningfulTerms.length > 0
         ? meaningfulTerms
         : query.toLowerCase().split(/\s+/)
@@ -4879,68 +5181,14 @@
         : (preserveFilters ? Promise.resolve(lastExpandedTerms) : expandQuery(query));
       expansionInFlight = !isBrowse && !isForcedPhrase && !preserveFilters && CONFIG.AI_EXPAND_QUERY;
 
-      const primarySearch = await pagefindSearch(searchQuery, activeFilters);
-      // Pagefind returns every match id up front, so the true match total is
-      // free here — before the cap decides how few of them to load.
-      if (isBrowse) browseTotal = primarySearch.results.length;
-      allScoredResults = isBrowse
-        ? await loadBrowseResults(primarySearch)
-        : await loadAndScoreSearch(primarySearch, scorerQuery, 1.0);
-
-      // OR fallback: only activate when AND search returns ZERO results.
-      // This prevents diluting precision when the user provides many terms
-      // to find a specific piece of content. Forced-phrase queries (quoted)
-      // never fall back to OR — the user explicitly asked for phrase results.
-      usedOrFallback = false;
-      if (!isForcedPhrase && meaningfulTerms.length > 1 && primarySearch.results.length === 0) {
-        debugLog('[scolta:search] AND returned 0 results — running OR fallback');
-        const orQueries = meaningfulTerms.map(term => ({ term, weight: 0.6 }));
-        // Specificity weighting so the OR fallback leads with the rare on-intent
-        // term, not the ubiquitous typed word. Closes the typed-word exemption:
-        // a common word the user typed is still searched (recall) but no longer
-        // floods the head of the list.
-        const orSpecificity = {
-          enabled: CONFIG.SPECIFICITY_WEIGHTING,
-          corpusTotal: subwordCorpusSize(activeFilters),
-          strongMatched: false,
-        };
-        const orResults = await searchAndLoadParallel(orQueries, activeFilters, searchQuery, orSpecificity);
-        // Only adopt the specificity signal if this search is still current — a
-        // newer doSearch() resets hadSpecificMatch, and a late-resolving stale OR
-        // fallback must not repollute it.
-        if (version === searchVersion && orSpecificity.strongMatched) hadSpecificMatch = true;
-        allScoredResults = mergeResults(allScoredResults, orResults);
-        applyAgreementBonus(allScoredResults, orResults);
-        usedOrFallback = allScoredResults.length > 0;
-      }
-
-      allScoredResults.sort((a, b) => b.score - a.score);
-      allScoredResults = deduplicateByTitle(allScoredResults);
-
-      // Priority pages are matched against the query, so a browse has nothing
-      // to match them against.
-      const priorityPages = isBrowse ? [] : getInstancePriorityPages();
-      if (priorityPages.length > 0 && scoltaWasm && scoltaWasm.match_priority_pages) {
-        try {
-          const priorityInput = JSON.stringify({ query: currentQuery, priority_pages: priorityPages });
-          const priorityMatches = JSON.parse(scoltaWasm.match_priority_pages(priorityInput));
-          if (priorityMatches && priorityMatches.length > 0) {
-            const priorityMap = {};
-            priorityMatches.forEach(pm => {
-              priorityMap[(pm.url || '').replace(/\/$/, '').toLowerCase()] = pm;
-            });
-            allScoredResults.forEach(result => {
-              const url = resolveUrl(result.data.url || '').replace(/\/$/, '').toLowerCase();
-              if (priorityMap[url]) {
-                result.score = (result.score || 0) + (priorityMap[url].boost || 100);
-              }
-            });
-            allScoredResults.sort((a, b) => b.score - a.score);
-          }
-        } catch (e) {
-          console.warn('[scolta] Priority page matching failed', e);
-        }
-      }
+      const primary = await rankPrimary(plan, activeFilters);
+      if (isBrowse) browseTotal = primary.total;
+      allScoredResults = primary.results;
+      usedOrFallback = primary.usedOrFallback;
+      // Only adopt the specificity signal if this search is still current — a
+      // newer doSearch() resets hadSpecificMatch, and a late-resolving stale OR
+      // fallback must not repollute it.
+      if (version === searchVersion && primary.strongMatched) hadSpecificMatch = true;
 
       // Paint the results BEFORE computing facet counts. The count pass below is a
       // second full Pagefind search, and on a production-size index that is the
@@ -6080,6 +6328,20 @@
     debugLog("[scolta] Initialized");
   }
 
+  // Headless: no container, no DOM. Load Pagefind and WASM now so the first
+  // retrieve() does not wait for them, and hand back the retriever.
+  if (headless) {
+    searchMemoCap = 300;
+    retrieverReady = Promise.all([initPagefind(), initScoltaWasm()]).then(() => undefined);
+    return {
+      ready: () => retrieverReady,
+      retrieve: retrieve,
+      buildContext: buildContext,
+      extractContext: extractContext,
+      terms: (text) => extractSearchTerms(String(text || ''), instanceStopwords(), true),
+    };
+  }
+
   // Initialize the instance by building the UI inside the container.
   init(containerSelector);
   // If init failed to find the container it never cached any DOM reference.
@@ -6265,6 +6527,39 @@
       throw new TypeError('[scolta] Scolta.setSuggestionRenderer expects a function or null');
     }
     globalSuggestionRenderer = fn || null;
+  };
+
+  /**
+   * Create a headless retriever: the search page's ranking, as data.
+   *
+   *   const retriever = Scolta.createRetriever(window.scolta);
+   *   await retriever.ready();
+   *   const { results } = await retriever.retrieve('breach notification');
+   *   const pages = retriever.buildContext(results, { query: 'breach notification' });
+   *
+   * `config` is the same object Scolta.init() reads (window.scolta when
+   * omitted). No container or DOM is needed. The facet index is not loaded
+   * up front (facetMode 'deferred') unless the config names another mode.
+   *
+   *   retrieve(query, { expandedTerms, filters, signal, limit })
+   *     -> Promise<{ query, expandedTerms, results: [{ data, score }], total }>
+   *     The list the search page ranks for the query with no facet selected,
+   *     total being the match count before any cap. Without expandedTerms it
+   *     calls expand-query beside the primary search, as the search page does;
+   *     the sort and filter hints that call can return are not applied.
+   *   buildContext(results, { query, topN, topChars, broadN, broadChars })
+   *     -> [{ n, tier, title, url, excerpt }]
+   *   extractContext(text, query, maxLength) -> string
+   *   terms(text) -> the meaningful words, with this config's stop words;
+   *     [] when there are none
+   *   ready() -> Promise that settles when Pagefind and WASM are loaded
+   *
+   * Experimental, added in 2.0.0.
+   */
+  global.Scolta.createRetriever = function(config) {
+    const base = config || global.scolta || {};
+    const cfg = Object.assign({}, base, { facetMode: base.facetMode || 'deferred' });
+    return createInstance(null, cfg, true);
   };
 
   // Backward-compatible init: creates a default instance from window.scolta.

@@ -118,3 +118,31 @@ describe('customStopWords applied in JS query tokenization', () => {
         expect(q).toBe('chocolate desserts');
     });
 });
+
+describe('an instance tokenizes with its own CUSTOM_STOP_WORDS', () => {
+    // Before the fix every instance read window.scolta.scoring, so a second
+    // instance with its own list searched with the page's list instead.
+    async function instanceSearch(pageStops, instanceStops, query) {
+        const searchedQueries = [];
+        const window = createWindow(pageStops, searchedQueries);
+        window.document.body.insertAdjacentHTML('beforeend', '<div id="second"></div>');
+        const second = window.Scolta.createInstance('#second', Object.assign({}, window.scolta, {
+            container: '#second',
+            scoring: Object.assign({}, window.scolta.scoring, instanceStops === undefined ? { CUSTOM_STOP_WORDS: undefined } : { CUSTOM_STOP_WORDS: instanceStops }),
+        }));
+        for (let i = 0; i < 10; i++) await tick(0);
+        searchedQueries.length = 0;
+        window.document.querySelector('#second #scolta-query').value = query;
+        await second.doSearch();
+        for (let i = 0; i < 20; i++) await tick(0);
+        return searchedQueries[0];
+    }
+
+    test('its own list wins over the page list', async () => {
+        expect(await instanceSearch(['chocolate'], ['desserts'], 'chocolate desserts')).toBe('chocolate');
+    });
+
+    test('an instance without a list keeps the page list', async () => {
+        expect(await instanceSearch(['desserts'], undefined, 'chocolate desserts')).toBe('chocolate');
+    });
+});

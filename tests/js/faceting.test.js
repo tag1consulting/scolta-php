@@ -170,9 +170,10 @@ describe('faceting: source structure', () => {
 
     test('doSearch accepts initialFilters parameter', () => {
         expect(scoltaSource).toContain('async function doSearch(preserveFilters, initialFilters)');
-        // activeFilters is set via effectiveFilters to allow auto-language
+        // activeFilters is seeded through seedFilters() to allow auto-language
         // injection, and emptied outright under facetMode 'disabled'.
-        expect(scoltaSource).toContain("activeFilters = facetsDisabled() ? {} : effectiveFilters;");
+        expect(scoltaSource).toContain("activeFilters = seedFilters(initialFilters);");
+        expect(scoltaSource).toContain("return facetsDisabled() ? {} : effectiveFilters;");
     });
 
     test('doSearch computes query-fixed counts only on a fresh typed query', () => {

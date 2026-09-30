@@ -351,14 +351,21 @@ describe('scolta.js structure', () => {
         const fnMatch = jsSource.match(/function summarizeResults\b[\s\S]*?function\s+\w+/);
         expect(fnMatch).not.toBeNull();
         const fnBody = fnMatch[0];
-        expect(fnBody).toContain('r.data.meta?.url');
+        expect(fnBody).toContain('resultUrl(r.data)');
+    });
+
+    test('resultUrl prefers meta.url and makes the URL absolute', () => {
+        const fnMatch = jsSource.match(/function resultUrl\b[\s\S]*?\n  }/);
+        expect(fnMatch).not.toBeNull();
+        expect(fnMatch[0]).toContain('data.meta?.url || resolveUrl(data.url || "")');
+        expect(fnMatch[0]).toContain('window.location.origin');
     });
 
     test('buildLLMContext uses meta.url fallback for citation URLs', () => {
         const fnMatch = jsSource.match(/function buildLLMContext\b[\s\S]*?function\s+\w+/);
         expect(fnMatch).not.toBeNull();
         const fnBody = fnMatch[0];
-        expect(fnBody).toContain('r.data.meta?.url');
+        expect(fnBody).toContain('resultUrl(r.data)');
     });
 
     test('result card renderer uses meta.url fallback', () => {
