@@ -243,5 +243,7 @@ class ContextAssemblerTest extends TestCase
         $this->assertSame([], CitedPages::find("The pages I have here don't cover that.", $pages), 'A decline shows no sources.');
         $this->assertSame([2], array_column(CitedPages::find('Read [it](/two).', $pages), 'n'), 'A same site path link counts.');
         $this->assertSame([], CitedPages::find('Read [it](https://other.example/two).', $pages), 'The same path on another host cites nothing.');
+        $this->assertSame([2], array_column(CitedPages::find('Read [it](https://S.TEST/two).', $pages), 'n'), 'The host matches in any case.');
+        $this->assertSame([], CitedPages::find('Read [it](/Two).', $pages), 'The path matches exactly.');
     }
 }

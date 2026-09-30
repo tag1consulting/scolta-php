@@ -344,10 +344,12 @@ describe('scolta-chat.js', () => {
         const h = await setup({ plan: { query: 'GDPR breach notification details', needs_search: true, terms: [] } });
         await h.ask('What does GDPR say about breach notification?');
         await h.ask('Tell me more');
+        await h.ask('Great, tell me more');
+        await h.ask('Yes please');
 
-        expect(h.plans()).toHaveLength(1);
+        expect(h.plans()).toHaveLength(3);
         expect(h.calls.retrieve[1].query).toBe('GDPR breach notification details');
-        expect(h.turns()[1].body.needs_search).toBe(true);
+        expect(h.turns().slice(1).map(t => t.body.needs_search)).toEqual([true, true, true]);
     });
 
     test('page context skips navigation, forms and anything marked ignore', async () => {
@@ -414,6 +416,9 @@ describe('scolta-chat.js', () => {
             detail: { question: 'What about contractors?', query: 'data retention', summary: 'Keep records six years.', pages: [{ title: 'Retention', url: 'https://complianceiq.test/retention', excerpt: '' }] },
         });
         const notCancelled = h.win.document.body.dispatchEvent(event);
+        // Before deep-chat has loaded, the panel is open and working.
+        expect(h.$('#scolta-chat-panel').hidden).toBe(false);
+        expect(h.$('.scolta-chat-status').textContent).toBe('Working on it');
         await settle(60);
 
         expect(notCancelled).toBe(false);

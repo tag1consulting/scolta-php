@@ -39,13 +39,16 @@
     chatUnavailable: "The chat didn't load. Try again in a moment.",
   };
 
-  // Greetings and thanks name no subject, so on their own they never need a
-  // lookup, even though the stop word list keeps them.
+  // A message made only of these words is a greeting or thanks: it names no
+  // subject and needs no lookup. Answers like "yes", "ok" or "sure" are left
+  // out on purpose, since they reply to the assistant and only the planner
+  // can read them against the thread.
   const SMALL_TALK = new Set([
-    'hi', 'hello', 'hey', 'hiya', 'thanks', 'thank', 'thx', 'cheers', 'bye',
-    'goodbye', 'great', 'cool', 'nice', 'awesome', 'ok', 'okay', 'yes',
-    'morning', 'afternoon', 'evening', 'good', 'welcome',
-    'please', 'sorry', 'lol', 'perfect', 'wonderful', 'appreciate', 'appreciated',
+    'hi', 'hello', 'hey', 'hiya', 'there', 'thanks', 'thank', 'thx', 'cheers',
+    'bye', 'goodbye', 'great', 'cool', 'nice', 'awesome', 'morning',
+    'afternoon', 'evening', 'good', 'welcome', 'sorry', 'lol', 'perfect',
+    'wonderful', 'appreciate', 'appreciated', 'you', 'so', 'much', 'very', 'a',
+    'lot', 'that', 's', 'it', 'all', 'for', 'the', 'again', 'really',
   ]);
 
   // Page text that is never the page's content.
@@ -337,12 +340,12 @@
 
       setStatus(L.chatWorking);
       await load();
-      const words = state.retriever.terms(message);
-      const hasContent = words.some(t => !SMALL_TALK.has(t));
-      // "Thanks!" or "hi there": only greetings, so nothing to plan. "Tell me
-      // more" has no words left at all and still goes to the planner, which
-      // reads it against the thread.
-      const pleasantry = words.length > 0 && !hasContent;
+      const hasContent = state.retriever.terms(message).some(t => !SMALL_TALK.has(t));
+      // "Thanks!" or "hi there": only greetings, so nothing to plan. Read on
+      // every word typed, stop words too, so "Great, tell me more" still goes
+      // to the planner.
+      const typed = message.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+      const pleasantry = typed.length > 0 && typed.every(w => SMALL_TALK.has(w));
 
       if (state.threadId === null && seed === null) {
         // First turn: nothing to rewrite, so retrieve() calls expand-query
@@ -549,11 +552,14 @@
           pages: Array.isArray(detail.pages) ? detail.pages : [],
         };
         state.restored = true;
+        // The search page has dropped its own follow up, so show the chat
+        // taking the question at once, before deep-chat is ready.
+        panel.hidden = false;
+        launcher.setAttribute('aria-expanded', 'true');
+        setStatus(L.chatWorking);
         const start = state.element ? Promise.resolve(state.element) : build();
         start.then(el => {
           el.clearMessages(true);
-          panel.hidden = false;
-          launcher.setAttribute('aria-expanded', 'true');
           el.submitUserMessage({ text: detail.question });
         }).catch(err => {
           console.warn('[scolta:chat] hand off failed', err);
