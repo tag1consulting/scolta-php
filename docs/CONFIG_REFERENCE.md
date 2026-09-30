@@ -150,6 +150,26 @@ factor before being added to the final score; the title boost is unaffected.
 | `promptExpandQuery` | string | `''` | Custom prompt for query expansion (empty = use DefaultPrompts) |
 | `promptSummarize` | string | `''` | Custom prompt for summarization (empty = use DefaultPrompts) |
 | `promptFollowUp` | string | `''` | Custom prompt for follow-up conversations (empty = use DefaultPrompts) |
+| `promptChat` | string | `''` | Custom system prompt for chat answers (empty = use DefaultPrompts). It is the same for every turn on a site, so a provider can cache it; the pages and history go in the user turn. `@since 2.0.0`, `@stability experimental`. |
+| `promptChatPlan` | string | `''` | Custom prompt for the chat's planning call, which turns a follow up into a standalone query and expands it (empty = use DefaultPrompts). The site's expansion prompt is appended after it. `@since 2.0.0`, `@stability experimental`. |
+| `promptChatFold` | string | `''` | Custom prompt for folding older chat messages into a running summary (empty = use DefaultPrompts). `@since 2.0.0`, `@stability experimental`. |
+
+### Chat
+
+All `@since 2.0.0`, `@stability experimental`. Numbers are clamped by `normalizedChat()`; the range is in each description. With the chat off, `toBrowserConfig()` emits no `chat` block and every chat handler answers 404.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `chatEnabled` | bool | `false` | Turn the chat on. The adapter still has to place its chat block and grant the permission. |
+| `chatTopResults` | int | `5` | Pages sent with excerpts on each turn (1 to 10). |
+| `chatTopChars` | int | `6000` | Characters of excerpt across those pages, divided evenly between them (500 to 30000). |
+| `chatBroadResults` | int | `25` | Further pages sent with only a title and one line, for questions about what the site covers (0 to 50). |
+| `chatBroadChars` | int | `2500` | Characters for those pages together (0 to 10000). |
+| `chatPageContext` | bool | `true` | Send the parts of the page the visitor is reading most relevant to the question, so "what does this page say about fees?" works. This text goes to your AI provider with each question. |
+| `chatPageChars` | int | `3000` | Characters of that page to send (200 to 10000). |
+| `chatMaxTokens` | int | `700` | Longest answer, in tokens (100 to 4000). |
+| `chatThreadTtl` | int | `86400` | Seconds a conversation, and an anonymous visitor's chat cookie, lives without use (300 to 2592000). |
+| `chatHandoff` | bool | `true` | A follow up typed under the search page's AI overview opens the chat with that search instead. |
 
 ### Build
 
@@ -327,6 +347,24 @@ The full order, the source vocabulary and the rules adapters follow are in
 | `promptExpandQuery` | `prompt_expand_query` | `prompts.expand_query` | `prompt_expand_query` |
 | `promptSummarize` | `prompt_summarize` | `prompts.summarize` | `prompt_summarize` |
 | `promptFollowUp` | `prompt_follow_up` | `prompts.follow_up` | `prompt_follow_up` |
+| `promptChat` | `prompt_chat` | not yet supported | not yet supported |
+| `promptChatPlan` | `prompt_chat_plan` | not yet supported | not yet supported |
+| `promptChatFold` | `prompt_chat_fold` | not yet supported | not yet supported |
+
+### Chat Keys
+
+| ScoltaConfig Property | Drupal | Laravel | WordPress |
+|----------------------|--------|---------|-----------|
+| `chatEnabled` | `chat_enabled` | not yet supported | not yet supported |
+| `chatTopResults` | `chat_top_results` | not yet supported | not yet supported |
+| `chatTopChars` | `chat_top_chars` | not yet supported | not yet supported |
+| `chatBroadResults` | `chat_broad_results` | not yet supported | not yet supported |
+| `chatBroadChars` | `chat_broad_chars` | not yet supported | not yet supported |
+| `chatPageContext` | `chat_page_context` | not yet supported | not yet supported |
+| `chatPageChars` | `chat_page_chars` | not yet supported | not yet supported |
+| `chatMaxTokens` | `chat_max_tokens` | not yet supported | not yet supported |
+| `chatThreadTtl` | `chat_thread_ttl` | not yet supported | not yet supported |
+| `chatHandoff` | `chat_handoff` | not yet supported | not yet supported |
 
 ### Build Keys
 

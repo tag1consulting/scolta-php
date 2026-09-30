@@ -776,4 +776,155 @@ class AiClientTest extends TestCase
         $request = $container[0]['request'];
         $this->assertEquals('2023-06-01', $request->getHeaderLine('anthropic-version'));
     }
+
+    // -------------------------------------------------------------------
+    // Streaming (conversationStream)
+    // -------------------------------------------------------------------
+
+    /**
+     * @param list<Response|\Throwable> $responses
+     * @param array<int, array<string, mixed>> $history
+     */
+    private function streamingClient(string $provider, array $responses, array &$history, array $extra = []): AiClient
+    {
+        $stack = HandlerStack::create(new MockHandler($responses));
+        $stack->push(Middleware::history($history));
+
+        return new AiClient(['provider' => $provider, 'api_key' => 'test'] + $extra, new Client(['handler' => $stack]));
+    }
+
+    private static function anthropicStream(string ...$texts): string
+    {
+        $out = "event: message_start\ndata: {\"type\":\"message_start\"}\n\n";
+        $out .= "event: ping\ndata: {\"type\":\"ping\"}\n\n";
+        foreach ($texts as $text) {
+            $out .= "event: content_block_delta\ndata: " . json_encode(['type' => 'content_block_delta', 'index' => 0, 'delta' => ['type' => 'text_delta', 'text' => $text]]) . "\n\n";
+        }
+
+        return $out . "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+    }
+
+    public function testAnthropicStreamYieldsTextDeltasInOrder(): void
+    {
+        $history = [];
+        $client = $this->streamingClient('anthropic', [new Response(200, [], self::anthropicStream('The page ', "on breach\nnotification", ' says 72 hours.'))], $history);
+
+        $pieces = iterator_to_array($client->conversationStream('sys', [['role' => 'user', 'content' => 'hi']], 700), false);
+
+        $this->assertSame(['The page ', "on breach\nnotification", ' says 72 hours.'], $pieces);
+    }
+
+    public function testOpenAiStreamYieldsDeltasUntilDone(): void
+    {
+        $history = [];
+        $body = 'data: ' . json_encode(['choices' => [['delta' => ['role' => 'assistant']]]]) . "\n\n"
+            . 'data: ' . json_encode(['choices' => [['delta' => ['content' => 'Hello']]]]) . "\n\n"
+            . 'data: ' . json_encode(['choices' => [['delta' => ['content' => ' there']]]]) . "\n\n"
+            . "data: [DONE]\n\n"
+            . 'data: ' . json_encode(['choices' => [['delta' => ['content' => 'after done']]]]) . "\n\n";
+        $client = $this->streamingClient('openai', [new Response(200, [], $body)], $history);
+
+        $this->assertSame(['Hello', ' there'], iterator_to_array($client->conversationStream('sys', [['role' => 'user', 'content' => 'hi']]), false));
+    }
+
+    public function testStreamReadsALastLineWithoutANewline(): void
+    {
+        $history = [];
+        $body = 'data: ' . json_encode(['choices' => [['delta' => ['content' => 'only line']]]]);
+        $client = $this->streamingClient('openai', [new Response(200, [], $body)], $history);
+
+        $this->assertSame(['only line'], iterator_to_array($client->conversationStream('sys', [['role' => 'user', 'content' => 'hi']]), false));
+    }
+
+    public function testStreamRequestIsTheConversationRequestPlusStream(): void
+    {
+        $history = [];
+        $client = $this->streamingClient('anthropic', [
+            new Response(200, [], json_encode(['content' => [['type' => 'text', 'text' => 'x']]])),
+            new Response(200, [], self::anthropicStream('x')),
+        ], $history, ['timeout' => 12]);
+        $messages = [['role' => 'user', 'content' => 'hi']];
+
+        $client->conversation('sys', $messages, 700, null, 0.5);
+        iterator_to_array($client->conversationStream('sys', $messages, 700, null, 0.5));
+
+        $plain = json_decode((string) $history[0]['request']->getBody(), true);
+        $streamed = json_decode((string) $history[1]['request']->getBody(), true);
+        $this->assertTrue($streamed['stream']);
+        unset($streamed['stream']);
+        $this->assertSame($plain, $streamed);
+        $headers = static fn($request): array => array_diff_key($request->getHeaders(), ['Content-Length' => true]);
+        $this->assertSame($headers($history[0]['request']), $headers($history[1]['request']));
+        $this->assertTrue($history[1]['options']['stream']);
+        $this->assertSame(12, $history[1]['options']['read_timeout']);
+        $this->assertGreaterThanOrEqual(60, $history[1]['options']['timeout']);
+    }
+
+    public function testCacheSystemMarksTheAnthropicSystemPromptOnly(): void
+    {
+        $history = [];
+        $client = $this->streamingClient('anthropic', [new Response(200, [], self::anthropicStream('x'))], $history);
+        iterator_to_array($client->conversationStream('the system', [['role' => 'user', 'content' => 'hi']], 700, null, null, true));
+        $body = json_decode((string) $history[0]['request']->getBody(), true);
+        $this->assertSame([['type' => 'text', 'text' => 'the system', 'cache_control' => ['type' => 'ephemeral']]], $body['system']);
+
+        $history = [];
+        $client = $this->streamingClient('openai', [new Response(200, [], "data: [DONE]\n\n")], $history);
+        iterator_to_array($client->conversationStream('the system', [['role' => 'user', 'content' => 'hi']], 700, null, null, true));
+        $body = json_decode((string) $history[0]['request']->getBody(), true);
+        $this->assertSame(['role' => 'system', 'content' => 'the system'], $body['messages'][0]);
+        $this->assertStringNotContainsString('cache_control', (string) $history[0]['request']->getBody());
+    }
+
+    public function testStreamMapsHttpErrorsBeforeTheFirstDelta(): void
+    {
+        $cases = [
+            [new Response(401, [], '{}'), ApiKeyInvalidException::class],
+            [new Response(429, ['Retry-After' => '7'], '{}'), RateLimitException::class],
+            [new Response(500, [], '{}'), \RuntimeException::class],
+        ];
+        foreach ($cases as [$response, $expected]) {
+            $history = [];
+            $client = $this->streamingClient('anthropic', [$response], $history);
+            $yielded = [];
+            try {
+                foreach ($client->conversationStream('sys', [['role' => 'user', 'content' => 'hi']]) as $piece) {
+                    $yielded[] = $piece;
+                }
+                $this->fail('Expected ' . $expected);
+            } catch (\RuntimeException $e) {
+                $this->assertInstanceOf($expected, $e);
+                $this->assertSame([], $yielded);
+                if ($e instanceof RateLimitException) {
+                    $this->assertSame('7', $e->retryAfter);
+                }
+            }
+        }
+    }
+
+    public function testStreamWithoutAKeyThrowsApiKeyMissing(): void
+    {
+        $client = new AiClient(['provider' => 'anthropic', 'api_key' => '']);
+        $this->expectException(ApiKeyMissingException::class);
+        iterator_to_array($client->conversationStream('sys', [['role' => 'user', 'content' => 'hi']]));
+    }
+
+    public function testAnErrorEventMidStreamThrows(): void
+    {
+        $history = [];
+        $body = "event: content_block_delta\ndata: " . json_encode(['type' => 'content_block_delta', 'delta' => ['type' => 'text_delta', 'text' => 'Part']]) . "\n\n"
+            . "event: error\ndata: " . json_encode(['type' => 'error', 'error' => ['type' => 'overloaded_error', 'message' => 'Overloaded']]) . "\n\n";
+        $client = $this->streamingClient('anthropic', [new Response(200, [], $body)], $history);
+
+        $yielded = [];
+        try {
+            foreach ($client->conversationStream('sys', [['role' => 'user', 'content' => 'hi']]) as $piece) {
+                $yielded[] = $piece;
+            }
+            $this->fail('Expected the stream to fail');
+        } catch (\RuntimeException $e) {
+            $this->assertSame(['Part'], $yielded);
+            $this->assertStringContainsString('overloaded_error', $e->getMessage());
+        }
+    }
 }

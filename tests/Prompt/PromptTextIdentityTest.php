@@ -78,6 +78,9 @@ class PromptTextIdentityTest extends TestCase
         'expand_query' => 'EXPAND_QUERY',
         'summarize'    => 'SUMMARIZE',
         'follow_up'    => 'FOLLOW_UP',
+        'chat'         => 'CHAT',
+        'chat_plan'    => 'CHAT_PLAN',
+        'chat_fold'    => 'CHAT_FOLD',
     ];
 
     /**

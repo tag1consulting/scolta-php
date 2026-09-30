@@ -122,13 +122,62 @@ class AiServiceAdapter
     }
 
     /**
+     * Stream a multi-turn conversation via the best available AI path.
+     *
+     * Tries the platform's streaming hook first
+     * (tryFrameworkConversationStream), then its one-piece hook
+     * (tryFrameworkConversation, yielded whole, so a platform AI layer that
+     * cannot stream still works), then the built-in AiClient's stream. The
+     * failure and success bookkeeping of every other call runs here too: on
+     * an exception thrown before or during the stream, and on completion.
+     *
+     * @param string $systemPrompt The system prompt.
+     * @param array<int, array<string, mixed>> $messages Message objects with 'role' and 'content' keys.
+     * @param int $maxTokens Maximum response tokens.
+     * @param string|null $model Model override for the built-in client.
+     * @param float|null $temperature Sampling temperature for the built-in client.
+     * @param bool $cacheSystem Mark the system prompt for provider prompt caching.
+     *
+     * @return \Generator<int, string> Text pieces, in order.
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function conversationStream(
+        string $systemPrompt,
+        array $messages,
+        int $maxTokens = 1024,
+        ?string $model = null,
+        ?float $temperature = null,
+        bool $cacheSystem = false,
+    ): \Generator {
+        try {
+            $pieces = $this->tryFrameworkConversationStream($systemPrompt, $messages, $maxTokens);
+            if ($pieces === null) {
+                $whole = $this->tryFrameworkConversation($systemPrompt, $messages, $maxTokens);
+                $pieces = $whole !== null
+                    ? [$whole]
+                    : $this->getClient()->conversationStream($systemPrompt, $messages, $maxTokens, $model, $temperature, $cacheSystem);
+            }
+            foreach ($pieces as $piece) {
+                yield (string) $piece;
+            }
+        } catch (\RuntimeException $e) {
+            $this->noteCallFailure($e);
+            throw $e;
+        }
+
+        $this->noteCallSuccess();
+    }
+
+    /**
      * Send a single-turn message with operation-specific model routing.
      *
-     * Uses the expansion model for 'expand_query' when configured, falling
-     * back to the primary model for all other operations. Framework AI
+     * Uses the expansion model for 'expand_query' and 'chat_plan' when
+     * configured, falling back to the primary model for all other operations,
+     * and pins both to temperature 0. Framework AI
      * integrations (tryFrameworkAi) take precedence over the model override.
      *
-     * @param string $operation   The operation: 'expand_query', 'summarize', or 'follow_up'.
+     * @param string $operation   The operation: 'expand_query', 'chat_plan', 'summarize', or 'follow_up'.
      * @param string $systemPrompt The system prompt.
      * @param string $userMessage  The user message.
      * @param int    $maxTokens    Maximum response tokens.
@@ -146,7 +195,10 @@ class AiServiceAdapter
                 return $result;
             }
 
-            $model = ($operation === 'expand_query' && $this->config->aiExpansionModel !== '')
+            // The chat's planning call is an expansion too, with a rewrite in
+            // front of it, so it takes the expansion model and temperature.
+            $expands = in_array($operation, ['expand_query', 'chat_plan'], true);
+            $model = ($expands && $this->config->aiExpansionModel !== '')
                 ? $this->config->aiExpansionModel
                 : null;
 
@@ -154,7 +206,7 @@ class AiServiceAdapter
             // temperature 0 so the same query yields the same terms on every
             // uncached call. Summarize and follow-up keep the provider default
             // (null → temperature field omitted).
-            $temperature = $operation === 'expand_query' ? 0.0 : null;
+            $temperature = $expands ? 0.0 : null;
 
             return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens, $model, $temperature);
         });
@@ -203,6 +255,53 @@ class AiServiceAdapter
         }
 
         return $this->resolvePrompt(DefaultPrompts::FOLLOW_UP);
+    }
+
+    /**
+     * Get the chat's answer system prompt (custom override or default).
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function getChatPrompt(): string
+    {
+        if (!empty($this->config->promptChat)) {
+            return $this->config->promptChat;
+        }
+
+        return $this->resolvePrompt(DefaultPrompts::CHAT);
+    }
+
+    /**
+     * Get the chat's planning prompt (custom override or default).
+     *
+     * The site's expansion prompt is appended after it by the caller.
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function getChatPlanPrompt(): string
+    {
+        if (!empty($this->config->promptChatPlan)) {
+            return $this->config->promptChatPlan;
+        }
+
+        return $this->resolvePrompt(DefaultPrompts::CHAT_PLAN);
+    }
+
+    /**
+     * Get the chat's summary fold prompt (custom override or default).
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function getChatFoldPrompt(): string
+    {
+        if (!empty($this->config->promptChatFold)) {
+            return $this->config->promptChatFold;
+        }
+
+        return $this->resolvePrompt(DefaultPrompts::CHAT_FOLD);
     }
 
     /**
@@ -291,6 +390,25 @@ class AiServiceAdapter
     }
 
     /**
+     * Try streaming a conversation via the platform's native AI integration.
+     *
+     * Override in platform subclasses whose AI layer can stream. Return null
+     * to fall back to tryFrameworkConversation() and then the built-in client.
+     *
+     * @param string $systemPrompt The system prompt.
+     * @param array<int, array<string, mixed>> $messages Message objects with 'role' and 'content' keys.
+     * @param int $maxTokens Maximum response tokens.
+     *
+     * @return iterable<string>|null Text pieces, or null to fall back.
+     * @since 2.0.0
+     * @stability experimental
+     */
+    protected function tryFrameworkConversationStream(string $systemPrompt, array $messages, int $maxTokens): ?iterable
+    {
+        return null;
+    }
+
+    /**
      * Hook invoked when an AI call throws a RuntimeException.
      *
      * No-op by default. Platform adapters override this to convert or notify
@@ -326,14 +444,22 @@ class AiServiceAdapter
         try {
             $result = $call();
         } catch (\RuntimeException $e) {
-            $this->handlePossibleBudgetException($e);
-            $this->noteAuthFailure($e);
+            $this->noteCallFailure($e);
             throw $e;
         }
 
         $this->noteCallSuccess();
 
         return $result;
+    }
+
+    /**
+     * The failure side of every call: budget conversion, then auth recording.
+     */
+    private function noteCallFailure(\RuntimeException $e): void
+    {
+        $this->handlePossibleBudgetException($e);
+        $this->noteAuthFailure($e);
     }
 
     /**

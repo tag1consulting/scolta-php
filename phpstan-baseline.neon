@@ -13,18 +13,6 @@ parameters:
 			path: src/AiClient.php
 
 		-
-			message: '#^Method Tag1\\Scolta\\AiClient\:\:sendAnthropicRequest\(\) has parameter \$messages with no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/AiClient.php
-
-		-
-			message: '#^Method Tag1\\Scolta\\AiClient\:\:sendOpenAiRequest\(\) has parameter \$messages with no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/AiClient.php
-
-		-
 			message: '#^Method Tag1\\Scolta\\AiClient\:\:sendRequest\(\) has parameter \$messages with no value type specified in iterable type array\.$#'
 			identifier: missingType.iterableValue
 			count: 1

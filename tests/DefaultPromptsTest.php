@@ -21,6 +21,22 @@ class DefaultPromptsTest extends TestCase
         $this->assertEquals('expand_query', DefaultPrompts::EXPAND_QUERY);
         $this->assertEquals('summarize', DefaultPrompts::SUMMARIZE);
         $this->assertEquals('follow_up', DefaultPrompts::FOLLOW_UP);
+        $this->assertEquals('chat', DefaultPrompts::CHAT);
+        $this->assertEquals('chat_plan', DefaultPrompts::CHAT_PLAN);
+        $this->assertEquals('chat_fold', DefaultPrompts::CHAT_FOLD);
+    }
+
+    public function testChatTemplatesResolveBySiteAndCarryNoPerTurnData(): void
+    {
+        foreach ([DefaultPrompts::CHAT, DefaultPrompts::CHAT_PLAN, DefaultPrompts::CHAT_FOLD] as $name) {
+            $resolved = DefaultPrompts::resolve($name, 'ComplianceIQ', 'compliance guides');
+            $this->assertStringContainsString('ComplianceIQ', $resolved);
+            $this->assertStringNotContainsString('{SITE_NAME}', $resolved);
+            $this->assertStringNotContainsString('{DYNAMIC_ANCHORS}', DefaultPrompts::getTemplate($name));
+        }
+        $this->assertStringEndsWith('EXPANSION INSTRUCTIONS:', DefaultPrompts::getTemplate(DefaultPrompts::CHAT_PLAN));
+        $this->assertStringContainsString('[[n]](URL)', DefaultPrompts::getTemplate(DefaultPrompts::CHAT));
+        $this->assertStringContainsString('at most 120 words', DefaultPrompts::getTemplate(DefaultPrompts::CHAT_FOLD));
     }
 
     public function testResolveCustomStringReplacesPlaceholders(): void

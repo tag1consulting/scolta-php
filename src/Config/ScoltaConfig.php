@@ -305,6 +305,46 @@ class ScoltaConfig
     public string $promptSummarize = '';
     public string $promptFollowUp = '';
 
+    /**
+     * Custom prompts for the chat's answer, planning and fold calls (empty =
+     * DefaultPrompts). The planning prompt is followed by the site's resolved
+     * expansion prompt, so it ends where expansion instructions can follow.
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public string $promptChat = '';
+    public string $promptChatPlan = '';
+    public string $promptChatFold = '';
+
+    /**
+     * The chat: a conversation grounded in the site's pages. Off until a site
+     * turns it on; every chat handler answers 404 while it is off.
+     *
+     * The numbers are clamped by normalizedChat(), which is what the handler
+     * and toBrowserConfig() read. The browser sends up to chatTopResults pages
+     * with excerpts inside chatTopChars characters, then up to
+     * chatBroadResults with a title and one line inside chatBroadChars. With
+     * chatPageContext on, the parts of the page the visitor is reading most
+     * relevant to the question (up to chatPageChars) go with it.
+     * chatMaxTokens caps each answer, chatThreadTtl is how long a thread and
+     * the anonymous chat cookie live, and chatHandoff lets a follow up typed on
+     * the search page open the chat instead.
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public bool $chatEnabled = false;
+    public int $chatTopResults = 5;
+    public int $chatTopChars = 6000;
+    public int $chatBroadResults = 25;
+    public int $chatBroadChars = 2500;
+    public bool $chatPageContext = true;
+    public int $chatPageChars = 3000;
+    public int $chatMaxTokens = 700;
+    public int $chatThreadTtl = 86400;
+    public bool $chatHandoff = true;
+
     // -- Indexer --
     /** @var string Accepted for backward compatibility; the pure-PHP indexer is the only pipeline since 2.0.0 and every value selects it. */
     public string $indexer = 'auto';
@@ -861,7 +901,58 @@ class ScoltaConfig
             'saytExpandPerMinute' => $this->saytExpandPerMinute,
             'saytExpansionDelayMs' => $this->saytExpansionDelayMs,
             'saytSuggestionAction' => $this->normalizedSaytSuggestionAction(),
+        ] + ($this->chatEnabled ? ['chat' => $this->browserChatConfig()] : []);
+    }
+
+    /**
+     * The chat settings with every number clamped to a range that works.
+     *
+     * The one place the chat's limits are bounded: the handler and the
+     * browser config both read this, never the raw properties.
+     *
+     * @return array{enabled: bool, topResults: int, topChars: int, broadResults: int, broadChars: int, pageContext: bool, pageChars: int, maxTokens: int, threadTtl: int, handoff: bool}
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function normalizedChat(): array
+    {
+        $clamp = static fn(int $value, int $min, int $max): int => max($min, min($max, $value));
+
+        return [
+            'enabled' => $this->chatEnabled,
+            'topResults' => $clamp($this->chatTopResults, 1, 10),
+            'topChars' => $clamp($this->chatTopChars, 500, 30000),
+            'broadResults' => $clamp($this->chatBroadResults, 0, 50),
+            'broadChars' => $clamp($this->chatBroadChars, 0, 10000),
+            'pageContext' => $this->chatPageContext,
+            'pageChars' => $clamp($this->chatPageChars, 200, 10000),
+            'maxTokens' => $clamp($this->chatMaxTokens, 100, 4000),
+            'threadTtl' => $clamp($this->chatThreadTtl, 300, 2592000),
+            'handoff' => $this->chatHandoff,
         ];
+    }
+
+    /**
+     * The `chat` block of the browser config, read by assets/js/scolta-chat.js.
+     *
+     * @return array<string, mixed>
+     */
+    private function browserChatConfig(): array
+    {
+        $chat = $this->normalizedChat();
+        unset($chat['maxTokens'], $chat['threadTtl']);
+
+        return [
+            // Filled in by the adapter, like wasmPath.
+            'deepChatPath' => '',
+            'endpoints' => [
+                'plan' => '/api/scolta/v1/chat/plan',
+                'turn' => '/api/scolta/v1/chat/turn',
+                'fold' => '/api/scolta/v1/chat/fold',
+                'thread' => '/api/scolta/v1/chat/thread',
+            ],
+        ] + $chat;
     }
 
     /**
