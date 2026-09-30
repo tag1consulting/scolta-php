@@ -7,10 +7,8 @@ namespace Tag1\Scolta\Http;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Tag1\Scolta\Cache\CacheDriverInterface;
-use Tag1\Scolta\Exception\ApiKeyInvalidException;
 use Tag1\Scolta\Exception\ApiKeyMissingException;
 use Tag1\Scolta\Exception\ModelProviderMismatchException;
-use Tag1\Scolta\Exception\RateLimitException;
 use Tag1\Scolta\Prompt\NullEnricher;
 use Tag1\Scolta\Prompt\PromptEnricherInterface;
 
@@ -33,6 +31,8 @@ use Tag1\Scolta\Prompt\PromptEnricherInterface;
  */
 class AiEndpointHandler
 {
+    use AiFailureMapping;
+
     /**
      * Per-message content cap for follow-up conversations, in characters.
      *
@@ -222,30 +222,6 @@ class AiEndpointHandler
     }
 
     /**
-     * Log a provider/model mismatch with both values as structured context.
-     *
-     * The model and provider go in the context array as well as the message:
-     * this is the entry an operator greps for, and structured fields survive
-     * log aggregation that truncates or reformats messages.
-     *
-     * @param ModelProviderMismatchException $e         The mismatch to report.
-     * @param string                         $operation Human-readable operation name.
-     */
-    private function logModelProviderMismatch(
-        ModelProviderMismatchException $e,
-        string $operation,
-    ): void {
-        $this->logger->error(
-            'Scolta ' . $operation . ' failed: ' . $e->getMessage(),
-            [
-                'exception' => $e,
-                'ai_model' => $e->getModel(),
-                'ai_provider' => $e->getProvider(),
-            ],
-        );
-    }
-
-    /**
      * Handle a summarize request.
      *
      * @param string $query   The search query.
@@ -402,28 +378,8 @@ class AiEndpointHandler
             ]];
         } catch (ApiKeyMissingException $e) {
             return ['ok' => true, 'data' => ['response' => '', 'remaining' => 0]];
-        } catch (ApiKeyInvalidException $e) {
-            $this->logger->error('Scolta follow-up failed: invalid API key', ['exception' => $e]);
-
-            return ['ok' => false, 'status' => 401, 'error' => 'AI API key is invalid or expired'];
-        } catch (RateLimitException $e) {
-            $result = ['ok' => false, 'status' => 429, 'error' => 'AI API rate limit reached'];
-            if ($e->retryAfter !== null) {
-                $result['retry_after'] = $e->retryAfter;
-            }
-
-            return $result;
-        } catch (ModelProviderMismatchException $e) {
-            $this->logModelProviderMismatch($e, 'follow-up');
-
-            // Follow-up is an explicit user action rather than a background
-            // enhancement, so it reports rather than degrades. The message is
-            // the operator-facing one, not a generic failure string.
-            return ['ok' => false, 'status' => 503, 'error' => $e->getMessage()];
         } catch (\Exception $e) {
-            $this->logger->error('Scolta follow-up failed', ['exception' => $e]);
-
-            return ['ok' => false, 'status' => 503, 'error' => 'Follow-up unavailable'];
+            return $this->aiFailureResult($e, 'follow-up', 'Follow-up unavailable');
         }
     }
 
@@ -799,7 +755,22 @@ ENDFILTERINSTR;
      */
     public function cacheKey(string $action, string ...$parts): string
     {
+        return self::cacheKeyFor($this->generation, $action, ...$parts);
+    }
+
+    /**
+     * The cache key cacheKey() builds, for a handler that holds its own
+     * generation (the chat's opening answers use it).
+     *
+     * @param int    $generation Generation counter for cache invalidation.
+     * @param string $action     The action name.
+     * @param string ...$parts   Variable parts to hash.
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public static function cacheKeyFor(int $generation, string $action, string ...$parts): string
+    {
         $hashInput = strtolower(implode('|', $parts));
-        return 'scolta_' . $action . '_' . $this->generation . '_' . hash('sha256', $hashInput);
+        return 'scolta_' . $action . '_' . $generation . '_' . hash('sha256', $hashInput);
     }
 }
