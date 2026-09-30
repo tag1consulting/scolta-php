@@ -247,7 +247,7 @@ const pages = retriever.buildContext(results, { query: 'breach notification' });
 // [{ n: 1, tier: 1, title, url, excerpt }, ..., { n: 6, tier: 2, title, url, excerpt }]
 ```
 
-`retrieve()` returns what the search page ranks for the query with no facet selected, calling expand-query beside the primary search unless you pass `expandedTerms`. It does not apply the sort or filter hints expansion can return. `buildContext()` gives up to 5 pages with excerpts inside a 6,000 character budget, then up to 25 with a title and one line inside 2,500, numbered across both, with URLs chosen as the search page links them. `extractContext(text, query, maxLength)` picks the parts of any text most relevant to a query, and `terms(text)` returns its meaningful words (none for "thanks" padded with stop words, so a caller can tell small talk from a question).
+`retrieve()` returns what the search page ranks for the query with no facet selected, calling expand-query beside the primary search unless you pass `expandedTerms`. It does not apply the sort or filter hints expansion can return. `buildContext()` gives up to 5 pages with excerpts inside a 6,000 character budget, then up to 25 with a title and one line inside 2,500, numbered across both, with URLs chosen as the search page links them. `extractContext(text, query, maxLength)` picks the parts of any text most relevant to a query, and `terms(text)` returns its meaningful words (none for a message made only of stop words, like "tell me more").
 
 ## Configuration Reference
 

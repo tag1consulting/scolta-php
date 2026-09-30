@@ -492,6 +492,45 @@ describe('scolta-chat.js', () => {
         expect(h.turns()[1].body.seed).toBeNull();
     });
 
+    test('a hand off during a running turn starts a new thread once that turn has closed', async () => {
+        const h = await setup({ chunkDelay: 1 });
+        const el = await h.openChat();
+        const running = el.submitUserMessage({ text: 'What does GDPR say about breach notification?' });
+        await h.win.eval('new Promise(r => setTimeout(r, 30))');
+
+        h.win.document.body.dispatchEvent(new h.win.CustomEvent('scolta:followup-submit', {
+            bubbles: true,
+            cancelable: true,
+            detail: { question: 'What about contractors?', query: 'data retention', summary: 'Keep records six years.', pages: [] },
+        }));
+        await h.win.eval('new Promise(r => setTimeout(r, 400))');
+
+        expect(running.closed).toBe(1);
+        expect(h.calls.cancelled).toBe(1);
+        expect(h.plans()[0].body.thread_id).toBeNull();
+        expect(h.turns()[1].body.thread_id).toBeNull();
+        expect(h.turns()[1].body.seed.query).toBe('data retention');
+    });
+
+    test('a failed CSRF token fetch is asked for again', async () => {
+        const h = await setup({ chat: { csrf: { header: 'X-CSRF-Token', tokenUrl: '/session/token' } } });
+        const fetch = h.win.fetch;
+        let first = true;
+        h.win.fetch = jest.fn((url, init) => {
+            if (url === '/session/token' && first) {
+                first = false;
+                h.calls.fetch.push({ url, method: 'GET', headers: {}, body: null });
+                return Promise.resolve({ ok: false, status: 500, text: () => Promise.resolve('') });
+            }
+            return fetch(url, init);
+        });
+        await h.ask('What about contractors?');
+        await h.ask('And processors?');
+
+        expect(h.calls.fetch.filter(f => f.url === '/session/token')).toHaveLength(2);
+        expect(h.turns()[1].headers['X-CSRF-Token']).toBe('"token-1"');
+    });
+
     test('with hand off off the search page keeps its own follow up', async () => {
         const h = await setup({ chat: { handoff: false } });
         const event = new h.win.CustomEvent('scolta:followup-submit', { bubbles: true, cancelable: true, detail: { question: 'q', summary: 's' } });

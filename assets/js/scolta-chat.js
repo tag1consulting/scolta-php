@@ -165,6 +165,7 @@
       element: null,
       csrf: null,
       restored: false,
+      running: null,
       // New chat bumps it; a turn that began under an older one is dropped.
       chat: 0,
     };
@@ -246,9 +247,13 @@
     function csrfToken() {
       if (!state.csrf) {
         state.csrf = fetch(cfg.csrf.tokenUrl, { credentials: 'same-origin' })
-          .then(resp => (resp.ok ? resp.text() : ''))
+          .then(resp => {
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            return resp.text();
+          })
           .then(text => text.trim())
           .catch(() => {
+            // Not kept, so the next request asks again.
             state.csrf = null;
             return '';
           });
@@ -479,7 +484,7 @@
       const last = messages[messages.length - 1] || {};
       const message = String(last.text || '').trim();
       const chat = state.chat;
-      turn(message, signals).catch(err => {
+      state.running = turn(message, signals).catch(err => {
         console.warn('[scolta:chat] turn failed', err && err.status ? 'HTTP ' + err.status : err);
         setStatus('');
         if (chat !== state.chat) {
@@ -584,6 +589,8 @@
         const detail = e.detail || {};
         if (!detail.question || !detail.summary) return;
         e.preventDefault();
+        // Like New chat: a turn still running is left behind.
+        state.chat++;
         state.threadId = null;
         state.seed = {
           query: detail.query || '',
@@ -597,7 +604,8 @@
         launcher.setAttribute('aria-expanded', 'true');
         setStatus(L.chatWorking);
         const start = state.element ? Promise.resolve(state.element) : build();
-        start.then(el => {
+        // deep-chat takes a new message only once the running turn closed.
+        Promise.all([start, state.running]).then(([el]) => {
           el.clearMessages(true);
           el.submitUserMessage({ text: detail.question });
         }).catch(err => {
