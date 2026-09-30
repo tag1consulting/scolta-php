@@ -1,0 +1,89 @@
+/* Scolta chat: launcher, panel and status. Colors follow scolta.css's custom
+   properties when a theme sets them. */
+
+.scolta-chat-launcher {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 1000;
+  padding: 0.7rem 1.1rem;
+  border: none;
+  border-radius: 999px;
+  background: var(--scolta-primary, #1f5fbf);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+}
+
+.scolta-chat-launcher:focus-visible,
+.scolta-chat-panel button:focus-visible {
+  outline: 3px solid var(--scolta-focus, #ffbf47);
+  outline-offset: 2px;
+}
+
+.scolta-chat-panel {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 4.75rem;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  width: min(26rem, calc(100vw - 2rem));
+  height: min(38rem, calc(100vh - 7rem));
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+
+.scolta-chat-panel[hidden] {
+  display: none;
+}
+
+.scolta-chat-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.scolta-chat-title {
+  flex: 1;
+  font-weight: 600;
+}
+
+.scolta-chat-header button {
+  border: none;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.scolta-chat-close {
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.scolta-chat-status {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
+.scolta-chat-body {
+  flex: 1;
+  min-height: 0;
+}
+
+.scolta-chat-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

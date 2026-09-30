@@ -391,6 +391,148 @@
   }
 
   // ==========================================================================
+  // HTML ESCAPING AND MARKDOWN RENDERING, shared by every instance and by
+  // Scolta.formatAnswer().
+  // ==========================================================================
+
+  function escapeHtml(text) {
+    const div = document.createElement("div");
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  // Escape a value for interpolation into an HTML attribute. escapeHtml (a
+  // textContent → innerHTML round-trip) does not escape quotes, so a value
+  // containing `"` could break out of the attribute and inject new ones.
+  // Use this for every `attr="${...}"` interpolation; escapeHtml stays for
+  // text nodes.
+  function escapeAttr(text) {
+    return String(text)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  // Whether a URL is safe to emit as an href: absolute http(s) or relative
+  // (scheme-less). Anything with another scheme (javascript:, data:, …) is
+  // not. Control characters and whitespace are stripped before scheme
+  // detection because browsers ignore them when parsing a scheme.
+  // Mirrors PHP MarkdownRenderer::isSafeLinkUrl().
+  function isSafeLinkUrl(url) {
+    const cleaned = String(url).replace(/[\u0000-\u0020\u007f]+/g, "");
+    if (/^https?:\/\//i.test(cleaned)) return true;
+    return !/^[a-z][a-z0-9+.\-]*:/i.test(cleaned);
+  }
+
+  // Attribute-escape a URL for use in href; unsafe schemes become inert "#".
+  function sanitizeUrlAttr(url) {
+    return isSafeLinkUrl(url) ? escapeAttr(url) : "#";
+  }
+
+  // Repair markdown truncated by the AI hitting max_tokens mid-output.
+  // Superset of PHP MarkdownRenderer::cleanBrokenLinks(): both repair a
+  // truncated [text](url link; this side also salvages a bare trailing
+  // "[label" and closes unbalanced bold/italic/backtick markers. The shared
+  // rendering contract between the two renderers is pinned by the fixtures
+  // in tests/fixtures/render-parity/ (asserted by Jest and PHPUnit).
+  function cleanBrokenMarkdown(text) {
+    if (!text) return text;
+
+    // Fix unclosed markdown links: [text](url  or  [text](  or  [text
+    text = text.replace(/\[([^\]]+)\]\([^)]*$/g, '**$1**');
+    text = text.replace(/\[([^\]]+)$/g, '**$1**');
+
+    // Close unclosed bold/italic at end of string
+    const boldCount = (text.match(/\*\*/g) || []).length;
+    if (boldCount % 2 !== 0) text += '**';
+
+    const italicMatches = text.match(/(?<!\*)\*(?!\*)/g) || [];
+    if (italicMatches.length % 2 !== 0) text += '*';
+
+    // Close unclosed backtick
+    const backtickCount = (text.match(/`/g) || []).length;
+    if (backtickCount % 2 !== 0) text += '`';
+
+    return text;
+  }
+
+  // Convert lightweight markdown from Claude's summary into safe HTML.
+  // Render model Markdown as HTML: escaped first, links only to allowed
+  // domains, and with `citations` the chat's numbered citation marker too.
+  function formatSummary(text, allowedDomains, citations) {
+    if (!text) return '';
+    text = cleanBrokenMarkdown(text);
+    const escaped = escapeHtml(text);
+    const lines = escaped.split('\n');
+    let html = '';
+    let inList = false;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed === '') {
+        if (inList) { html += '</ul>'; inList = false; }
+        continue;
+      }
+      const headingMatch = trimmed.match(/^(#{1,3}) (.+)/);
+      if (headingMatch) {
+        if (inList) { html += '</ul>'; inList = false; }
+        const tag = `h${headingMatch[1].length + 2}`;
+        html += `<${tag}>${formatInline(headingMatch[2], allowedDomains, citations)}</${tag}>`;
+      } else if (trimmed.startsWith('- ')) {
+        if (!inList) { html += '<ul>'; inList = true; }
+        html += `<li>${formatInline(trimmed.substring(2), allowedDomains, citations)}</li>`;
+      } else {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += `<p>${formatInline(trimmed, allowedDomains, citations)}</p>`;
+      }
+    }
+    if (inList) html += '</ul>';
+    return html;
+  }
+
+  function formatInline(text, allowedDomains, citations) {
+    if (citations) {
+      // The chat's citation marker, [[n]](URL): a Markdown link whose text is
+      // the page number in brackets, which the link pattern below cannot parse.
+      text = text.replace(/\[\[(\d{1,3})\]\]\(([^)\s]+)\)/g, (match, n, url) =>
+        linkAllowed(url, allowedDomains)
+          ? `<sup class="scolta-cite"><a href="${escapeAttr(url)}" target="_blank" rel="noopener">${n}</a></sup>`
+          : `[${n}]`);
+    }
+    return text
+      .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, linkText, url) => {
+        // Scheme gate (mirrors PHP MarkdownRenderer): only http(s) and
+        // relative URLs may become links, even when no domain allowlist is
+        // configured. escapeAttr on the href: the summary was escaped with
+        // escapeHtml, which leaves `"` intact — unescaped it could break out
+        // of the href attribute.
+        if (!linkAllowed(url, allowedDomains)) {
+          // Unsafe scheme, non-allowed or invalid URL: text only, no link.
+          return linkText;
+        }
+        return `<a href="${escapeAttr(url)}" target="_blank" rel="noopener">${linkText}</a>`;
+      });
+  }
+
+  // Whether a Markdown link target may become an anchor: a safe scheme, and
+  // a host on the allowlist when there is one.
+  function linkAllowed(url, allowedDomains) {
+    if (!isSafeLinkUrl(url)) return false;
+    if (!allowedDomains || allowedDomains.length === 0) return true;
+    try {
+      const host = new URL(url).hostname.replace(/^www\./, '');
+      return allowedDomains.some(d => host === d || host.endsWith('.' + d));
+    } catch {
+      return false;
+    }
+  }
+
+  // ==========================================================================
   // INSTANCE FACTORY
   // ==========================================================================
   // All mutable state is scoped to createInstance() closures, allowing
@@ -479,6 +621,9 @@
   let displayedCount = 0;
   let activeFilters = {};
   let conversationMessages = [];
+  // What a follow up hands to a scolta:followup-submit listener: the query,
+  // the summary and the pages it was written from.
+  let followUpSeed = null;
   let followUpCount = 0;
   let abortController = null;
   // Watches the resolved summary's text region so the clamp decision follows
@@ -1817,9 +1962,18 @@
         // Stays reserved: the resolved summary replaces the skeleton inside
         // the same box, so this swap moves nothing.
         summaryEl.className = `scolta-ai-summary ${SUMMARY_RESERVED_CLASS}`;
-        const formatted = formatSummary(data.summary);
+        const formatted = formatSummary(data.summary, getInstanceAllowedLinkDomains());
 
         const userContext = `Search query: ${fullQuery}\n\nSearch result excerpts:\n${context}`;
+        followUpSeed = {
+          query: query,
+          summary: data.summary,
+          pages: topN.map(r => ({
+            title: r.data.meta?.title || '',
+            url: resultUrl(r.data),
+            excerpt: stripHtml(r.data.excerpt || ''),
+          })),
+        };
         conversationMessages = [
           { role: 'user', content: userContext },
           { role: 'assistant', content: data.summary },
@@ -1876,42 +2030,6 @@
       summaryEl.innerHTML = `${summaryLabelHtml(false)}
         <div class="scolta-ai-summary-text" id="${SUMMARY_TEXT_ID}">Summary unavailable. Results shown below.</div>`;
     }
-  }
-
-  function escapeHtml(text) {
-    const div = document.createElement("div");
-    div.textContent = text;
-    return div.innerHTML;
-  }
-
-  // Escape a value for interpolation into an HTML attribute. escapeHtml (a
-  // textContent → innerHTML round-trip) does not escape quotes, so a value
-  // containing `"` could break out of the attribute and inject new ones.
-  // Use this for every `attr="${...}"` interpolation; escapeHtml stays for
-  // text nodes.
-  function escapeAttr(text) {
-    return String(text)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-  }
-
-  // Whether a URL is safe to emit as an href: absolute http(s) or relative
-  // (scheme-less). Anything with another scheme (javascript:, data:, …) is
-  // not. Control characters and whitespace are stripped before scheme
-  // detection because browsers ignore them when parsing a scheme.
-  // Mirrors PHP MarkdownRenderer::isSafeLinkUrl().
-  function isSafeLinkUrl(url) {
-    const cleaned = String(url).replace(/[\u0000-\u0020\u007f]+/g, "");
-    if (/^https?:\/\//i.test(cleaned)) return true;
-    return !/^[a-z][a-z0-9+.\-]*:/i.test(cleaned);
-  }
-
-  // Attribute-escape a URL for use in href; unsafe schemes become inert "#".
-  function sanitizeUrlAttr(url) {
-    return isSafeLinkUrl(url) ? escapeAttr(url) : "#";
   }
 
   // Prepare a raw query for display inside the results header, which wraps the
@@ -1993,95 +2111,6 @@
     }).join("\n\n");
   }
 
-  // Repair markdown truncated by the AI hitting max_tokens mid-output.
-  // Superset of PHP MarkdownRenderer::cleanBrokenLinks(): both repair a
-  // truncated [text](url link; this side also salvages a bare trailing
-  // "[label" and closes unbalanced bold/italic/backtick markers. The shared
-  // rendering contract between the two renderers is pinned by the fixtures
-  // in tests/fixtures/render-parity/ (asserted by Jest and PHPUnit).
-  function cleanBrokenMarkdown(text) {
-    if (!text) return text;
-
-    // Fix unclosed markdown links: [text](url  or  [text](  or  [text
-    text = text.replace(/\[([^\]]+)\]\([^)]*$/g, '**$1**');
-    text = text.replace(/\[([^\]]+)$/g, '**$1**');
-
-    // Close unclosed bold/italic at end of string
-    const boldCount = (text.match(/\*\*/g) || []).length;
-    if (boldCount % 2 !== 0) text += '**';
-
-    const italicMatches = text.match(/(?<!\*)\*(?!\*)/g) || [];
-    if (italicMatches.length % 2 !== 0) text += '*';
-
-    // Close unclosed backtick
-    const backtickCount = (text.match(/`/g) || []).length;
-    if (backtickCount % 2 !== 0) text += '`';
-
-    return text;
-  }
-
-  // Convert lightweight markdown from Claude's summary into safe HTML.
-  function formatSummary(text) {
-    if (!text) return '';
-    text = cleanBrokenMarkdown(text);
-    const escaped = escapeHtml(text);
-    const lines = escaped.split('\n');
-    let html = '';
-    let inList = false;
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed === '') {
-        if (inList) { html += '</ul>'; inList = false; }
-        continue;
-      }
-      const headingMatch = trimmed.match(/^(#{1,3}) (.+)/);
-      if (headingMatch) {
-        if (inList) { html += '</ul>'; inList = false; }
-        const tag = `h${headingMatch[1].length + 2}`;
-        html += `<${tag}>${formatInline(headingMatch[2])}</${tag}>`;
-      } else if (trimmed.startsWith('- ')) {
-        if (!inList) { html += '<ul>'; inList = true; }
-        html += `<li>${formatInline(trimmed.substring(2))}</li>`;
-      } else {
-        if (inList) { html += '</ul>'; inList = false; }
-        html += `<p>${formatInline(trimmed)}</p>`;
-      }
-    }
-    if (inList) html += '</ul>';
-    return html;
-  }
-
-  function formatInline(text) {
-    const allowedDomains = getInstanceAllowedLinkDomains();
-    return text
-      .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.+?)\*/g, '<em>$1</em>')
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, linkText, url) => {
-        // Scheme gate (mirrors PHP MarkdownRenderer): only http(s) and
-        // relative URLs may become links, even when no domain allowlist is
-        // configured. escapeAttr on the href: the summary was escaped with
-        // escapeHtml, which leaves `"` intact — unescaped it could break out
-        // of the href attribute.
-        if (!isSafeLinkUrl(url)) {
-          return linkText;
-        }
-        if (allowedDomains.length === 0) {
-          return `<a href="${escapeAttr(url)}" target="_blank" rel="noopener">${linkText}</a>`;
-        }
-        try {
-          const parsed = new URL(url);
-          const host = parsed.hostname.replace(/^www\./, '');
-          if (allowedDomains.some(d => host === d || host.endsWith('.' + d))) {
-            return `<a href="${escapeAttr(url)}" target="_blank" rel="noopener">${linkText}</a>`;
-          }
-        } catch {}
-        // Non-allowed or invalid URL — show text only, no link
-        return linkText;
-      });
-  }
-
   // --- Follow-up conversation ---
 
   async function searchForFollowUpContext(question) {
@@ -2129,6 +2158,18 @@
     const question = input.value.trim();
     if (!question || conversationMessages.length === 0) return;
     if (followUpCount >= CONFIG.AI_MAX_FOLLOWUPS) return;
+
+    // A listener (the chat) may take the question over: it gets the search
+    // and its summary, and preventDefault() stops this follow up.
+    const handoff = new global.CustomEvent('scolta:followup-submit', {
+      bubbles: true,
+      cancelable: true,
+      detail: Object.assign({ question }, followUpSeed),
+    });
+    if (!input.dispatchEvent(handoff)) {
+      input.value = '';
+      return;
+    }
 
     input.disabled = true;
     btn.disabled = true;
@@ -2188,7 +2229,7 @@
 
       if (data.response) {
         conversationMessages.push({ role: 'assistant', content: data.response });
-        turnEl.querySelector(".scolta-ai-followup-answer").innerHTML = formatSummary(data.response);
+        turnEl.querySelector(".scolta-ai-followup-answer").innerHTML = formatSummary(data.response, getInstanceAllowedLinkDomains());
         const remaining = data.remaining ?? (CONFIG.AI_MAX_FOLLOWUPS - followUpCount - 1);
         followUpCount++;
         updateFollowUpCounter(remaining);
@@ -5104,6 +5145,7 @@
       hadSpecificMatch = false;
       browseTotal = null;
       conversationMessages = [];
+      followUpSeed = null;
       followUpCount = 0;
       // Fresh cycle, fresh memo: identical searches are shared WITHIN a cycle
       // only, so a count from an earlier query can never leak into this one.
@@ -5386,6 +5428,7 @@
     paintedEntries = [];
     paintedHighlightSignature = null;
     conversationMessages = [];
+    followUpSeed = null;
     followUpCount = 0;
     activeFilters = {};
     currentSortOverride = null;
@@ -6560,6 +6603,19 @@
     const base = config || global.scolta || {};
     const cfg = Object.assign({}, base, { facetMode: base.facetMode || 'deferred' });
     return createInstance(null, cfg, true);
+  };
+
+  /**
+   * Render model Markdown the way the AI summary renders it, plus the chat's
+   * citation marker [[n]](URL) as a small numbered link. HTML in the input is
+   * escaped; links survive only with a safe scheme and, when
+   * allowedLinkDomains is not empty, a host on it.
+   *
+   * Experimental, added in 2.0.0.
+   */
+  global.Scolta.formatAnswer = function(markdown, options) {
+    const domains = (options && Array.isArray(options.allowedLinkDomains)) ? options.allowedLinkDomains : [];
+    return formatSummary(String(markdown == null ? '' : markdown), domains, true);
   };
 
   // Backward-compatible init: creates a default instance from window.scolta.

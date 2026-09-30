@@ -104,3 +104,45 @@ describe('follow-up affordance gating on AI_MAX_FOLLOWUPS', () => {
         expect(query(win, '#scolta-followup-counter').textContent).toBe('3 remaining');
     });
 });
+
+describe('scolta:followup-submit hands a follow up to a listener', () => {
+    async function ready() {
+        const win = createWin();
+        await win.__summarizeResults('data retention', makeResults(), []);
+        win.document.querySelector('#scolta-followup-field').value = 'What about contractors?';
+        win.fetch.mockClear();
+        return win;
+    }
+
+    test('a listener that cancels takes the question and the search with it', async () => {
+        const win = await ready();
+        let detail = null;
+        win.document.addEventListener('scolta:followup-submit', e => {
+            detail = e.detail;
+            e.preventDefault();
+        });
+
+        await win.Scolta.submitFollowUp();
+
+        expect(detail).toEqual({
+            question: 'What about contractors?',
+            query: 'data retention',
+            summary: 'A useful summary.',
+            pages: [{ title: 'A', url: 'https://example.com/a', excerpt: '' }],
+        });
+        expect(win.document.querySelector('#scolta-followup-field').value).toBe('');
+        expect(win.fetch).not.toHaveBeenCalled();
+        expect(win.document.querySelectorAll('.scolta-ai-followup-turn')).toHaveLength(0);
+    });
+
+    test('without a cancel the follow up runs as before', async () => {
+        const win = await ready();
+        const seen = [];
+        win.document.addEventListener('scolta:followup-submit', e => seen.push(e.cancelable && e.bubbles));
+
+        await win.Scolta.submitFollowUp();
+
+        expect(seen).toEqual([true]);
+        expect(win.fetch).toHaveBeenCalledWith('/f', expect.objectContaining({ method: 'POST' }));
+    });
+});
