@@ -47,8 +47,8 @@
     'hi', 'hello', 'hey', 'hiya', 'there', 'thanks', 'thank', 'thx', 'cheers',
     'bye', 'goodbye', 'great', 'cool', 'nice', 'awesome', 'morning',
     'afternoon', 'evening', 'good', 'welcome', 'sorry', 'lol', 'perfect',
-    'wonderful', 'appreciate', 'appreciated', 'you', 'so', 'much', 'very', 'a',
-    'lot', 'that', 's', 'it', 'all', 'for', 'the', 'again', 'really',
+    'wonderful', 'appreciate', 'appreciated', 'you', 'much', 'very', 'a',
+    'lot', 'that', 's', 'it', 'all', 'for', 'the',
   ]);
 
   // Page text that is never the page's content.
@@ -340,12 +340,14 @@
 
       setStatus(L.chatWorking);
       await load();
+      // Content words outside the same list decide whether an opening message
+      // searches, and keep a follow up searching whatever the plan says.
       const hasContent = state.retriever.terms(message).some(t => !SMALL_TALK.has(t));
       // "Thanks!" or "hi there": only greetings, so nothing to plan. Read on
       // every word typed, stop words too, so "Great, tell me more" still goes
-      // to the planner.
+      // to the planner, and a question ("That's it?") always does.
       const typed = message.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
-      const pleasantry = typed.length > 0 && typed.every(w => SMALL_TALK.has(w));
+      const pleasantry = !message.includes('?') && typed.length > 0 && typed.every(w => SMALL_TALK.has(w));
 
       if (state.threadId === null && seed === null) {
         // First turn: nothing to rewrite, so retrieve() calls expand-query

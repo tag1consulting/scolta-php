@@ -346,10 +346,11 @@ describe('scolta-chat.js', () => {
         await h.ask('Tell me more');
         await h.ask('Great, tell me more');
         await h.ask('Yes please');
+        await h.ask("That's it?");
 
-        expect(h.plans()).toHaveLength(3);
+        expect(h.plans()).toHaveLength(4);
         expect(h.calls.retrieve[1].query).toBe('GDPR breach notification details');
-        expect(h.turns().slice(1).map(t => t.body.needs_search)).toEqual([true, true, true]);
+        expect(h.turns().slice(1).map(t => t.body.needs_search)).toEqual([true, true, true, true]);
     });
 
     test('page context skips navigation, forms and anything marked ignore', async () => {
