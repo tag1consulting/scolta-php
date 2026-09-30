@@ -273,9 +273,6 @@
 
     // --- One turn -----------------------------------------------------------
 
-    function contentTerms(message) {
-      return state.retriever.terms(message).filter(t => !SMALL_TALK.has(t));
-    }
 
     function answerHtml(text, sources) {
       let html = global.Scolta.formatAnswer(text, { allowedLinkDomains: ownHosts() });
@@ -322,12 +319,19 @@
 
       setStatus(L.chatWorking);
       await load();
-      const hasContent = contentTerms(message).length > 0;
+      const words = state.retriever.terms(message);
+      const hasContent = words.some(t => !SMALL_TALK.has(t));
+      // "Thanks!" or "hi there": only greetings, so nothing to plan. "Tell me
+      // more" has no words left at all and still goes to the planner, which
+      // reads it against the thread.
+      const pleasantry = words.length > 0 && !hasContent;
 
       if (state.threadId === null && seed === null) {
         // First turn: nothing to rewrite, so retrieve() calls expand-query
         // itself, in parallel with the primary search.
         needsSearch = hasContent;
+      } else if (pleasantry) {
+        needsSearch = false;
       } else {
         const planResp = await send('POST', cfg.endpoints.plan, {
           thread_id: state.threadId,
@@ -459,8 +463,15 @@
       el.style.width = '100%';
       el.style.height = '100%';
       el.style.border = 'none';
+      // deep-chat refuses submitUserMessage() and friends until it has
+      // rendered; the fallback covers a copy that never reports it.
+      const rendered = new Promise(resolve => {
+        el.onComponentRender = () => resolve();
+        global.setTimeout(resolve, 3000);
+      });
       body.replaceChildren(el);
       state.element = el;
+      await rendered;
       return el;
     }
 

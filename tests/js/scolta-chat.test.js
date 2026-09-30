@@ -88,9 +88,15 @@ async function setup({ chat = {}, html = '', turnEvents, plan, idle = false, lab
                     this.attachShadow({ mode: 'open' }).innerHTML = '<div id="text-input" contenteditable="true"></div>';
                     this.focused = 0;
                 }
+                connectedCallback() {
+                    // deep-chat reports its first render; until then it
+                    // refuses submitUserMessage().
+                    setTimeout(() => { this.rendered = true; if (this.onComponentRender) this.onComponentRender(this); }, 0);
+                }
                 focusInput() { this.focused++; this.shadowRoot.getElementById('text-input').focus(); }
                 clearMessages() { this.cleared = true; }
                 submitUserMessage({ text }) {
+                    if (!this.rendered) throw new Error('submitUserMessage before render');
                     const record = { opened: 0, closed: 0, responses: [] };
                     calls.signals.push(record);
                     this.connect.handler({ messages: [{ role: 'user', text }] }, {
@@ -124,7 +130,7 @@ async function setup({ chat = {}, html = '', turnEvents, plan, idle = false, lab
             },
             terms: text => String(text).toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/)
                 // A few of scolta.js's stop words, enough for these messages.
-                .filter(w => w.length > 1 && !['what', 'does', 'this', 'the', 'is', 'about', 'say', 'page', 'any', 'for', 'of', 'there', 'you', 'and'].includes(w)),
+                .filter(w => w.length > 1 && !['what', 'does', 'this', 'the', 'is', 'about', 'say', 'page', 'any', 'for', 'of', 'there', 'you', 'and', 'tell', 'me', 'more'].includes(w)),
         };
     };
     win.scolta = {
@@ -313,11 +319,22 @@ describe('scolta-chat.js', () => {
         await h.ask('Thank you, cheers');
 
         expect(h.calls.retrieve).toHaveLength(0);
+        expect(h.plans()).toHaveLength(0);
         for (const turn of h.turns()) {
             expect(turn.body.needs_search).toBe(false);
             expect(turn.body.pages).toEqual([]);
             expect(turn.body.page).toBeNull();
         }
+    });
+
+    test('a later message with no words of its own still goes to the planner', async () => {
+        const h = await setup({ plan: { query: 'GDPR breach notification details', needs_search: true, terms: [] } });
+        await h.ask('What does GDPR say about breach notification?');
+        await h.ask('Tell me more');
+
+        expect(h.plans()).toHaveLength(1);
+        expect(h.calls.retrieve[1].query).toBe('GDPR breach notification details');
+        expect(h.turns()[1].body.needs_search).toBe(true);
     });
 
     test('page context skips navigation, forms and anything marked ignore', async () => {
