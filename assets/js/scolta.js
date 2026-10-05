@@ -3922,6 +3922,32 @@
     return loaded.map((data, i) => ({ data: data, score: toLoad - i }));
   }
 
+  // Load the capped head of each search and keep the first document seen per
+  // URL, in search order and then Pagefind's order within each search.
+  //
+  // The sort path sorts this map's values on one field, and a field that ties
+  // (a date with day granularity, a price shared by many products) leaves the
+  // tied documents in insertion order, because the sort is stable. Inserting as
+  // each search's fragments finished loading made that order whatever the
+  // network delivered first, so the same query on the same index painted a
+  // different list from one page load to the next. Waiting for every load and
+  // then inserting in a fixed order makes it the same list every time.
+  async function loadUniqueByUrl(searches) {
+    const CONFIG = getInstanceConfig();
+    const loadedPerSearch = await Promise.all(searches.map(search => {
+      const toLoad = Math.min(search.results.length, CONFIG.MAX_PAGEFIND_RESULTS);
+      return Promise.all(search.results.slice(0, toLoad).map(r => r.data()));
+    }));
+    const byUrl = new Map();
+    for (const loaded of loadedPerSearch) {
+      for (const data of loaded) {
+        const url = resolveUrl(data.url || '');
+        if (!byUrl.has(url)) byUrl.set(url, data);
+      }
+    }
+    return byUrl;
+  }
+
   async function searchAndLoadParallel(queries, filters, originalQuery, specificityOpts) {
     const CONFIG = getInstanceConfig();
     if (queries.length === 0) return [];
@@ -4486,16 +4512,7 @@
         return;
       }
 
-      const urlMap = new Map();
-      await Promise.all(searches.map(async (search) => {
-        const toLoad = Math.min(search.results.length, CONFIG.MAX_PAGEFIND_RESULTS);
-        if (toLoad === 0) return;
-        const loaded = await Promise.all(search.results.slice(0, toLoad).map(r => r.data()));
-        for (const data of loaded) {
-          const url = resolveUrl(data.url || '');
-          if (!urlMap.has(url)) urlMap.set(url, data);
-        }
-      }));
+      const urlMap = await loadUniqueByUrl(searches);
 
       if (version !== searchVersion) {
         debugLog('[scolta:expand] Discarding stale expansion after sort load (version', version, 'vs current', searchVersion, ')');
@@ -4516,16 +4533,7 @@
           [...termSet].map(t => pagefindSearch(t, mergedFilters, null))
         );
         if (version !== searchVersion) return;
-        const fallbackMap = new Map();
-        await Promise.all(unsortedSearches.map(async (search) => {
-          const toLoad = Math.min(search.results.length, CONFIG.MAX_PAGEFIND_RESULTS);
-          if (toLoad === 0) return;
-          const loaded = await Promise.all(search.results.slice(0, toLoad).map(r => r.data()));
-          for (const data of loaded) {
-            const url = resolveUrl(data.url || '');
-            if (!fallbackMap.has(url)) fallbackMap.set(url, data);
-          }
-        }));
+        const fallbackMap = await loadUniqueByUrl(unsortedSearches);
         if (version !== searchVersion) return;
         withField = [...fallbackMap.values()].filter(data => {
           const v = data.meta?.[field];
@@ -4879,19 +4887,28 @@
         : (preserveFilters ? Promise.resolve(lastExpandedTerms) : expandQuery(query));
       expansionInFlight = !isBrowse && !isForcedPhrase && !preserveFilters && CONFIG.AI_EXPAND_QUERY;
 
-      const primarySearch = await pagefindSearch(searchQuery, activeFilters);
-      // Pagefind returns every match id up front, so the true match total is
-      // free here — before the cap decides how few of them to load.
-      if (isBrowse) browseTotal = primarySearch.results.length;
-      allScoredResults = isBrowse
+      // Phase 1 builds its list in locals, from its own query and filters, and
+      // returns at every await where a newer doSearch() has started. The
+      // abortController stops neither Pagefind's search nor its fragment loads,
+      // so a superseded cycle still resolves, and when the newer cycle resolved
+      // first (its chunks or fragments already cached) the older one used to
+      // finish last: it replaced allScoredResults with the previous query's
+      // results under the new query's header, appended them past the newer
+      // cycle's displayedCount, and ran its OR fallback with the newer cycle's
+      // filters. The finally below still releases the suggest window.
+      const filters = activeFilters;
+      const primarySearch = await pagefindSearch(searchQuery, filters);
+      if (version !== searchVersion) return;
+      let results = isBrowse
         ? await loadBrowseResults(primarySearch)
         : await loadAndScoreSearch(primarySearch, scorerQuery, 1.0);
+      if (version !== searchVersion) return;
 
       // OR fallback: only activate when AND search returns ZERO results.
       // This prevents diluting precision when the user provides many terms
       // to find a specific piece of content. Forced-phrase queries (quoted)
       // never fall back to OR — the user explicitly asked for phrase results.
-      usedOrFallback = false;
+      let orFallback = false;
       if (!isForcedPhrase && meaningfulTerms.length > 1 && primarySearch.results.length === 0) {
         debugLog('[scolta:search] AND returned 0 results — running OR fallback');
         const orQueries = meaningfulTerms.map(term => ({ term, weight: 0.6 }));
@@ -4901,46 +4918,54 @@
         // floods the head of the list.
         const orSpecificity = {
           enabled: CONFIG.SPECIFICITY_WEIGHTING,
-          corpusTotal: subwordCorpusSize(activeFilters),
+          corpusTotal: subwordCorpusSize(filters),
           strongMatched: false,
         };
-        const orResults = await searchAndLoadParallel(orQueries, activeFilters, searchQuery, orSpecificity);
-        // Only adopt the specificity signal if this search is still current — a
-        // newer doSearch() resets hadSpecificMatch, and a late-resolving stale OR
-        // fallback must not repollute it.
-        if (version === searchVersion && orSpecificity.strongMatched) hadSpecificMatch = true;
-        allScoredResults = mergeResults(allScoredResults, orResults);
-        applyAgreementBonus(allScoredResults, orResults);
-        usedOrFallback = allScoredResults.length > 0;
+        const orResults = await searchAndLoadParallel(orQueries, filters, searchQuery, orSpecificity);
+        // A newer doSearch() resets hadSpecificMatch, and a late-resolving stale
+        // OR fallback must not repollute it.
+        if (version !== searchVersion) return;
+        if (orSpecificity.strongMatched) hadSpecificMatch = true;
+        results = mergeResults(results, orResults);
+        applyAgreementBonus(results, orResults);
+        orFallback = results.length > 0;
       }
 
-      allScoredResults.sort((a, b) => b.score - a.score);
-      allScoredResults = deduplicateByTitle(allScoredResults);
+      results.sort((a, b) => b.score - a.score);
+      results = deduplicateByTitle(results);
 
       // Priority pages are matched against the query, so a browse has nothing
       // to match them against.
       const priorityPages = isBrowse ? [] : getInstancePriorityPages();
       if (priorityPages.length > 0 && scoltaWasm && scoltaWasm.match_priority_pages) {
         try {
-          const priorityInput = JSON.stringify({ query: currentQuery, priority_pages: priorityPages });
+          const priorityInput = JSON.stringify({ query: query, priority_pages: priorityPages });
           const priorityMatches = JSON.parse(scoltaWasm.match_priority_pages(priorityInput));
           if (priorityMatches && priorityMatches.length > 0) {
             const priorityMap = {};
             priorityMatches.forEach(pm => {
               priorityMap[(pm.url || '').replace(/\/$/, '').toLowerCase()] = pm;
             });
-            allScoredResults.forEach(result => {
+            results.forEach(result => {
               const url = resolveUrl(result.data.url || '').replace(/\/$/, '').toLowerCase();
               if (priorityMap[url]) {
                 result.score = (result.score || 0) + (priorityMap[url].boost || 100);
               }
             });
-            allScoredResults.sort((a, b) => b.score - a.score);
+            results.sort((a, b) => b.score - a.score);
           }
         } catch (e) {
           console.warn('[scolta] Priority page matching failed', e);
         }
       }
+
+      // Still current: nothing has awaited since the last check. Only now does
+      // this cycle's list become the module's.
+      // Pagefind returns every match id up front, so the true match total is
+      // free here, before the cap decides how few of them to load.
+      if (isBrowse) browseTotal = primarySearch.results.length;
+      allScoredResults = results;
+      usedOrFallback = orFallback;
 
       // Paint the results BEFORE computing facet counts. The count pass below is a
       // second full Pagefind search, and on a production-size index that is the
