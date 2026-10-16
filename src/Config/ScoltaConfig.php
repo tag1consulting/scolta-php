@@ -428,6 +428,33 @@ class ScoltaConfig
      */
     public const FACET_MODES = ['eager', 'deferred', 'disabled'];
 
+    // -- Federated search --
+
+    /**
+     * Other sites' Pagefind bundles to search alongside this one.
+     *
+     * Each entry is ['label' => 'Docs', 'url' => 'https://docs.example.com/sites/docs/files/scolta-pagefind/pagefind/pagefind.js', 'weight' => 1.0].
+     * The browser loads each remote as its own Pagefind instance after the local
+     * index, so the first search is never held up by a remote, and a remote that
+     * is down, built for another Pagefind major.minor, or missing the page's
+     * language is skipped rather than breaking the search. Remote result URLs are
+     * made absolute against the origin of `url`; `label` is shown as the result's
+     * site badge; `weight` (default 1.0) multiplies the remote's Pagefind scores.
+     *
+     * Each remote must serve its bundle with CORS headers allowing this site.
+     * While any remote is merged, facets use Pagefind's own filters instead of
+     * the facet index, which describes local pages only. Empty (default) keeps
+     * search local. Emitted top-level by toBrowserConfig() after
+     * normalizedFederatedSources().
+     *
+     * Entries arrive from CMS config storage unvalidated, hence mixed.
+     *
+     * @var array<int, mixed>
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public array $federatedSources = [];
+
     // -- Search as you type (SAYT) --
     //
     // Ten top-level browser settings, NOT scoring keys: they govern the
@@ -846,6 +873,7 @@ class ScoltaConfig
             'filterFieldDescriptions' => $this->filterFieldDescriptions,
             'hideEmptyFacets' => $this->hideEmptyFacets,
             'facetMode' => $this->normalizedFacetMode(),
+            'federatedSources' => $this->normalizedFederatedSources(),
             'labels' => $this->normalizedLabels(),
             'valueLabels' => $this->normalizedValueLabels(),
             // SAYT — top-level, not scoring keys. scolta.js reads each as
@@ -942,6 +970,50 @@ class ScoltaConfig
         return in_array($this->facetMode, self::FACET_MODES, true)
             ? $this->facetMode
             : 'eager';
+    }
+
+    /**
+     * The federated sources the browser can use, each as {label, url, weight}.
+     *
+     * Drops entries whose url is not an absolute http(s) URL ending in
+     * pagefind.js, so a broken settings form degrades to fewer sources instead
+     * of a failed fetch on every page load. A missing label falls back to the
+     * URL's host; a missing or non-positive weight to 1.0.
+     *
+     * @return list<array{label: string, url: string, weight: float}>
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function normalizedFederatedSources(): array
+    {
+        $normalized = [];
+        foreach ($this->federatedSources as $source) {
+            if (!is_array($source) || !is_string($source['url'] ?? null)) {
+                continue;
+            }
+            $url = trim($source['url']);
+            $host = parse_url($url, PHP_URL_HOST);
+            $scheme = parse_url($url, PHP_URL_SCHEME);
+            $path = (string) parse_url($url, PHP_URL_PATH);
+            if (!is_string($host) || $host === '' || !in_array($scheme, ['http', 'https'], true)
+                || !str_ends_with($path, '/pagefind.js')) {
+                continue;
+            }
+            $label = is_string($source['label'] ?? null) ? trim($source['label']) : '';
+            $weight = is_numeric($source['weight'] ?? null) ? (float) $source['weight'] : 1.0;
+            // INF would make json_encode() fail for the whole page config.
+            if (!is_finite($weight)) {
+                $weight = 1.0;
+            }
+            $normalized[] = [
+                'label' => $label !== '' ? $label : $host,
+                'url' => $url,
+                'weight' => $weight > 0 ? $weight : 1.0,
+            ];
+        }
+
+        return $normalized;
     }
 
     /**

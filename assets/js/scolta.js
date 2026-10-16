@@ -16,6 +16,9 @@
  *   siteName: 'My Site'                    — Display name for the site
  *   container: '#scolta-search'            — CSS selector for the search container
  *   allowedLinkDomains: []                 — Domains allowed in summary links (empty = all)
+ *   federatedSources: []                   — Optional: other sites' bundles searched alongside this
+ *                                            one, as [{ label, url, weight }], url naming the remote's
+ *                                            pagefind.js. Each remote must allow this origin via CORS.
  *   disclaimer: ''                         — Disclaimer text below AI summary (empty = none)
  *   labels: {}                             — Optional: per-site overrides for user-facing UI strings.
  *                                            Rendered as text (HTML-escaped). Keys and defaults:
@@ -398,6 +401,10 @@
   // the tab, producing "No pointer" errors. Cache the initialized module here
   // so every createInstance() call shares it without re-calling init().
   let pagefindInstance = null;
+  // Pagefind version the local bundle was built with, read from its
+  // pagefind-entry.json during the first init. Federated sources are gated on
+  // it, and a re-entering instance has no entry fetch of its own to read it from.
+  let pagefindLocalVersion = null;
 
   // Platform-supplied result renderer, registered through
   // Scolta.setResultRenderer(). Module-scoped rather than per-instance so
@@ -651,7 +658,23 @@
   }
 
   function getInstanceAllowedLinkDomains() {
-    return (instanceConfig && instanceConfig.allowedLinkDomains) || [];
+    const domains = (instanceConfig && instanceConfig.allowedLinkDomains) || [];
+    // Empty means every domain is allowed; only a real allowlist needs the
+    // federated hosts added, or summary links to their results would be scrubbed.
+    if (domains.length === 0) return domains;
+    const hosts = getInstanceFederatedSources().map(s => {
+      try { return new URL(s.url).hostname.replace(/^www\./, ''); } catch (_) { return ''; }
+    }).filter(Boolean);
+    return domains.concat(hosts);
+  }
+
+  // Other sites' Pagefind bundles to search alongside this one: a list of
+  // { label, url, weight }, url naming the remote's pagefind.js.
+  function getInstanceFederatedSources() {
+    const list = (instanceConfig && instanceConfig.federatedSources) || [];
+    return Array.isArray(list)
+      ? list.filter(s => s && typeof s.url === 'string' && /^https?:\/\//.test(s.url))
+      : [];
   }
 
   function getInstanceDisclaimer() {
@@ -782,6 +805,10 @@
   // pagefind-entry.json, and whether a secondary language index was merged in.
   let facetIndexExpectedHash = null;
   let facetIndexMergedLanguages = false;
+  // Set once a federated source is searched alongside the local bundle. The
+  // facet artifact describes local pages only, so from then on facets take
+  // Pagefind's own filters, which every instance answers for its own pages.
+  let facetIndexFederated = false;
   // The pagefind.js path initPagefind() resolved, kept so a deferred load can
   // find the artifact later without re-deriving it from the config.
   let facetIndexPagefindPath = null;
@@ -1165,6 +1192,9 @@
       if (facetIndexMergedLanguages) {
         throw new Error('a secondary language index was merged in');
       }
+      if (facetIndexFederated) {
+        throw new Error('federated sources are searched alongside this index');
+      }
       // facetIndexExpectedHash comes from the cache-busted pagefind-entry.json
       // fetched during initPagefind(), which always runs before this. Without
       // it there is no trustworthy URL to ask for: the artifact is named
@@ -1175,6 +1205,10 @@
         throw new Error('index hash unknown (pagefind-entry.json did not load)');
       }
       facetIndex = await loadFacetIndex(facetIndexBase(pagefindPath), facetIndexExpectedHash);
+      // Federation can land while the artifact is still downloading.
+      if (facetIndexFederated) {
+        throw new Error('federated sources are searched alongside this index');
+      }
       if (facetIndex.indexHash && facetIndex.indexHash !== facetIndexExpectedHash) {
         // The URL itself is named after facetIndexExpectedHash, so landing
         // here means the artifact's own header disagrees with the filename it
@@ -1222,6 +1256,7 @@
       if (!cachedPagefindFilters && !facetIndex && facetMode() === 'eager') {
         await loadFacetTaxonomy(pagefindPath);
       }
+      startFederation(pagefindLocalVersion, pageLanguage());
       return;
     }
 
@@ -1261,8 +1296,8 @@
       if (totalPages > 0) {
         cachedPagefindPageCount = totalPages;
       }
-      const primaryLang = (document.querySelector('html')?.getAttribute('lang') || 'en')
-        .toLowerCase().split('-')[0];
+      pagefindLocalVersion = entry.version || null;
+      const primaryLang = pageLanguage();
       // The facet index is stamped with the pf_meta hash it was built against.
       // This entry file is cache-busted, so it is the trustworthy statement of
       // which index the browser is actually using.
@@ -1296,6 +1331,208 @@
     }
 
     debugLog("[scolta] Pagefind index preloaded");
+
+    // Not awaited: the first search runs on the local bundle alone, and the
+    // remotes join once they have loaded.
+    startFederation(pagefindLocalVersion, pageLanguage());
+  }
+
+  function pageLanguage() {
+    return (document.querySelector('html')?.getAttribute('lang') || 'en')
+      .toLowerCase().split('-')[0];
+  }
+
+  // --- Federated sources ---
+  //
+  // Each remote bundle runs as its own Pagefind instance rather than through
+  // pagefind.mergeIndex(). A merged index joins every search the moment it is
+  // added: one remote that fails to load rejects every later search on the
+  // page, local results included, and one that loads slowly stalls them all
+  // until it is done. A separate instance is admitted only once it has answered
+  // a warm-up search, and a remote that fails later drops out of that one
+  // search instead of taking the local results with it.
+  const FEDERATED_SOURCE_TIMEOUT_MS = 3000;
+
+  function majorMinor(version) {
+    return String(version || '').split('.').slice(0, 2).join('.');
+  }
+
+  function withTimeout(promise, ms, what) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(what + ' timed out after ' + ms + 'ms')), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  }
+
+  // Load one remote, or return null when it cannot be searched on this page.
+  async function loadFederatedSource(source, localVersion, lang) {
+    let remote = null;
+    let abandoned = false;
+    let label = source.url;
+    try {
+      const base = source.url.replace(/pagefind\.js(\?.*)?$/, '');
+      const origin = new URL(base).origin;
+      label = String(source.label || new URL(base).hostname);
+      const weight = Number(source.weight) > 0 ? Number(source.weight) : 1;
+      return await withTimeout((async () => {
+        const resp = await fetch(base + 'pagefind-entry.json?ts=' + Date.now());
+        if (!resp || !resp.ok) throw new Error('pagefind-entry.json: HTTP ' + (resp && resp.status));
+        const entry = await resp.json();
+        // This page's pagefind.js decodes the remote's index files, so the
+        // remote has to be written for the same Pagefind release line.
+        if (localVersion && majorMinor(entry.version) !== majorMinor(localVersion)) {
+          throw new Error('built for Pagefind ' + entry.version + ', this page runs ' + localVersion);
+        }
+        // The page language only: another language's results would land in
+        // this one's search, so a remote without it is skipped, not substituted.
+        const langEntry = (entry.languages || {})[lang];
+        if (!langEntry) throw new Error('no "' + lang + '" index');
+        // Timed out while the entry was in flight: build nothing nobody will use.
+        if (abandoned) throw new Error('abandoned');
+        // noWorker: a SharedWorker must be same-origin, and the remote's is not.
+        remote = pagefindInstance.createInstance({
+          basePath: base,
+          baseUrl: origin + '/',
+          indexWeight: weight,
+          noWorker: true,
+        });
+        await remote.init();
+        await remote.search('');
+        return { label, origin, instance: remote, pageCount: langEntry.page_count || 0 };
+      })(), FEDERATED_SOURCE_TIMEOUT_MS, label);
+    } catch (e) {
+      abandoned = true;
+      console.warn('[scolta] Federated source ' + label + ' skipped: ' + (e && e.message ? e.message : e));
+      if (remote && typeof remote.destroy === 'function') {
+        Promise.resolve().then(() => remote.destroy()).catch(() => {});
+      }
+      return null;
+    }
+  }
+
+  function sumFilterCounts(list) {
+    const merged = {};
+    for (const filters of list) {
+      for (const [dim, values] of Object.entries(filters || {})) {
+        const into = merged[dim] || (merged[dim] = {});
+        for (const [value, n] of Object.entries(values || {})) {
+          into[value] = (into[value] || 0) + n;
+        }
+      }
+    }
+    return merged;
+  }
+
+  // A remote result, made distinguishable from a local one: an id that cannot
+  // collide with a local page's, the source label as meta.site (the card badge
+  // and the summary's metadata line both read it), and a root-relative meta.url
+  // made absolute, since it would otherwise resolve against this host.
+  function tagFederatedResult(r, remote) {
+    const load = r.data;
+    return Object.assign({}, r, {
+      id: remote.origin + '#' + r.id,
+      data: async () => {
+        const d = await load();
+        const meta = d.meta || (d.meta = {});
+        if (!meta.site) meta.site = remote.label;
+        if (typeof meta.url === 'string' && meta.url.startsWith('/')) {
+          meta.url = remote.origin + meta.url;
+        }
+        return d;
+      },
+    });
+  }
+
+  // The local Pagefind module with every loaded remote fanned in. Combined the
+  // way Pagefind combines merged indexes: results concatenated and sorted by
+  // score (indexWeight already applied by each instance), counts summed.
+  function federatedPagefind(local, remotes) {
+    const fanOut = (method, args) => Promise.all([
+      local[method](...args),
+      ...remotes.map(r => Promise.resolve()
+        .then(() => r.instance[method](...args))
+        .catch((e) => {
+          debugLog('[scolta] Federated source ' + r.label + ' failed a ' + method + ':', e && e.message);
+          return null;
+        })),
+    ]);
+    return {
+      createInstance: local.createInstance,
+      init: () => local.init(),
+      options: (o) => local.options(o),
+      mergeIndex: (path, o) => local.mergeIndex(path, o),
+      preload: (term, o) => fanOut('preload', [term, o]).then(() => undefined),
+      filters: () => fanOut('filters', []).then(all => sumFilterCounts(all)),
+      async search(term, o) {
+        const [own, ...others] = await fanOut('search', [term, o]);
+        const answered = [];
+        others.forEach((res, i) => { if (res) answered.push([res, remotes[i]]); });
+        if (answered.length === 0) return own;
+        const results = (own.results || []).slice();
+        for (const [res, remote] of answered) {
+          for (const r of (res.results || [])) results.push(tagFederatedResult(r, remote));
+        }
+        results.sort((a, b) => b.score - a.score);
+        return Object.assign({}, own, {
+          results,
+          unfilteredResultCount: answered.reduce(
+            (n, [res]) => n + (res.unfilteredResultCount || 0), own.unfilteredResultCount || 0),
+          filters: sumFilterCounts([own.filters, ...answered.map(([res]) => res.filters)]),
+          totalFilters: sumFilterCounts([own.totalFilters, ...answered.map(([res]) => res.totalFilters)]),
+        });
+      },
+    };
+  }
+
+  async function startFederation(localVersion, lang) {
+    const sources = getInstanceFederatedSources();
+    if (sources.length === 0 || facetIndexFederated) return;
+    if (!pagefindInstance || typeof pagefindInstance.createInstance !== 'function') {
+      console.warn('[scolta] Federated sources need Pagefind createInstance(); none loaded');
+      return;
+    }
+    // A mesh tends to hand every site the same list, this one included, and a
+    // site searched as its own remote shows every local result twice. Skip it,
+    // and any bundle listed more than once.
+    const bundleOf = (url) => {
+      try { return new URL(url.replace(/pagefind\.js(\?.*)?$/, ''), window.location.href).href; } catch (_) { return url; }
+    };
+    const seen = new Set([bundleOf((instanceConfig && instanceConfig.pagefindPath) || '/pagefind/pagefind.js')]);
+    const unique = sources.filter(s => {
+      const b = bundleOf(s.url);
+      if (seen.has(b)) return false;
+      seen.add(b);
+      return true;
+    });
+    const loaded = (await Promise.all(
+      unique.map(s => loadFederatedSource(s, localVersion, lang)))).filter(Boolean);
+    if (loaded.length === 0 || facetIndexFederated) return;
+
+    pagefind = federatedPagefind(pagefind, loaded);
+    facetIndexFederated = true;
+    facetIndex = null;
+    searchMemo = new Map();
+    if (cachedPagefindPageCount !== null) {
+      cachedPagefindPageCount += loaded.reduce((n, r) => n + r.pageCount, 0);
+    }
+    // ponytail: the slow facet path once federated; a combined multi-bundle
+    // artifact is the upgrade if pagefind.filters() proves too costly.
+    if (!facetsDisabled() && (cachedPagefindFilters || facetMode() === 'eager')) {
+      try {
+        cachedPagefindFilters = await pagefind.filters();
+      } catch (e) {
+        console.warn('[scolta] Failed to cache federated Pagefind filters:', e.message);
+      }
+    }
+    debugLog('[scolta] Federated sources joined:', loaded.map(r => r.label).join(', '));
+
+    // A search already on screen ran without the remotes: run it once more.
+    // Only when the box still holds that query, so text the user has typed
+    // but not submitted is never submitted for them.
+    if (searchVersion > 0 && els.queryInput && els.queryInput.value.trim() === currentQuery) {
+      doSearch(true);
+    }
   }
 
   // Strip the pagefind base path that fullUrl() prepends to root-relative paths.

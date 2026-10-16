@@ -1383,4 +1383,29 @@ class ScoltaConfigTest extends TestCase
             );
         }
     }
+
+    public function testFederatedSourcesAreNormalizedForTheBrowser(): void
+    {
+        $config = ScoltaConfig::fromArray(['federated_sources' => [
+            ['label' => 'Docs', 'url' => 'https://docs.example.com/sites/docs/files/scolta-pagefind/pagefind/pagefind.js', 'weight' => '1.5'],
+            ['url' => 'https://blog.example.com/pagefind/pagefind.js', 'weight' => 0],
+            ['label' => 'Huge', 'url' => 'https://huge.example.com/pagefind/pagefind.js', 'weight' => '1e400'],
+            ['label' => 'No scheme', 'url' => 'docs.example.com/pagefind/pagefind.js'],
+            ['label' => 'Not a bundle', 'url' => 'https://shop.example.com/pagefind/'],
+            ['label' => 'Script scheme', 'url' => 'javascript:alert(1)//pagefind.js'],
+            'not an array',
+        ]]);
+
+        $this->assertSame([
+            ['label' => 'Docs', 'url' => 'https://docs.example.com/sites/docs/files/scolta-pagefind/pagefind/pagefind.js', 'weight' => 1.5],
+            ['label' => 'blog.example.com', 'url' => 'https://blog.example.com/pagefind/pagefind.js', 'weight' => 1.0],
+            ['label' => 'Huge', 'url' => 'https://huge.example.com/pagefind/pagefind.js', 'weight' => 1.0],
+        ], $config->toBrowserConfig()['federatedSources']);
+        $this->assertNotFalse(json_encode($config->toBrowserConfig()));
+    }
+
+    public function testFederatedSourcesDefaultToNone(): void
+    {
+        $this->assertSame([], (new ScoltaConfig())->toBrowserConfig()['federatedSources']);
+    }
 }
