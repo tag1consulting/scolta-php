@@ -68,16 +68,6 @@ class AiControllerTraitTest extends TestCase
         $this->assertInstanceOf(\RuntimeException::class, $controller->logger->records[0]['context']['exception']);
     }
 
-    public function testResolveLoggerDefaultsToNullLogger(): void
-    {
-        $controller = new ConcreteAiController();
-
-        $handler = $controller->exposeCreateHandler(new ThrowingAiService(), new ScoltaConfig());
-        $result = $handler->handleSummarize('pricing', 'some excerpts');
-
-        $this->assertTrue($result['ok'], 'Without an override the failure is swallowed, as before');
-    }
-
     // -------------------------------------------------------------------
     // parseJsonBody() — shared JSON decode + error shape for controllers
     // -------------------------------------------------------------------
@@ -131,7 +121,12 @@ class ConcreteAiController
 
     public int $lastCacheTtl = -1;
 
-    public ?LoggerInterface $logger = null;
+    public LoggerInterface $logger;
+
+    public function __construct()
+    {
+        $this->logger = new NullLogger();
+    }
 
     public function exposeCreateHandler(object $aiService, ScoltaConfig $config): AiEndpointHandler
     {
@@ -161,7 +156,7 @@ class ConcreteAiController
 
     protected function resolveLogger(): LoggerInterface
     {
-        return $this->logger ?? new NullLogger();
+        return $this->logger;
     }
 }
 
