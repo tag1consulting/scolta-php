@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Tag1\Scolta\Tests\Http;
 
 use PHPUnit\Framework\TestCase;
+use Psr\Log\AbstractLogger;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Tag1\Scolta\Cache\CacheDriverInterface;
 use Tag1\Scolta\Cache\NullCacheDriver;
 use Tag1\Scolta\Config\ScoltaConfig;
@@ -45,6 +48,34 @@ class AiControllerTraitTest extends TestCase
         $controller->exposeCreateHandler(new \stdClass(), $config);
 
         $this->assertSame(0, $controller->lastCacheTtl);
+    }
+
+    public function testCreateHandlerPassesResolvedLoggerToHandler(): void
+    {
+        $controller = new ConcreteAiController();
+        $controller->logger = new TraitRecordingLogger();
+        $config = new ScoltaConfig();
+        $config->cacheTtl = 0;
+
+        $handler = $controller->exposeCreateHandler(new ThrowingAiService(), $config);
+        $result = $handler->handleSummarize('pricing', 'some excerpts');
+
+        $this->assertTrue($result['ok'], 'A provider failure degrades to a 200 result');
+        $this->assertSame('ai_error', $result['data']['degraded_reason']);
+        $this->assertCount(1, $controller->logger->records, 'The provider failure must reach the resolved logger');
+        $this->assertSame('error', $controller->logger->records[0]['level']);
+        $this->assertStringContainsString('summarization failed', $controller->logger->records[0]['message']);
+        $this->assertInstanceOf(\RuntimeException::class, $controller->logger->records[0]['context']['exception']);
+    }
+
+    public function testResolveLoggerDefaultsToNullLogger(): void
+    {
+        $controller = new ConcreteAiController();
+
+        $handler = $controller->exposeCreateHandler(new ThrowingAiService(), new ScoltaConfig());
+        $result = $handler->handleSummarize('pricing', 'some excerpts');
+
+        $this->assertTrue($result['ok'], 'Without an override the failure is swallowed, as before');
     }
 
     // -------------------------------------------------------------------
@@ -100,6 +131,8 @@ class ConcreteAiController
 
     public int $lastCacheTtl = -1;
 
+    public ?LoggerInterface $logger = null;
+
     public function exposeCreateHandler(object $aiService, ScoltaConfig $config): AiEndpointHandler
     {
         return $this->createHandler($aiService, $config);
@@ -124,5 +157,36 @@ class ConcreteAiController
     protected function resolveEnricher(): PromptEnricherInterface
     {
         return new NullEnricher();
+    }
+
+    protected function resolveLogger(): LoggerInterface
+    {
+        return $this->logger ?? new NullLogger();
+    }
+}
+
+/** @internal test double: every AI call fails like a provider outage */
+class ThrowingAiService
+{
+    public function getSummarizePrompt(): string
+    {
+        return 'Summarize.';
+    }
+
+    public function message(string $systemPrompt, string $userMessage, int $maxTokens = 512): string
+    {
+        throw new \RuntimeException('529 overloaded');
+    }
+}
+
+/** @internal test double */
+class TraitRecordingLogger extends AbstractLogger
+{
+    /** @var list<array{level: mixed, message: string, context: array}> */
+    public array $records = [];
+
+    public function log($level, string|\Stringable $message, array $context = []): void
+    {
+        $this->records[] = ['level' => $level, 'message' => (string) $message, 'context' => $context];
     }
 }
