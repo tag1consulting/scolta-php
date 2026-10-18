@@ -106,12 +106,14 @@ jobs:
       - name: Setup PHP with Xdebug
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          # 8.4: the committed lock resolves symfony 8, which needs it.
+          php-version: '8.4'
           extensions: intl
           coverage: xdebug
 
       - name: Install dependencies
-        run: composer update --no-interaction --prefer-dist
+        # install, not update: one PHP, one dependency set, so the lock governs.
+        run: composer install --no-interaction --prefer-dist
 
       - name: Run tests with coverage
         run: ./vendor/bin/phpunit --coverage-text --colors=never 2>&1 | tail -20
@@ -201,12 +203,14 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          # 8.4: the committed lock resolves symfony 8, which needs it.
+          php-version: '8.4'
           extensions: intl
           coverage: none
 
       - name: Install PHP dependencies
-        run: composer update --no-interaction --prefer-dist
+        # install, not update: one PHP, one dependency set, so the lock governs.
+        run: composer install --no-interaction --prefer-dist
 
       - name: Install JS dependencies
         working-directory: tests/js
@@ -265,12 +269,20 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          # 8.4: the committed lock resolves symfony 8, which needs it. The
+          # test matrix covers 8.1 to 8.3 with a fresh resolve.
+          php-version: '8.4'
           extensions: intl
           coverage: none
 
       - name: Install dependencies
-        run: composer update --no-interaction --prefer-dist
+        # install, not update: this job runs one PHP and one dependency set,
+        # so the committed lock should govern which phpstan analyses the code.
+        # A phpstan release reached through update changed how baseline
+        # entries are counted and turned every open PR red at once.
+        # phpstan.neon sets no phpVersion, so the code is still checked
+        # against the runtime's rules; the test matrix covers older PHPs.
+        run: composer install --no-interaction --prefer-dist
 
       - name: Run PHPStan
         run: composer analyse

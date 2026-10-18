@@ -213,7 +213,7 @@ parameters:
 		-
 			message: '#^Method Tag1\\Scolta\\Http\\AiEndpointHandler\:\:parseExpansionResult\(\) return type has no value type specified in iterable type array\.$#'
 			identifier: missingType.iterableValue
-			count: 2
+			count: 1
 			path: src/Http/AiEndpointHandler.php
 
 		-
@@ -405,7 +405,7 @@ parameters:
 		-
 			message: '#^Method Tag1\\Scolta\\Index\\IndexMerger\:\:merge\(\) return type has no value type specified in iterable type array\.$#'
 			identifier: missingType.iterableValue
-			count: 2
+			count: 1
 			path: src/Index/IndexMerger.php
 
 		-
@@ -477,7 +477,7 @@ parameters:
 		-
 			message: '#^Method Tag1\\Scolta\\Index\\InvertedIndexBuilder\:\:build\(\) return type has no value type specified in iterable type array\.$#'
 			identifier: missingType.iterableValue
-			count: 2
+			count: 1
 			path: src/Index/InvertedIndexBuilder.php
 
 		-
@@ -489,7 +489,7 @@ parameters:
 		-
 			message: '#^Method Tag1\\Scolta\\Index\\InvertedIndexBuilder\:\:buildFromItemStream\(\) return type has no value type specified in iterable type array\.$#'
 			identifier: missingType.iterableValue
-			count: 2
+			count: 1
 			path: src/Index/InvertedIndexBuilder.php
 
 		-
@@ -501,7 +501,7 @@ parameters:
 		-
 			message: '#^Method Tag1\\Scolta\\Index\\InvertedIndexBuilder\:\:buildFromTokenData\(\) return type has no value type specified in iterable type array\.$#'
 			identifier: missingType.iterableValue
-			count: 2
+			count: 1
 			path: src/Index/InvertedIndexBuilder.php
 
 		-
@@ -651,7 +651,7 @@ parameters:
 		-
 			message: '#^Method Tag1\\Scolta\\Index\\PagefindFormatWriter\:\:remapPageNumbers\(\) return type has no value type specified in iterable type array\.$#'
 			identifier: missingType.iterableValue
-			count: 2
+			count: 1
 			path: src/Index/PagefindFormatWriter.php
 
 		-
