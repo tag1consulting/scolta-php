@@ -265,7 +265,9 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          # 8.4: the committed lock resolves symfony 8, which needs it. The
+          # test matrix covers 8.1 to 8.3 with a fresh resolve.
+          php-version: '8.4'
           extensions: intl
           coverage: none
 
@@ -274,6 +276,8 @@ jobs:
         # so the committed lock should govern which phpstan analyses the code.
         # A phpstan release reached through update changed how baseline
         # entries are counted and turned every open PR red at once.
+        # phpstan.neon sets no phpVersion, so the code is still checked
+        # against the runtime's rules; the test matrix covers older PHPs.
         run: composer install --no-interaction --prefer-dist
 
       - name: Run PHPStan
