@@ -270,7 +270,11 @@ jobs:
           coverage: none
 
       - name: Install dependencies
-        run: composer update --no-interaction --prefer-dist
+        # install, not update: this job runs one PHP and one dependency set,
+        # so the committed lock should govern which phpstan analyses the code.
+        # A phpstan release reached through update changed how baseline
+        # entries are counted and turned every open PR red at once.
+        run: composer install --no-interaction --prefer-dist
 
       - name: Run PHPStan
         run: composer analyse
