@@ -8,6 +8,8 @@ use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Exception\GuzzleException;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Tag1\Scolta\AiProvider\ModelIdentity;
 use Tag1\Scolta\Exception\ApiKeyInvalidException;
 use Tag1\Scolta\Exception\ApiKeyMissingException;
@@ -70,6 +72,7 @@ class AiClient
     private string $apiVersion;
     private int $timeout;
     private string $effort;
+    private LoggerInterface $logger;
 
     /**
      * Whether requests go to the provider's own API rather than a proxy.
@@ -92,13 +95,20 @@ class AiClient
      *   - api_version: Anthropic API version (default: '2023-06-01')
      *   - timeout: HTTP request timeout in seconds (default: 30)
      *   - effort: Anthropic reasoning effort, one of low|medium|high|xhigh|max
-     *     (default: AiClient::DEFAULT_EFFORT). An empty string omits the field;
-     *     needed for models older than Opus 4.5, which reject it. Ignored by
-     *     the OpenAI path.
+     *     (default: AiClient::DEFAULT_EFFORT). Case and surrounding whitespace
+     *     are ignored. An empty string omits the field; needed for models older
+     *     than Opus 4.5, which reject it. An unrecognised value falls back to
+     *     the default with a warning rather than disabling AI. Ignored by the
+     *     OpenAI path.
      * @param ClientInterface|null $httpClient Optional Guzzle client override.
+     * @param LoggerInterface|null $logger PSR-3 logger for config warnings
+     *   (defaults to NullLogger).
      */
-    public function __construct(array $config, ?ClientInterface $httpClient = null)
-    {
+    public function __construct(
+        array $config,
+        ?ClientInterface $httpClient = null,
+        ?LoggerInterface $logger = null,
+    ) {
         // No default. An absent or empty provider is "nobody selected one", and
         // the check below turns that into an error rather than into Anthropic:
         // a client must never be built on an assumption about which vendor the
@@ -124,14 +134,24 @@ class AiClient
         $this->model = $config['model'] ?? self::DEFAULT_MODEL;
         $this->apiVersion = $config['api_version'] ?? self::ANTHROPIC_API_VERSION;
         $this->timeout = (int) ($config['timeout'] ?? 30);
-        $this->effort = (string) ($config['effort'] ?? self::DEFAULT_EFFORT);
-        if ($this->effort !== '' && !in_array($this->effort, self::EFFORT_LEVELS, true)) {
-            throw new \InvalidArgumentException(sprintf(
-                "Unsupported AI effort '%s'. Supported levels: %s, or an empty string to omit it.",
-                $this->effort,
-                implode(', ', self::EFFORT_LEVELS),
-            ));
+        $this->logger = $logger ?? new NullLogger();
+        // A platform setting arrives as whatever an operator or an env var
+        // holds, so tolerate case and whitespace. An unknown level falls back
+        // to the default rather than throwing: this setting did not exist
+        // before, and a typo in it must not take every AI feature down.
+        $effort = strtolower(trim((string) ($config['effort'] ?? self::DEFAULT_EFFORT)));
+        if ($effort !== '' && !in_array($effort, self::EFFORT_LEVELS, true)) {
+            $this->logger->warning(
+                "Unsupported AI effort '{effort}'; using '{default}'. Supported levels: {levels}, or an empty string to omit it.",
+                [
+                    'effort' => $effort,
+                    'default' => self::DEFAULT_EFFORT,
+                    'levels' => implode(', ', self::EFFORT_LEVELS),
+                ],
+            );
+            $effort = self::DEFAULT_EFFORT;
         }
+        $this->effort = $effort;
         // Recorded before the OpenAI path rewrites $baseUrl below, which would
         // otherwise make an unset base_url indistinguishable from a configured
         // one.

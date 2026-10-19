@@ -16,7 +16,7 @@ Passing `null` for any preset-overridable field means **"use the Site Type prese
 | `aiApiKey` | string | `''` | API key for the AI provider |
 | `aiModel` | string | `'claude-sonnet-5-5'` | Model identifier for summarize and follow-up |
 | `aiExpansionModel` | string | `''` | Optional model for query expansion (empty = use `aiModel`) |
-| `aiEffort` | string | `'low'` | Anthropic reasoning effort (`output_config.effort`): `low`, `medium`, `high`, `xhigh` or `max`. Current models think by default, so `low` keeps summaries and expansions fast. Empty omits the field for models older than Opus 4.5, which reject it. Not sent to OpenAI. |
+| `aiEffort` | string | `'low'` | Anthropic reasoning effort (`output_config.effort`): `low`, `medium`, `high`, `xhigh` or `max`. Current models think by default, so `low` keeps summaries and expansions fast. Case-insensitive; an unrecognised value falls back to `low` with a warning. Empty omits the field for models older than Opus 4.5, which reject it. Not sent to OpenAI. |
 | `aiBaseUrl` | string | `''` | Custom API base URL (empty = provider default) |
 
 ### Site Identity

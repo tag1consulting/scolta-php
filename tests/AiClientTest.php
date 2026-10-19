@@ -827,12 +827,51 @@ class AiClientTest extends TestCase
         $this->assertArrayNotHasKey('output_config', $body);
     }
 
-    public function testUnknownEffortIsRejected(): void
+    public function testEffortIsNormalizedBeforeValidation(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage("Unsupported AI effort 'maximum'");
+        $history = [];
+        $this->anthropicClientWithHistory($history, ['effort' => " High\t"])->message('sys', 'msg');
 
-        new AiClient(['provider' => 'anthropic', 'api_key' => 'key', 'effort' => 'maximum']);
+        $body = json_decode((string) $history[0]['request']->getBody(), true);
+        $this->assertSame(['effort' => 'high'], $body['output_config']);
+    }
+
+    public function testUnknownEffortFallsBackToDefaultWithWarning(): void
+    {
+        $history = [];
+        $mock = new MockHandler([
+            new Response(200, [], json_encode([
+                'content' => [['type' => 'text', 'text' => 'ok']],
+            ])),
+        ]);
+        $stack = HandlerStack::create($mock);
+        $stack->push(Middleware::history($history));
+        $logger = new RecordingLogger();
+
+        $client = new AiClient(
+            ['provider' => 'anthropic', 'api_key' => 'key', 'effort' => 'maximum'],
+            new Client(['handler' => $stack]),
+            $logger,
+        );
+        $client->message('sys', 'msg');
+
+        // AI keeps working on the default level rather than failing at construction.
+        $body = json_decode((string) $history[0]['request']->getBody(), true);
+        $this->assertSame(['effort' => AiClient::DEFAULT_EFFORT], $body['output_config']);
+
+        $this->assertCount(1, $logger->records);
+        $this->assertSame('warning', $logger->records[0]['level']);
+        $this->assertSame('maximum', $logger->records[0]['context']['effort']);
+        $this->assertSame('low', $logger->records[0]['context']['default']);
+    }
+
+    public function testValidEffortLogsNothing(): void
+    {
+        $logger = new RecordingLogger();
+        new AiClient(['provider' => 'anthropic', 'api_key' => 'key', 'effort' => 'medium'], null, $logger);
+        new AiClient(['provider' => 'anthropic', 'api_key' => 'key', 'effort' => ''], null, $logger);
+
+        $this->assertSame([], $logger->records);
     }
 
     public function testOpenAiNeverSendsOutputConfig(): void
@@ -854,5 +893,19 @@ class AiClientTest extends TestCase
 
         $body = json_decode((string) $history[0]['request']->getBody(), true);
         $this->assertArrayNotHasKey('output_config', $body);
+    }
+}
+
+/**
+ * Minimal PSR-3 logger that records every call for assertions.
+ */
+final class RecordingLogger extends \Psr\Log\AbstractLogger
+{
+    /** @var list<array{level: string, message: string, context: array}> */
+    public array $records = [];
+
+    public function log($level, string|\Stringable $message, array $context = []): void
+    {
+        $this->records[] = ['level' => (string) $level, 'message' => (string) $message, 'context' => $context];
     }
 }
