@@ -4451,16 +4451,25 @@
         mergedFilters[dim] = vals;
       }
       if (hasFilterMatch) {
+        let activeChanged = false;
         for (const [dim, val] of Object.entries(subjectFilters)) {
           if (!mergedFilters[dim]) {
             mergedFilters[dim] = new Set([val]);
           }
           if (!activeFilters[dim]) {
             activeFilters[dim] = new Set([val]);
+            activeChanged = true;
           }
           if (!llmAppliedFilters[dim]) {
             llmAppliedFilters[dim] = val;
           }
+        }
+        // Same reason as the recall-guard path in doSearch(): the URL was
+        // written before this injection. The version guard above already
+        // established this expansion is current, and the sort path is never
+        // a browse (expansion is skipped for an empty query).
+        if (activeChanged && version === searchVersion) {
+          syncUrlToSearchState(originalQuery, originalQuery === '');
         }
       }
 
@@ -4717,6 +4726,41 @@
     debugLog(`[scolta:expand] ${sortOverride ? 'Native sort' : 'Merged'}: ${allScoredResults.length} results`);
   }
 
+  // --- URL sync ---
+  //
+  // Writes the current query and activeFilters to the address bar as ?q= and
+  // f_<dim>= params. doSearch() calls it before the primary search; the two
+  // places that merge an LLM filter hint into activeFilters after that point
+  // call it again, so the URL carries the hint at the moment the "Filtered:"
+  // badge appears. A host that paints its own facet rail from the URL (the
+  // deferred facet mode leaves the bundle's checkbox markup empty) would
+  // otherwise show the hinted value unchecked until the next facet click
+  // re-entered doSearch().
+  function syncUrlToSearchState(query, isBrowse) {
+    try {
+      var url = new URL(window.location.href);
+      // A browse writes no q param rather than an empty one, so the link is
+      // the facet state alone and reloading it does not re-enter doSearch()
+      // through the bootstrap on a falsy query.
+      if (isBrowse) {
+        url.searchParams.delete('q');
+      } else {
+        url.searchParams.set('q', query);
+      }
+      for (const key of [...url.searchParams.keys()]) {
+        if (key.startsWith('f_')) url.searchParams.delete(key);
+      }
+      for (const [dim, vals] of Object.entries(activeFilters)) {
+        if (vals instanceof Set && vals.size > 0) {
+          url.searchParams.set('f_' + dim, [...vals].join(','));
+        }
+      }
+      history.replaceState(null, '', url.toString());
+    } catch (e) {
+      // Silently ignore — URL sync is non-critical.
+    }
+  }
+
   // --- Main search ---
 
   async function doSearch(preserveFilters, initialFilters) {
@@ -4800,28 +4844,7 @@
       }
 
       // Update URL with search query and active filter state.
-      try {
-        var url = new URL(window.location.href);
-        // A browse writes no q param rather than an empty one, so the link is
-        // the facet state alone and reloading it does not re-enter doSearch()
-        // through the bootstrap on a falsy query.
-        if (isBrowse) {
-          url.searchParams.delete('q');
-        } else {
-          url.searchParams.set('q', query);
-        }
-        for (const key of [...url.searchParams.keys()]) {
-          if (key.startsWith('f_')) url.searchParams.delete(key);
-        }
-        for (const [dim, vals] of Object.entries(activeFilters)) {
-          if (vals instanceof Set && vals.size > 0) {
-            url.searchParams.set('f_' + dim, [...vals].join(','));
-          }
-        }
-        history.replaceState(null, '', url.toString());
-      } catch (e) {
-        // Silently ignore — URL sync is non-critical.
-      }
+      syncUrlToSearchState(query, isBrowse);
 
       els.layout.style.display = "grid";
       emitBeforeResults('loading');
@@ -5058,6 +5081,10 @@
             }
             activeFilters[dim].add(val);
           }
+          // The hint changed activeFilters after doSearch() wrote the URL.
+          if (Object.keys(partition.applied).length > 0) {
+            syncUrlToSearchState(query, isBrowse);
+          }
         }
       }
       renderExpandedTerms(expandedTerms, query);
@@ -5209,10 +5236,12 @@
   //   scolta:before-results-render  { container, reason }
   //   scolta:results-rendered       { container, results, rendered, reused, appended, query }
   //   scolta:before-filters-render  { container }
-  //   scolta:filters-rendered       { container }
+  //   scolta:filters-rendered       { container, activeFilters }
   //
   // `container` is always the element being written and is identical to
-  // event.target. The events bubble, so one listener on the mount point or on
+  // event.target. `activeFilters` is { dimension: [value, ...] } — the
+  // selections in force at that paint, including a filter hint the LLM
+  // expansion applied, so a host rail need not parse the URL for them. The events bubble, so one listener on the mount point or on
   // document sees every render. They are deliberately NOT cancellable: a render
   // a consumer could veto would make every state assumption downstream
   // conditional, for a use case nobody has yet.
@@ -5258,8 +5287,22 @@
     emitLifecycle(els.filters, 'scolta:before-filters-render', { container: els.filters });
   }
 
+  // `activeFilters` is a plain object of string arrays, a snapshot of the
+  // state at this paint: a host that draws its own rail reads checked state
+  // from here instead of the URL's f_ params.
   function emitFiltersRendered() {
-    emitLifecycle(els.filters, 'scolta:filters-rendered', { container: els.filters });
+    emitLifecycle(els.filters, 'scolta:filters-rendered', {
+      container: els.filters,
+      activeFilters: activeFiltersSnapshot(),
+    });
+  }
+
+  function activeFiltersSnapshot() {
+    const out = {};
+    for (const [dim, vals] of Object.entries(activeFilters)) {
+      if (vals instanceof Set && vals.size > 0) out[dim] = [...vals];
+    }
+    return out;
   }
 
   // --- Filter handling ---
