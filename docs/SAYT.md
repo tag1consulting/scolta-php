@@ -114,9 +114,8 @@ aborted request, a degraded server response, an expansion with no new terms, or
 a cycle superseded while the call was in flight all leave the keyword
 suggestions that are already on screen exactly as they are.
 
-Expansion is served through the platform endpoints, cached server-side for a
-month, and run at temperature 0, so a repeated prefix is a cache hit rather than
-a new model call.
+Expansion is served through the platform endpoints and cached server-side for a
+month, so a repeated prefix is a cache hit rather than a new model call.
 
 ## Behaviour
 

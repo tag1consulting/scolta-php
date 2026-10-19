@@ -251,16 +251,17 @@ class AiServiceAdapterTest extends TestCase
         };
     }
 
-    public function testExpandQueryReachesClientWithTemperatureZero(): void
+    public function testExpandQueryReachesClientWithNullTemperature(): void
     {
-        // Expansion is a deterministic semantic mapping — it must run at
-        // temperature 0 so the same query yields the same terms every call.
+        // Expansion sends no temperature: the Claude 5.x models reject the
+        // field with HTTP 400, and the old pin to 0 turned every expansion
+        // into a degraded, unexpanded search on claude-haiku-5-5.
         $adapter = $this->makeRecordingAdapter(ScoltaConfig::fromArray(['ai_provider' => 'anthropic', ]));
 
         $result = $adapter->messageForOperation('expand_query', 'sys', 'user', 512);
 
         $this->assertEquals('recorded', $result);
-        $this->assertSame(0.0, $adapter->recordingClient->calls[0]['temperature']);
+        $this->assertNull($adapter->recordingClient->calls[0]['temperature']);
     }
 
     public function testNonExpansionOperationReachesClientWithNullTemperature(): void

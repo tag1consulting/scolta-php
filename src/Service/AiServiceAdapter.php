@@ -150,13 +150,14 @@ class AiServiceAdapter
                 ? $this->config->aiExpansionModel
                 : null;
 
-            // Query expansion is a deterministic semantic mapping: pin it to
-            // temperature 0 so the same query yields the same terms on every
-            // uncached call. Summarize and follow-up keep the provider default
-            // (null → temperature field omitted).
-            $temperature = $operation === 'expand_query' ? 0.0 : null;
-
-            return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens, $model, $temperature);
+            // No temperature is sent for any operation. Expansion used to be
+            // pinned to 0 for repeatability, but the Claude 5.x models reject
+            // the field outright (`temperature` is deprecated for this model,
+            // HTTP 400), which silently degraded every expansion to an
+            // unexpanded search once a site moved to claude-haiku-5-5. The
+            // server-side cache already makes a repeated query a cache hit
+            // rather than a new sample, so the pin bought little.
+            return $this->getClient()->message($systemPrompt, $userMessage, $maxTokens, $model);
         });
     }
 
