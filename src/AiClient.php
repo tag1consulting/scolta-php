@@ -343,7 +343,35 @@ class AiClient
         ]);
 
         $data = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
-        return $data['content'][0]['text'] ?? '';
+        return self::anthropicText($data);
+    }
+
+    /**
+     * The answer text of an Anthropic Messages response.
+     *
+     * The response's `content` is a list of typed blocks, and the text is
+     * not always the first one: the Claude 5.x models think adaptively, and
+     * on a long system prompt they put a `thinking` block ahead of the
+     * `text` block (`output_config.effort` lowers how much they think, not
+     * whether). Reading `content[0]['text']` returned '' for such a
+     * response, which turned every query expansion on a 24 KB prompt into
+     * an unexpanded search with nothing logged (sharemylesson.com develop,
+     * 2026-10-19). All text blocks are concatenated, in order, so a reply
+     * split across several is kept whole as well.
+     *
+     * @param mixed $data The decoded response body.
+     */
+    private static function anthropicText(mixed $data): string
+    {
+        $blocks = is_array($data) && is_array($data['content'] ?? null) ? $data['content'] : [];
+        $text = '';
+        foreach ($blocks as $block) {
+            if (is_array($block) && ($block['type'] ?? null) === 'text' && is_string($block['text'] ?? null)) {
+                $text .= $block['text'];
+            }
+        }
+
+        return $text;
     }
 
     private function sendOpenAiRequest(

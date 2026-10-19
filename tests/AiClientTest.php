@@ -84,6 +84,47 @@ class AiClientTest extends TestCase
     // Anthropic provider
     // -------------------------------------------------------------------
 
+    public function testAnthropicTextFollowsThinkingBlock(): void
+    {
+        // Claude 5.x answers a long prompt with a thinking block ahead of the
+        // text; the text must be found wherever it sits, and several text
+        // blocks are joined in order.
+        $mock = new MockHandler([
+            new Response(200, [], json_encode([
+                'content' => [
+                    ['type' => 'thinking', 'thinking' => 'Soup is a category...', 'signature' => 'sig'],
+                    ['type' => 'text', 'text' => '{"terms": ["broth",'],
+                    ['type' => 'text', 'text' => ' "stew"]}'],
+                ],
+                'stop_reason' => 'end_turn',
+            ])),
+        ]);
+
+        $client = new AiClient(
+            ['provider' => 'anthropic', 'api_key' => 'sk-ant-test', 'model' => 'claude-haiku-5-5'],
+            new Client(['handler' => HandlerStack::create($mock)]),
+        );
+
+        $this->assertSame('{"terms": ["broth", "stew"]}', $client->message('system', 'Expand this search query: soup'));
+    }
+
+    public function testAnthropicResponseWithoutTextBlockIsEmpty(): void
+    {
+        $mock = new MockHandler([
+            new Response(200, [], json_encode([
+                'content' => [['type' => 'thinking', 'thinking' => '...', 'signature' => 'sig']],
+                'stop_reason' => 'max_tokens',
+            ])),
+        ]);
+
+        $client = new AiClient(
+            ['provider' => 'anthropic', 'api_key' => 'sk-ant-test', 'model' => 'claude-haiku-5-5'],
+            new Client(['handler' => HandlerStack::create($mock)]),
+        );
+
+        $this->assertSame('', $client->message('system', 'hello'));
+    }
+
     public function testAnthropicRequestFormat(): void
     {
         $history = [];
