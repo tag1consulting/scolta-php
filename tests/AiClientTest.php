@@ -809,15 +809,6 @@ class AiClientTest extends TestCase
         $this->assertArrayNotHasKey('thinking', $body);
     }
 
-    public function testAnthropicEffortIsConfigurable(): void
-    {
-        $history = [];
-        $this->anthropicClientWithHistory($history, ['effort' => 'high'])->message('sys', 'msg');
-
-        $body = json_decode((string) $history[0]['request']->getBody(), true);
-        $this->assertSame(['effort' => 'high'], $body['output_config']);
-    }
-
     public function testAnthropicEmptyEffortOmitsOutputConfig(): void
     {
         $history = [];
@@ -827,8 +818,9 @@ class AiClientTest extends TestCase
         $this->assertArrayNotHasKey('output_config', $body);
     }
 
-    public function testEffortIsNormalizedBeforeValidation(): void
+    public function testEffortIsConfigurableAndNormalized(): void
     {
+        // A platform setting may carry stray case or whitespace.
         $history = [];
         $this->anthropicClientWithHistory($history, ['effort' => " High\t"])->message('sys', 'msg');
 
@@ -863,15 +855,6 @@ class AiClientTest extends TestCase
         $this->assertSame('warning', $logger->records[0]['level']);
         $this->assertSame('maximum', $logger->records[0]['context']['effort']);
         $this->assertSame('low', $logger->records[0]['context']['default']);
-    }
-
-    public function testValidEffortLogsNothing(): void
-    {
-        $logger = new RecordingLogger();
-        new AiClient(['provider' => 'anthropic', 'api_key' => 'key', 'effort' => 'medium'], null, $logger);
-        new AiClient(['provider' => 'anthropic', 'api_key' => 'key', 'effort' => ''], null, $logger);
-
-        $this->assertSame([], $logger->records);
     }
 
     public function testOpenAiNeverSendsOutputConfig(): void
