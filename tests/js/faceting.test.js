@@ -218,9 +218,10 @@ describe('faceting: source structure', () => {
     test('initPagefind merges all non-primary language instances via absolute URL', () => {
         // pagefind.mergeIndex skips calls where indexPath is a string-prefix of
         // the primary basePath. Passing an absolute URL bypasses the check.
-        expect(scoltaSource).toContain('await pagefind.mergeIndex(absoluteBase, { language: lang });');
+        // Which languages are merged is covered behaviourally in
+        // multilingual-merge.test.js.
+        expect(scoltaSource).toContain("await pagefind.mergeIndex(absoluteBase, { language: lang, baseUrl: pagefindBase + '/' });");
         expect(scoltaSource).toContain('const absoluteBase = new URL(basePath, window.location.href).href;');
-        expect(scoltaSource).toContain('if (lang !== primaryLang)');
     });
 
     test('clearSearch resets activeFilters to empty object', () => {
