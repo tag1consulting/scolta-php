@@ -299,14 +299,14 @@ class AiServiceAdapterTest extends TestCase
     {
         $config = ScoltaConfig::fromArray([
             'ai_provider' => 'anthropic',
-            'ai_model' => 'claude-sonnet-4-5-20250929',
+            'ai_model' => 'claude-sonnet-5-5',
             'ai_expansion_model' => 'claude-haiku-4-5-20251001',
         ]);
 
         $clientConfig = $config->toAiClientConfig();
 
         $this->assertArrayHasKey('model', $clientConfig);
-        $this->assertSame('claude-sonnet-4-5-20250929', $clientConfig['model']);
+        $this->assertSame('claude-sonnet-5-5', $clientConfig['model']);
         $this->assertArrayNotHasKey('expansion_model', $clientConfig);
         $this->assertArrayNotHasKey('ai_expansion_model', $clientConfig);
     }

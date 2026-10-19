@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tag1\Scolta\Tests;
 
 use PHPUnit\Framework\TestCase;
+use Tag1\Scolta\AiClient;
 use Tag1\Scolta\Config\ScoltaConfig;
 
 class ScoltaConfigTest extends TestCase
@@ -21,7 +22,7 @@ class ScoltaConfigTest extends TestCase
         // particular is not Anthropic.
         $this->assertSame('', $config->aiProvider);
         $this->assertEquals('', $config->aiApiKey);
-        $this->assertEquals('claude-sonnet-4-5-20250929', $config->aiModel);
+        $this->assertEquals('claude-sonnet-5-5', $config->aiModel);
         $this->assertEquals('', $config->aiBaseUrl);
         $this->assertEquals('', $config->siteName);
         $this->assertEquals('website', $config->siteDescription);
@@ -304,15 +305,25 @@ class ScoltaConfigTest extends TestCase
         $config = ScoltaConfig::fromArray([
             'ai_provider' => 'anthropic',
             'ai_api_key' => 'sk-ant-key',
-            'ai_model' => 'claude-sonnet-4-5-20250929',
+            'ai_model' => 'claude-sonnet-5-5',
         ]);
 
         $clientConfig = $config->toAiClientConfig();
 
         $this->assertEquals('anthropic', $clientConfig['provider']);
         $this->assertEquals('sk-ant-key', $clientConfig['api_key']);
-        $this->assertEquals('claude-sonnet-4-5-20250929', $clientConfig['model']);
+        $this->assertEquals('claude-sonnet-5-5', $clientConfig['model']);
         $this->assertArrayNotHasKey('base_url', $clientConfig);
+    }
+
+    public function testToAiClientConfigCarriesEffort(): void
+    {
+        $default = ScoltaConfig::fromArray(['ai_provider' => 'anthropic']);
+        $this->assertSame(AiClient::DEFAULT_EFFORT, $default->toAiClientConfig()['effort']);
+        $this->assertSame('low', AiClient::DEFAULT_EFFORT);
+
+        $raised = ScoltaConfig::fromArray(['ai_provider' => 'anthropic', 'ai_effort' => 'medium']);
+        $this->assertSame('medium', $raised->toAiClientConfig()['effort']);
     }
 
     public function testToAiClientConfigWithBaseUrl(): void

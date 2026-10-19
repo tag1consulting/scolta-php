@@ -28,7 +28,7 @@ class ModelIdentityTest extends TestCase
             'family-first fable' => ['claude-fable-5'],
             'dated family-first snapshot' => ['claude-sonnet-4-5-20250929'],
             'dated haiku snapshot' => ['claude-haiku-4-5-20251001'],
-            'shipped default' => ['claude-sonnet-4-5-20250929'],
+            'shipped default' => ['claude-sonnet-5-5'],
             'legacy generation-first' => ['claude-3-opus-20240229'],
             'legacy generation-first two-part' => ['claude-3-5-sonnet-20241022'],
             'legacy generation-first haiku' => ['claude-3-haiku-20240307'],

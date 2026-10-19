@@ -36,6 +36,11 @@ class ScoltaConfig
     public string $aiApiKey = '';
     public string $aiModel = AiClient::DEFAULT_MODEL;
     public string $aiExpansionModel = '';
+    /**
+     * Anthropic reasoning effort (`output_config.effort`): low, medium, high,
+     * xhigh or max. Empty omits the field for models that predate it.
+     */
+    public string $aiEffort = AiClient::DEFAULT_EFFORT;
     public string $aiBaseUrl = '';
 
     // -- Site identity --
@@ -956,6 +961,7 @@ class ScoltaConfig
             'provider' => $this->aiProvider,
             'api_key' => $this->aiApiKey,
             'model' => $this->aiModel,
+            'effort' => $this->aiEffort,
         ];
 
         if (!empty($this->aiBaseUrl)) {

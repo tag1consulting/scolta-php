@@ -14,8 +14,9 @@ Passing `null` for any preset-overridable field means **"use the Site Type prese
 |----------|------|---------|-------------|
 | `aiProvider` | string | `''` | AI provider identifier (`anthropic`, `openai`). No default: `''` means no provider has been selected and AI features are off. Selecting one is always explicit. |
 | `aiApiKey` | string | `''` | API key for the AI provider |
-| `aiModel` | string | `'claude-sonnet-4-5-20250929'` | Model identifier for summarize and follow-up |
+| `aiModel` | string | `'claude-sonnet-5-5'` | Model identifier for summarize and follow-up |
 | `aiExpansionModel` | string | `''` | Optional model for query expansion (empty = use `aiModel`) |
+| `aiEffort` | string | `'low'` | Anthropic reasoning effort (`output_config.effort`): `low`, `medium`, `high`, `xhigh` or `max`. Current models think by default, so `low` keeps summaries and expansions fast. Empty omits the field for models older than Opus 4.5, which reject it. Not sent to OpenAI. |
 | `aiBaseUrl` | string | `''` | Custom API base URL (empty = provider default) |
 
 ### Site Identity
@@ -228,6 +229,7 @@ Each platform adapter maps its native config format to `ScoltaConfig::fromArray(
 | `aiProvider` | `ai_provider` | `ai_provider` / `SCOLTA_AI_PROVIDER` | `ai_provider` |
 | `aiApiKey` | `ai_api_key` | `ai_api_key` / `SCOLTA_API_KEY` | (env/constant only) |
 | `aiModel` | `ai_model` | `ai_model` / `SCOLTA_AI_MODEL` | `ai_model` |
+| `aiEffort` | `ai_effort` | `ai_effort` / `SCOLTA_AI_EFFORT` | `ai_effort` |
 | `aiBaseUrl` | `ai_base_url` | `ai_base_url` / `SCOLTA_AI_BASE_URL` | `ai_base_url` |
 
 `aiApiKey` is the one property an adapter does not simply copy across. Several

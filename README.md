@@ -99,7 +99,7 @@ $config = ScoltaConfig::fromArray([
     // AI provider — no default. Omitting it leaves AI off and search working.
     'ai_provider'         => 'anthropic',
     'ai_api_key'          => getenv('SCOLTA_API_KEY'),
-    'ai_model'            => 'claude-sonnet-4-5-20250929',
+    'ai_model'            => 'claude-sonnet-5-5',
     'ai_expand_query'     => true,
     'ai_summarize'        => true,
 
@@ -222,7 +222,7 @@ Verify `ext-intl` is loaded and that the `ContentItem` objects passed to the ind
 ### "AI calls failing"
 
 1. Confirm the API key: check `SCOLTA_API_KEY` env var or the platform-specific constant.
-2. Check the model identifier — model names change with provider releases. Default: `claude-sonnet-4-5-20250929`.
+2. Check the model identifier — model names change with provider releases. Default: `claude-sonnet-5-5`.
 3. Enable request logging: set `SCOLTA_DEBUG=1` to log raw request/response bodies via Guzzle.
 
 ### "Scoring results look wrong"
