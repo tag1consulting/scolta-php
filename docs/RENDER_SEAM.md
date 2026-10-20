@@ -34,7 +34,7 @@ listener on the mount point (or on `document`) sees every render.
 | `scolta:before-results-render` | immediately before any write to `#scolta-results` | `{ container, reason }` |
 | `scolta:results-rendered` | immediately after that write completes | `{ container, results, rendered, reused, appended, query }` |
 | `scolta:before-filters-render` | immediately before the `#scolta-filters` write | `{ container }` |
-| `scolta:filters-rendered` | immediately after it | `{ container }` |
+| `scolta:filters-rendered` | immediately after it | `{ container, activeFilters }` |
 | `scolta:before-suggestions-render` | immediately before the `#scolta-sayt` write | `{ container, query }` |
 | `scolta:suggestions-rendered` | immediately after it | `{ container, suggestions, query }` |
 
@@ -60,6 +60,14 @@ On `scolta:results-rendered`:
   was rebuilt in the first place.
 - `appended` — `true` only on the additive "show more" path.
 - `query` — the current query string.
+
+On `scolta:filters-rendered`:
+
+- `activeFilters` — the selections in force at this paint, as a plain object
+  of string arrays: `{ subject: ['Science'], language: ['en'] }`. It includes
+  a filter hint the AI expansion applied, so a host that paints its own facet
+  rail can read checked state from here rather than from the URL's `f_`
+  params. It is a snapshot, not a live reference.
 
 On `scolta:suggestions-rendered` (search as you type, added in 1.1.0 — see
 [`SAYT.md`](SAYT.md)):

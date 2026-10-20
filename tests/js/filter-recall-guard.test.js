@@ -223,6 +223,36 @@ describe('filter-hint recall guard', () => {
         expect(seen[seen.length - 1]).toEqual({ topic: ['Merging'] });
     });
 
+    test('sort path: a subject-matched filter reaches the URL too', async () => {
+        // No filter_hint. The sort hint sends expansion down the native-sort
+        // branch of mergeExpandedSearchResults(), where a subject term that
+        // names a facet value is injected into activeFilters — the second
+        // place a filter lands after doSearch() has already written the URL.
+        const docs = makeDocs([
+            [15, { topic: 'Basics' }],
+            [20, { topic: 'Merging' }],
+        ]);
+        const win = createGuardWindow(
+            {
+                terms: ['merge conflicts'],
+                sort_hint: { field: 'date', direction: 'desc' },
+                subject_terms: ['Merging'],
+            },
+            { topic: { Basics: 15, Merging: 20 } },
+            docs
+        );
+
+        await runSearch(win, 'newest merging guides');
+
+        const state = win.__getFilterState();
+        expect(state.llmAppliedFilters).toEqual({ topic: 'Merging' });
+        expect([...state.activeFilters.topic]).toEqual(['Merging']);
+
+        const url = new win.URL(win.location.href);
+        expect(url.searchParams.get('q')).toBe('newest merging guides');
+        expect(url.searchParams.get('f_topic')).toBe('Merging');
+    });
+
     test('stacked hints with healthy marginals but collapsed joint: first applies, second is offered', async () => {
         // topic=Comparisons alone keeps 12, level=Expert alone keeps 10, but
         // their intersection is 1 doc — the Q20-django stacking shape.
