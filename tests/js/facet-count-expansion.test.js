@@ -587,6 +587,84 @@ describe('counts stay scoped to structural dimensions', () => {
     });
 });
 
+describe('the header total once the cap bites', () => {
+    // The header's "of N" is the union of raw match ids across every search
+    // that seeded the list, reported only once MAX_PAGEFIND_RESULTS cut a
+    // load; the list itself stays the capped head. These pin the two paths
+    // the browse-no-query tests do not reach: an expansion term pushing the
+    // union past the cap, and a superseded cycle's expansion resolving after
+    // the cycle that replaced it.
+
+    test('an expansion term that overruns the cap lifts N past the loaded list', async () => {
+        const env = await createEnv({
+            scoring: { MAX_PAGEFIND_RESULTS: 2 },
+            docs: {
+                'a-0': { url: '/a0', title: 'Alpha Bravo Charlie', filters: { topic: 'Fruit', level: 'Beginner' } },
+                'a-1': { url: '/a1', title: 'Delta Echo Foxtrot', filters: { topic: 'Fruit', level: 'Beginner' } },
+                'b-0': { url: '/b0', title: 'Golf Hotel India', filters: { topic: 'Veg', level: 'Advanced' } },
+                'b-1': { url: '/b1', title: 'Juliet Kilo Lima', filters: { topic: 'Veg', level: 'Advanced' } },
+                'b-2': { url: '/b2', title: 'Mike November Oscar', filters: { topic: 'Veg', level: 'Advanced' } },
+            },
+            // The typed query is under the cap; the expansion term is not.
+            queries: { alpha: ['a-0', 'a-1'], beta: ['b-0', 'b-1', 'b-2'] },
+            expansion: { terms: ['beta'] },
+        });
+        await runSearch(env, 'alpha');
+
+        // Two typed plus two of beta's three loaded; all five ids counted.
+        expect(resultCards(env.window)).toBe(4);
+        expect(headerCount(env.window)).toBe(5);
+    });
+
+    test("a superseded cycle's late expansion never reaches the new cycle's header", async () => {
+        // Cycle 1's expansion search sits behind the gate. Cycle 2 replaces it
+        // and paints. When the gate opens, cycle 1's capped expansion resolves
+        // and is recorded — into cycle 1's own tally, not the one cycle 2 is
+        // reading. A load-more repaints cycle 2's header from that tally, so
+        // a tally that had absorbed cycle 1's three ids would show here.
+        const env = await createEnv({
+            scoring: { MAX_PAGEFIND_RESULTS: 2, RESULTS_PER_PAGE: 2 },
+            docs: {
+                'stale-t': { url: '/st', title: 'Alpha One Bravo', filters: { topic: 'Fruit', level: 'Beginner' } },
+                'stale-0': { url: '/s0', title: 'Charlie Two Delta', filters: { topic: 'Fruit', level: 'Beginner' } },
+                'stale-1': { url: '/s1', title: 'Echo Three Foxtrot', filters: { topic: 'Fruit', level: 'Beginner' } },
+                'stale-2': { url: '/s2', title: 'Golf Four Hotel', filters: { topic: 'Fruit', level: 'Beginner' } },
+                'fresh-t': { url: '/ft', title: 'India Five Juliet', filters: { topic: 'Veg', level: 'Advanced' } },
+                'fresh-0': { url: '/f0', title: 'Kilo Six Lima', filters: { topic: 'Veg', level: 'Advanced' } },
+                'fresh-1': { url: '/f1', title: 'Mike Seven November', filters: { topic: 'Veg', level: 'Advanced' } },
+            },
+            queries: {
+                stale: ['stale-t'], staleexp: ['stale-0', 'stale-1', 'stale-2'],
+                fresh: ['fresh-t'], freshexp: ['fresh-0', 'fresh-1'],
+            },
+            expansion: q => ({ terms: [q === 'fresh' ? 'freshexp' : 'staleexp'] }),
+            // No facet is active, so the result path's expansion search for
+            // 'staleexp' is the unfiltered one the gate holds.
+            gateCountQuery: 'staleexp',
+        });
+
+        env.window.document.querySelector('#scolta-query').value = 'stale';
+        const first = env.inst.doSearch(false);
+        await settle(env.window);
+
+        env.window.document.querySelector('#scolta-query').value = 'fresh';
+        await env.inst.doSearch();
+        await settle(env.window);
+        // Cycle 2's own expansion landed: three matches, none cut by the cap.
+        expect(headerCount(env.window)).toBe(3);
+
+        env.releaseCount();
+        await settle(env.window);
+        await first;
+        expect(headerCount(env.window)).toBe(3);
+
+        env.window.document.querySelector('#scolta-load-more').click();
+        await settle(env.window);
+        expect(resultCards(env.window)).toBe(3);
+        expect(headerCount(env.window)).toBe(3);
+    });
+});
+
 describe('staleness', () => {
     test("a superseded cycle's post-expansion counts are neither stored nor rendered", async () => {
         // A user facet makes the count searches genuinely separate Pagefind
