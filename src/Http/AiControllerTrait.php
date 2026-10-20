@@ -128,6 +128,8 @@ trait AiControllerTrait
             sortableFieldDescriptions: $config->sortableFieldDescriptions,
             filterFields: $config->filterFields,
             filterFieldDescriptions: $config->filterFieldDescriptions,
+            aiModel: $config->aiModel,
+            aiExpansionModel: $config->aiExpansionModel,
         );
     }
 }

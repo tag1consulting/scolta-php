@@ -272,46 +272,112 @@ class AiEndpointHandlerTest extends TestCase
     public function testExpandQueryReturnsCachedResult(): void
     {
         $cache = new InMemoryCacheDriver();
-        $ai = new MockAiService('should not be called');
+        $ai = new MockAiService('["expanded1", "expanded2"]');
 
-        // Pre-populate cache with new payload format.
-        $handler = $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600);
-        $cacheKey = $handler->cacheKey('expand', 'test query');
-        $cache->set($cacheKey, ['terms' => ['cached term'], 'expand_primary_weight' => 0.5], 3600);
+        $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600)->handleExpandQuery('test query');
+        $this->assertEquals(1, $ai->callCount);
 
-        $result = $handler->handleExpandQuery('test query');
+        // A second handler over the same cache, same inputs: served from cache.
+        $result = $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600)->handleExpandQuery('test query');
 
         $this->assertTrue($result['ok']);
-        $this->assertEquals(['cached term'], $result['data']['terms']);
-        $this->assertEquals(0, $ai->callCount, 'AI service should not have been called');
+        $this->assertEquals(['expanded1', 'expanded2'], $result['data']['terms']);
+        $this->assertEquals(1, $ai->callCount, 'AI service should not have been called again');
     }
 
     public function testExpandQueryStoresResultInCache(): void
     {
-        $cache = new InMemoryCacheDriver();
+        $cache = new TrackingCacheDriver();
         $ai = new MockAiService('["expanded1", "expanded2", "expanded3"]');
         $handler = $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600);
 
         $handler->handleExpandQuery('store test');
 
-        $cacheKey = $handler->cacheKey('expand', 'store test');
-        $this->assertNotNull($cache->get($cacheKey), 'Result should be stored in cache');
+        $this->assertEquals(1, $cache->setCalls, 'Result should be stored in cache');
     }
 
     public function testSummarizeUsesCacheWithGeneration(): void
     {
         $cache = new InMemoryCacheDriver();
-        $ai = new MockAiService('should not be called');
+        $ai = new MockAiService('A summary.');
 
-        $handler = $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600, generation: 5);
-        $cacheKey = $handler->cacheKey('summarize', 'query', 'context');
-        $cache->set($cacheKey, ['summary' => 'cached summary'], 3600);
-
-        $result = $handler->handleSummarize('query', 'context');
+        $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600, generation: 5)->handleSummarize('query', 'context');
+        $result = $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600, generation: 5)->handleSummarize('query', 'context');
 
         $this->assertTrue($result['ok']);
-        $this->assertEquals('cached summary', $result['data']['summary']);
-        $this->assertEquals(0, $ai->callCount);
+        $this->assertEquals('A summary.', $result['data']['summary']);
+        $this->assertEquals(1, $ai->callCount);
+
+        // A different generation over the same cache is a miss.
+        $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600, generation: 6)->handleSummarize('query', 'context');
+        $this->assertEquals(2, $ai->callCount);
+    }
+
+    // The resolved system prompt and the model are part of the key, so a
+    // cached response is a pure function of what the provider saw. Adapters
+    // used to bump the generation on every index build to cover prompt
+    // changes, which emptied the cache far more often than anything changed.
+
+    public function testExpandCacheKeyVariesWithEnrichedPrompt(): void
+    {
+        $cache = new InMemoryCacheDriver();
+        $ai = new MockAiService('["term"]');
+
+        $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600, enricher: new AppendingEnricher(' Prefer recipes.'))
+            ->handleExpandQuery('pasta');
+        $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600, enricher: new AppendingEnricher(' Prefer recipes.'))
+            ->handleExpandQuery('pasta');
+        $this->assertEquals(1, $ai->callCount, 'Same enriched prompt must hit');
+
+        $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600, enricher: new AppendingEnricher(' Prefer products.'))
+            ->handleExpandQuery('pasta');
+        $this->assertEquals(2, $ai->callCount, 'A changed enricher contribution must miss');
+    }
+
+    public function testSummarizeCacheKeyVariesWithEnrichedPrompt(): void
+    {
+        $cache = new InMemoryCacheDriver();
+        $ai = new MockAiService('A summary.');
+
+        $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600, enricher: new AppendingEnricher(' Policy v1.'))
+            ->handleSummarize('q', 'excerpts');
+        $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600, enricher: new AppendingEnricher(' Policy v2.'))
+            ->handleSummarize('q', 'excerpts');
+
+        $this->assertEquals(2, $ai->callCount, 'A changed enricher contribution must miss');
+    }
+
+    public function testCacheKeyVariesWithModel(): void
+    {
+        $cache = new InMemoryCacheDriver();
+        $ai = new MockAiService('["term"]');
+
+        $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600, aiModel: 'model-a')->handleExpandQuery('q');
+        $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600, aiModel: 'model-a')->handleExpandQuery('q');
+        $this->assertEquals(1, $ai->callCount);
+
+        $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600, aiModel: 'model-b')->handleExpandQuery('q');
+        $this->assertEquals(2, $ai->callCount, 'A model change must miss');
+
+        // The expansion model, when set, is the one the expand key sees.
+        $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600, aiModel: 'model-b', aiExpansionModel: 'cheap')->handleExpandQuery('q');
+        $this->assertEquals(3, $ai->callCount, 'An expansion model change must miss');
+        $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600, aiModel: 'model-c', aiExpansionModel: 'cheap')->handleExpandQuery('q');
+        $this->assertEquals(3, $ai->callCount, 'The primary model does not key the expand call once an expansion model is set');
+    }
+
+    public function testEnricherRunsBeforeTheCacheLookup(): void
+    {
+        $cache = new InMemoryCacheDriver();
+        $ai = new MockAiService('["term"]');
+        $enricher = new AppendingEnricher(' Hello.');
+
+        $handler = $this->makeHandler(aiService: $ai, cache: $cache, cacheTtl: 3600, enricher: $enricher);
+        $handler->handleExpandQuery('q');
+        $handler->handleExpandQuery('q');
+
+        $this->assertEquals(1, $ai->callCount);
+        $this->assertEquals(2, $enricher->calls, 'The enricher runs on a hit too: its output is part of the key');
     }
 
     public function testCacheKeyIncludesGeneration(): void
@@ -1809,6 +1875,8 @@ class AiEndpointHandlerTest extends TestCase
         array $sortableFieldDescriptions = [],
         array $filterFields = [],
         array $filterFieldDescriptions = [],
+        string $aiModel = '',
+        string $aiExpansionModel = '',
     ): AiEndpointHandler {
         return new AiEndpointHandler(
             aiService: $aiService ?? new MockAiService('["term1", "term2"]'),
@@ -1824,6 +1892,8 @@ class AiEndpointHandlerTest extends TestCase
             sortableFieldDescriptions: $sortableFieldDescriptions,
             filterFields: $filterFields,
             filterFieldDescriptions: $filterFieldDescriptions,
+            aiModel: $aiModel,
+            aiExpansionModel: $aiExpansionModel,
         );
     }
 }
@@ -1919,6 +1989,22 @@ class InMemoryCacheDriver implements CacheDriverInterface
     public function set(string $key, mixed $value, int $ttlSeconds): void
     {
         $this->store[$key] = $value;
+    }
+}
+
+/**
+ * Enricher that appends a fixed suffix and counts its calls.
+ */
+class AppendingEnricher implements PromptEnricherInterface
+{
+    public int $calls = 0;
+
+    public function __construct(private readonly string $suffix) {}
+
+    public function enrich(string $resolvedPrompt, string $promptName, array $context = []): string
+    {
+        $this->calls++;
+        return $resolvedPrompt . $this->suffix;
     }
 }
 

@@ -84,6 +84,8 @@ class AiEndpointHandler
      * @param array<string, string>     $sortableFieldDescriptions  Human-readable descriptions for sortable fields.
      * @param array                     $filterFields               Filter dimension names for filter-intent detection.
      * @param array<string, string>     $filterFieldDescriptions    Human-readable descriptions for filter fields.
+     * @param string                    $aiModel                    Model the summarize call is sent to; part of its cache key.
+     * @param string                    $aiExpansionModel           Model the expand call is sent to ('' = $aiModel); part of its cache key.
      */
     public function __construct(
         private readonly object $aiService,
@@ -102,6 +104,8 @@ class AiEndpointHandler
         private readonly array $sortableFieldDescriptions = [],
         private readonly array $filterFields = [],
         private readonly array $filterFieldDescriptions = [],
+        private readonly string $aiModel = '',
+        private readonly string $aiExpansionModel = '',
     ) {}
 
     /**
@@ -124,16 +128,9 @@ class AiEndpointHandler
             return ['ok' => false, 'status' => 400, 'error' => 'Invalid query'];
         }
 
-        // Cache lookup.
-        $cacheKey = $this->cacheKey('expand', $query);
-        if ($this->cacheTtl > 0) {
-            $cached = $this->cache->get($cacheKey);
-            if ($cached !== null) {
-                return ['ok' => true, 'data' => $cached];
-            }
-        }
-
         try {
+            // The prompt is built before the cache lookup because it is part
+            // of the key: see cacheKey().
             $systemPrompt = $this->promptEnricher->enrich(
                 $this->aiService->getExpandPrompt(),
                 'expand_query',
@@ -142,6 +139,14 @@ class AiEndpointHandler
             $systemPrompt = $this->appendLanguageInstruction($systemPrompt, 'expand_query');
             $systemPrompt = $this->appendSortableFieldsInstruction($systemPrompt);
             $systemPrompt = $this->appendFilterFieldsInstruction($systemPrompt);
+
+            $cacheKey = $this->cacheKey('expand', $query, $systemPrompt, $this->modelFor('expand_query'));
+            if ($this->cacheTtl > 0) {
+                $cached = $this->cache->get($cacheKey);
+                if ($cached !== null) {
+                    return ['ok' => true, 'data' => $cached];
+                }
+            }
 
             $response = $this->aiService->messageForOperation(
                 'expand_query',
@@ -271,24 +276,25 @@ class AiEndpointHandler
             return ['ok' => false, 'status' => 400, 'error' => 'Invalid context'];
         }
 
-        // Cache lookup.
-        $cacheKey = $this->cacheKey('summarize', $query, $context);
-        if ($this->cacheTtl > 0) {
-            $cached = $this->cache->get($cacheKey);
-            if ($cached !== null) {
-                return ['ok' => true, 'data' => $cached];
-            }
-        }
-
         $userMessage = "Search query: {$query}\n\nSearch result excerpts:\n{$context}";
 
         try {
+            // The prompt is built before the cache lookup because it is part
+            // of the key: see cacheKey().
             $systemPrompt = $this->promptEnricher->enrich(
                 $this->aiService->getSummarizePrompt(),
                 'summarize',
                 ['query' => $query, 'context' => $context],
             );
             $systemPrompt = $this->appendLanguageInstruction($systemPrompt, 'summarize');
+
+            $cacheKey = $this->cacheKey('summarize', $query, $context, $systemPrompt, $this->modelFor('summarize'));
+            if ($this->cacheTtl > 0) {
+                $cached = $this->cache->get($cacheKey);
+                if ($cached !== null) {
+                    return ['ok' => true, 'data' => $cached];
+                }
+            }
 
             $summary = $this->aiService->message(
                 $systemPrompt,
@@ -789,7 +795,37 @@ ENDFILTERINSTR;
     }
 
     /**
+     * The model an operation's request goes to, as the cache key sees it.
+     *
+     * Mirrors AiServiceAdapter::messageForOperation(): the expansion model
+     * when one is configured and the operation is expand_query, the primary
+     * model otherwise. '' when the handler was built without either, as the
+     * tests and older adapters do; the key then varies by prompt alone.
+     */
+    private function modelFor(string $operation): string
+    {
+        return ($operation === 'expand_query' && $this->aiExpansionModel !== '')
+            ? $this->aiExpansionModel
+            : $this->aiModel;
+    }
+
+    /**
      * Generate a deterministic cache key.
+     *
+     * The handlers pass every input the provider sees: the query, the
+     * excerpts for a summary, the fully resolved system prompt (default or
+     * override, enricher output, language, sort and filter instructions) and
+     * the model. A cached response is then a pure function of its inputs: a
+     * prompt override, a changed enricher contribution, a new model or a new
+     * default prompt each lands on a fresh key, and the old entry is left to
+     * expire. Before 2.0 the prompt and model were not in the key, so a
+     * stale response could only be retired by bumping $generation, which
+     * adapters did on every index build and thereby emptied the cache far
+     * more often than anything had changed.
+     *
+     * $generation stays as the adapter's manual kill switch (a
+     * clear-cache command). Parts are lower-cased before hashing, so
+     * "Math" and "math" share an entry.
      *
      * @param string $action The action name (expand, summarize).
      * @param string ...$parts Variable parts to hash.
