@@ -105,9 +105,12 @@ function fragmentResponse(url) {
  * A Pagefind mock that records every search it is asked to run.
  *
  * A null query matches the whole corpus, the way Pagefind does; a term matches
- * a fixed subset so a query search is distinguishable from a browse.
+ * a fixed subset so a query search is distinguishable from a browse. `termPages`
+ * overrides that subset, and `extraTermResults` appends raw results to it —
+ * the way to hand a term a second fragment id for a URL it already matched.
  */
-function createMockPagefind() {
+function createMockPagefind(opts) {
+    opts = opts || {};
     const calls = { filters: 0, searchOpts: [], queries: [] };
     const mock = {
         init: () => Promise.resolve(),
@@ -123,9 +126,11 @@ function createMockPagefind() {
             // distinguishable from the browse's first page.
             const matched = (query === null || query === undefined)
                 ? ALL_PAGES
-                : ALL_PAGES.slice(100, 120);
+                : (opts.termPages || ALL_PAGES.slice(100, 120));
+            const results = resultsForPages(matched)
+                .concat(query === null || query === undefined ? [] : (opts.extraTermResults || []));
             return Promise.resolve({
-                results: resultsForPages(matched),
+                results,
                 filters: {},
                 unfilteredResultCount: matched.length,
             });
@@ -387,14 +392,60 @@ describe('an empty query browses the corpus (SML-2791)', () => {
         expect(cards(env.window).length).toBeLessThanOrEqual(75);
     });
 
-    test('a keyword search header still reports the loaded list length', async () => {
+    test('a keyword search under the cap reports the loaded list length', async () => {
         const { mock, calls } = createMockPagefind();
         const env = await boot(mock, calls);
         await search(env, 'things');
 
-        // The term matches 20 pages; the keyword path is unchanged.
+        // The term matches 20 pages, well under MAX_PAGEFIND_RESULTS, so every
+        // match was loaded and the list length is the exact total.
         const total = Number(headerText(env.window).match(/Showing\s+[\d,]+\s+of\s+([\d,]+)/)[1].replace(/,/g, ''));
         expect(total).toBe(20);
+    });
+
+    test('an uncapped keyword search keeps the deduped length over the raw id count', async () => {
+        // A 21st fragment id carrying the same page as the first match: same
+        // URL, same title. Pagefind reports 21 ids, and the list collapses the
+        // pair to one row (by URL in the WASM scorer, which this harness does
+        // not load, so here by the opt-in title dedup that runs on the same
+        // list). Nothing was cut by the cap, so the deduped 20 is the truth and
+        // the raw 21 would only overstate it.
+        const dup = resultsForPages([100])[0];
+        const extra = Object.assign({}, dup, { id: PAGE_IDS[120] });
+        const { mock, calls } = createMockPagefind({ extraTermResults: [extra] });
+        const env = await boot(mock, calls, { TITLE_DEDUP: true });
+        await search(env, 'things');
+
+        const total = Number(headerText(env.window).match(/Showing\s+[\d,]+\s+of\s+([\d,]+)/)[1].replace(/,/g, ''));
+        expect(total).toBe(20);
+    });
+
+    test('a capped keyword search reports the raw filtered match count, not the cap', async () => {
+        // The term matches all 200 pages against MAX_PAGEFIND_RESULTS of 75.
+        // The list is the capped head, but Pagefind returned every match id,
+        // and the header used to report the cap (minus dedup) as the total —
+        // and kept reporting it after a facet narrowed the matches, as long
+        // as more than 75 still matched.
+        const { mock, calls } = createMockPagefind({ termPages: ALL_PAGES });
+        const env = await boot(mock, calls);
+        await search(env, 'things');
+
+        const totalOf = () => Number(headerText(env.window)
+            .match(/Showing\s+[\d,]+\s+of\s+([\d,]+)/)[1].replace(/,/g, ''));
+        expect(totalOf()).toBe(200);
+        expect(cards(env.window).length).toBe(12);
+        expect(headerText(env.window)).toContain('for "things"');
+
+        // Beginner is every even page: 100 matches, still over the cap.
+        await clickFacet(env, 'level', 'Beginner');
+        expect(totalOf()).toBe(100);
+        expect(headerText(env.window)).toContain('Beginner');
+        expect(cards(env.window).length).toBe(12);
+
+        // Fruit is pages 0-2: under the cap, so the loaded length is exact.
+        await clickFacet(env, 'level', 'Beginner');
+        await clickFacet(env, 'topic', 'Fruit');
+        expect(totalOf()).toBe(3);
     });
 
     test('a browse runs no query expansion', async () => {

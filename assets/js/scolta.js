@@ -496,6 +496,14 @@
   // A browse loads only a capped, title-deduped head of the match list, so
   // allScoredResults.length there is an artifact of cap + dedup, not a total.
   let browseTotal = null;
+  // Raw Pagefind match ids behind the current keyword search — the union over
+  // every search that seeds the list (the typed query, the OR fallback terms,
+  // the expansion terms) — and whether any of those searches had more matches
+  // than MAX_PAGEFIND_RESULTS let it load. Null on a browse. Pagefind returns
+  // every match id before a single fragment loads, so the union is free; it
+  // is what the header reports as "of N" once the cap has truncated the list,
+  // since allScoredResults.length is then the cap, not a total.
+  let keywordMatches = null;
   let pagefindBase = '';   // Set during initPagefind(); used by resolveUrl().
   let currentSortOverride = null;    // { field, direction } or null — active sort override
   let llmAppliedFilters = {};        // { dimension: value } — filters injected by LLM expansion
@@ -3922,7 +3930,19 @@
     return loaded.map((data, i) => ({ data: data, score: toLoad - i }));
   }
 
-  async function searchAndLoadParallel(queries, filters, originalQuery, specificityOpts) {
+  // Record a seeding search's raw match ids into a keywordMatches tally (see
+  // the declaration). Every id is taken, not just the capped head that loads,
+  // and the tally remembers whether the cap cut anything.
+  function noteRawMatches(tally, search) {
+    if (!tally || !search || !search.results) return;
+    const CONFIG = getInstanceConfig();
+    if (search.results.length > CONFIG.MAX_PAGEFIND_RESULTS) tally.capped = true;
+    for (const r of search.results) tally.ids.add(r.id);
+  }
+
+  // `matchTally` is the keywordMatches object of the cycle this load belongs
+  // to, or null; each seeding term's raw match ids are recorded into it.
+  async function searchAndLoadParallel(queries, filters, originalQuery, specificityOpts, matchTally) {
     const CONFIG = getInstanceConfig();
     if (queries.length === 0) return [];
 
@@ -3993,6 +4013,7 @@
       if (!seedingTerms.has(queries[i].term)) continue;
       const search = searches[i];
       const { term, weight } = queries[i];
+      noteRawMatches(matchTally, search);
       const toLoad = Math.min(search.results.length, CONFIG.MAX_PAGEFIND_RESULTS);
       for (let j = 0; j < toLoad; j++) {
         const entry = search.results[j];
@@ -4316,6 +4337,10 @@
       debugLog('[scolta:expand] Discarding stale expansion (version', version, 'vs current', searchVersion, ')');
       return;
     }
+    // Taken now, while the version check above guarantees it is this cycle's:
+    // a newer doSearch() replaces keywordMatches, and the awaits below would
+    // otherwise let a stale expansion write into the cycle that superseded it.
+    const matchTally = keywordMatches;
 
     // An expansion term is a phrase, and decomposing it into words is what
     // puts a conjunction on the highlight list: "reading and writing" carries
@@ -4544,6 +4569,10 @@
         // urlMap and out to the list. The typed query is counted by the typed
         // pass, so only the rest is the delta.
         countTerms = [...termSet].filter(t => t !== searchQuery);
+        // The union's raw ids are the header's "of N" once the cap bites. That
+        // overcounts documents the sort field filter drops, but only in the
+        // capped case, where the list length is no total either.
+        for (const search of searches) noteRawMatches(matchTally, search);
         withField.sort((a, b) => {
           const av = parseFloat(a.meta[field]);
           const bv = parseFloat(b.meta[field]);
@@ -4641,7 +4670,7 @@
       // the list.
       countTerms = queries.filter(q => !q.isTyped && !q.agreementOnly).map(q => q.term);
 
-      const expandedResults = await searchAndLoadParallel(queries, activeFilters, searchQuery, expandSpecificity);
+      const expandedResults = await searchAndLoadParallel(queries, activeFilters, searchQuery, expandSpecificity, matchTally);
 
       if (version !== searchVersion) {
         debugLog('[scolta:expand] Discarding stale expansion after load (version', version, 'vs current', searchVersion, ')');
@@ -4777,6 +4806,7 @@
       allScoredResults = [];
       hadSpecificMatch = false;
       browseTotal = null;
+      keywordMatches = null;
       conversationMessages = [];
       followUpCount = 0;
       // Fresh cycle, fresh memo: identical searches are shared WITHIN a cycle
@@ -4883,6 +4913,13 @@
       // Pagefind returns every match id up front, so the true match total is
       // free here — before the cap decides how few of them to load.
       if (isBrowse) browseTotal = primarySearch.results.length;
+      // A keyword search tallies ids rather than a length, because the OR
+      // fallback and the expansion pass union further searches into it.
+      // Held in a local too: a newer cycle may replace keywordMatches during
+      // the loads below, and this cycle's later writes belong to its own tally.
+      const matchTally = isBrowse ? null : { ids: new Set(), capped: false };
+      keywordMatches = matchTally;
+      noteRawMatches(matchTally, primarySearch);
       allScoredResults = isBrowse
         ? await loadBrowseResults(primarySearch)
         : await loadAndScoreSearch(primarySearch, scorerQuery, 1.0);
@@ -4904,7 +4941,7 @@
           corpusTotal: subwordCorpusSize(activeFilters),
           strongMatched: false,
         };
-        const orResults = await searchAndLoadParallel(orQueries, activeFilters, searchQuery, orSpecificity);
+        const orResults = await searchAndLoadParallel(orQueries, activeFilters, searchQuery, orSpecificity, matchTally);
         // Only adopt the specificity signal if this search is still current — a
         // newer doSearch() resets hadSpecificMatch, and a late-resolving stale OR
         // fallback must not repollute it.
@@ -5611,9 +5648,21 @@
     // count while the paged list is deduped, so paging can exhaust before N —
     // preferred over reporting a cap artifact as the total. "Showing X" keeps
     // its meaning: how many are painted.
+    //
+    // A keyword search has the same problem once MAX_PAGEFIND_RESULTS cut
+    // the load: the list length is then the cap, so a facet that narrows the
+    // matches from 2,000 to 400 left N stuck at 75 even as the list changed.
+    // When the cap bit, N is the union of raw match ids across every search
+    // that seeded the list (filter-aware, since each search ran under the
+    // active filters). That figure counts fragments, and the list collapses
+    // fragments by URL and near-duplicate title, so it can run a little high
+    // — again accepted over a cap artifact. When nothing was cut, every
+    // match was loaded and the deduped list length IS the exact total, so it
+    // is kept: there the raw count would only overstate the dedup.
+    const capped = currentQuery && keywordMatches !== null && keywordMatches.capped;
     const totalCount = (!currentQuery && browseTotal !== null)
       ? browseTotal
-      : filtered.length;
+      : (capped ? Math.max(keywordMatches.ids.size, filtered.length) : filtered.length);
     const resultNoun = totalCount === 1 ? 'result' : 'results';
     // A browse has no query to name, and `results for ""` is worse than saying
     // nothing.

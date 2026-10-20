@@ -311,7 +311,7 @@ function panelGroups(window) {
         .map(h => h.textContent.trim());
 }
 
-/** The number the results header claims, i.e. allScoredResults.length. */
+/** The number the results header claims as "of N". */
 function headerCount(window) {
     const text = window.document.querySelector('#scolta-results-header').textContent || '';
     const m = text.match(/^\s*Showing\s+[\d,]+\s+of\s+([\d,]+)\s+results?\s+for/);
@@ -783,7 +783,10 @@ describe('#265: the panel counts only documents the list actually shows', () => 
         });
         await runSearch(env, 'alpha');
 
-        expect(headerCount(env.window)).toBe(2);
+        // The header reports the raw match total once the cap has cut the
+        // list (three matched, two loaded); the list itself holds two.
+        expect(headerCount(env.window)).toBe(3);
+        expect(resultCards(env.window)).toBe(2);
         const counts = panel(env.window);
         expect(counts['level:Beginner']).toBe(2);
         // Zeroed, so hideEmptyFacets drops it: absent, or present at 0. What it
