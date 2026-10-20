@@ -438,14 +438,17 @@ describe('an empty query browses the corpus (SML-2791)', () => {
 
         // Beginner is every even page: 100 matches, still over the cap.
         await clickFacet(env, 'level', 'Beginner');
-        expect(totalOf()).toBe(100);
+        expect(headerText(env.window)).toMatch(/Showing 12 of 100 results/);
         expect(headerText(env.window)).toContain('Beginner');
         expect(cards(env.window).length).toBe(12);
 
-        // Fruit is pages 0-2: under the cap, so the loaded length is exact.
+        // Fruit is pages 0-2: under the cap, so the loaded length is exact,
+        // and "Showing X" — the painted count, a page's worth until the
+        // filtered list is shorter than a page — follows the list down.
         await clickFacet(env, 'level', 'Beginner');
         await clickFacet(env, 'topic', 'Fruit');
-        expect(totalOf()).toBe(3);
+        expect(headerText(env.window)).toMatch(/Showing 3 of 3 results/);
+        expect(cards(env.window).length).toBe(3);
     });
 
     test('a browse runs no query expansion', async () => {
