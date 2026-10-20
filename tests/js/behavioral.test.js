@@ -242,8 +242,10 @@ describe('scolta.js behavioral tests', () => {
         );
         const doSearchBody = jsSource.match(/async function doSearch[\s\S]*?els\.layout\.style\.display/);
         expect(doSearchBody).not.toBeNull();
-        expect(doSearchBody[0]).toContain("searchParams.set('q'");
-        expect(doSearchBody[0]).toContain('replaceState');
+        expect(doSearchBody[0]).toContain('syncUrlToSearchState(query, isBrowse)');
+        const helperBody = jsSource.match(/function syncUrlToSearchState[\s\S]*?replaceState/);
+        expect(helperBody).not.toBeNull();
+        expect(helperBody[0]).toContain("searchParams.set('q'");
     });
 
     test('clearSearch removes query from URL', () => {
