@@ -8,6 +8,8 @@ use Tag1\Scolta\AiProvider\Amazee\KeyExpiryRecovery;
 use Tag1\Scolta\Cache\CacheDriverInterface;
 use Tag1\Scolta\Config\ResolvedApiKey;
 use Tag1\Scolta\Config\ScoltaConfig;
+use Tag1\Scolta\Index\IndexLocatorInterface;
+use Tag1\Scolta\Index\LocalIndexLocator;
 
 /**
  * Shared health check logic for all platform adapters.
@@ -34,12 +36,17 @@ final class HealthChecker
      *   When provided, the payload reports the key's source, so /health and
      *   the settings UI cannot disagree about it. When null, the payload
      *   falls back to the key already on the config and omits the source.
+     * @param IndexLocatorInterface|null $indexLocator Where the index the site
+     *   searches is served from, when that is not $indexOutputDir: a
+     *   RemoteIndexLocator for an index another host serves. When null, the
+     *   index is looked for in $indexOutputDir. Added in 2.0.0.
      */
     public function __construct(
         private readonly ScoltaConfig $config,
         private readonly string $indexOutputDir,
         private readonly ?CacheDriverInterface $cache = null,
         private readonly ?ResolvedApiKey $resolvedKey = null,
+        private readonly ?IndexLocatorInterface $indexLocator = null,
     ) {}
 
     /**
@@ -71,19 +78,18 @@ final class HealthChecker
      * a fault, so `ai_usable: false` alone does not degrade the status. See
      * docs/HEALTH_REFERENCE.md.
      *
-     * @return array{status: 'ok'|'degraded', status_reasons: list<string>, ai_provider: string, ai_provider_selected: bool, ai_configured: bool, ai_usable: bool, ai_auth_failing: bool, ai_auth_failing_since: int|null, ai_auth_failing_ttl: int|null, ai_key_source: string|null, ai_amazee_overridden: bool, wasm_available: bool, index_exists: bool, indexer_active: string, stale_artifact_urls: bool, stale_artifact_message: string|null, wasm: array}
+     * @return array{status: 'ok'|'degraded', status_reasons: list<string>, ai_provider: string, ai_provider_selected: bool, ai_configured: bool, ai_usable: bool, ai_auth_failing: bool, ai_auth_failing_since: int|null, ai_auth_failing_ttl: int|null, ai_key_source: string|null, ai_amazee_overridden: bool, wasm_available: bool, index_exists: bool, index_remote: bool, indexer_active: string, stale_artifact_urls: bool, stale_artifact_message: string|null, wasm: array}
      * @since 1.0.0 The `pagefind`, `pagefind_available`, `indexer_upgrade_available`
      *   and `indexer_upgrade_message` keys were removed in 2.0.0; `indexer_active`
-     *   is always `php`.
+     *   is always `php`. The `index_remote` key and the
+     *   `remote_index_unreachable` reason were added in 2.0.0.
      * @stability stable
      */
     public function check(): array
     {
-        // PhpIndexer writes into a pagefind/ subdirectory of outputDir (atomic
-        // swap from .scolta-building → pagefind/). Indexes built before 2.0.0
-        // by the Pagefind binary may sit at the root, so check both.
-        $indexExists = file_exists($this->indexOutputDir . '/pagefind/pagefind.js')
-            || file_exists($this->indexOutputDir . '/pagefind.js');
+        $locator = $this->indexLocator ?? new LocalIndexLocator($this->indexOutputDir);
+        $indexExists = $locator->exists();
+        $indexRemote = $locator->isRemote();
 
         // An Amazee resolution counts as configured even when it withholds the
         // key: the credentials are what the site is running on, and a
@@ -129,8 +135,10 @@ final class HealthChecker
 
         $reasons = [];
 
+        // A remote index that does not answer is a different fault, fixed on
+        // a different host, from a local one that was never built.
         if (!$indexExists) {
-            $reasons[] = 'index_missing';
+            $reasons[] = $indexRemote ? 'remote_index_unreachable' : 'index_missing';
         }
 
         // At most one ai_* reason, the next thing to fix: a key cannot be
@@ -147,7 +155,8 @@ final class HealthChecker
             }
         }
 
-        $staleIndex = $this->detectStaleArtifactUrls();
+        // Sampled from local fragments, so only a local index can be judged.
+        $staleIndex = !$indexRemote && $this->detectStaleArtifactUrls();
 
         if ($staleIndex) {
             $reasons[] = 'index_stale_artifact_urls';
@@ -171,6 +180,7 @@ final class HealthChecker
             'ai_amazee_overridden' => $this->resolvedKey?->amazeeOverridden() ?? false,
             'wasm_available' => false,
             'index_exists' => $indexExists,
+            'index_remote' => $indexRemote,
             'indexer_active' => 'php',
             'stale_artifact_urls' => $staleIndex,
             'stale_artifact_message' => $staleIndex
