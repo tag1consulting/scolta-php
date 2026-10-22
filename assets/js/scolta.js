@@ -5156,8 +5156,17 @@
       // A browse skips summarization the way it skips expansion: there is no
       // query to summarize, and the endpoint 400s an empty one. The result
       // paint reserved no slot for a browse, so there is nothing to release.
+      // The summary is told only about the hints the recall guard applied
+      // (plus any the sort path injected): a declined hint is offered as a
+      // chip, not in force, and naming it here made the model describe a
+      // filter the user never saw. llmAppliedFilters survives a
+      // preserveFilters re-run (facet toggle, sort, load-more), so the
+      // summary keeps naming a hint that is still in force.
+      const summaryFilterHint = Object.keys(llmAppliedFilters).length > 0
+        ? { ...llmAppliedFilters }
+        : null;
       if (!isBrowse) {
-        summarizeResults(query, allScoredResults, expandedLabel, sortHint, filterHint, activeFilters)
+        summarizeResults(query, allScoredResults, expandedLabel, sortHint, summaryFilterHint, activeFilters)
           .catch(e => {
             if (version !== searchVersion) return;
             console.warn('[scolta:summarize] failed before the request:', e);

@@ -202,6 +202,55 @@ describe('filter-hint recall guard', () => {
         expect(url.searchParams.get('f_topic')).toBe('Merging');
     });
 
+    // The summary request carries a context whose header names the filters
+    // in force. Before the fix the raw expand-response hint was passed, so a
+    // declined hint still reached the model as "[Results are filtered by
+    // ...]" and the summary described a grade range no filter enforced
+    // (sharemylesson.com).
+    function summarizeContext(win) {
+        const call = win.fetch.mock.calls.find(([url]) => url === '/s');
+        expect(call).toBeDefined();
+        return JSON.parse(call[1].body).context;
+    }
+
+    test('declined hint is not described to the summary as a filter', async () => {
+        const docs = makeDocs([
+            [29, { topic: 'Basics' }],
+            [1, { topic: 'Branching' }],
+        ]);
+        const win = createGuardWindow(
+            { terms: ['git workflows', 'branching models'], filter_hint: { topic: 'Branching' } },
+            { topic: { Basics: 29, Branching: 1 } },
+            docs
+        );
+
+        await runSearch(win, 'most popular git workflows');
+
+        expect(win.__getFilterState().offeredLlmFilters).toEqual({ topic: 'Branching' });
+        const context = summarizeContext(win);
+        expect(context).not.toContain('[Results are filtered by');
+        expect(context).not.toContain('FILTERED BY THIS FIELD');
+        expect(context).not.toContain('User has filtered results by');
+    });
+
+    test('applied hint is still described to the summary as a filter', async () => {
+        const docs = makeDocs([
+            [15, { topic: 'Basics' }],
+            [20, { topic: 'Merging' }],
+        ]);
+        const win = createGuardWindow(
+            { terms: ['merge conflicts', 'conflict markers'], filter_hint: { topic: 'Merging' } },
+            { topic: { Basics: 15, Merging: 20 } },
+            docs
+        );
+
+        await runSearch(win, 'merge conflict resolution');
+
+        expect(win.__getFilterState().llmAppliedFilters).toEqual({ topic: 'Merging' });
+        const context = summarizeContext(win);
+        expect(context).toContain('[Results are filtered by "topic: Merging"]');
+    });
+
     test('scolta:filters-rendered exposes the applied hint in detail.activeFilters', async () => {
         const docs = makeDocs([
             [15, { topic: 'Basics' }],
