@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\Export\ContentItem;
 use Tag1\Scolta\Index\BuildIntent;
+use Tag1\Scolta\Index\CborDecoder;
 use Tag1\Scolta\Index\IncrementalIndexUpdater;
 use Tag1\Scolta\Index\IncrementalUpdateUnavailable;
 use Tag1\Scolta\Index\IndexBuildOrchestrator;
@@ -693,6 +694,86 @@ final class IncrementalDifferentialTest extends TestCase
         $this->assertSame(0, $result->pagesUpdated);
         $this->assertSame(0, $result->pagesDeleted);
         $this->assertSame($before, self::manifest($this->incrementalOut));
+    }
+
+    // ── The published pf_meta survives a commit that does not change it ────
+
+    /**
+     * The pf_meta the entry file names, decoded, with the entry's page count.
+     *
+     * @return array{path: string, pages: int, entryPages: int}
+     */
+    private function publishedMeta(): array
+    {
+        $dir   = $this->incrementalOut . '/pagefind';
+        $entry = json_decode((string) file_get_contents($dir . '/pagefind-entry.json'), true);
+        $this->assertIsArray($entry);
+        $path = $dir . '/pagefind.' . $entry['languages']['en']['hash'] . '.pf_meta';
+        $this->assertFileExists($path, 'The pf_meta the entry file names must exist, or every search fails.');
+
+        $meta = CborDecoder::decodeArtifact($path);
+
+        return [
+            'path'       => $path,
+            'pages'      => count($meta[1]),
+            'entryPages' => (int) $entry['languages']['en']['page_count'],
+        ];
+    }
+
+    public function testDeletingIdsTheIndexNeverHeldLeavesThePublishedMetaInPlace(): void
+    {
+        // What a Drupal site does after content is saved inside a workspace:
+        // the delete is staged for an id that never reached the index. Nothing
+        // in pf_meta changes, so its rewrite lands under the same name, and
+        // removing the "superseded" path removed the file just written.
+        $this->seedBoth(SyntheticCorpus::generate(20, seed: 5));
+        $before = $this->publishedMeta();
+
+        $updater = $this->updater();
+        $updater->stageDelete('never-indexed-1');
+        $updater->stageDelete('never-indexed-2');
+        $updater->commit();
+
+        $after = $this->publishedMeta();
+        $this->assertSame($before, $after);
+        $this->assertCount(1, glob($this->incrementalOut . '/pagefind/pagefind.*.pf_meta') ?: []);
+        $this->assertTrue($this->updater()->isAvailable(), 'The next update must still find the index.');
+    }
+
+    public function testReSavingAnUnchangedPageLeavesThePublishedMetaInPlace(): void
+    {
+        // The same defect reached through an upsert: a save that changes no
+        // byte of the page reproduces pf_meta under the name it already had.
+        $items = SyntheticCorpus::generate(20, seed: 5);
+        $this->seedBoth($items);
+        $before = $this->publishedMeta();
+
+        $updater = $this->updater();
+        $updater->stageUpsert($items[7]);
+        $updater->commit();
+
+        $this->assertSame($before, $this->publishedMeta());
+        $this->assertCount(1, glob($this->incrementalOut . '/pagefind/pagefind.*.pf_meta') ?: []);
+    }
+
+    public function testACommitThatChangesTheMetaRemovesTheOldOneAndLeavesExactlyOne(): void
+    {
+        $this->seedBoth(SyntheticCorpus::generate(20, seed: 5));
+        $before = $this->publishedMeta();
+
+        $updater = $this->updater();
+        $updater->stageUpsert(SyntheticCorpus::item(21, seed: 5));
+        $updater->commit();
+
+        $after = $this->publishedMeta();
+        $this->assertNotSame($before['path'], $after['path']);
+        $this->assertFileDoesNotExist($before['path'], 'A superseded pf_meta must not be left behind.');
+        $this->assertSame($before['pages'] + 1, $after['pages']);
+        $this->assertSame($after['pages'], $after['entryPages']);
+        $this->assertSame(
+            [$after['path']],
+            glob($this->incrementalOut . '/pagefind/pagefind.*.pf_meta') ?: [],
+        );
     }
 
     public function testIsAvailableReflectsWhetherAnIndexAndLedgerExist(): void
