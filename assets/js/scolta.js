@@ -1213,6 +1213,23 @@
     }
   }
 
+  // The language key of the index pagefind.init() loaded, chosen the way
+  // Pagefind's findIndex() chooses it: the page's <html lang> exactly, then its
+  // base language, then the index with the most pages. The last step is why
+  // <html lang> alone cannot name it: the PHP indexer writes one index keyed
+  // "en" for every language, so a Spanish page loads "en" by fallback.
+  function pagefindLoadedLanguage(languages) {
+    const keys = Object.keys(languages || {});
+    if (keys.length === 0) return null;
+    const pageLang = (document.querySelector('html')?.getAttribute('lang') || 'unknown')
+      .toLocaleLowerCase();
+    if (languages[pageLang]) return pageLang;
+    const baseLang = pageLang.split('-')[0];
+    if (languages[baseLang]) return baseLang;
+    return keys.reduce((best, k) =>
+      (languages[k].page_count || 0) > (languages[best].page_count || 0) ? k : best);
+  }
+
   // Initialize Pagefind and preload the WASM index.
   async function initPagefind() {
     const pagefindPath = (instanceConfig && instanceConfig.pagefindPath) || '/pagefind/pagefind.js';
@@ -1269,13 +1286,13 @@
       if (totalPages > 0) {
         cachedPagefindPageCount = totalPages;
       }
-      const primaryLang = (document.querySelector('html')?.getAttribute('lang') || 'en')
-        .toLowerCase().split('-')[0];
+      // Merging the index the primary instance already loaded loads it twice,
+      // and every result then comes back twice.
+      const primaryLang = pagefindLoadedLanguage(entry.languages);
       // The facet index is stamped with the pf_meta hash it was built against.
       // This entry file is cache-busted, so it is the trustworthy statement of
       // which index the browser is actually using.
-      const primaryEntry = (entry.languages || {})[primaryLang]
-        || Object.values(entry.languages || {})[0];
+      const primaryEntry = primaryLang ? entry.languages[primaryLang] : null;
       facetIndexExpectedHash = (primaryEntry && primaryEntry.hash) || null;
       const absoluteBase = new URL(basePath, window.location.href).href;
       for (const lang of Object.keys(entry.languages || {})) {
