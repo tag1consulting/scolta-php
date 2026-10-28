@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Tag1\Scolta\Export\ContentItem;
 use Tag1\Scolta\Index\BuildIntent;
+use Tag1\Scolta\Index\CborDecoder;
 use Tag1\Scolta\Index\IncrementalIndexUpdater;
 use Tag1\Scolta\Index\IndexBuildOrchestrator;
 use Tag1\Scolta\Index\MemoryBudget;
@@ -332,6 +333,50 @@ final class CorpusTableReuseTest extends TestCase
 
         $this->fullBuild($this->fullState, $this->fullOut, $edited);
         $this->assertTreesMatch('Two body-only edits in sequence must match a full rebuild.');
+    }
+
+    public function testAnUpdateThatChangesNothingKeepsThePfMetaTheEntryFileNames(): void
+    {
+        // Re-saving pages with identical content and deleting pages that were
+        // never indexed leaves the page table, chunk list, filters and sorts
+        // exactly as they were, so the new pf_meta is byte-identical to the
+        // old one and lands at the same hash-named path. The publish sequence
+        // must not then unlink "the superseded" pf_meta, because that is the
+        // file it just wrote: sharemylesson.com lost its index that way on
+        // 2026-10-28 and had to fall back to a two-hour full rebuild.
+        $items = SyntheticCorpus::generate(60, seed: 3);
+        $this->seedBoth($items);
+
+        $hashBefore = self::entryIndexHash($this->incrementalOut);
+
+        $route = $this->commit(static function (IncrementalIndexUpdater $u) use ($items): void {
+            $u->stageUpsert($items[20]);
+            $u->stageUpsert($items[40]);
+            $u->stageDelete('never-indexed-1');
+            $u->stageDelete('never-indexed-2');
+        });
+        $this->assertSame('reused', $route, 'A no-op update rebuilt the corpus tables.');
+
+        $hashAfter = self::entryIndexHash($this->incrementalOut);
+        $this->assertSame($hashBefore, $hashAfter, 'A no-op update changed the index hash.');
+
+        $metaPath = $this->incrementalOut . '/pagefind/pagefind.' . $hashAfter . '.pf_meta';
+        $this->assertFileExists($metaPath, 'The pf_meta named by pagefind-entry.json is gone after a no-op update.');
+        $meta = CborDecoder::decodeArtifact($metaPath);
+        $this->assertIsArray($meta);
+        $this->assertCount(60, $meta[1], 'The surviving pf_meta does not describe the whole corpus.');
+
+        $this->assertTreesMatch('A no-op update must leave the tree identical to a full build.');
+    }
+
+    private static function entryIndexHash(string $out): string
+    {
+        $entry = json_decode((string) file_get_contents($out . '/pagefind/pagefind-entry.json'), true);
+        self::assertIsArray($entry);
+        $hash = $entry['languages']['en']['hash'] ?? null;
+        self::assertIsString($hash, 'pagefind-entry.json names no index hash.');
+
+        return $hash;
     }
 
     /** Filenames and mtimes of the filter chunks, to catch a needless rewrite. */

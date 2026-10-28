@@ -387,8 +387,12 @@ final class IncrementalIndexUpdater
         // this point and the old pf_meta still pointed at the old ones, so a
         // reader mid-update saw a consistent older index throughout. The new
         // pf_meta and the entry file that names it are written last, and only
-        // then are the superseded pf_meta and facet index removed.
-        $this->removeSupersededMeta($metaPath);
+        // then are the superseded pf_meta and facet index removed. Both
+        // removals are guarded on the hash actually changing: an update that
+        // leaves the page table, chunk list and corpus tables as they were
+        // produces a byte-identical pf_meta at the same path, and unlinking
+        // "the old one" would delete the file the entry file now names.
+        $this->removeSupersededMeta($metaPath, $previousIndexHash, $newMetaHash);
         $this->removeSupersededFacets($previousIndexHash, $newMetaHash);
 
         // Appended, not snapshotted. The whole table is the largest single
@@ -623,8 +627,19 @@ final class IncrementalIndexUpdater
         return $matches === [] ? null : $matches[0];
     }
 
-    private function removeSupersededMeta(string $keptOutOfDate): void
+    /**
+     * Removes the pf_meta this commit just superseded.
+     *
+     * Guarded on the two hashes differing, like removeSupersededFacets(): a
+     * commit that changes nothing in the index (pages re-saved with identical
+     * content, deletes of pages that were never indexed) writes the same
+     * bytes to the same path, and the "superseded" file is then the live one.
+     */
+    private function removeSupersededMeta(string $keptOutOfDate, string $previousIndexHash, string $newIndexHash): void
     {
+        if ($previousIndexHash === $newIndexHash) {
+            return;
+        }
         foreach (glob($this->indexDir() . '/pagefind.*.pf_meta') ?: [] as $path) {
             if ($path === $keptOutOfDate) {
                 unlink($path);
