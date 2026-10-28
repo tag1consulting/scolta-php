@@ -64,6 +64,15 @@ final class ModelIdentity
     private const ANTHROPIC_GENERATION_FIRST
         = '/^claude-(\d+)(-\d+)*-(opus|sonnet|haiku|instant)(-\d{8}|-latest)$/';
 
+    /**
+     * {@see self::ANTHROPIC_FAMILY_FIRST} with the major and minor version
+     * captured, for {@see self::acceptsEffort()}. Version segments are one or
+     * two digits so that a dated snapshot with no minor version
+     * (`claude-opus-4-20250514`) does not read its date as the minor.
+     */
+    private const ANTHROPIC_FAMILY_VERSION
+        = '/^claude-(opus|sonnet|haiku|fable|mythos)-(\d{1,2})(?:-(\d{1,2}))?(?:-\d{1,2})*(?:-\d{8}|-latest)?$/';
+
     /** Pre-Claude-3 naming: `claude-2.1`, `claude-instant-1.2`. */
     private const ANTHROPIC_LEGACY = '/^claude-(instant-)?\d+(\.\d+)?$/';
 
@@ -141,6 +150,47 @@ final class ModelIdentity
             $provider,
             $provider,
         );
+    }
+
+    /**
+     * Whether an Anthropic model accepts the `output_config.effort` field.
+     *
+     * Effort arrived with Opus 4.5 and is on every model from the 4.6
+     * generation onward (Opus and Sonnet 4.6, the whole 5.x line, Fable and
+     * Mythos). The dated Sonnet 4.5 and Haiku 4.5 snapshots, the 4.0/4.1
+     * models and everything generation-first (`claude-3-5-sonnet-*`) reject
+     * it with a 400, which takes every AI feature down, so the client omits
+     * the field for them.
+     *
+     * Unlike {@see self::looksNativeFor()} this IS consulted on the request
+     * path, and the asymmetry is deliberate: a false negative here omits
+     * effort and the model thinks at its default depth, which is slower but
+     * works, while a false positive breaks every request. A name this method
+     * cannot parse (a gateway alias, a model newer than its grammar) is
+     * therefore reported as not accepting it.
+     *
+     * @param string $model Effective model identifier.
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public static function acceptsEffort(string $model): bool
+    {
+        if (preg_match(self::ANTHROPIC_FAMILY_VERSION, strtolower(trim($model)), $m) !== 1) {
+            return false;
+        }
+        $family = $m[1];
+        $major = (int) $m[2];
+        $minor = (int) ($m[3] ?? '0');
+
+        if ($major >= 5) {
+            return true;
+        }
+        if ($major === 4) {
+            return $minor >= 6 || ($family === 'opus' && $minor === 5);
+        }
+
+        return false;
     }
 
     private static function looksAnthropic(string $model): bool
