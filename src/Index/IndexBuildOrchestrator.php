@@ -715,15 +715,13 @@ final class IndexBuildOrchestrator
                 warnings: $trashLeft ? self::TRASH_LEFT_WARNING : null,
             );
         } catch (BuildLockHeldException $e) {
-            // Refused at the door, not failed inside: nothing ran, so there is
-            // nothing to sweep and, above all, nothing to record. Recording
-            // this as the build's outcome is what turned a deploy mid-build
-            // into a fresh full build: the killed process's lock record stays
-            // live for STALE_LOCK_SECONDS, every tick in that window was
-            // refused here, and the refusal was written to segment-outcome.json
-            // as a non-memory failure — which ResumeChainPolicy::resumable()
-            // reads as "start over". The build on disk is still resumable
-            // once the lock goes stale; say so and leave it alone.
+            // Nothing ran, so there is nothing to sweep and nothing to record.
+            // Recording the refusal as the build's outcome is what made
+            // ResumeChainPolicy::resumable() read a killed build as "start
+            // over" while its lock record was still fresh. Log it so a lock
+            // that never goes stale is still visible.
+            $logger->warning('[scolta] Build not started: {reason}', ['reason' => $e->getMessage()]);
+
             return $this->makeRefusedReport($telemetry, $intent->memoryBudget(), $startTime, $e->getMessage());
         } catch (\Throwable $e) {
             // Sweep before the lock goes: the success path sweeps under it too,
@@ -952,10 +950,10 @@ final class IndexBuildOrchestrator
     }
 
     /**
-     * A report for a run that was refused the lock, recorded nowhere.
+     * A report for a run that was refused the lock.
      *
-     * Deliberately not makeStatusReport(): that writes the outcome file, and
-     * a refusal must leave the state directory exactly as it found it.
+     * Not makeStatusReport(): that writes the outcome file, and a refusal
+     * must leave the state directory as it found it.
      */
     private function makeRefusedReport(
         MemoryTelemetry $telemetry,
@@ -1190,10 +1188,9 @@ final class IndexBuildOrchestrator
      * Whether the build being continued died while writing the index, with
      * its partial output still staged.
      *
-     * Read before enterPhase() stamps this run's phase over the recorded one.
-     * The staging directory is only trusted alongside a manifest that says
-     * merging: a stray one next to a build that never merged is a corpse from
-     * some earlier run and is cleared as before.
+     * Read before enterPhase() overwrites the recorded phase. A staging
+     * directory beside a build that never merged is left over from an earlier
+     * run and is cleared as before.
      */
     private function interruptedMergeIsStaged(BuildState $buildState): bool
     {
@@ -1204,11 +1201,7 @@ final class IndexBuildOrchestrator
     /**
      * Clear the staging directory for a fresh merge, or keep it for a resumed one.
      *
-     * Resuming the merge is what makes a build killed in its longest phase —
-     * a deploy during the 65 minutes merge_pages takes on a network
-     * filesystem — cost minutes to finish rather than the whole phase again.
-     * The writer re-derives every file and keeps the staged ones that match;
-     * see StreamingFormatWriter::setKeepStaged().
+     * See StreamingFormatWriter::setKeepStaged().
      */
     private function prepareStagingDir(StreamingFormatWriter $writer, bool $resumingMerge, LoggerInterface $logger): void
     {

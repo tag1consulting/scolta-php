@@ -77,9 +77,8 @@ final class StatusReport
     /**
      * Whether this run was refused because another process holds the build lock.
      *
-     * Not a failure of the build on disk: nothing was run and nothing was
-     * recorded, so a driver should try again once the lock is free rather
-     * than count it against the build or start a fresh one.
+     * Nothing ran and nothing was recorded. A driver should retry once the
+     * lock is free rather than count it as a failure.
      *
      * @since 2.0.0
      * @stability experimental

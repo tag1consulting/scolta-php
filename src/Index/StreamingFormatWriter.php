@@ -213,23 +213,15 @@ class StreamingFormatWriter
      * Keep staged files an interrupted merge already wrote, instead of
      * rewriting them.
      *
-     * A merge that dies part-way — a deploy, an OOM kill — leaves the build
-     * directory holding every fragment it got to. Each is named by its
-     * contents and was written by this same build generation, so one that is
-     * on disk at the size this write would produce is the file this write
-     * would produce. On the filesystem this package is slow on, confirming
-     * that costs one stat against the create, write and close it replaces,
-     * which is what turns "restart the merge" into "finish the merge".
+     * A fragment is named by its content hash, so a staged one at the size
+     * this write would produce is the file this write would produce; a kill
+     * can only leave a truncated file, which the size check catches. Keeping
+     * one costs a stat instead of a create, write and close. Files this write
+     * does not produce are removed in endWrite(), because the pre-swap check
+     * counts fragments against the page table.
      *
-     * Truncation is the one way a kill can leave a wrong file behind, and a
-     * size mismatch catches it; the content hash in the name rules out a
-     * same-size file with different bytes. Files this write does not produce
-     * — a page edited between the kill and the resume — are removed in
-     * endWrite(), because the pre-swap integrity check counts fragments
-     * against the page table and an orphan would fail it.
-     *
-     * Must be called before beginWrite(). Off by default: a fresh build has
-     * its staging directory cleared first and would only pay the stat.
+     * Call before beginWrite(). Off by default: a fresh build clears its
+     * staging directory first and would only pay the stat.
      *
      * @since 2.0.0
      * @stability experimental
@@ -666,11 +658,8 @@ class StreamingFormatWriter
     }
 
     /**
-     * Put one fragment's bytes at $fragPath by the cheapest route that is safe.
-     *
-     * Kept when an interrupted merge already staged it complete; linked from
-     * the live index when reuse is on and the live copy matches; otherwise
-     * compressed and written.
+     * Put one fragment at $fragPath: keep a complete staged copy, else link
+     * the live index's copy when reuse is on, else compress and write.
      */
     private function placeFragment(string $hash, string $payload, string $fragPath): void
     {
@@ -708,9 +697,7 @@ class StreamingFormatWriter
     /**
      * Whether a staged file is on disk at exactly the size this write would give it.
      *
-     * One stat. The name is a content hash, so size is the only question left:
-     * a kill between create and close is the one way a wrong file gets here,
-     * and it leaves a short one.
+     * One stat. The name is a content hash, so size is the only check left.
      */
     private static function stagedFileHolds(string $path, int $expectedBytes): bool
     {
@@ -722,11 +709,10 @@ class StreamingFormatWriter
     /**
      * Remove every staged file this write did not produce.
      *
-     * Fragments and index chunks are kept when their name is one this write
-     * produced; everything else under the build directory — a previous
-     * attempt's pf_meta, facet index, filter chunks and entry file, whose
-     * names change with the content — is removed, because endWrite() is about
-     * to write this attempt's versions and the swap publishes the whole tree.
+     * Fragments and index chunks this write named are kept. Everything else
+     * (a previous attempt's pf_meta, facet index, filters and entry file) is
+     * removed, since endWrite() writes this attempt's versions and the swap
+     * publishes the whole tree.
      */
     private function removeStagedOrphans(): void
     {
@@ -763,7 +749,7 @@ class StreamingFormatWriter
             if ($name === '.' || $name === '..' || isset($keep[$name]) || !is_file($path)) {
                 continue;
             }
-            if (!unlink($path)) {
+            if (!unlink($path)) { // nosemgrep: php.lang.security.unlink-use.unlink-use
                 throw new \RuntimeException("Failed to remove a stale staged file: {$path}");
             }
             $removed++;

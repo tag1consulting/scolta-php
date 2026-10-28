@@ -74,10 +74,12 @@ final class LockContentionLeavesBuildResumableTest extends TestCase
         // STALE_LOCK_SECONDS.
         $this->writeLiveLockRecordFromAnotherHost();
 
+        $log     = new CollectingLogger();
         $refused = (new IndexBuildOrchestrator($this->stateDir, $this->outputDir))
-            ->build(BuildIntent::resume($budget), $items);
+            ->build(BuildIntent::resume($budget), $items, logger: $log);
 
         $this->assertFalse($refused->success);
+        $this->assertNotNull($log->lineContaining('Build not started'), 'A refusal must leave a log line.');
         $this->assertTrue($refused->isLockContention(), 'A refusal must be reported as contention, not as a failure: ' . ($refused->error ?? ''));
         $this->assertFalse($refused->isMemoryAbort());
         $this->assertStringContainsString('another build is running', (string) $refused->error);
@@ -152,7 +154,7 @@ final class LockContentionLeavesBuildResumableTest extends TestCase
             \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($files as $file) {
-            $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
+            $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname()); // nosemgrep: php.lang.security.unlink-use.unlink-use
         }
         rmdir($dir);
     }
