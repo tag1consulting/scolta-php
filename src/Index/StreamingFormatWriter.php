@@ -101,6 +101,23 @@ class StreamingFormatWriter
     /** Fragments compressed and written by this build. */
     private int $fragmentsWritten = 0;
 
+    /**
+     * Whether a file already staged under the build directory may be kept.
+     *
+     * Off for a fresh build, whose staging directory is cleared before
+     * beginWrite(). See {@see self::setKeepStaged()}.
+     */
+    private bool $keepStaged = false;
+
+    /** Staged fragments found complete and kept rather than rewritten. */
+    private int $fragmentsKept = 0;
+
+    /** Staged index chunks found complete and kept rather than rewritten. */
+    private int $chunksKept = 0;
+
+    /** Staged files this write did not produce and therefore removed. */
+    private int $stagedOrphansRemoved = 0;
+
     /** Build-scoped instrumentation; null disables phase emission. */
     private ?MemoryTelemetry $telemetry = null;
 
@@ -192,6 +209,69 @@ class StreamingFormatWriter
         return $this->fragmentsWritten;
     }
 
+    /**
+     * Keep staged files an interrupted merge already wrote, instead of
+     * rewriting them.
+     *
+     * A merge that dies part-way — a deploy, an OOM kill — leaves the build
+     * directory holding every fragment it got to. Each is named by its
+     * contents and was written by this same build generation, so one that is
+     * on disk at the size this write would produce is the file this write
+     * would produce. On the filesystem this package is slow on, confirming
+     * that costs one stat against the create, write and close it replaces,
+     * which is what turns "restart the merge" into "finish the merge".
+     *
+     * Truncation is the one way a kill can leave a wrong file behind, and a
+     * size mismatch catches it; the content hash in the name rules out a
+     * same-size file with different bytes. Files this write does not produce
+     * — a page edited between the kill and the resume — are removed in
+     * endWrite(), because the pre-swap integrity check counts fragments
+     * against the page table and an orphan would fail it.
+     *
+     * Must be called before beginWrite(). Off by default: a fresh build has
+     * its staging directory cleared first and would only pay the stat.
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function setKeepStaged(bool $keep): void
+    {
+        $this->keepStaged = $keep;
+    }
+
+    /**
+     * Staged fragments found complete and kept rather than rewritten.
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function fragmentsKept(): int
+    {
+        return $this->fragmentsKept;
+    }
+
+    /**
+     * Staged index chunks found complete and kept rather than rewritten.
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function chunksKept(): int
+    {
+        return $this->chunksKept;
+    }
+
+    /**
+     * Staged files from an interrupted merge that this write did not produce.
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function stagedOrphansRemoved(): int
+    {
+        return $this->stagedOrphansRemoved;
+    }
+
     private function getVersion(): string
     {
         return $this->pagefindVersion !== ''
@@ -223,6 +303,9 @@ class StreamingFormatWriter
         $this->lastTerm             = null;
         $this->fragmentsReused      = 0;
         $this->fragmentsWritten     = 0;
+        $this->fragmentsKept        = 0;
+        $this->chunksKept           = 0;
+        $this->stagedOrphansRemoved = 0;
 
         $this->ensureDir($this->buildDir);
         $this->ensureDir($this->buildDir . '/index');
@@ -279,13 +362,7 @@ class StreamingFormatWriter
         $payload  = self::DELIMITER . $fragment;
         $fragPath = $this->buildDir . "/fragment/{$hash}.pf_fragment";
 
-        if (!$this->reuseFragmentsResolved || !$this->linkUnchangedFragment($hash, $payload, $fragPath)) {
-            $compressed = gzencode($payload, $this->compressionLevel);
-            if (file_put_contents($fragPath, $compressed) === false) {
-                throw new \RuntimeException("Failed to write file: {$fragPath}");
-            }
-            $this->fragmentsWritten++;
-        }
+        $this->placeFragment($hash, $payload, $fragPath);
 
         // Retain only what pf_meta needs (~40 bytes per page).
         $this->pageMeta[$pageNum] = [
@@ -421,6 +498,10 @@ class StreamingFormatWriter
         // from a running counter over the gather order. Nothing enforced that;
         // it held by accident. Sorting is done inside the metadata writer so
         // the requirement has one home.
+        if ($this->keepStaged) {
+            $this->removeStagedOrphans();
+        }
+
         $this->telemetry?->emit('endwrite_metadata', ['items' => count($this->pageMeta)]);
 
         (new IndexMetadataWriter($this->cbor, $this->compressionLevel))->write(
@@ -450,7 +531,12 @@ class StreamingFormatWriter
         $hash       = IndexFileNaming::chunkHash($this->currentChunkWords, $cborData);
         $compressed = gzencode(self::DELIMITER . $cborData, $this->compressionLevel);
         $indexPath  = $this->buildDir . "/index/{$hash}.pf_index";
-        if (file_put_contents($indexPath, $compressed) === false) {
+        if ($compressed === false) {
+            throw new \RuntimeException("Failed to compress index chunk: {$indexPath}");
+        }
+        if ($this->keepStaged && self::stagedFileHolds($indexPath, strlen($compressed))) {
+            $this->chunksKept++;
+        } elseif (file_put_contents($indexPath, $compressed) === false) {
             throw new \RuntimeException("Failed to write file: {$indexPath}");
         }
 
@@ -577,6 +663,113 @@ class StreamingFormatWriter
                 unlink($file);
             }
         }
+    }
+
+    /**
+     * Put one fragment's bytes at $fragPath by the cheapest route that is safe.
+     *
+     * Kept when an interrupted merge already staged it complete; linked from
+     * the live index when reuse is on and the live copy matches; otherwise
+     * compressed and written.
+     */
+    private function placeFragment(string $hash, string $payload, string $fragPath): void
+    {
+        $compressed = null;
+        if ($this->keepStaged) {
+            $compressed = $this->compress($payload, $fragPath);
+            if (self::stagedFileHolds($fragPath, strlen($compressed))) {
+                $this->fragmentsKept++;
+
+                return;
+            }
+        }
+
+        if ($this->reuseFragmentsResolved && $this->linkUnchangedFragment($hash, $payload, $fragPath)) {
+            return;
+        }
+
+        $compressed ??= $this->compress($payload, $fragPath);
+        if (file_put_contents($fragPath, $compressed) === false) {
+            throw new \RuntimeException("Failed to write file: {$fragPath}");
+        }
+        $this->fragmentsWritten++;
+    }
+
+    private function compress(string $payload, string $path): string
+    {
+        $compressed = gzencode($payload, $this->compressionLevel);
+        if ($compressed === false) {
+            throw new \RuntimeException("Failed to compress: {$path}");
+        }
+
+        return $compressed;
+    }
+
+    /**
+     * Whether a staged file is on disk at exactly the size this write would give it.
+     *
+     * One stat. The name is a content hash, so size is the only question left:
+     * a kill between create and close is the one way a wrong file gets here,
+     * and it leaves a short one.
+     */
+    private static function stagedFileHolds(string $path, int $expectedBytes): bool
+    {
+        clearstatcache(true, $path);
+
+        return is_file($path) && filesize($path) === $expectedBytes;
+    }
+
+    /**
+     * Remove every staged file this write did not produce.
+     *
+     * Fragments and index chunks are kept when their name is one this write
+     * produced; everything else under the build directory — a previous
+     * attempt's pf_meta, facet index, filter chunks and entry file, whose
+     * names change with the content — is removed, because endWrite() is about
+     * to write this attempt's versions and the swap publishes the whole tree.
+     */
+    private function removeStagedOrphans(): void
+    {
+        $fragments = [];
+        foreach ($this->pageMeta as $meta) {
+            $fragments[$meta['fragmentHash'] . '.pf_fragment'] = true;
+        }
+        $chunks = [];
+        foreach ($this->indexChunkMeta as $meta) {
+            $chunks[$meta['hash'] . '.pf_index'] = true;
+        }
+
+        $this->stagedOrphansRemoved += self::removeFilesExcept($this->buildDir . '/fragment', $fragments);
+        $this->stagedOrphansRemoved += self::removeFilesExcept($this->buildDir . '/index', $chunks);
+        $this->stagedOrphansRemoved += self::removeFilesExcept($this->buildDir . '/filter', []);
+        $this->stagedOrphansRemoved += self::removeFilesExcept($this->buildDir, []);
+    }
+
+    /**
+     * Unlink the regular files directly in $dir whose names are not in $keep.
+     *
+     * @param array<string, true> $keep
+     * @return int Files removed.
+     */
+    private static function removeFilesExcept(string $dir, array $keep): int
+    {
+        if (!is_dir($dir)) {
+            return 0;
+        }
+
+        $removed = 0;
+        foreach (scandir($dir) ?: [] as $name) {
+            $path = $dir . '/' . $name;
+            if ($name === '.' || $name === '..' || isset($keep[$name]) || !is_file($path)) {
+                continue;
+            }
+            if (!unlink($path)) {
+                throw new \RuntimeException("Failed to remove a stale staged file: {$path}");
+            }
+            $removed++;
+        }
+
+        return $removed;
     }
 
     /**

@@ -37,6 +37,7 @@ final class StatusReport
         public readonly ?string $warnings = null,
         public readonly bool $success = true,
         public readonly ?string $error = null,
+        public readonly bool $lockHeld = false,
     ) {}
 
     /**
@@ -71,6 +72,21 @@ final class StatusReport
     public function isMemoryAbort(): bool
     {
         return !$this->success && $this->error === self::MEMORY_ABORT;
+    }
+
+    /**
+     * Whether this run was refused because another process holds the build lock.
+     *
+     * Not a failure of the build on disk: nothing was run and nothing was
+     * recorded, so a driver should try again once the lock is free rather
+     * than count it against the build or start a fresh one.
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function isLockContention(): bool
+    {
+        return !$this->success && $this->lockHeld;
     }
 
     /**

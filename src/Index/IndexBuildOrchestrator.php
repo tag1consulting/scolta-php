@@ -622,7 +622,8 @@ final class IndexBuildOrchestrator
             $this->assertLedgerHasLivePages();
 
             $telemetry->emit('merge_start');
-            $buildState = $this->coordinator->buildState();
+            $buildState    = $this->coordinator->buildState();
+            $resumingMerge = $isResume && $this->interruptedMergeIsStaged($buildState);
             $buildState->enterPhase(BuildState::PHASE_MERGING);
             $chunkFiles   = $this->coordinator->chunkFiles();
             $streamWriter = new StreamingFormatWriter(new CborEncoder(), budget: $budget);
@@ -631,12 +632,13 @@ final class IndexBuildOrchestrator
             $streamWriter->setFragmentReuse($this->reuseFragments);
             $this->merger->setTelemetry($telemetry);
             $telemetry->emit('writer_start');
-            $this->clearStagingDir($this->stagedIndexDir());
+            $this->prepareStagingDir($streamWriter, $resumingMerge, $logger);
             $streamWriter->beginWrite($this->outputDir);
             $this->merger->mergeStreaming($chunkFiles, $streamWriter, $budget);
             $streamWriter->fillTombstones($this->ledger->pageTableSize());
             $streamWriter->endWrite();
             $telemetry->emit('writer_complete');
+            $this->logKeptStagedFiles($streamWriter, $resumingMerge, $logger);
 
             $totalPagesProcessed = $this->coordinator->pagesProcessed();
             $pagesForReport      = $totalPagesProcessed > 0 ? $totalPagesProcessed : $pagesInRun;
@@ -712,6 +714,17 @@ final class IndexBuildOrchestrator
                 success: true,
                 warnings: $trashLeft ? self::TRASH_LEFT_WARNING : null,
             );
+        } catch (BuildLockHeldException $e) {
+            // Refused at the door, not failed inside: nothing ran, so there is
+            // nothing to sweep and, above all, nothing to record. Recording
+            // this as the build's outcome is what turned a deploy mid-build
+            // into a fresh full build: the killed process's lock record stays
+            // live for STALE_LOCK_SECONDS, every tick in that window was
+            // refused here, and the refusal was written to segment-outcome.json
+            // as a non-memory failure — which ResumeChainPolicy::resumable()
+            // reads as "start over". The build on disk is still resumable
+            // once the lock goes stale; say so and leave it alone.
+            return $this->makeRefusedReport($telemetry, $intent->memoryBudget(), $startTime, $e->getMessage());
         } catch (\Throwable $e) {
             // Sweep before the lock goes: the success path sweeps under it too,
             // and a retry that starts the moment the lock is free would walk
@@ -939,6 +952,34 @@ final class IndexBuildOrchestrator
     }
 
     /**
+     * A report for a run that was refused the lock, recorded nowhere.
+     *
+     * Deliberately not makeStatusReport(): that writes the outcome file, and
+     * a refusal must leave the state directory exactly as it found it.
+     */
+    private function makeRefusedReport(
+        MemoryTelemetry $telemetry,
+        MemoryBudget $budget,
+        float $startTime,
+        string $error,
+    ): StatusReport {
+        return new StatusReport(
+            version: self::VERSION,
+            pagefindVersion: SupportedVersions::getVersionForMetadata(),
+            resolvedIndexer: 'php',
+            pagesProcessed: 0,
+            chunksWritten: 0,
+            peakMemoryBytes: $telemetry->getPeakRssBytes(),
+            memoryBudgetBytes: $budget->totalBudgetBytes(),
+            durationSeconds: round(microtime(true) - $startTime, 3),
+            outputDir: $this->outputDir,
+            success: false,
+            error: $error,
+            lockHeld: true,
+        );
+    }
+
+    /**
      * Perform the merge + write + swap phases from pre-committed chunks.
      *
      * Called by framework adapters after all ProcessIndexChunk jobs complete.
@@ -1007,19 +1048,21 @@ final class IndexBuildOrchestrator
             $this->assertLedgerHasLivePages();
 
             $telemetry->emit('merge_start');
-            $buildState = $this->coordinator->buildState();
+            $buildState    = $this->coordinator->buildState();
+            $resumingMerge = $this->interruptedMergeIsStaged($buildState);
             $buildState->enterPhase(BuildState::PHASE_MERGING);
             $streamWriter = new StreamingFormatWriter(new CborEncoder(), budget: $budget);
             $streamWriter->setTelemetry($telemetry);
             $streamWriter->setHeartbeat($buildState->heartbeat(...));
             $streamWriter->setFragmentReuse($this->reuseFragments);
             $this->merger->setTelemetry($telemetry);
-            $this->clearStagingDir($this->stagedIndexDir());
+            $this->prepareStagingDir($streamWriter, $resumingMerge, $logger);
             $streamWriter->beginWrite($this->outputDir);
             $this->merger->mergeStreaming($chunkFiles, $streamWriter, $budget);
             $streamWriter->fillTombstones($this->ledger->pageTableSize());
             $streamWriter->endWrite();
             $telemetry->emit('writer_complete');
+            $this->logKeptStagedFiles($streamWriter, $resumingMerge, $logger);
 
             $pagesProcessed = $this->coordinator->pagesProcessed();
             $chunksFinalized = count($chunkFiles);
@@ -1141,6 +1184,62 @@ final class IndexBuildOrchestrator
     private function stagedIndexDir(): string
     {
         return $this->outputDir . '/.scolta-building';
+    }
+
+    /**
+     * Whether the build being continued died while writing the index, with
+     * its partial output still staged.
+     *
+     * Read before enterPhase() stamps this run's phase over the recorded one.
+     * The staging directory is only trusted alongside a manifest that says
+     * merging: a stray one next to a build that never merged is a corpse from
+     * some earlier run and is cleared as before.
+     */
+    private function interruptedMergeIsStaged(BuildState $buildState): bool
+    {
+        return $buildState->phase() === BuildState::PHASE_MERGING
+            && $this->storage->exists($this->stagedIndexDir());
+    }
+
+    /**
+     * Clear the staging directory for a fresh merge, or keep it for a resumed one.
+     *
+     * Resuming the merge is what makes a build killed in its longest phase —
+     * a deploy during the 65 minutes merge_pages takes on a network
+     * filesystem — cost minutes to finish rather than the whole phase again.
+     * The writer re-derives every file and keeps the staged ones that match;
+     * see StreamingFormatWriter::setKeepStaged().
+     */
+    private function prepareStagingDir(StreamingFormatWriter $writer, bool $resumingMerge, LoggerInterface $logger): void
+    {
+        if (!$resumingMerge) {
+            $this->clearStagingDir($this->stagedIndexDir());
+
+            return;
+        }
+
+        $writer->setKeepStaged(true);
+        $logger->notice(
+            '[scolta] The previous run was interrupted while writing the index; resuming the merge over its staged output in {dir}. Staged files that are already complete are kept.',
+            ['dir' => $this->stagedIndexDir()],
+        );
+    }
+
+    private function logKeptStagedFiles(StreamingFormatWriter $writer, bool $resumingMerge, LoggerInterface $logger): void
+    {
+        if (!$resumingMerge) {
+            return;
+        }
+
+        $logger->info(
+            '[scolta] Resumed merge: {fragments} staged fragments and {chunks} index chunks were complete and kept, {written} fragments were written, {orphans} stale staged files were removed.',
+            [
+                'fragments' => $writer->fragmentsKept(),
+                'chunks'    => $writer->chunksKept(),
+                'written'   => $writer->fragmentsWritten() + $writer->fragmentsReused(),
+                'orphans'   => $writer->stagedOrphansRemoved(),
+            ],
+        );
     }
 
     /**
