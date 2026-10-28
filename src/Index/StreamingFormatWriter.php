@@ -749,7 +749,7 @@ class StreamingFormatWriter
             if ($name === '.' || $name === '..' || isset($keep[$name]) || !is_file($path)) {
                 continue;
             }
-            if (!unlink($path)) { // nosemgrep: php.lang.security.unlink-use.unlink-use
+            if (!unlink($path)) { // nosemgrep: php.lang.security.unlink-use.unlink-use -- path is the build directory plus a scandir entry, never user input
                 throw new \RuntimeException("Failed to remove a stale staged file: {$path}");
             }
             $removed++;

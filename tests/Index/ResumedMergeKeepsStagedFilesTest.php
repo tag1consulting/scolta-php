@@ -158,7 +158,7 @@ final class ResumedMergeKeepsStagedFilesTest extends TestCase
             \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($files as $file) {
-            $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname()); // nosemgrep: php.lang.security.unlink-use.unlink-use
+            $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname()); // nosemgrep: php.lang.security.unlink-use.unlink-use -- temp dir cleanup
         }
         rmdir($dir);
     }
