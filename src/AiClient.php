@@ -403,6 +403,13 @@ class AiClient
         if ($temperature !== null) {
             $body['temperature'] = $temperature;
         }
+        // No effort equivalent is sent here. OpenAI's `reasoning_effort` is
+        // accepted only by its reasoning models (gpt-4o and most compatible
+        // servers answer 400), this path is a generic one whose model names
+        // cannot be classified, and through LiteLLM the field can mean
+        // "enable thinking with a 1024-token budget" on a Claude alias, the
+        // opposite of what `effort` means on the Anthropic path. See the
+        // CHANGELOG entry for `AiClient::DEFAULT_EFFORT`.
 
         $response = $this->httpClient->request('POST', $this->baseUrl, [
             'headers' => [
