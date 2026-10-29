@@ -69,7 +69,7 @@ final class BuildCoordinator
             // manifest and chunk files while it was still writing them.
             // initiateBuild() takes the lock first and clears state after.
             if (!$this->state->initiateBuild($manifest)) {
-                throw new \RuntimeException(
+                throw new BuildLockHeldException(
                     'Another index build is already running against this state directory. '
                     . 'Wait for it to finish, or stop that process and retry. '
                     . $this->lockDescription(),
@@ -89,7 +89,7 @@ final class BuildCoordinator
         }
 
         if (!$this->state->resumeBuild($manifest)) {
-            throw new \RuntimeException(
+            throw new BuildLockHeldException(
                 'Failed to re-acquire build lock for resume — another build is running. '
                 . $this->lockDescription(),
             );
