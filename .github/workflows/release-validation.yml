@@ -53,7 +53,9 @@ jobs:
   # -------------------------------------------------------------------
   e2e-search:
     name: E2E — PHP index ↔ pagefind.js search
-    runs-on: ubuntu-latest
+    # ubuntu-latest moved to 26.04 on 2026-10-28 and Playwright 1.59 cannot
+    # install Chromium there. Pin until a Playwright release supports it.
+    runs-on: ubuntu-24.04
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
