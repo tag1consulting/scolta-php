@@ -850,6 +850,45 @@ class AiClientTest extends TestCase
         $this->assertArrayNotHasKey('thinking', $body);
     }
 
+    public function testEffortIsSentToModelsThatAcceptIt(): void
+    {
+        foreach (['claude-sonnet-5-5', 'claude-haiku-5-5'] as $model) {
+            $history = [];
+            $this->anthropicClientWithHistory($history, ['model' => $model])->message('sys', 'msg');
+
+            $body = json_decode((string) $history[0]['request']->getBody(), true);
+            $this->assertSame($model, $body['model']);
+            $this->assertSame(['effort' => 'low'], $body['output_config'], $model);
+        }
+    }
+
+    public function testEffortIsNotSentToModelsThatRejectIt(): void
+    {
+        // Sonnet 4.5 and Haiku 4.5 answer `output_config` with a 400, so a
+        // site still pinned to one gets the request exactly as before the
+        // effort setting existed: the same four fields, nothing else.
+        $history = [];
+        $this->anthropicClientWithHistory($history, ['model' => 'claude-sonnet-4-5-20250929'])
+            ->message('sys', 'msg');
+
+        $body = json_decode((string) $history[0]['request']->getBody(), true);
+        $this->assertSame(['model', 'max_tokens', 'system', 'messages'], array_keys($body));
+    }
+
+    public function testPerCallModelOverrideDecidesEffort(): void
+    {
+        // The gate reads the model the request carries, not the configured
+        // one: an expansion model override to a 4.5 id gets no effort even
+        // when the summarize model is current.
+        $history = [];
+        $this->anthropicClientWithHistory($history, ['model' => 'claude-sonnet-5-5'])
+            ->message('sys', 'msg', 1024, 'claude-haiku-4-5-20251001');
+
+        $body = json_decode((string) $history[0]['request']->getBody(), true);
+        $this->assertSame('claude-haiku-4-5-20251001', $body['model']);
+        $this->assertArrayNotHasKey('output_config', $body);
+    }
+
     public function testAnthropicEmptyEffortOmitsOutputConfig(): void
     {
         $history = [];
