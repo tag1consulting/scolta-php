@@ -49,6 +49,45 @@ class ModelIdentityTest extends TestCase
         );
     }
 
+    /**
+     * @return array<string, array{string, bool}>
+     */
+    public static function effortSupport(): array
+    {
+        return [
+            'shipped default' => ['claude-sonnet-5-5', true],
+            'cheap expansion model' => ['claude-haiku-5-5', true],
+            'opus 5' => ['claude-opus-5', true],
+            'fable' => ['claude-fable-5-1', true],
+            'mythos' => ['claude-mythos-5', true],
+            'opus 4.6' => ['claude-opus-4-6', true],
+            'sonnet 4.6' => ['claude-sonnet-4-6', true],
+            'opus 4.5, where the field arrived' => ['claude-opus-4-5', true],
+            'dated opus 4.5' => ['claude-opus-4-5-20251101', true],
+            'case and whitespace tolerated' => [' Claude-Sonnet-5-5 ', true],
+            'sonnet 4.5 snapshot (previous default)' => ['claude-sonnet-4-5-20250929', false],
+            'haiku 4.5 snapshot' => ['claude-haiku-4-5-20251001', false],
+            'undated haiku 4.5' => ['claude-haiku-4-5', false],
+            'opus 4.1' => ['claude-opus-4-1-20250805', false],
+            'dated opus 4 with no minor' => ['claude-opus-4-20250514', false],
+            'legacy generation-first' => ['claude-3-5-sonnet-20241022', false],
+            'pre-3' => ['claude-2.1', false],
+            'gateway alias' => ['claude-4-5-sonnet', false],
+            'other vendor' => ['gpt-4o', false],
+            'empty' => ['', false],
+        ];
+    }
+
+    /**
+     * @dataProvider effortSupport
+     */
+    public function testAcceptsEffortFollowsTheModelGeneration(string $model, bool $expected): void
+    {
+        // A false positive sends a field the model rejects with a 400, so an
+        // unparseable name (gateway alias, other vendor) must come back false.
+        $this->assertSame($expected, ModelIdentity::acceptsEffort($model), $model);
+    }
+
     public function testAmazeeGatewayAliasIsNotNativeToAnthropic(): void
     {
         // The exact name observed poisoning the Athenaeum demo. LiteLLM puts

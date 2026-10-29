@@ -38,7 +38,8 @@ class ScoltaConfig
     public string $aiExpansionModel = '';
     /**
      * Anthropic reasoning effort (`output_config.effort`): low, medium, high,
-     * xhigh or max. Empty omits the field for models that predate it.
+     * xhigh or max. Sent only to models that accept the field (Opus 4.5 and
+     * the 4.6+ and 5.x generations); empty never sends it.
      */
     public string $aiEffort = AiClient::DEFAULT_EFFORT;
     public string $aiBaseUrl = '';
