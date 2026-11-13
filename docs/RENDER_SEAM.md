@@ -32,7 +32,7 @@ listener on the mount point (or on `document`) sees every render.
 | Event | Fires | `detail` |
 |---|---|---|
 | `scolta:before-results-render` | immediately before any write to `#scolta-results` | `{ container, reason }` |
-| `scolta:results-rendered` | immediately after that write completes | `{ container, results, rendered, reused, appended, query }` |
+| `scolta:results-rendered` | immediately after that write completes | `{ container, results, rendered, reused, appended, query, sort }` (`sort` is the `{ field, direction }` in force, or `null`) |
 | `scolta:before-filters-render` | immediately before the `#scolta-filters` write | `{ container }` |
 | `scolta:filters-rendered` | immediately after it | `{ container, activeFilters }` |
 | `scolta:before-suggestions-render` | immediately before the `#scolta-sayt` write | `{ container, query }` |

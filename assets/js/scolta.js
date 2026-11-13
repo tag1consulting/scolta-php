@@ -25,6 +25,16 @@
  *                                                summary box.
  *                                            Missing, empty, or non-string values fall back to the
  *                                            default; unknown keys are ignored.
+ *                                              sort: 'Sort:' — prefix on the sort control.
+ *                                              sortRelevance: 'Relevance' — the control's first
+ *                                                option, the unsorted order.
+ *   sortOptions: []                        — Optional: the orders the results can be put in, besides
+ *                                            relevance, as [{ field, direction: 'asc'|'desc', label }].
+ *                                            Non-empty renders a "Sort: Relevance | <label> ..."
+ *                                            control above the results; each option is a link to the
+ *                                            same search with ?sort=<field>:<direction>. `field` must
+ *                                            be a sortable field the index carries. Malformed entries
+ *                                            are dropped; a missing label falls back to the field.
  *   valueLabels: {}                        — Optional: indexed filter value => the text shown for it, in
  *                                            the facet panel and the results header ("in Blog / TNTL").
  *                                            One flat map across dimensions; a value with no entry
@@ -506,6 +516,7 @@
   let keywordMatches = null;
   let pagefindBase = '';   // Set during initPagefind(); used by resolveUrl().
   let currentSortOverride = null;    // { field, direction } or null — active sort override
+  let userSort = null;               // { field, direction } or null — the visitor's explicit sort (setSort() / ?sort=)
   let llmAppliedFilters = {};        // { dimension: value } — filters injected by LLM expansion
   let offeredLlmFilters = {};        // { dimension: value } — LLM hints the recall guard declined to auto-apply
   let expansionInFlight = false;     // true while an expand-query HTTP request is pending
@@ -679,6 +690,8 @@
   const LABEL_DEFAULTS = {
     expandedTerms: 'Also try:',
     aiOverview: 'AI Overview',
+    sort: 'Sort:',
+    sortRelevance: 'Relevance',
   };
 
   function getInstanceLabels() {
@@ -2235,27 +2248,181 @@
     doSearch();
   }
 
-  function renderSortIndicator(override) {
-    const el = els.sortIndicator;
-    if (!override || !override.field) {
-      el.style.display = 'none';
-      el.innerHTML = '';
-      return;
+  // The orders a site offers besides relevance (TOP-LEVEL instance config,
+  // the hideEmptyFacets pattern): [{ field, direction, label }]. Clamped here
+  // as well as in PHP, since a direct createInstance() caller bypasses PHP.
+  function getSortOptions() {
+    const raw = instanceConfig && instanceConfig.sortOptions;
+    if (!Array.isArray(raw)) return [];
+    const options = [];
+    for (const entry of raw) {
+      if (!entry || typeof entry !== 'object') continue;
+      const sort = normalizeSort({ field: entry.field, direction: entry.direction || 'desc' });
+      if (!sort) continue;
+      if (options.some(o => o.field === sort.field && o.direction === sort.direction)) continue;
+      sort.label = (typeof entry.label === 'string' && entry.label !== '') ? entry.label : sort.field;
+      options.push(sort);
     }
+    return options;
+  }
+
+  // The current address with ?sort= set to `value`, or removed for ''. The
+  // control's options are real links: one can be opened in a new tab or
+  // shared, and a plain click is intercepted and handed to setSort().
+  function sortHref(value) {
+    try {
+      const url = new URL(window.location.href);
+      if (value) {
+        url.searchParams.set('sort', value);
+      } else {
+        url.searchParams.delete('sort');
+      }
+      return url.pathname + url.search;
+    } catch (e) {
+      return '#';
+    }
+  }
+
+  function sortBadgeHtml(override) {
     const dirLabel = override.direction === 'desc' ? 'highest first' : 'lowest first';
-    el.style.display = 'block';
-    el.innerHTML = '<span class="scolta-sort-badge">Sorted by: ' + escapeHtml(override.field) +
+    return '<span class="scolta-sort-badge">Sorted by: ' + escapeHtml(override.field) +
       ' (' + dirLabel + ') ' +
       '<button class="scolta-sort-dismiss" data-scolta-sort-dismiss aria-label="Remove sort">×</button></span>';
   }
 
+  // Two shapes, by whether the site configured sortOptions.
+  //
+  // Without them this is the badge it always was: nothing until a sort is in
+  // force (an LLM hint, or a host's own setSort() call), then "Sorted by: ..."
+  // with a dismiss button.
+  //
+  // With them it is a control that is always there: "Sort: Relevance | Newest",
+  // the order in force marked aria-current. It is repainted from the sort
+  // actually in force, not from the last click, so a hint that sorted without
+  // one and a sort that fell back to relevance both show the truth. A sort in
+  // force that is none of the options (a hint on another field) keeps its
+  // badge beside the control, or nothing on screen would name it.
+  function renderSortIndicator(override) {
+    const el = els.sortIndicator;
+    const active = (override && override.field) ? override : null;
+    const options = getSortOptions();
+    if (options.length === 0) {
+      if (!active) {
+        el.style.display = 'none';
+        el.innerHTML = '';
+        return;
+      }
+      el.style.display = 'block';
+      el.innerHTML = sortBadgeHtml(active);
+      return;
+    }
+    const labels = getInstanceLabels();
+    const isActive = o => !!active && o.field === active.field && o.direction === active.direction;
+    const optionHtml = (label, value, current) =>
+      '<a class="scolta-sort-option" href="' + escapeAttr(sortHref(value)) + '"' +
+      ' data-scolta-sort="' + escapeAttr(value) + '"' +
+      (current ? ' aria-current="true"' : '') + '>' + escapeHtml(label) + '</a>';
+    let html = '<span class="scolta-sort-control">' +
+      '<span class="scolta-sort-label">' + escapeHtml(labels.sort) + '</span>' +
+      optionHtml(labels.sortRelevance, '', !active);
+    for (const o of options) {
+      html += optionHtml(o.label, o.field + ':' + o.direction, isActive(o));
+    }
+    html += '</span>';
+    if (active && !options.some(isActive)) html += ' ' + sortBadgeHtml(active);
+    el.style.display = 'block';
+    el.innerHTML = html;
+  }
+
   function dismissSortOverride() {
-    currentSortOverride = null;
-    renderSortIndicator(null);
-    // Re-run the full search without sort so all matching docs are reconsidered
-    // by BM25 relevance. We can't simply swap arrays — the sorted result set
-    // excluded pages that lacked price metadata, so the relevance set is different.
-    doSearch(true);
+    setSort(null);
+  }
+
+  // --- Explicit sort ---
+  //
+  // currentSortOverride used to have one source: the sort_hint the LLM
+  // expansion infers from the query ("newest posts"). A host that wants a
+  // "Sort: relevance | newest" control had no way to ask for the same thing,
+  // so setSort() is that seam, and userSort is what it sets.
+  //
+  // The two differ in three ways, all because one is a guess and the other is
+  // an instruction:
+  //
+  //   - STICKY. A hint belongs to the query it was inferred from and is
+  //     replaced on the next fresh search. userSort survives new queries and
+  //     facet toggles until setSort(null) or clearSearch(), and takes
+  //     precedence over a hint while set.
+  //   - IN THE URL. It is written as ?sort=<field>:<asc|desc> beside q and the
+  //     f_ params, and read back by the load bootstrap and popstate, so a
+  //     sorted search is a link. A hint is never written: reloading re-infers.
+  //   - NO EXPANSION. A cycle under userSort searches the typed query only.
+  //     Relevance ranking is what keeps a loosely related expansion match
+  //     below the on-topic ones; ordering the union by date instead puts the
+  //     newest page that matched ANY expansion term first. It also means the
+  //     sorted list needs no AI round-trip, so it is the first paint rather
+  //     than a reorder of one (doSearch() skips its relevance paint).
+  //
+  // A sort that matches nothing sortable still falls back to relevance in
+  // mergeExpandedSearchResults(), which clears currentSortOverride for that
+  // cycle only; getSort() reports what is in force, so a host control can show
+  // the truth.
+  function normalizeSort(sort) {
+    if (!sort || typeof sort !== 'object') return null;
+    const field = typeof sort.field === 'string' ? sort.field : '';
+    const direction = sort.direction === 'asc' || sort.direction === 'desc' ? sort.direction : '';
+    // The field becomes a Pagefind sort key and a URL value; anything outside
+    // an identifier is not a field any indexer emits.
+    if (!/^[A-Za-z0-9_-]+$/.test(field) || !direction) return null;
+    return { field, direction };
+  }
+
+  // The ?sort= value: "<field>:<direction>", direction defaulting to desc.
+  function sortFromUrlParam(value) {
+    if (typeof value !== 'string' || !value) return null;
+    const parts = value.split(':');
+    if (parts.length > 2) return null;
+    return normalizeSort({ field: parts[0], direction: parts[1] || 'desc' });
+  }
+
+  function getSort() {
+    return currentSortOverride
+      ? { field: currentSortOverride.field, direction: currentSortOverride.direction }
+      : null;
+  }
+
+  // Sort the current search by a field the index carries, or pass null to
+  // return to relevance. Re-runs the search in place, filters kept.
+  function setSort(sort) {
+    const next = normalizeSort(sort);
+    if (sort !== null && sort !== undefined && !next) {
+      throw new TypeError('[scolta] setSort expects { field, direction: "asc" | "desc" } or null');
+    }
+    const hadUserSort = !!userSort;
+    userSort = next;
+    currentSortOverride = next;
+    renderSortIndicator(next);
+    // Nothing on screen to re-sort; the choice applies to the next search.
+    if (els.layout.style.display === 'none') return;
+    if (next || !hadUserSort) {
+      // Sorting, or dismissing an LLM hint: the query has not changed, so the
+      // stored expansion (unused while sorted) must not be re-billed.
+      doSearch(true);
+      return;
+    }
+    // Back to relevance from an explicit sort. A search that STARTED sorted
+    // never requested an expansion, so there is none stored to reuse and a
+    // preserveFilters cycle would run relevance without one. A fresh cycle
+    // re-decides it; filters ride across exactly as in toggleExpansion().
+    const carried = {};
+    for (const dim of Object.keys(activeFilters)) {
+      const vals = activeFilters[dim];
+      if (vals instanceof Set && vals.size > 0) carried[dim] = new Set(vals);
+    }
+    if (lastExpandedTerms) {
+      doSearch(true);
+    } else {
+      doSearch(false, Object.keys(carried).length > 0 ? carried : null);
+    }
   }
 
   // Flip the visitor's expansion opt-out and re-run the search they are looking
@@ -4371,7 +4538,9 @@
     // the USER actually typed — frequency is a leaky proxy for "generic," and in a
     // topical corpus the on-topic words are also the high-frequency ones. Exempt
     // query tokens from the frequency check, EXCEPT words on the guard denylist.
-    const queryTokens = new Set(extractSearchTerms(searchQuery));
+    // A browse has no typed query (searchQuery is null); it reaches here only
+    // under an explicit sort, since nothing else gives a browse a second pass.
+    const queryTokens = new Set(extractSearchTerms(searchQuery || ''));
     const subwordDenylist = new Set(
       (CONFIG.EXPAND_SUBWORD_DENYLIST || []).map(w => String(w).toLowerCase())
     );
@@ -4582,12 +4751,18 @@
         // overcounts documents the sort field filter drops, but only in the
         // capped case, where the list length is no total either.
         for (const search of searches) noteRawMatches(matchTally, search);
+        // Numeric only when the WHOLE value is a number. parseFloat() reads
+        // the leading digits of anything, so it took "2026-11-10" for 2026 and
+        // ordered ISO dates by year alone — invisible with one term, whose
+        // order Pagefind's own sort already fixed, and wrong as soon as a
+        // union interleaved two.
+        const NUMERIC = /^-?\d+(\.\d+)?$/;
         withField.sort((a, b) => {
-          const av = parseFloat(a.meta[field]);
-          const bv = parseFloat(b.meta[field]);
-          const cmp = (!isNaN(av) && !isNaN(bv))
-            ? av - bv
-            : String(a.meta[field] || '').localeCompare(String(b.meta[field] || ''));
+          const as = String(a.meta[field] ?? '').trim();
+          const bs = String(b.meta[field] ?? '').trim();
+          const cmp = (NUMERIC.test(as) && NUMERIC.test(bs))
+            ? parseFloat(as) - parseFloat(bs)
+            : as.localeCompare(bs);
           return desc ? -cmp : cmp;
         });
 
@@ -4703,6 +4878,10 @@
 
     displayedCount = 0;
 
+    // "Expanded" only when expansion terms actually went in: a sort over the
+    // typed query alone took this path too, and its header must not claim them.
+    const paintedExpanded = validTerms.length > 0;
+
     // renderResults() reconciles the container by result identity, so when the
     // expansion pass produces the same ordered list as the first paint this
     // costs zero node churn: the header gains its "(with expanded terms)" label
@@ -4713,7 +4892,7 @@
     // before its own: the count pass awaits searches, and the list is what the
     // user is waiting for. The panel holds its pre-expansion state across the
     // gap rather than being repainted against counts that are about to change.
-    renderResults(true, 'expansion');
+    renderResults(paintedExpanded, 'expansion');
 
     // Expansion changed the result list, so the counts describing it are
     // recomputed here — the one and only time they move within a typed query.
@@ -4783,6 +4962,13 @@
         if (vals instanceof Set && vals.size > 0) {
           url.searchParams.set('f_' + dim, [...vals].join(','));
         }
+      }
+      // Only the visitor's explicit sort. An LLM sort hint is re-inferred from
+      // q on reload and would otherwise pin itself as if it had been chosen.
+      if (userSort) {
+        url.searchParams.set('sort', userSort.field + ':' + userSort.direction);
+      } else {
+        url.searchParams.delete('sort');
       }
       history.replaceState(null, '', url.toString());
     } catch (e) {
@@ -4876,6 +5062,13 @@
       // Update URL with search query and active filter state.
       syncUrlToSearchState(query, isBrowse);
 
+      // A fresh search starts from the explicit sort alone: the last query's
+      // hint does not describe this one, and this one's has not arrived.
+      // Painted here, not only when the cycle settles, because a configured
+      // sort control's links are this URL and it should not appear late.
+      if (!preserveFilters) currentSortOverride = userSort;
+      renderSortIndicator(currentSortOverride);
+
       els.layout.style.display = "grid";
       emitBeforeResults('loading');
       els.results.innerHTML = '<p class="scolta-searching">Searching...</p>';
@@ -4927,10 +5120,14 @@
       // matched something OTHER than that phrase. (The WASM scorer excludes
       // non-adjacent primary matches for quoted queries; skipping expansion
       // here closes the other door those documents came in through.)
-      expandPromise = (isBrowse || isForcedPhrase)
+      // An explicit sort searches the typed query only (see setSort()), so it
+      // resolves null like the two cases above — without touching
+      // lastExpandedTerms on a preserveFilters cycle, which a return to
+      // relevance reuses.
+      expandPromise = (isBrowse || isForcedPhrase || userSort)
         ? Promise.resolve(null)
         : (preserveFilters ? Promise.resolve(lastExpandedTerms) : expandQuery(query));
-      expansionInFlight = !isBrowse && !isForcedPhrase && !preserveFilters && CONFIG.AI_EXPAND_QUERY;
+      expansionInFlight = !isBrowse && !isForcedPhrase && !userSort && !preserveFilters && CONFIG.AI_EXPAND_QUERY;
 
       const primarySearch = await pagefindSearch(searchQuery, activeFilters);
       // Pagefind returns every match id up front, so the true match total is
@@ -5016,7 +5213,12 @@
       // then introduces no new visual state: it never flashes empty, and on the
       // first search of a page load the panel simply appears when the counts
       // arrive, exactly as it did before this reorder.
-      renderResults(false, 'search');
+      //
+      // Under an explicit sort this list is not the answer: the sorted one is,
+      // and with no expansion to wait for it is moments away. Painting the
+      // relevance order first would show the visitor a list they asked not to
+      // see and then replace it. "Searching..." stays up instead.
+      if (!userSort) renderResults(false, 'search');
     } finally {
       // Only the owner releases the window. If a newer cycle started while
       // this one was in flight it owns the window now, and releasing it here
@@ -5070,7 +5272,7 @@
 
       if (!preserveFilters) {
         lastExpandedTerms = expansion;
-        currentSortOverride = sortHint;
+        currentSortOverride = userSort || sortHint;
         // Apply LLM-detected filter intent by merging into activeFilters —
         // but only the hints that survive the recall guard; the rest become
         // offered (clickable, not applied) chips.
@@ -5139,6 +5341,9 @@
         renderResults(false, 'expansion');
       }
 
+      // A preserveFilters cycle skips the assignment above, and the sort pass
+      // clears currentSortOverride when nothing matched carried the field.
+      // The explicit sort is not dropped with it: the next cycle tries again.
       renderSortIndicator(currentSortOverride);
       renderFilterBadges();
 
@@ -5184,6 +5389,13 @@
       if (version !== searchVersion) return;
       console.warn('[scolta:search] expansion phase failed:', e);
       releaseSummarySlot();
+      // An explicit sort held the relevance paint back for a sorted list that
+      // is now not coming. Show the relevance one rather than "Searching...".
+      if (userSort) {
+        currentSortOverride = null;
+        renderSortIndicator(null);
+        renderResults(false, 'search');
+      }
     });
   }
 
@@ -5214,6 +5426,7 @@
     followUpCount = 0;
     activeFilters = {};
     currentSortOverride = null;
+    userSort = null;
     llmAppliedFilters = {};
     offeredLlmFilters = {};
     expansionInFlight = false;
@@ -5222,6 +5435,7 @@
     try {
       var url = new URL(window.location.href);
       url.searchParams.delete('q');
+      url.searchParams.delete('sort');
       for (const key of [...url.searchParams.keys()]) {
         if (key.startsWith('f_')) url.searchParams.delete(key);
       }
@@ -5280,7 +5494,7 @@
   // supported one. Nothing here knows about any particular host platform.
   //
   //   scolta:before-results-render  { container, reason }
-  //   scolta:results-rendered       { container, results, rendered, reused, appended, query }
+  //   scolta:results-rendered       { container, results, rendered, reused, appended, query, sort }
   //   scolta:before-filters-render  { container }
   //   scolta:filters-rendered       { container, activeFilters }
   //
@@ -5326,6 +5540,7 @@
       reused: reused,
       appended: appended,
       query: currentQuery,
+      sort: getSort(),
     });
   }
 
@@ -6065,6 +6280,17 @@
         dismissSortOverride();
         return;
       }
+      // Sort control option → that order, in place. A modified click keeps
+      // the browser's own meaning, since the href is a real URL.
+      const sortEl = e.target.closest("[data-scolta-sort]");
+      if (sortEl) {
+        if (e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        if (sortEl.getAttribute('aria-current') !== 'true') {
+          setSort(sortFromUrlParam(sortEl.getAttribute('data-scolta-sort')));
+        }
+        return;
+      }
       // Results-header expansion switch → flip the opt-out and re-run
       if (e.target.closest("[data-scolta-expansion-toggle]")) {
         toggleExpansion();
@@ -6141,6 +6367,8 @@
         var urlQuery = urlParams.get('q');
         var restoredFilters = filtersFromUrlParams(urlParams);
         if (urlQuery || Object.keys(restoredFilters).length > 0) {
+          userSort = sortFromUrlParam(urlParams.get('sort'));
+          currentSortOverride = userSort;
           els.queryInput.value = urlQuery || '';
           els.searchClear.style.display = urlQuery ? "block" : "none";
           doSearch(false, Object.keys(restoredFilters).length > 0 ? restoredFilters : null);
@@ -6166,7 +6394,11 @@
         var urlParams = new URLSearchParams(window.location.search);
         var urlQuery = urlParams.get('q');
         var initialFilters = filtersFromUrlParams(urlParams);
+        // ?sort= alone runs nothing, like a bare search page: it only names
+        // the order of a search some other parameter asks for.
         if (urlQuery || Object.keys(initialFilters).length > 0) {
+          userSort = sortFromUrlParam(urlParams.get('sort'));
+          currentSortOverride = userSort;
           if (urlQuery) {
             els.queryInput.value = urlQuery;
             els.searchClear.style.display = "block";
@@ -6201,6 +6433,11 @@
     showMore,
     setResultRenderer,
     setSuggestionRenderer,
+    // Explicit sort from a host's own control: setSort({ field, direction })
+    // or setSort(null) for relevance; getSort() is the sort in force, which
+    // is also an LLM-inferred one. See "Explicit sort" above.
+    setSort,
+    getSort,
     toggleExpansion,
     // Set the visitor's expansion opt-out from a host's own control, for a
     // platform that would rather place the switch in its own chrome than take
@@ -6388,6 +6625,8 @@
       global.Scolta.clearSearch = inst.clearSearch;
       global.Scolta.doSearch = inst.doSearch;
       global.Scolta.showMore = inst.showMore;
+      global.Scolta.setSort = inst.setSort;
+      global.Scolta.getSort = inst.getSort;
       global.Scolta.batchScoreResults = inst.batchScoreResults;
       global.Scolta.toggleExpansion = inst.toggleExpansion;
       global.Scolta.setExpansionEnabled = inst.setExpansionEnabled;

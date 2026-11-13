@@ -353,7 +353,8 @@ class ScoltaConfig
      *
      * One map rather than a flat property per string. Keys the browser reads
      * (see LABEL_DEFAULTS in assets/js/scolta.js): 'expandedTerms' (default
-     * 'Also try:') and 'aiOverview' (default 'AI Overview'). Values render as
+     * 'Also try:'), 'aiOverview' (default 'AI Overview'), 'sort' (default
+     * 'Sort:') and 'sortRelevance' (default 'Relevance'). Values render as
      * text (HTML-escaped); a missing, empty, or non-string value falls back
      * to the browser's default, and unknown keys are ignored. Emitted
      * top-level into window.scolta via normalizedLabels().
@@ -382,6 +383,26 @@ class ScoltaConfig
      * @stability experimental
      */
     public array $valueLabels = [];
+
+    /**
+     * The orders the browser widget offers besides relevance.
+     *
+     * A list of `['field' => ..., 'direction' => 'asc'|'desc', 'label' => ...]`
+     * entries. Non-empty renders a "Sort: Relevance | <label> ..." control
+     * above the results in scolta.js; each option links to the same search
+     * with `?sort=<field>:<direction>`. `field` has to be a sortable field the
+     * index carries (ContentItem::$sortable, or the built-in `date`), or the
+     * option falls back to relevance when chosen. Independent of
+     * $sortableFields, which is what the LLM may infer a sort on.
+     *
+     * Typed loosely because fromArray() assigns adapter config verbatim;
+     * normalizedSortOptions() is the guard.
+     *
+     * @var array<array-key, mixed>
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public array $sortOptions = [];
 
     /**
      * Hide facet values whose result count is zero for the current query.
@@ -854,6 +875,7 @@ class ScoltaConfig
             'facetMode' => $this->normalizedFacetMode(),
             'labels' => $this->normalizedLabels(),
             'valueLabels' => $this->normalizedValueLabels(),
+            'sortOptions' => $this->normalizedSortOptions(),
             // SAYT — top-level, not scoring keys. scolta.js reads each as
             // instanceConfig.<camelCase> with a fallback byte-equal to the
             // default here, and BrowserConfigParityTest diffs the two sets.
@@ -929,6 +951,45 @@ class ScoltaConfig
         }
 
         return $normalized;
+    }
+
+    /**
+     * $sortOptions with malformed and duplicate entries dropped.
+     *
+     * An entry needs an identifier-shaped field and a direction of asc or
+     * desc (default desc); a missing or empty label falls back to the field.
+     * The browser applies the same rules, since a direct createInstance()
+     * caller bypasses this class.
+     *
+     * @return list<array{field: string, direction: string, label: string}>
+     *
+     * @since 2.0.0
+     * @stability experimental
+     */
+    public function normalizedSortOptions(): array
+    {
+        $normalized = [];
+        foreach ($this->sortOptions as $option) {
+            if (!is_array($option)) {
+                continue;
+            }
+            $field = $option['field'] ?? null;
+            $direction = $option['direction'] ?? 'desc';
+            if (!is_string($field) || preg_match('/^[A-Za-z0-9_-]+$/', $field) !== 1) {
+                continue;
+            }
+            if ($direction !== 'asc' && $direction !== 'desc') {
+                continue;
+            }
+            $label = $option['label'] ?? '';
+            $normalized[$field . ':' . $direction] ??= [
+                'field' => $field,
+                'direction' => $direction,
+                'label' => is_string($label) && $label !== '' ? $label : $field,
+            ];
+        }
+
+        return array_values($normalized);
     }
 
     /**

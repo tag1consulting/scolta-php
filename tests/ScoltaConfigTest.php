@@ -1042,6 +1042,54 @@ class ScoltaConfigTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+    // sortOptions — the orders the widget offers besides relevance
+    // ------------------------------------------------------------------
+
+    public function testSortOptionsDefaultsToEmpty(): void
+    {
+        // Empty means no sort control: the widget keeps its badge-only UI.
+        $config = new ScoltaConfig();
+        $this->assertSame([], $config->sortOptions);
+        $this->assertSame([], $config->toBrowserConfig()['sortOptions']);
+    }
+
+    public function testSortOptionsRoundTripToBrowserConfigTopLevel(): void
+    {
+        $config = ScoltaConfig::fromArray(['sort_options' => [
+            ['field' => 'created', 'direction' => 'desc', 'label' => 'Newest'],
+            ['field' => 'price', 'direction' => 'asc', 'label' => 'Cheapest'],
+        ]]);
+        $browser = $config->toBrowserConfig();
+        $this->assertSame([
+            ['field' => 'created', 'direction' => 'desc', 'label' => 'Newest'],
+            ['field' => 'price', 'direction' => 'asc', 'label' => 'Cheapest'],
+        ], $browser['sortOptions']);
+        $this->assertArrayNotHasKey('sortOptions', $browser['scoring']);
+    }
+
+    public function testNormalizedSortOptionsDropsMalformedAndDuplicateEntries(): void
+    {
+        // A broken settings form must cost the site an option, not put a link
+        // on the page that sorts by nothing.
+        $config = new ScoltaConfig();
+        $config->sortOptions = [
+            ['field' => 'created', 'label' => 'Newest'],
+            ['field' => 'created', 'direction' => 'desc', 'label' => 'Duplicate'],
+            ['field' => 'created', 'direction' => 'asc'],
+            ['field' => 'bad field', 'direction' => 'desc', 'label' => 'x'],
+            ['field' => 'created', 'direction' => 'sideways', 'label' => 'x'],
+            ['direction' => 'desc', 'label' => 'x'],
+            'created',
+            'keyed' => ['field' => 'rating', 'direction' => 'desc', 'label' => 3],
+        ];
+        $this->assertSame([
+            ['field' => 'created', 'direction' => 'desc', 'label' => 'Newest'],
+            ['field' => 'created', 'direction' => 'asc', 'label' => 'created'],
+            ['field' => 'rating', 'direction' => 'desc', 'label' => 'rating'],
+        ], $config->normalizedSortOptions());
+    }
+
+    // ------------------------------------------------------------------
     // labels — per-site overrides for user-facing UI strings
     // ------------------------------------------------------------------
 
