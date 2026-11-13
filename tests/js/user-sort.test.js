@@ -242,6 +242,60 @@ describe('explicit sort', () => {
     });
 });
 
+// A search under an explicit sort requests no expansion, so the header must
+// not offer a switch for it.
+describe('expansion switch in the results header', () => {
+
+    const header = win => win.document.querySelector('#scolta-results-header');
+    const toggle = win => header(win).querySelector('[data-scolta-expansion-toggle]');
+
+    test('present under relevance', async () => {
+        const win = createWindow(INDEX, { terms: ['decimals'] });
+        await runSearch(win, 'fractions');
+        expect(toggle(win)).not.toBeNull();
+        expect(header(win).textContent).toContain('expanded terms');
+    });
+
+    test('absent while explicitly sorted, and back after setSort(null)', async () => {
+        const win = createWindow(INDEX, { terms: ['decimals'] });
+        await runSearch(win, 'fractions');
+
+        win.Scolta.setSort({ field: 'date', direction: 'desc' });
+        await settle();
+        expect(toggle(win)).toBeNull();
+        expect(header(win).textContent).toMatch(/results for "fractions"$/);
+
+        // Still absent on a new query run under the same sort.
+        await runSearch(win, 'decimals');
+        expect(toggle(win)).toBeNull();
+        expect(header(win).textContent).not.toContain('expanded terms');
+
+        win.Scolta.setSort(null);
+        await settle();
+        expect(toggle(win)).not.toBeNull();
+    });
+
+    test('absent on a search that started sorted from ?sort=', async () => {
+        const win = createWindow(INDEX, { terms: ['decimals'] }, 'https://example.com/search?q=fractions&sort=date:desc');
+        await settle();
+        expect(toggle(win)).toBeNull();
+
+        win.Scolta.setSort(null);
+        await settle();
+        expect(toggle(win)).not.toBeNull();
+    });
+
+    test('present under an LLM sort hint, which does use expansion', async () => {
+        const win = createWindow(INDEX, {
+            terms: ['decimals'],
+            sort_hint: { field: 'date', direction: 'desc' },
+        });
+        await runSearch(win, 'fractions');
+        expect(win.Scolta.getSort()).toEqual({ field: 'date', direction: 'desc' });
+        expect(toggle(win)).not.toBeNull();
+    });
+});
+
 describe('LLM sort hint', () => {
 
     test('ISO dates from a union of terms order by full date, not year', async () => {
