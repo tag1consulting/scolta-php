@@ -5809,7 +5809,12 @@
   // "Expanded terms" and not "AI", deliberately: this governs query expansion
   // alone, and a platform may separately offer a broader, permanent AI opt-out
   // that this must not be mistaken for.
+  //
+  // Absent under an explicit sort as well: a search under userSort requests no
+  // expansion, so the switch would change nothing the visitor can see. An LLM
+  // sort hint is not userSort and does use expansion, so it keeps the switch.
   function expansionToggleLink(CONFIG, isExpanded) {
+    if (userSort) return '';
     if (!CONFIG.EXPANSION_TOGGLE || !CONFIG.AI_EXPAND_QUERY_ALLOWED) return '';
     const label = expansionOptedOut()
       ? 'expand terms'
@@ -5822,6 +5827,8 @@
   // "(with expanded terms)" parenthetical when there is one, and hung off a
   // dash when there is not.
   function expansionCountLabel(CONFIG, isExpanded) {
+    // No expansion wording at all while explicitly sorted (see above).
+    if (userSort) return '';
     const link = expansionToggleLink(CONFIG, isExpanded);
     if (isExpanded) {
       return link ? ' (with expanded terms - ' + link + ')' : ' (with expanded terms)';
