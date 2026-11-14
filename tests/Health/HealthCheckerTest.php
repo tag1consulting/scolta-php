@@ -9,6 +9,7 @@ use Tag1\Scolta\Config\ApiKeySource;
 use Tag1\Scolta\Config\ResolvedApiKey;
 use Tag1\Scolta\Config\ScoltaConfig;
 use Tag1\Scolta\Health\HealthChecker;
+use Tag1\Scolta\Index\IndexLocatorInterface;
 
 /**
  * Tests for the shared HealthChecker class.
@@ -426,6 +427,80 @@ class HealthCheckerTest extends TestCase
 
         $this->assertSame('ok', $okResult['status']);
         $this->assertSame([], $okResult['status_reasons']);
+    }
+
+    // -------------------------------------------------------------------
+    // Where the index is served from
+    // -------------------------------------------------------------------
+
+    public function testWithoutALocatorTheIndexIsLocal(): void
+    {
+        $result = (new HealthChecker(ScoltaConfig::fromArray([]), $this->tempDir))->check();
+
+        $this->assertFalse($result['index_remote']);
+        $this->assertContains('index_missing', $result['status_reasons']);
+    }
+
+    public function testAReachableRemoteIndexIsNotFaultedForTheEmptyLocalDirectory(): void
+    {
+        // A site that only searches another host's index never builds one, so
+        // its own output directory is empty and that is not a fault.
+        $checker = new HealthChecker(ScoltaConfig::fromArray([]), $this->tempDir, indexLocator: $this->remote(true));
+        $result = $checker->check();
+
+        $this->assertSame('ok', $result['status']);
+        $this->assertSame([], $result['status_reasons']);
+        $this->assertTrue($result['index_exists']);
+        $this->assertTrue($result['index_remote']);
+    }
+
+    public function testAnUnreachableRemoteIndexHasItsOwnReason(): void
+    {
+        $checker = new HealthChecker(ScoltaConfig::fromArray([]), $this->tempDir, indexLocator: $this->remote(false));
+        $result = $checker->check();
+
+        $this->assertSame('degraded', $result['status']);
+        $this->assertSame(['remote_index_unreachable'], $result['status_reasons']);
+        $this->assertFalse($result['index_exists']);
+    }
+
+    public function testStaleArtifactUrlsAreNotSampledForARemoteIndex(): void
+    {
+        // Fragments in the local directory are not the index being searched.
+        mkdir($this->tempDir . '/pagefind/fragment', 0755, true);
+        file_put_contents($this->tempDir . '/pagefind/pagefind-entry.json', '{}');
+        file_put_contents($this->tempDir . '/pagefind/fragment/a.pf_fragment', gzencode('pagefind_dcd{"url":"/42.html"}'));
+
+        $this->assertTrue(
+            (new HealthChecker(ScoltaConfig::fromArray([]), $this->tempDir))->check()['stale_artifact_urls'],
+            'Control: the same directory is flagged when it is the index being searched',
+        );
+
+        $result = (new HealthChecker(ScoltaConfig::fromArray([]), $this->tempDir, indexLocator: $this->remote(true)))->check();
+
+        $this->assertFalse($result['stale_artifact_urls']);
+    }
+
+    private function remote(bool $exists): IndexLocatorInterface
+    {
+        return new class ($exists) implements IndexLocatorInterface {
+            public function __construct(private readonly bool $exists) {}
+
+            public function exists(): bool
+            {
+                return $this->exists;
+            }
+
+            public function isRemote(): bool
+            {
+                return true;
+            }
+
+            public function origin(): string
+            {
+                return 'https://search.example.com';
+            }
+        };
     }
 
     private function removeDir(string $dir): void

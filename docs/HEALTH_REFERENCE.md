@@ -22,6 +22,7 @@ not have to re-derive the rule from the other fields:
 | Reason | Meaning |
 | --- | --- |
 | `index_missing` | Neither `{outputDir}/pagefind/pagefind.js` nor `{outputDir}/pagefind.js` exists. Search cannot run. |
+| `remote_index_unreachable` | The site searches an index another host serves (a `RemoteIndexLocator` was passed), and that host did not serve it: `{base}/pagefind/pagefind.js` did not answer 200 with something other than HTML, or `{base}/pagefind/pagefind-entry.json` did not answer 200 with the `version` and `languages` of an entry file. Search cannot run; the fix is on the serving host. |
 | `index_stale_artifact_urls` | Sampled fragments carry `/{id}.html` URLs from a pre-1.1.0 binary build. Results 404. Run a full rebuild. |
 | `ai_provider_unselected` | A key is set but no provider was chosen, so the key is inert. |
 | `ai_key_missing` | A provider was chosen but no key resolved. |
@@ -153,10 +154,28 @@ again, and the Amazee credentials it was provisioned with are still dead.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `index_exists` | bool | `{outputDir}/pagefind/pagefind.js` or `{outputDir}/pagefind.js` exists. |
+| `index_exists` | bool | The index the site searches is being served: by default `{outputDir}/pagefind/pagefind.js` or `{outputDir}/pagefind.js` exists; with a `RemoteIndexLocator`, the remote host served `pagefind.js` and a valid entry file. |
+| `index_remote` | bool | The index is served by another host, so `index_exists` came from a request rather than a file check. |
 | `indexer_active` | string | Always `php`. Kept so adapters reading it keep working. |
 | `stale_artifact_urls` | bool | Sampled fragments carry `/{id}.html` URLs from a pre-1.1.0 binary build. |
 | `stale_artifact_message` | string\|null | Operator text for the above, or `null`. |
+
+### Where the index is served from
+
+`HealthChecker` looks for the index in `$indexOutputDir` unless it is given an
+`IndexLocatorInterface`. An adapter whose search UI points at an index another
+host serves passes a `RemoteIndexLocator` for that host. That locator makes
+requests, so it requires a cache: a health endpoint is usually anonymous, and
+without one every request to it would make more to the remote host, each
+able to take the whole timeout when the host is down.
+
+It fetches what the browser loads, in the order the browser loads it:
+`pagefind.js`, then `pagefind-entry.json`. Neither status code is trusted alone,
+because a host can answer 200 with an error page or redirect to a login page
+that does. The script must not be served as HTML, and the entry file must
+decode to the `version` and `languages` a build checks before it publishes. CORS
+headers and the `.wasm` content type matter only to a browser and are not
+checked.
 
 ## History
 
